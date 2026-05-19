@@ -1,6 +1,6 @@
-using DatumIngest.Web.Dtos.Settings;
+using Heliosoph.DatumV.Web.Dtos.Settings;
 
-namespace DatumIngest.Web.Settings;
+namespace Heliosoph.DatumV.Web.Settings;
 
 // Per-user (today: per-local-user) settings. Backed by a JSON file under
 // the principal's catalog path. Scoped per request so the file path is

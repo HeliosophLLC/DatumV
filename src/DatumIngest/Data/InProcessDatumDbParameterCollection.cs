@@ -1,7 +1,7 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Data;
+namespace Heliosoph.DatumV.Data;
 
 /// <summary>
 /// Named-parameter bag for an <see cref="InProcessDatumDbCommand"/>. Wraps a
@@ -61,7 +61,7 @@ public sealed class InProcessDatumDbParameterCollection
 
     /// <summary>
     /// Snapshot the collection as a read-only dictionary suitable for
-    /// <see cref="ParameterBinder.Bind(DatumIngest.Parsing.Ast.Statement, IReadOnlyDictionary{string, ParameterValue})"/>.
+    /// <see cref="ParameterBinder.Bind(Heliosoph.DatumV.Parsing.Ast.Statement, IReadOnlyDictionary{string, ParameterValue})"/>.
     /// </summary>
     internal IReadOnlyDictionary<string, ParameterValue> AsValueMap() => _values;
 }

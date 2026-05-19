@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// <see cref="IInferenceTensor"/> implementation wrapping an

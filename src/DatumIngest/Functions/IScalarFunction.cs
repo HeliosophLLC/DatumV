@@ -1,7 +1,7 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Scalar SQL function operating on <see cref="ValueRef"/>: takes one or

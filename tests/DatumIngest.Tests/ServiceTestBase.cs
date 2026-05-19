@@ -1,17 +1,17 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using DatumIngest.Tests.Infra;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Tests.Infra;
 
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// Base class for tests that need a DI service provider. Creates a fresh
@@ -44,7 +44,7 @@ public abstract class ServiceTestBase : IDisposable
         ServiceCollection services = new();
 
         // Core services available to all tests.
-        services.AddDatumIngest();
+        services.AddDatumV();
         services.AddFileFormats();
 
         // ModelLibrary: the manifest store reads models/catalog.json (resolved
@@ -68,9 +68,9 @@ public abstract class ServiceTestBase : IDisposable
 
     /// <summary>
     /// Resolved models directory: the <c>DATUM_MODELS</c> env var when set,
-    /// otherwise the per-user fallback under <c>%LOCALAPPDATA%/DatumIngest/models</c>
-    /// (Windows) or <c>~/.local/share/DatumIngest/models</c> (Linux/macOS).
-    /// Matches <see cref="DatumIngest.Models.ModelCatalog.DefaultModelDirectory"/>
+    /// otherwise the per-user fallback under <c>%LOCALAPPDATA%/Heliosoph.DatumV/models</c>
+    /// (Windows) or <c>~/.local/share/Heliosoph.DatumV/models</c> (Linux/macOS).
+    /// Matches <see cref="Heliosoph.DatumV.Models.ModelCatalog.DefaultModelDirectory"/>
     /// so tests and production code see the same model files. Set
     /// <c>DATUM_MODELS=E:\Path\To\Models</c> in your shell to keep large
     /// model files off the C: drive without changing test code.
@@ -79,7 +79,7 @@ public abstract class ServiceTestBase : IDisposable
         Environment.GetEnvironmentVariable("DATUM_MODELS")
         ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DatumIngest",
+            "Heliosoph.DatumV",
             "models");
 
     /// <summary>
@@ -147,7 +147,7 @@ public abstract class ServiceTestBase : IDisposable
     /// <returns></returns>
     protected Pool CreatePool() => GetService<Pool>();
 
-    protected EvaluationFrame CreateEvaluationFrame(DatumIngest.Execution.ExecutionContext? context = null)
+    protected EvaluationFrame CreateEvaluationFrame(Heliosoph.DatumV.Execution.ExecutionContext? context = null)
     {
         context ??= CreateExecutionContext();
         return new EvaluationFrame(Row.Empty, context.Store, context);
@@ -254,7 +254,7 @@ public abstract class ServiceTestBase : IDisposable
     /// Creates a minimal execution context suitable for most unit tests.
     /// Uses a fresh <see cref="Arena"/> as the value store.
     /// </summary>
-    protected DatumIngest.Execution.ExecutionContext CreateExecutionContext(
+    protected Heliosoph.DatumV.Execution.ExecutionContext CreateExecutionContext(
         FunctionRegistry? functionRegistry = null,
         TableCatalog? catalog = null,
         long? memoryBudgetBytes = null,
@@ -335,7 +335,7 @@ public abstract class ServiceTestBase : IDisposable
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
 
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics, store: store);
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog, diagnostics: diagnostics, store: store);
 
         QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

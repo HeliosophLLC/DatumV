@@ -1,16 +1,16 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Diagnostics;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Per-statement event emitted by <c>BatchExecutor.RunWithEventsAsync</c>.

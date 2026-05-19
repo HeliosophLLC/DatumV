@@ -1,4 +1,4 @@
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 /// <summary>
 /// Answers "for catalog entry &lt;id&gt;, which version is currently the
@@ -13,7 +13,7 @@ namespace DatumIngest.ModelLibrary;
 /// <para>
 /// The lookup is intentionally narrow — one method, no caching, no
 /// invalidation. The state behind it is already cached in
-/// <see cref="DatumIngest.Catalog.Registries.ModelRegistry"/> (a
+/// <see cref="Heliosoph.DatumV.Catalog.Registries.ModelRegistry"/> (a
 /// <c>ConcurrentDictionary</c>) and updates atomically with install /
 /// activate / delete; there's no separate cache to keep in sync.
 /// </para>

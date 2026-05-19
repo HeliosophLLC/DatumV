@@ -1,10 +1,10 @@
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Image;
-using DatumIngest.Functions.Video;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Functions.Video;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Rewrites <see cref="LiteralExpression"/> nodes into <see cref="LiteralValueExpression"/>

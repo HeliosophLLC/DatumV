@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Data;
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for <see cref="StatementBatch"/> and the
@@ -80,7 +80,7 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
         StatementBatch batch = Assert.IsType<StatementBatch>(prepared);
 
         using InProcessDatumDbConnection connection = new(catalog);
-        using DatumIngest.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
         ctx.Accountant.StartProfiling();
         await using InProcessDatumDbReader reader = await InProcessDatumDbReader_OpenForTest(
             batch, ctx);
@@ -119,7 +119,7 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
             "SELECT name FROM public.b ORDER BY name");
         StatementBatch batch = Assert.IsType<StatementBatch>(prepared);
 
-        using DatumIngest.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = catalog.CreateExecutionContext();
         ctx.Accountant.StartProfiling();
         await using InProcessDatumDbReader reader = await InProcessDatumDbReader_OpenForTest(
             batch, ctx);
@@ -178,7 +178,7 @@ public sealed class BatchPlanTests : ServiceTestBase, IDisposable
     }
 
     private static Task<InProcessDatumDbReader> InProcessDatumDbReader_OpenForTest(
-        PreparedSql prepared, DatumIngest.Execution.ExecutionContext ctx)
+        PreparedSql prepared, Heliosoph.DatumV.Execution.ExecutionContext ctx)
         => InProcessDatumDbReader.OpenAsync(prepared, ctx, ownsContext: false, CancellationToken.None);
 
     private static async Task Seed(TableCatalog catalog, params string[] sqls)

@@ -2,15 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyName>DatumIngest.LanguageServer</AssemblyName>
-    <RootNamespace>DatumIngest.LanguageServer</RootNamespace>
+    <PackageId>Heliosoph.DatumV.LanguageServer</PackageId>
+    <RootNamespace>Heliosoph.DatumV.LanguageServer</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV.LanguageServer</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>true</IsTrimmable>
     <IsPackable>true</IsPackable>
-    <PackageId>DatumIngest.LanguageServer</PackageId>
-    <Description>Transport-agnostic SQL language intelligence for the DatumIngest SQL dialect. Provides autocomplete, diagnostics, and hover for Monaco and VS Code integration.</Description>
+    <Description>Transport-agnostic SQL language intelligence for the DatumV SQL dialect. Provides autocomplete, diagnostics, and hover for Monaco and VS Code integration.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
@@ -21,7 +21,7 @@
   </ItemGroup>
   
   <ItemGroup>
-    <InternalsVisibleTo Include="DatumIngest.Tests" />
+    <InternalsVisibleTo Include="Heliosoph.DatumV.Tests" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.Tests.Infra;
+namespace Heliosoph.DatumV.Tests.Infra;
 
 /// <summary>
 /// Capturing <see cref="IDownloadProgressReporter"/> for tests. Exposes

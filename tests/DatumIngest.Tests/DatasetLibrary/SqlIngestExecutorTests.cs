@@ -1,16 +1,16 @@
 ﻿using System.Buffers.Binary;
 using System.IO.Compression;
 
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Tests.Functions.TableValued;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Tests.Functions.TableValued;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// End-to-end tests for <see cref="SqlIngestExecutor"/> — runs a SELECT
@@ -226,13 +226,13 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
     [Fact]
     public void Parse_CrossJoinOpenCifar_MarksJoinAsLateral()
     {
-        DatumIngest.Parsing.Ast.Statement parsed = DatumIngest.Parsing.SqlParser.ParseStatement(
+        Heliosoph.DatumV.Parsing.Ast.Statement parsed = Heliosoph.DatumV.Parsing.SqlParser.ParseStatement(
             "SELECT c.idx FROM open_archive($archive) AS a " +
             "CROSS JOIN open_cifar10(a.bytes) AS c");
-        DatumIngest.Parsing.Ast.QueryStatement query = Assert.IsType<DatumIngest.Parsing.Ast.QueryStatement>(parsed);
-        DatumIngest.Parsing.Ast.SelectQueryExpression sel =
-            Assert.IsType<DatumIngest.Parsing.Ast.SelectQueryExpression>(query.Query);
-        DatumIngest.Parsing.Ast.JoinClause join = Assert.Single(sel.Statement.Joins!);
+        Heliosoph.DatumV.Parsing.Ast.QueryStatement query = Assert.IsType<Heliosoph.DatumV.Parsing.Ast.QueryStatement>(parsed);
+        Heliosoph.DatumV.Parsing.Ast.SelectQueryExpression sel =
+            Assert.IsType<Heliosoph.DatumV.Parsing.Ast.SelectQueryExpression>(query.Query);
+        Heliosoph.DatumV.Parsing.Ast.JoinClause join = Assert.Single(sel.Statement.Joins!);
         Assert.True(join.IsLateral, "CROSS JOIN with a FunctionSource right side should be implicit-LATERAL");
     }
 

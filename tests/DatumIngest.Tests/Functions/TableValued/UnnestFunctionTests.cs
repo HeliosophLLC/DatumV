@@ -1,14 +1,14 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Json;
-using DatumIngest.Functions.TableValued;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Functions.TableValued;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.TableValued;
+namespace Heliosoph.DatumV.Tests.Functions.TableValued;
 
 /// <summary>
 /// <c>unnest(array)</c> table-valued function: expands an Array&lt;T&gt;

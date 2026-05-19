@@ -1,16 +1,16 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators.Scans;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Indexing.Bloom;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators.Scans;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Indexing.Bloom;
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Reads rows from a table provider, applying projection pushdown

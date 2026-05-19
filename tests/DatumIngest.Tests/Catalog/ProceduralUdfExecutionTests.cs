@@ -1,9 +1,9 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Models;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for procedural UDFs (<c>CREATE FUNCTION … BEGIN…END</c>):

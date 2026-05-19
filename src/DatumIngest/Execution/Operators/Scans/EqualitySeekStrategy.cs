@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Seeks via single-column equality predicates (<c>column = literal</c>).

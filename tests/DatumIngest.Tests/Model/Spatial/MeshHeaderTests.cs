@@ -1,7 +1,7 @@
 using System.Numerics;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Tests.Model.Spatial;
+namespace Heliosoph.DatumV.Tests.Model.Spatial;
 
 /// <summary>
 /// Coverage for <see cref="MeshHeader"/> — read/write round-trip, version

@@ -1,7 +1,7 @@
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// Verifies that <see cref="SourceSpan"/> values are populated on AST nodes

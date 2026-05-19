@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Stratified sampling operator: applies a uniform Bernoulli filter at the given

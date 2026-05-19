@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace DatumIngest.Models.Onnx;
+namespace Heliosoph.DatumV.Models.Onnx;
 
 /// <summary>
 /// Shared image preprocessing helpers for ONNX model pipelines.

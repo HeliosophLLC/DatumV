@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
 /// <c>mesh_to_gltf(m Mesh) → UInt8[]</c>. Serializes a Mesh to binary
@@ -49,7 +49,7 @@ public sealed class MeshToGltfFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.UInt8));
         }
-        byte[] glb = GltfExporter.Export(arg.AsMesh(), generator: "DatumIngest");
+        byte[] glb = GltfExporter.Export(arg.AsMesh(), generator: "Heliosoph.DatumV");
         return new ValueTask<ValueRef>(ValueRef.FromBytes(DataKind.UInt8, glb, isArray: true));
     }
 }
@@ -99,7 +99,7 @@ public sealed class MeshToObjFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.UInt8));
         }
-        byte[] obj = ObjExporter.Export(arg.AsMesh(), generator: "DatumIngest");
+        byte[] obj = ObjExporter.Export(arg.AsMesh(), generator: "Heliosoph.DatumV");
         return new ValueTask<ValueRef>(ValueRef.FromBytes(DataKind.UInt8, obj, isArray: true));
     }
 }
@@ -150,7 +150,7 @@ public sealed class MeshToStlFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.UInt8));
         }
-        byte[] stl = StlExporter.Export(arg.AsMesh(), generator: "DatumIngest");
+        byte[] stl = StlExporter.Export(arg.AsMesh(), generator: "Heliosoph.DatumV");
         return new ValueTask<ValueRef>(ValueRef.FromBytes(DataKind.UInt8, stl, isArray: true));
     }
 }

@@ -2,14 +2,14 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Spatial;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Spatial;
 
 /// <summary>
 /// Tests for <see cref="PointCloudToPlyFunction"/> — binary PLY export.

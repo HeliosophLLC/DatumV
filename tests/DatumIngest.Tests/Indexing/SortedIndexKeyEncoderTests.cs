@@ -1,8 +1,8 @@
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Indexing.Sorted;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Indexing.Sorted;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="SortedIndexKeyEncoder"/> verifying round-trip correctness,

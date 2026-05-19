@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for the <see cref="MergeJoinOperator"/> which joins two pre-sorted

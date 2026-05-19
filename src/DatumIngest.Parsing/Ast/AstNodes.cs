@@ -1,4 +1,4 @@
-namespace DatumIngest.Parsing.Ast;
+namespace Heliosoph.DatumV.Parsing.Ast;
 
 /// <summary>
 /// A source-level position span attached to AST nodes that carry names
@@ -340,7 +340,7 @@ public enum OutputFormat
     /// <summary>Comma-separated values text format.</summary>
     Csv,
 
-    /// <summary>DatumIngest native columnar format (.datum).</summary>
+    /// <summary>Heliosoph.DatumV native columnar format (.datum).</summary>
     Datum,
 }
 

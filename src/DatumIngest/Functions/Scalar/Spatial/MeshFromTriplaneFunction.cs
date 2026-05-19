@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Inference;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
 /// <c>mesh_from_triplane(session_name String, triplane Float32[], triplane_shape Int32[], resolution Int32, isolevel Float32, radius Float32, chunk_size Int32) → Mesh</c>.

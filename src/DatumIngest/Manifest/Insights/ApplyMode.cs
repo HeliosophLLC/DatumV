@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Policy tier controlling how an insight's actions are applied.

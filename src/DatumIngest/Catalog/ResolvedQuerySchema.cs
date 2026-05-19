@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Describes a single column resolved from a query's table sources,

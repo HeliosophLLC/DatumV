@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Configurable thresholds for <see cref="IInsightRule"/> implementations.

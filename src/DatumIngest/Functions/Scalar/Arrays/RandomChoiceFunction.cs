@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Returns one element of an array selected uniformly at random. The element

@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Web.Dtos;
-using DatumIngest.Web.Hosting;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Web.Dtos;
+using Heliosoph.DatumV.Web.Hosting;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 [ApiController]
 [Route("api/health")]

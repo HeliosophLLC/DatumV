@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Activation;
+namespace Heliosoph.DatumV.Functions.Scalar.Activation;
 
 /// <summary>
 /// <c>softmax(values FLOAT32[]) → FLOAT32[]</c>. Numerically-stable softmax

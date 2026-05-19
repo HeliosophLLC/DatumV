@@ -1,7 +1,7 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
 using System.Formats.Cbor;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Accumulates root-type histogram, top-level field set (for object-rooted

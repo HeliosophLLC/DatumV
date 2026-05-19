@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Phase-A1 substrate: construction, accessor, evaluator promotion, and
@@ -106,7 +106,7 @@ public sealed class LambdaValueTests : ServiceTestBase
         LambdaExpression ast = ParseLambda("x -> x + 1");
         EvaluationFrame frame = CreateEvaluationFrame();
 
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         ValueRef result = await evaluator.EvaluateAsValueRefAsync(ast, frame, default);
 
@@ -124,7 +124,7 @@ public sealed class LambdaValueTests : ServiceTestBase
         LambdaExpression ast = ParseLambda("x -> x + 1");
         EvaluationFrame frame = CreateEvaluationFrame();
 
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         // The evaluator's outer catch wraps internal failures in
         // ExpressionEvaluationException (carrying source-span info); the

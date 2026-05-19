@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Detects total GPU VRAM via <c>nvidia-smi</c> and computes a budget for

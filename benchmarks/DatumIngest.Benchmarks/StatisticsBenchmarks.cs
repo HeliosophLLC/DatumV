@@ -1,8 +1,8 @@
 using BenchmarkDotNet.Attributes;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Benchmarks for statistics collection overhead.

@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Controls which operations are permitted on a table.

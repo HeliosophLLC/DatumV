@@ -1,9 +1,9 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Runtime adapter that lets a procedural UDF (a <c>CREATE FUNCTION … BEGIN…END</c>

@@ -1,7 +1,7 @@
 using System.Text;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Tests for <see cref="ByteArrayValueStore"/> — the in-memory <see cref="IValueStore"/>

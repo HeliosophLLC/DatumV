@@ -1,7 +1,7 @@
 using System.IO.Hashing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Tests for inline UTF-8 storage in <see cref="DataValue"/> for

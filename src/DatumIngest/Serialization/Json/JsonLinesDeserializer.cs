@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using DatumIngest.Functions.Json;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Json;
+namespace Heliosoph.DatumV.Serialization.Json;
 
 /// <summary>
 /// Deserializes newline-delimited JSON (<c>.jsonl</c> / <c>.ndjson</c>) into

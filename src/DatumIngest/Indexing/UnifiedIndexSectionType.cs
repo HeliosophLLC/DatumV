@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Identifies the type of a section within a v5 unified memory-mapped <c>.datum-index</c> file.

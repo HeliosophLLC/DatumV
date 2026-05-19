@@ -1,7 +1,7 @@
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// AST-shape tests for the procedural-flow grammar (BEGIN/END, IF/ELSE,

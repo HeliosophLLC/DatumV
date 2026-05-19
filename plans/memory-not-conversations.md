@@ -2,7 +2,7 @@
 
 ## Thesis
 
-DatumIngest's chat surface does not use threads. The user has one continuous
+DatumV's chat surface does not use threads. The user has one continuous
 conversation that persists for the life of the catalog. "Where we are in the
 conversation" is **detected**, not declared — every new user turn fires a
 retrieval over the message graph and the catalog, and the working LLM context
@@ -208,7 +208,7 @@ substrate for *new* conversations.
 This is a corollary of the thesis, not a separate feature: if memory is the
 product and threads are write-only in practice, then *every existing
 write-only thread the user has is latent memory waiting to be unlocked*.
-Cold-corpus import is the migration path from cloud chat into DatumIngest.
+Cold-corpus import is the migration path from cloud chat into DatumV.
 
 ### Schema impact
 
@@ -251,9 +251,9 @@ later via the same Phase A SQL-block parsing.
 
 Cloud chat data is "hostage" — even with export, the JSON is dead the
 moment it leaves the source UI because there's no other place to *use*
-it. DatumIngest becomes the place where exported chat data is *more
+it. DatumV becomes the place where exported chat data is *more
 useful than it was in the cloud app*, because retrieval works across it.
-That makes export → DatumIngest a migration path toward us, not just a
+That makes export → DatumV a migration path toward us, not just a
 backup. Filed as part of the thesis; build when the chat surface is ready
 to consume the imported corpus.
 

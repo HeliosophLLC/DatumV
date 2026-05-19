@@ -1,12 +1,12 @@
 using System.Runtime.InteropServices;
 
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Inference;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for <c>CREATE MODEL</c> / <c>DROP MODEL</c> through
@@ -368,7 +368,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         };
 
         // Add an in-memory source row so the query has something to scan.
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 5 }]));
 
         catalog.Plan(
@@ -440,7 +440,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // (String) → Int32. Error message should print both shapes.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_return(prompt String) RETURNS Int32 "
                 + $"IMPLEMENTS TextGenerator "
@@ -456,7 +456,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // TextGenerator requires one parameter (String); this declares two.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_arity(p String, n Int32) RETURNS String "
                 + $"IMPLEMENTS TextGenerator "
@@ -495,7 +495,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // violated — required-param-count (0) â‰  contract-input-count (1).
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_optional(prompt String = 'default') RETURNS String "
                 + $"IMPLEMENTS TextGenerator "
@@ -531,7 +531,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         // FunctionArgumentException is an ExecutionException subclass — same
         // boundary semantics as the kind validation that fires before it.
-        DatumIngest.Functions.FunctionArgumentException ex = Assert.Throws<DatumIngest.Functions.FunctionArgumentException>(
+        Heliosoph.DatumV.Functions.FunctionArgumentException ex = Assert.Throws<Heliosoph.DatumV.Functions.FunctionArgumentException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_default(t Float32 = CAST(1.5 AS Float32) "
                 + $"CHECK (t BETWEEN 0.0 AND 1.0)) RETURNS Float32 "
@@ -555,7 +555,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // evaluate the predicate against the default and reject CREATE.
         TableCatalog catalog = CreateCatalogWithDispatcher(out StubDispatcher dispatcher);
 
-        DatumIngest.Functions.FunctionArgumentException ex = Assert.Throws<DatumIngest.Functions.FunctionArgumentException>(
+        Heliosoph.DatumV.Functions.FunctionArgumentException ex = Assert.Throws<Heliosoph.DatumV.Functions.FunctionArgumentException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_custom(x Int32 = 3 CHECK (x = 7 OR x = 42)) RETURNS Int32 "
                 + $"USING '{_absoluteUsingPath}' AS BEGIN RETURN x END"));
@@ -600,7 +600,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // TextGenerator requires String; this declares Int32 input.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bad_input(n Int32) RETURNS String "
                 + $"IMPLEMENTS TextGenerator "
@@ -614,7 +614,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL bogus(x Int32) RETURNS Int32 "
                 + $"IMPLEMENTS NonExistentTask "
@@ -670,7 +670,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // CREATE time with both sets printed.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL wrong_field(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -687,7 +687,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // (class) — score is missing. Mismatch should fire.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL missing_field(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -704,7 +704,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // contract, not lenient.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL extra_field(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -777,7 +777,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // ScoredClass, so the registrar should throw at CREATE time.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL var_wrong_type(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -836,7 +836,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + "RETURN {x: CAST(0 AS Float32), y: CAST(0 AS Float32), "
             + "w: CAST(0 AS Float32), h: CAST(0 AS Float32)} END");
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL via_udf_wrong(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -879,7 +879,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             + $"AS BEGIN RETURN {{x: CAST(0 AS Float32), y: CAST(0 AS Float32), "
             + $"w: CAST(0 AS Float32), h: CAST(0 AS Float32)}} END");
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL outer_wrong(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -917,7 +917,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // throws at CREATE.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL detect_wrong(t String) RETURNS Array<RegionScore> "
                 + $"USING '{_absoluteUsingPath}' "
@@ -952,7 +952,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // array-vs-scalar mismatch.
         TableCatalog catalog = CreateCatalogWithDispatcher(out _);
 
-        DatumIngest.Execution.QueryPlanException ex = Assert.Throws<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = Assert.Throws<Heliosoph.DatumV.Execution.QueryPlanException>(
             () => catalog.Plan(
                 $"CREATE MODEL builtin_arr_scalar(t String) RETURNS ScoredClass "
                 + $"USING '{_absoluteUsingPath}' "
@@ -977,7 +977,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             // at batch=1 against stub sessions that don't move VRAM).
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
 
         Exception ex = Assert.ThrowsAny<Exception>(
@@ -999,7 +999,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             // at batch=1 against stub sessions that don't move VRAM).
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 1.0f }]));
 
         Assert.ThrowsAny<Exception>(
@@ -1026,7 +1026,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.Float32Doubler();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 3.0f }]));
 
         catalog.Plan(
@@ -1067,7 +1067,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
 
         catalog.Plan(
@@ -1121,7 +1121,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
 
         catalog.Plan(
@@ -1177,7 +1177,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.Float32Matrix2x3();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 10.0f }]));
 
         catalog.Plan(
@@ -1235,7 +1235,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.MultiInputInt64Sum();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["a", "b"], [new object?[] { 7L, 1L }]));
 
         catalog.Plan(
@@ -1279,7 +1279,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.MultiInputMaskedDotProduct();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["a", "b"], [new object?[] { 7L, 1L }]));
 
         catalog.Plan(
@@ -1322,7 +1322,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
 
         // Body picks the SECOND output ('boxes') by name, proving the field
@@ -1368,7 +1368,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
 
         catalog.Plan(
@@ -1412,7 +1412,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.Float32Doubler();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 3.0f }]));
 
         catalog.Plan(
@@ -1450,7 +1450,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
 
         dispatcher.NextSession = StubSession.MultiOutputDual();
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"], [new object?[] { 2.0f }]));
 
         catalog.Plan(
@@ -1516,7 +1516,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [
                 new object?[] { new float[] { 1f, 2f, 3f } },
@@ -1601,7 +1601,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [
                 new object?[] { new float[] { 1f } },
@@ -1688,7 +1688,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [
                 new object?[] { new float[] { 1f } },
@@ -1762,7 +1762,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [
                 new object?[] { new float[] { 1f, 2f, 3f } },
@@ -1834,7 +1834,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         // 3 rows, each with a 3*4*4 = 48-element preprocessed tensor — matches
         // the explicit [1, 3, 4, 4] shape literal product.
         float[] tensor = new float[48];
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [
                 new object?[] { tensor },
@@ -1949,7 +1949,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
         byte[] png1 = EncodeSolidPng(40, 40, new SkiaSharp.SKColor(50, 100, 200));
         byte[] png2 = EncodeSolidPng(48, 48, new SkiaSharp.SKColor(150, 200, 50));
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["img"], [DataKind.Image],
             [
                 new object?[] { png0 },
@@ -2018,7 +2018,7 @@ public sealed class ModelRegistrationTests : ServiceTestBase
             BatchSizePolicy = StaticBatchSizePolicy.Instance,
         };
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["v"],
             [new object?[] { new float[] { 1f, 2f, 3f } }]));
 

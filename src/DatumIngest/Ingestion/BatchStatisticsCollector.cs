@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// A passthrough batch stream wrapper that accumulates per-column statistics

@@ -1,6 +1,6 @@
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Tests.DatumFile;
+namespace Heliosoph.DatumV.Tests.DatumFile;
 
 /// <summary>
 /// Unit tests for <see cref="SidecarRegistry"/> — the per-catalog map from

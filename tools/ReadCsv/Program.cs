@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
 string sourcePath = args.Length > 0
     ? args[0]

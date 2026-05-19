@@ -1,12 +1,12 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Functions.Image;
-using DatumIngest.Functions.Json;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Ingestion.Sampling;
+namespace Heliosoph.DatumV.Ingestion.Sampling;
 
 /// <summary>
 /// Collects a representative sample of rows during ingestion using reservoir sampling

@@ -1,6 +1,6 @@
 using System.IO.MemoryMappedFiles;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Extension methods for <see cref="MemoryMappedViewAccessor"/> to read into spans.

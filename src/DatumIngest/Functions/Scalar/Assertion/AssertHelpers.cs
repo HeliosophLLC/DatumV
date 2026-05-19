@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Assertion;
+namespace Heliosoph.DatumV.Functions.Scalar.Assertion;
 
 /// <summary>
 /// Shared helpers for the <c>assert_*</c> scalar function family. Provides

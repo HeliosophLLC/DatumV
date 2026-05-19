@@ -1,8 +1,8 @@
-using DatumIngest.Web.Conversation;
+using Heliosoph.DatumV.Web.Conversation;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 public sealed class StreamHub : Hub<IStreamHubClient>, IStreamHub
 {

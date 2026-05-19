@@ -1,9 +1,9 @@
 using System.Buffers;
 using System.IO.Compression;
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 using ICSharpCode.SharpZipLib.BZip2;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Describes a source file for format deserialization. Provides the file path,
@@ -169,7 +169,7 @@ public class FileFormatDescriptor : IDisposable
 
     private async Task<string> MaterializeCompressedAsync(CancellationToken cancellationToken)
     {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"datumingest-{Guid.NewGuid():N}.tmp");
+        string tempPath = Path.Combine(Path.GetTempPath(), $"datumv-{Guid.NewGuid():N}.tmp");
 
         try
         {

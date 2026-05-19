@@ -3,14 +3,14 @@ using Sdcb.FFmpeg.Formats;
 using Sdcb.FFmpeg.Raw;
 using Sdcb.FFmpeg.Utils;
 
-namespace DatumIngest.Functions.Video;
+namespace Heliosoph.DatumV.Functions.Video;
 
 /// <summary>
 /// Lightweight video container header parser. Opens an in-memory video blob with
 /// FFmpeg, reads stream-level metadata (width / height / fps / codec / frame
 /// count) without spinning up a full decoder, and disposes the FFmpeg resources.
 /// Used at ingest time to stamp inline metadata onto <c>Video</c>
-/// <see cref="DatumIngest.Model.DataValue"/>s so accessors like <c>video_width()</c>
+/// <see cref="Heliosoph.DatumV.Model.DataValue"/>s so accessors like <c>video_width()</c>
 /// skip a full decode.
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ namespace DatumIngest.Functions.Video;
 /// 0 for frame count but width/height/fps still parse correctly.
 /// </para>
 /// <para>
-/// Mirrors the stream-open path in <see cref="DatumIngest.Model.VideoRegistry"/> —
+/// Mirrors the stream-open path in <see cref="Heliosoph.DatumV.Model.VideoRegistry"/> —
 /// wrap bytes in a <see cref="MemoryStream"/>, hand to FFmpeg via
 /// <see cref="IOContext.ReadStream"/>, open the format context, load stream info,
 /// find the best video stream. Disposes everything on every code path.

@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Uuid;
+namespace Heliosoph.DatumV.Functions.Scalar.Uuid;
 
 /// <summary>
 /// Returns the canonical <c>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</c> string

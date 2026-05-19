@@ -1,6 +1,6 @@
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 public sealed class SourceFingerprintTests : ServiceTestBase
 {

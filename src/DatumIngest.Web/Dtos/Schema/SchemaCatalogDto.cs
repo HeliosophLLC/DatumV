@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Schema;
+namespace Heliosoph.DatumV.Web.Dtos.Schema;
 
 // Response payload for GET /api/schema/catalog: the full set of user-visible
 // tables together with each table's columns and indexes. Built for the

@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Chunk-level pruning techniques that can eliminate data before row-level reads.

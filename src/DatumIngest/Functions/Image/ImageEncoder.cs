@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions.Image;
+namespace Heliosoph.DatumV.Functions.Image;
 
 using SkiaSharp;
 

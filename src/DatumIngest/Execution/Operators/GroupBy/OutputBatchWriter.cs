@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.GroupBy;
+namespace Heliosoph.DatumV.Execution.Operators.GroupBy;
 
 /// <summary>
 /// Owns the output-side state of a GROUP BY pipeline: the lazily-built

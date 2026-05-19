@@ -2,12 +2,12 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Pooling;
+namespace Heliosoph.DatumV.Pooling;
 
 /// <summary>
 /// 

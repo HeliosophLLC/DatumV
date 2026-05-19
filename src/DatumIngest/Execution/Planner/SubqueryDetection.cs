@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Detects whether a <see cref="SelectStatement"/> or expression tree contains any

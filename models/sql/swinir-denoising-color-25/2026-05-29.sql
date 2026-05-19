@@ -6,7 +6,7 @@
 -- ONNX file:   swinir_denoising_color_25.onnx
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/JingyunLiang/SwinIR
---              (Heliosoph ONNX export — SwinIR-M config, 180-dim embeds)
+--              (Heliosoph.DatumV ONNX export — SwinIR-M config, 180-dim embeds)
 --
 -- SwinIR color denoiser specialised on Gaussian noise σ=25 — the
 -- standard denoising-benchmark reference level. Use for σ≈25 matched

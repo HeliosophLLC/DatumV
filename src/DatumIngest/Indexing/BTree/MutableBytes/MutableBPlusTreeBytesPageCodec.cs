@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using DatumIngest.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
 
-namespace DatumIngest.Indexing.BTree.MutableBytes;
+namespace Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
 /// <summary>
 /// Encodes and decodes bytes-keyed B+Tree pages. Page size is per-tree

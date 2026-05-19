@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Engine-wide <see cref="ActivitySource"/> registry plus helpers for
@@ -29,7 +29,7 @@ public static class DatumActivity
     /// <c>ExecuteAsync</c> entry until the iterator is disposed (which
     /// includes time the operator spends suspended waiting for a pull).
     /// </summary>
-    public static readonly ActivitySource Operators = new("DatumIngest.Operators");
+    public static readonly ActivitySource Operators = new("Heliosoph.DatumV.Operators");
 
     /// <summary>
     /// Spans for scalar-function / expression-evaluation work. Separated
@@ -37,7 +37,7 @@ public static class DatumActivity
     /// paying the per-call allocation cost of the other — scalar dispatch
     /// fires at row granularity, operator dispatch fires at batch granularity.
     /// </summary>
-    public static readonly ActivitySource Scalars = new("DatumIngest.Scalars");
+    public static readonly ActivitySource Scalars = new("Heliosoph.DatumV.Scalars");
 
     /// <summary>
     /// Spans for model-calibration lifecycle work — store load/save,
@@ -46,7 +46,7 @@ public static class DatumActivity
     /// (relatively rare) calibration trail can be filtered to a dedicated
     /// listener without pulling in operator-level chatter.
     /// </summary>
-    public static readonly ActivitySource Calibration = new("DatumIngest.Calibration");
+    public static readonly ActivitySource Calibration = new("Heliosoph.DatumV.Calibration");
 
     /// <summary>
     /// Formats a byte count as a human-readable string (B / KB / MB / GB).
@@ -84,7 +84,7 @@ public static class DatumActivity
 /// A single frame from <see cref="DatumActivity.CurrentStack"/> or
 /// <see cref="RecentActivityLog.LiveSnapshot"/>. Captures the operator
 /// name, the <see cref="ActivitySource"/> it came from
-/// (<c>"DatumIngest.Operators"</c> vs <c>"DatumIngest.Scalars"</c>), the
+/// (<c>"Heliosoph.DatumV.Operators"</c> vs <c>"Heliosoph.DatumV.Scalars"</c>), the
 /// display name of the parent activity (so callers can reconstruct the
 /// pull chain across threads), and the moment the activity started plus
 /// elapsed time at snapshot.

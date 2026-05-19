@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
-using DatumIngest.Inference;
+using Heliosoph.DatumV.Inference;
 
-namespace DatumIngest.Catalog.Registries;
+namespace Heliosoph.DatumV.Catalog.Registries;
 
 /// <summary>
 /// Per-model lazy session loader. Wraps the (alias → resolved-path) map

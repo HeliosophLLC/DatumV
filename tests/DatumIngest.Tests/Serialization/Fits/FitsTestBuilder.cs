@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Tests.Serialization.Fits;
+namespace Heliosoph.DatumV.Tests.Serialization.Fits;
 
 /// <summary>
 /// Builds tiny well-formed FITS byte streams for tests. Mirrors the on-disk

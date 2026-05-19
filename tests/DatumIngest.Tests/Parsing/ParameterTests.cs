@@ -1,12 +1,12 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// Tests for parameterized query support: lexing, parsing, binding, and value parsing.

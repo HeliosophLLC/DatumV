@@ -1,6 +1,6 @@
 using System.Threading;
 
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Diagnostic counters for the per-DataValue hash optimization. Off by default;

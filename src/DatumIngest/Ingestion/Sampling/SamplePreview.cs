@@ -1,6 +1,6 @@
-using DatumIngest.Functions.Json;
+using Heliosoph.DatumV.Functions.Json;
 
-namespace DatumIngest.Ingestion.Sampling;
+namespace Heliosoph.DatumV.Ingestion.Sampling;
 
 /// <summary>
 /// A lightweight preview of sample records from an ingested table, suitable for

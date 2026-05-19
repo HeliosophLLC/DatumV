@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Sam;
+namespace Heliosoph.DatumV.Functions.Scalar.Sam;
 
 /// <summary>
 /// Shared mask-output helpers for the SAM-family builtins. Both

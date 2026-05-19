@@ -1,6 +1,6 @@
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Multi-dim arrays (ndim ≥ 2) only support fixed-width primitive element

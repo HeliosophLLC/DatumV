@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Covers <c>yolox_preprocess</c> + <c>yolox_postprocess</c> — the two

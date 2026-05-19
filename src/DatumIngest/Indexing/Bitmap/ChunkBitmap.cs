@@ -1,7 +1,7 @@
 using System.Numerics;
-using DatumIngest.DatumFile.Compression;
+using Heliosoph.DatumV.DatumFile.Compression;
 
-namespace DatumIngest.Indexing.Bitmap;
+namespace Heliosoph.DatumV.Indexing.Bitmap;
 
 /// <summary>
 /// A fixed-size bitset representing the presence of a single distinct value within a single

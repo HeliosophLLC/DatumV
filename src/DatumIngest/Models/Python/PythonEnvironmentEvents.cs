@@ -1,4 +1,4 @@
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Lifecycle events fired by <see cref="IPythonEnvironmentManager"/>
@@ -9,7 +9,7 @@ namespace DatumIngest.Models.Python;
 /// </summary>
 /// <remarks>
 /// Mirrors the shape of the existing
-/// <see cref="DatumIngest.ModelLibrary.IDownloadProgressReporter"/>
+/// <see cref="Heliosoph.DatumV.ModelLibrary.IDownloadProgressReporter"/>
 /// surface so the front-end's download-progress conventions extend
 /// naturally. Distinct events (not a single discriminated record)
 /// because the manager's stages have different payloads and the

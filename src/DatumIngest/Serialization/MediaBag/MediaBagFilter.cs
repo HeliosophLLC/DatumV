@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// Shared per-entry filter applied by <see cref="IMediaBagReader"/> implementations

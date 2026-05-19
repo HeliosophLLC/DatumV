@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Interactions;
+namespace Heliosoph.DatumV.Statistics.Interactions;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Computes Pearson correlation between the null masks of two columns using an online

@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.Models.Onnx;
+namespace Heliosoph.DatumV.Tests.Models.Onnx;
 
-using DatumIngest.Models;
-using DatumIngest.Models.Onnx;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Onnx;
 using Microsoft.ML.OnnxRuntime;
 
 /// <summary>

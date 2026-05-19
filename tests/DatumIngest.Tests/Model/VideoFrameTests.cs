@@ -1,10 +1,10 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Covers the new <see cref="DataKind.VideoFrame"/> data type and the
@@ -91,7 +91,7 @@ public sealed class VideoFrameTests : ServiceTestBase
     public void Registry_GetMetadataReturnsContainerFacts()
     {
         Assert.True(File.Exists(SpikeVideoPath()),
-            $"Fixture missing at {SpikeVideoPath()}. Check tests/DatumIngest.Tests/Fixtures/spike.mp4 is present and copied to bin output.");
+            $"Fixture missing at {SpikeVideoPath()}. Check tests/Heliosoph.DatumV.Tests/Fixtures/spike.mp4 is present and copied to bin output.");
 
         using VideoRegistry registry = new();
         uint id = registry.RegisterPath(SpikeVideoPath());
@@ -253,7 +253,7 @@ public sealed class VideoFrameTests : ServiceTestBase
     public void ExecutionContext_AllocatesAndOwnsVideoRegistry()
     {
         Pool pool = CreatePool();
-        ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
+        ExecutionContext ctx = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog());
 
         Assert.NotNull(ctx.VideoRegistry);
 
@@ -270,7 +270,7 @@ public sealed class VideoFrameTests : ServiceTestBase
         VideoRegistry shared = new();
         try
         {
-            ExecutionContext child = new DatumIngest.Execution.ExecutionContext(CreateCatalog(),
+            ExecutionContext child = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog(),
                 videoRegistry: shared);
             Assert.Same(shared, child.VideoRegistry);
             child.Dispose();

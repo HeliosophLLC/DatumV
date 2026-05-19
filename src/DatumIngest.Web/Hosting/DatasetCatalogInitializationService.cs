@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Pooling;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Mounts the DatasetSchemaCatalog into the local TableCatalog at boot
 // and wires the DatasetSchemaBinder so the catalog's bound tables stay
@@ -16,7 +16,7 @@ namespace DatumIngest.Web.Hosting;
 // datasets, and registering an init order is simpler than introducing
 // an explicit cross-service handshake. The host's
 // `IHostedService.StartAsync` order matches DI registration order;
-// AddDatumIngestWeb registers both, datasets after models.
+// AddDatumVWeb registers both, datasets after models.
 internal sealed class DatasetCatalogInitializationService : IHostedService
 {
     private readonly TableCatalog _catalog;

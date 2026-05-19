@@ -1,4 +1,4 @@
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// A snapshot of progress during ingestion, reported at regular intervals.

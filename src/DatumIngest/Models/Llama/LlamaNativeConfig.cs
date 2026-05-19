@@ -1,6 +1,6 @@
 using LLama.Native;
 
-namespace DatumIngest.Models.Llama;
+namespace Heliosoph.DatumV.Models.Llama;
 
 /// <summary>
 /// Process-wide singleton configuration for LlamaSharp's native loader. The

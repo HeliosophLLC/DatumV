@@ -1,6 +1,6 @@
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Accumulator that picks the fewest-positions winner across every

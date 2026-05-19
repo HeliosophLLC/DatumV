@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Base type for exceptions deliberately thrown during query execution to surface a

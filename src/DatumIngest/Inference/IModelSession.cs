@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// One loaded model bound to one device, viewed as a generic resolvable

@@ -1,8 +1,8 @@
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests that accumulators correctly implement the "indexable = self-contained" rule:

@@ -1,6 +1,6 @@
 using System.Linq;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 using Superpower.Parsers;
@@ -8,7 +8,7 @@ using SP = Superpower.Parse;
 
 #pragma warning disable CS8603, CS8604, CS8620 // Superpower combinators lack consistent nullable reference type annotations
 
-namespace DatumIngest.Parsing;
+namespace Heliosoph.DatumV.Parsing;
 
 /// <summary>
 /// Parses tokenized SQL into an AST rooted at <see cref="QueryExpression"/>.
@@ -155,7 +155,7 @@ public static partial class SqlParser
     /// <summary>
     /// Tokenizes <paramref name="sql"/> through Superpower and wraps any
     /// tokenizer-level failure (incomplete quoted identifier, illegal lexeme
-    /// like a stray <c>@</c>, etc.) in the DatumIngest-flavoured
+    /// like a stray <c>@</c>, etc.) in the Heliosoph.DatumV-flavoured
     /// <see cref="ParseException"/> so the public entry points throw a single
     /// consistent type regardless of which Superpower layer rejected the input.
     /// </summary>
@@ -335,7 +335,7 @@ public static partial class SqlParser
         // types (SELECT, CREATE, INSERT, UPDATE, DELETE, ALTER, ANALYZE) and
         // semicolon-separated batches. If it succeeds, no recovery needed.
         // Wrap in try/catch because some parser-side lowerings (template-string
-        // splice parsing) raise DatumIngest ParseException directly rather than
+        // splice parsing) raise Heliosoph.DatumV ParseException directly rather than
         // failing through the combinator's HasValue path; recovering callers
         // (the language server) need a diagnostic, not an exception.
         TokenListParserResult<SqlToken, IReadOnlyList<Statement>> batchResult;

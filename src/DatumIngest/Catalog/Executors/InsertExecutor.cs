@@ -1,11 +1,11 @@
-using DatumIngest.Catalog.Plans;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Executors;
+namespace Heliosoph.DatumV.Catalog.Executors;
 
 /// <summary>
 /// Owns the <c>INSERT</c>-statement pipeline for <see cref="TableCatalog.PlanAsync(Statement)"/>:
@@ -1418,7 +1418,7 @@ internal static class InsertExecutor
     private static async Task<Expression> PrefoldSubqueriesAsync(
         Expression expression,
         TableCatalog catalog, 
-        DatumIngest.Execution.ExecutionContext context,
+        Heliosoph.DatumV.Execution.ExecutionContext context,
         CancellationToken ct)
     {
         switch (expression)
@@ -1481,7 +1481,7 @@ internal static class InsertExecutor
     private static async Task<Expression> FoldOneSubqueryAsync(
         SubqueryExpression subquery,
         TableCatalog catalog,
-        DatumIngest.Execution.ExecutionContext context,
+        Heliosoph.DatumV.Execution.ExecutionContext context,
         CancellationToken ct)
     {
         StatementPlan innerPlan = catalog.PlanQuery(new SelectQueryExpression(subquery.Query));

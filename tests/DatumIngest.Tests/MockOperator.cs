@@ -1,8 +1,8 @@
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// A simple mock data-source operator backed by an <see cref="InMemoryTableProvider"/>.
@@ -26,6 +26,6 @@ public sealed class MockOperator : QueryOperator
 
     protected override OperatorPlanDescription DescribeForExplainImpl() => new("Mock");
 
-    protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(DatumIngest.Execution.ExecutionContext context)
+    protected override IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(Heliosoph.DatumV.Execution.ExecutionContext context)
         => _provider.ScanAsync(requiredColumns: null, filterHint: null, context.Store, context.CancellationToken);
 }

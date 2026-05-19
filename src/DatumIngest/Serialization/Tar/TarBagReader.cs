@@ -1,8 +1,8 @@
 using System.Formats.Tar;
 using System.Runtime.CompilerServices;
-using DatumIngest.Serialization.MediaBag;
+using Heliosoph.DatumV.Serialization.MediaBag;
 
-namespace DatumIngest.Serialization.Tar;
+namespace Heliosoph.DatumV.Serialization.Tar;
 
 /// <summary>
 /// <see cref="IMediaBagReader"/> implementation over <see cref="TarReader"/>.

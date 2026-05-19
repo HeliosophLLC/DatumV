@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.LanguageServer;
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Web.Lsp;
+namespace Heliosoph.DatumV.Web.Lsp;
 
 /// <summary>
 /// Process-wide host for the SQL <see cref="LanguageService"/>. Owns one

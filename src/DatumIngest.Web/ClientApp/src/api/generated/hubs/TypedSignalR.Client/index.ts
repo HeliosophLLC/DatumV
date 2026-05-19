@@ -3,8 +3,8 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
-import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './DatumIngest.Web.Hubs';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './Heliosoph.DatumV.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
 
 
 // components

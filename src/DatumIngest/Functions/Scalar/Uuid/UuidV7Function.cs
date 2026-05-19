@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Uuid;
+namespace Heliosoph.DatumV.Functions.Scalar.Uuid;
 
 /// <summary>
 /// Returns a new version-7 UUID (time-ordered, monotonic within a millisecond).

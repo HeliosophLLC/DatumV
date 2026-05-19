@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.Activation;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Activation;
 
 /// <summary>
 /// Covers <c>multilabel_classify(logits, labels, threshold)</c> — the

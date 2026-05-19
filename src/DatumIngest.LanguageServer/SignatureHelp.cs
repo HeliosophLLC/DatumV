@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Signature-help payload returned to the editor when the cursor is inside a

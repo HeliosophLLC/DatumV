@@ -19,7 +19,7 @@ This is the **complement** to depth-based 3D pipelines (depth → point cloud �
 
 Re-exported from upstream PyTorch weights via `torch.onnx.export`. Provenance trail: Tochilkin et al. → cloned VAST-AI-Research/TripoSR (for the `tsr/` architecture module) + stabilityai/TripoSR (for `config.yaml` + `model.ckpt` weights from the Hub) → two separately-traced ONNX graphs (image→triplane and (triplane,xyz)→(density,color)) → these files.
 
-Toolchain: `torch 2.4.x` (CUDA 12.4), `torchvision 0.19`, `transformers 4.45.2`, `einops>=0.7`, `omegaconf>=2.3`, `jaxtyping>=0.2.20`, `onnx>=1.16`, `onnxconverter-common>=1.14`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-triposr.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-triposr.ps1) in the DatumIngest repo. The script also writes a `requirements.txt` / `requirements-torch.txt` / `requirements-freeze.txt` / `README.txt` quartet into the output directory so the exact venv state is recoverable from just the uploaded files.
+Toolchain: `torch 2.4.x` (CUDA 12.4), `torchvision 0.19`, `transformers 4.45.2`, `einops>=0.7`, `omegaconf>=2.3`, `jaxtyping>=0.2.20`, `onnx>=1.16`, `onnxconverter-common>=1.14`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-triposr.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-triposr.ps1) in the Heliosoph repo. The script also writes a `requirements.txt` / `requirements-torch.txt` / `requirements-freeze.txt` / `README.txt` quartet into the output directory so the exact venv state is recoverable from just the uploaded files.
 
 Why two graphs instead of one: TripoSR is a feedforward image-to-triplane model whose downstream "render" step samples a NeRF MLP at many query points on a 3D grid (chunked over ~16M points at 256³ resolution). Tracing the entire thing as one graph would either (a) bake in a specific grid resolution as a constant, or (b) require dynamic-shape grid construction inside the ONNX graph — both fragile. Splitting it makes the per-image cost (`triplane.onnx`) and the per-chunk cost (`nerf.onnx`) independently schedulable on the host. Marching cubes runs entirely outside the ONNX graph in the host engine.
 
@@ -42,7 +42,7 @@ TripoSR ships as a **two-graph pipeline**, with the TripoSR runtime config + a r
 
 If you ran the export with `-Fp16`, you'll also see `triplane_fp16.onnx` + `triplane_fp16.onnx_data` + `nerf_fp16.onnx` siblings (~half the disk footprint, IO types kept fp32 so consumer code is identical to the fp32 path).
 
-**What's NOT in the ONNX graphs**: the marching-cubes step that extracts a triangle mesh from the density grid. That's a classical algorithm; it runs as a downstream pipeline step in whatever consumer renders the mesh (the DatumIngest engine has it as part of the `mesh_compute_*` SQL function family). Same convention used by InstantMesh, CRM, Shap-E, and other implicit-field mesh-gen models.
+**What's NOT in the ONNX graphs**: the marching-cubes step that extracts a triangle mesh from the density grid. That's a classical algorithm; it runs as a downstream pipeline step in whatever consumer renders the mesh (the Heliosoph engine has it as part of the `mesh_compute_*` SQL function family). Same convention used by InstantMesh, CRM, Shap-E, and other implicit-field mesh-gen models.
 
 ## Input / output
 

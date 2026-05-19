@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Provides efficient name-to-ordinal mapping for column lookup

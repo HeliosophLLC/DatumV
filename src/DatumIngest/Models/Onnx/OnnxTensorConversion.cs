@@ -1,7 +1,7 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace DatumIngest.Models.Onnx;
+namespace Heliosoph.DatumV.Models.Onnx;
 
 /// <summary>
 /// Helpers for reading ONNX session outputs into <see cref="DenseTensor{T}"/>

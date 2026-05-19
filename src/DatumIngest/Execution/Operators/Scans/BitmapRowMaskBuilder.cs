@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Builds a row-inclusion bitmap mask for a single chunk by composing

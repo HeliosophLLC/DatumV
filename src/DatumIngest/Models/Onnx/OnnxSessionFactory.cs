@@ -1,8 +1,8 @@
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Models.Llama;
 
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Models.Onnx;
+namespace Heliosoph.DatumV.Models.Onnx;
 
 /// <summary>
 /// Single source of truth for creating ONNX Runtime <see cref="InferenceSession"/>

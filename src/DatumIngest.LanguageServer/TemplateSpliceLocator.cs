@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Locates a <c>${…}</c> splice in a backtick-delimited template string and
@@ -10,11 +10,11 @@ namespace DatumIngest.LanguageServer;
 /// <para>
 /// The tokenizer collapses an entire template string (backticks, literal
 /// chunks, every splice) into a single
-/// <see cref="DatumIngest.Parsing.Tokens.SqlToken.TemplateString"/> token,
+/// <see cref="Heliosoph.DatumV.Parsing.Tokens.SqlToken.TemplateString"/> token,
 /// so the LS's cursor-on-token machinery can't reach into a splice on its
 /// own. This locator does the secondary walk: it mirrors the tokenizer's
 /// template scan
-/// (<see cref="DatumIngest.Parsing.Tokens.SqlTokenizer"/>) — backtick to
+/// (<see cref="Heliosoph.DatumV.Parsing.Tokens.SqlTokenizer"/>) — backtick to
 /// backtick, splices on <c>${</c>, brace-depth tracking, single-quoted
 /// strings inside splices skipped, backslash escapes consumed — and stops
 /// at the first splice that contains the cursor.

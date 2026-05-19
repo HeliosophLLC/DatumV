@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// A named collection of <see cref="IInferenceTensor"/>s — the input or

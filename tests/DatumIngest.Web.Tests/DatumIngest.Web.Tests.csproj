@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Heliosoph.DatumV.Web.Tests</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV.Web.Tests</AssemblyName>
     <!-- We project-reference DatumIngest.Web (OutputType=Exe). Suppress the
          "should not reference an Exe" guidance — for an xunit test project
          this is the conventional way to reach the web project's internals. -->

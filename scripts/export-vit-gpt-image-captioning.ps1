@@ -2,7 +2,7 @@
 #
 # nlpconnect/vit-gpt2-image-captioning is an encoder-decoder model that
 # generates a one-sentence caption for an input image. Apache-2.0 licensed.
-# After this script completes the DatumIngest engine can register
+# After this script completes the Heliosoph.DatumV engine can register
 # `models.captioner` against the resulting ONNX files.
 #
 # Requirements:

@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Adapts a slice of an <see cref="IBlobSource"/> as a read-only seekable

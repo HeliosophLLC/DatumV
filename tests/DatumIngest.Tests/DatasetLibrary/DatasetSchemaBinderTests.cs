@@ -1,19 +1,19 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
 // Both ModelLibrary and DatasetLibrary expose IManifestStore; alias the
 // dataset variant so the test reads naturally.
-using IManifestStore = DatumIngest.DatasetLibrary.IManifestStore;
+using IManifestStore = Heliosoph.DatumV.DatasetLibrary.IManifestStore;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// Focused unit tests over <see cref="DatasetSchemaBinder"/>'s
@@ -75,7 +75,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
 
         DatasetSchemaBinder binder = BuildBinderWithCatalog(
             entries: [
-                new DatumIngest.DatasetLibrary.DatasetEntry(
+                new Heliosoph.DatumV.DatasetLibrary.DatasetEntry(
                     Name: "COCO 2017",
                     Summary: "fixture",
                     Description: "fixture",
@@ -205,7 +205,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
     }
 
     private DatasetSchemaBinder BuildBinderWithCatalog(
-        IReadOnlyList<DatumIngest.DatasetLibrary.DatasetEntry> entries,
+        IReadOnlyList<Heliosoph.DatumV.DatasetLibrary.DatasetEntry> entries,
         DatasetSchemaCatalog catalog)
     {
         DatasetCatalogManifest manifest = new(SchemaVersion: 1, Datasets: entries);
@@ -226,7 +226,7 @@ public sealed class DatasetSchemaBinderTests : ServiceTestBase
     // tests assert on. Schema and ScanAsync aren't reached by the tests;
     // they throw to make accidental use loud.
     private sealed class TrackingProvider(Pool pool, QualifiedName name)
-        : DatumIngest.Catalog.Providers.NonSeekableTableProviderBase(pool, name)
+        : Heliosoph.DatumV.Catalog.Providers.NonSeekableTableProviderBase(pool, name)
     {
         public override long GetRowCount() => 0;
         public override Schema GetSchema() => throw new NotSupportedException();

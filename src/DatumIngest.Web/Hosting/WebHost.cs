@@ -1,17 +1,17 @@
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 public static class WebHost
 {
-    // Builds and starts the WebApplication using bootstrap. Returns once Kestrel
-    // is listening. Caller is responsible for disposing the StartedWebHost.
-    //
-    // Synchronous bridge inside is intentional and isolated to host boot:
-    // the desktop entry point requires the calling thread to remain STA for
-    // WebView2 (see project_datumingest_client_sta_requirement.md). The
-    // headless entry point can ignore that, but the sync surface is shared.
+    /// <summary>
+    /// Builds and starts the WebApplication using bootstrap. Returns once Kestrel
+    /// is listening. Caller is responsible for disposing the StartedWebHost.
+    /// </summary>
+    /// <param name="bootstrap"></param>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
     public static StartedWebHost Start(WebHostBootstrap bootstrap)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -20,11 +20,11 @@ public static class WebHost
             ContentRootPath = AppContext.BaseDirectory,
         });
         builder.WebHost.UseUrls(bootstrap.Url);
-        builder.Services.AddDatumIngestWeb(bootstrap.Options);
+        builder.Services.AddDatumVWeb(bootstrap.Options);
         builder.Services.AddFileFormats();
 
         var app = builder.Build();
-        app.UseDatumIngestWeb();
+        app.UseDatumVWeb();
 
         app.StartAsync().GetAwaiter().GetResult();
 

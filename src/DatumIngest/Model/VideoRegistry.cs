@@ -1,11 +1,11 @@
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 using Sdcb.FFmpeg.Codecs;
 using Sdcb.FFmpeg.Formats;
 using Sdcb.FFmpeg.Raw;
 using Sdcb.FFmpeg.Swscales;
 using Sdcb.FFmpeg.Utils;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Per-query registry of source videos backing <see cref="DataKind.VideoFrame"/> handles.

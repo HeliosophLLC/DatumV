@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.TableValued;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.TableValued;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Unit tests for the <see cref="RangeFunction"/> table-valued function.

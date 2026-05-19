@@ -65,7 +65,7 @@ In addition to this license, Meta gates the Llama 3.1 repositories on HuggingFac
 2. Have accepted Meta's terms on the HF model page.
 3. Have a HuggingFace access token configured locally.
 
-The DatumIngest app handles this by detecting 401/403 responses and prompting the user to complete the HF acceptance flow before retrying.
+The DatumV app handles this by detecting 401/403 responses and prompting the user to complete the HF acceptance flow before retrying.
 
 ---
 

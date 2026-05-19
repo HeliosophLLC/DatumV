@@ -132,7 +132,7 @@ size-related columns automatically. The user doesn't declare anything.
 | `est_vram_mb` | Already heuristic via `1.2 × file_size` | Could refine using parameter count × bytes-per-element + activation budget. |
 
 **Implementation**: extend
-[`OnnxFileMetadataReader`](../src/DatumIngest/Inference/OnnxRuntime/OnnxFileMetadata.cs)
+[`OnnxFileMetadataReader`](../src/DatumV/Inference/OnnxRuntime/OnnxFileMetadata.cs)
 with a `GraphProto.initializer` walk. Each initializer is a
 `TensorProto` carrying `data_type` (enum: `FLOAT = 1`, `FLOAT16 = 10`,
 `INT8 = 3`, `INT4 = 22`, …) plus `dims`. ~80 LOC of protobuf walking
@@ -408,7 +408,7 @@ The full enumeration of tasks we'd want to declare. Output space is
 bounded by the engine's data types (Image, String, Audio, Video,
 primitive arrays, Struct combinations), so this list approximates the
 realistic ceiling — not exhaustive, but covers every model family
-DatumIngest ships or plans to ship today, plus the obvious extensions.
+DatumV ships or plans to ship today, plus the obvious extensions.
 
 **Design choices baked into the vocabulary:**
 

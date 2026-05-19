@@ -6,7 +6,7 @@ User-defined functions (UDFs) allow you to name a reusable computation and
 call it like any other function. UDFs live in [schemas](schema-introspection.md) — by
 default `public` — and are callable by either their bare name (when the
 schema is on the session `search_path`) or a schema-qualified name
-(`analytics.shout(...)`). DatumIngest supports two UDF body shapes with
+(`analytics.shout(...)`). DatumV supports two UDF body shapes with
 different trade-offs:
 
 - **Macro UDFs** (`AS expression`) — the body is a scalar expression inlined

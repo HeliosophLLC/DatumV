@@ -1,8 +1,8 @@
 using System.Text.Json;
 
-using DatumIngest.DatasetLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
 
-namespace DatumIngest.Web.Settings;
+namespace Heliosoph.DatumV.Web.Settings;
 
 // Reads selected fields out of settings.json synchronously at startup,
 // before any DI service is constructed. Used to feed values like
@@ -32,7 +32,7 @@ internal static class StartupSettingsLoader
     // Reads {catalogRootPath}/settings.json and returns the user-configured
     // DatasetsDirectory if present and non-empty. Null means "no user
     // override; use the host's default cascade ($DATUM_DATASETS env var →
-    // %LOCALAPPDATA%/DatumIngest/datasets-cache)."
+    // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache)."
     public static string? LoadDatasetsDirectory(string catalogRootPath)
         => ReadStringField(catalogRootPath, "datasetsDirectory");
 

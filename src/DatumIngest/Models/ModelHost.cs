@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Diagnostics;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models.Python;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Attaches the model subsystem — <see cref="ModelCatalog"/>, calibration
@@ -76,7 +76,7 @@ public static class ModelHost
         // Wire calibration persistence when we can detect a stable host
         // fingerprint. On NVIDIA hosts this lets `system.models.weight_cost_bytes`
         // and the full `system.model_calibration` curve survive across
-        // process restarts via `%LOCALAPPDATA%/DatumIngest/calibration.json`.
+        // process restarts via `%LOCALAPPDATA%/Heliosoph.DatumV/calibration.json`.
         // On hosts without NVML (CPU-only, AMD/Intel GPU, init failed)
         // `HostFingerprint.Detect` returns null and we fall through to
         // in-memory-only calibration — engine still runs, just doesn't
@@ -273,7 +273,7 @@ public static class ModelHost
     // — the C# class was deleted along with RegisterMobileNetV2,
     // MobileNetV2DefaultFilename, and ImageNetLabelsDefaultFilename. The
     // labels file now travels with the model bundle on HuggingFace
-    // (Heliosoph/mobilenetv2-onnx) and is loaded catalog-relative.
+    // (Heliosoph.DatumV/mobilenetv2-onnx) and is loaded catalog-relative.
 
     // YOLOX-{nano,tiny,s,m,l,x,darknet} previously registered here as built-in
     // C# IModels (YoloXModel.cs + CocoLabels.cs). They shipped as SQL-defined

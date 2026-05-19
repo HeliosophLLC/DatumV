@@ -1,6 +1,6 @@
 using Superpower.Model;
 
-namespace DatumIngest.Parsing;
+namespace Heliosoph.DatumV.Parsing;
 
 /// <summary>
 /// Thrown when the SQL parser encounters input it cannot interpret.

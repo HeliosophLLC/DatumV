@@ -1,7 +1,7 @@
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// Round-trip tests for the descriptor blob codec. The codec is the

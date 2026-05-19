@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
 /// <summary>
 /// Validates that <see cref="ManifestSerializer"/> handles malformed JSON input

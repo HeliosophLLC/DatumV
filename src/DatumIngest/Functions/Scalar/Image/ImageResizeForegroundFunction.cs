@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// <c>image_resize_foreground(image Image, ratio Float32) → Image</c>. Crops

@@ -1,6 +1,6 @@
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// A single row of named <see cref="DataValue"/> entries. This is a lightweight value type
@@ -60,7 +60,7 @@ public readonly struct Row
         get
         {
 #if POOL_DIAGNOSTICS
-            DatumIngest.Pooling.PoolBacking.AssertNotReturned(_values, "Row.RawValues");
+            Heliosoph.DatumV.Pooling.PoolBacking.AssertNotReturned(_values, "Row.RawValues");
 #endif
             return _values;
         }

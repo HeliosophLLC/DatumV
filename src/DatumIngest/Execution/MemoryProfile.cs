@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// A single point in a query's memory-residency timeline. Captured by

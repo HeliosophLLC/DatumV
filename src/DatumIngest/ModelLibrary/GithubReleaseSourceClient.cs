@@ -4,7 +4,7 @@
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // IModelSourceClient implementation for GitHub release assets. URL shape:
 //   https://github.com/{owner}/{name}/releases/download/{tag}/{file}
@@ -42,7 +42,7 @@ internal sealed class GithubReleaseSourceClient : IModelSourceClient
         {
             _http.BaseAddress = new Uri("https://github.com/");
         }
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("DatumIngest/0.1 (+https://github.com/Heliosoph)");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
     }
 
     public ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(

@@ -1,4 +1,4 @@
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// Memory/throughput tradeoff knobs for <see cref="Ingester.IngestAsync(Serialization.FileFormatDescriptor, Serialization.OutputDescriptor, IngestionOptions, System.Threading.CancellationToken)"/>.

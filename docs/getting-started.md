@@ -2,16 +2,16 @@
 title: Getting Started
 ---
 
-## What Is DatumIngest?
+## What Is DatumV?
 
-DatumIngest is a SQL-based tool for preparing data for machine learning. If you've ever needed to load a CSV, join it with another dataset, clean up bad rows, normalize some columns, and export the result as Parquet — all without writing Python — DatumIngest does that in a single SQL query.
+DatumV is a SQL-based tool for preparing data for machine learning. If you've ever needed to load a CSV, join it with another dataset, clean up bad rows, normalize some columns, and export the result as Parquet — all without writing Python — DatumV does that in a single SQL query.
 
 It supports standard SQL (SELECT, JOIN, GROUP BY, window functions) plus ML-specific extensions: vector operations, image transforms, type-safe tensors, sampling, cross-validation, and 200+ built-in functions.
 
 ## Installing
 
 ```bash
-dotnet tool install --global DatumIngest.Cli
+dotnet tool install --global DatumV.Cli
 ```
 
 Verify it works:
@@ -37,11 +37,11 @@ To peek at the data:
 datum-ingest explore "SELECT * FROM iris LIMIT 5" --source "iris=./iris.csv"
 ```
 
-The `--source` flag tells DatumIngest where the data lives. The format is `name=path` — the name becomes the table name you use in SQL.
+The `--source` flag tells DatumV where the data lives. The format is `name=path` — the name becomes the table name you use in SQL.
 
 ## The Three-Step Pipeline
 
-Almost every DatumIngest workflow follows the same pattern: **load → transform → export**.
+Almost every DatumV workflow follows the same pattern: **load → transform → export**.
 
 ### Step 1: Load (FROM + --source)
 
@@ -231,7 +231,7 @@ datum-ingest query "
   --source "json:annotations=./labels.json"
 ```
 
-That's it — no Python script, no intermediate files, no memory issues. DatumIngest streams through the ZIP, joins with annotations, resizes each image, and writes directly to HDF5.
+That's it — no Python script, no intermediate files, no memory issues. DatumV streams through the ZIP, joins with annotations, resizes each image, and writes directly to HDF5.
 
 ## Sampling and Cross-Validation
 

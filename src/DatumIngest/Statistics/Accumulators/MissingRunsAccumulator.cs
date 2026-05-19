@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Counts the number of contiguous runs of null or empty values in a column.

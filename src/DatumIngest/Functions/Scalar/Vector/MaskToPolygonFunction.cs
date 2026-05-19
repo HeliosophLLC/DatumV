@@ -1,11 +1,11 @@
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Vector;
+namespace Heliosoph.DatumV.Functions.Scalar.Vector;
 
 /// <summary>
 /// <c>mask_to_polygon(mask FLOAT32[], width INT, height INT, threshold FLOAT32) → Array&lt;Point2D&gt;</c>.

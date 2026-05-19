@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_color_25.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Color Gaussian-noise specialist trained at σ=25 (moderate noise —
 -- typical night phone photo). The standard denoising-benchmark reference

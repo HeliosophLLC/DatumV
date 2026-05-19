@@ -4,7 +4,7 @@
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // IModelSourceClient for ad-hoc HTTPS URLs. The escape hatch for sources
 // that don't fit HuggingFace's repo+revision or GitHub's release-asset
@@ -19,7 +19,7 @@ namespace DatumIngest.ModelLibrary;
 // without collision (uncommon, but supported).
 //
 // No hash verification beyond HTTPS — same caveat as github-release. Use
-// a sibling Heliosoph HuggingFace source ahead of this in the Sources list
+// a sibling Heliosoph.DatumV HuggingFace source ahead of this in the Sources list
 // when you want strict-sha reproducibility.
 internal sealed class HttpsSourceClient : IModelSourceClient
 {
@@ -35,7 +35,7 @@ internal sealed class HttpsSourceClient : IModelSourceClient
 
         // No BaseAddress — each URL is absolute. Just stamp the UA so
         // hosts that filter on it can see our requests.
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("DatumIngest/0.1 (+https://github.com/Heliosoph)");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
     }
 
     public ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(

@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Operator that evaluates a fixed set of expressions per row and appends

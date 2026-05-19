@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
 public sealed class ManifestSerializerTests : ServiceTestBase
 {

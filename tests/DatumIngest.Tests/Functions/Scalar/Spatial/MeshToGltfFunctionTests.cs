@@ -3,13 +3,13 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Spatial;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Tests.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Spatial;
 
 /// <summary>
 /// Tests for <see cref="MeshToGltfFunction"/>. Verifies metadata, null
@@ -95,7 +95,7 @@ public sealed class MeshToGltfFunctionTests : ServiceTestBase
         Assert.True(primitive.TryGetProperty("indices", out _));
 
         // Generator stamp.
-        Assert.Equal("DatumIngest", root.GetProperty("asset").GetProperty("generator").GetString());
+        Assert.Equal("Heliosoph.DatumV", root.GetProperty("asset").GetProperty("generator").GetString());
 
         // Material with KHR_materials_unlit extension declared.
         Assert.True(root.TryGetProperty("materials", out JsonElement materials));

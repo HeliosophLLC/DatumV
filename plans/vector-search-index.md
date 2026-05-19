@@ -70,7 +70,7 @@ Sits alongside FTS as a parallel sidecar: `.datum-vec-{column}`.
 `ITextSearchIndex` (the input is a numeric vector, not a text query).
 
 Provider gains a parallel accessor on
-[ITableProvider.cs](../src/DatumIngest/Catalog/ITableProvider.cs):
+[ITableProvider.cs](../src/DatumV/Catalog/ITableProvider.cs):
 
 ```csharp
 bool TryGetVectorIndex(string columnName, out IVectorIndex index);
@@ -110,7 +110,7 @@ This is **not** the same shape as `MutableBPlusTreeBytes`; we can't piggyback
 on it (no tree topology, no key ordering). It's its own page-COW file. The
 crash-safety pattern is shipped: dual-slot header + CRC + COW-on-write +
 fsync-then-flip. Lift it from
-[MutableBPlusTreeBytes.cs](../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)
+[MutableBPlusTreeBytes.cs](../src/DatumV/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)
 as a shared `PageCowFile` abstraction in PR-VEC-B (small refactor; benefits
 the existing trees too).
 
@@ -306,7 +306,7 @@ follow the same convention.
 ## File / code layout
 
 ```
-src/DatumIngest/Indexing/Vector/
+src/DatumV/Indexing/Vector/
   IVectorIndex.cs
   VectorDistanceKind.cs              // Cosine | L2 | InnerProduct
   DistanceKernels.cs                 // SIMD float32 cosine/L2/dot
@@ -318,31 +318,31 @@ src/DatumIngest/Indexing/Vector/
   HnswIndex.cs                       // IVectorIndex impl over the store
   VectorOperatorRegistration.cs      // <-> <=> <#> as scalar functions
 
-src/DatumIngest/Indexing/Shared/   // lifted from BTree/MutableBytes
+src/DatumV/Indexing/Shared/   // lifted from BTree/MutableBytes
   PageCowFile.cs                     // dual-slot crash-safe page file
   PageCowHeader.cs
 
-src/DatumIngest/Execution/Operators/
+src/DatumV/Execution/Operators/
   VectorTopKOperator.cs
 
-src/DatumIngest/Catalog/
+src/DatumV/Catalog/
   ITableProvider.cs                    // + TryGetVectorIndex
   Providers/DatumFileTableProviderV2.cs // + open .datum-vec-{col} sidecars
   TableCatalog.cs                      // + CREATE INDEX USING HNSW path
 
-src/DatumIngest/Sql/
+src/DatumV/Sql/
   Parser/*                             // USING HNSW + WITH (dim, metric, m, ...)
   Ast/*                                // distance operator AST nodes
   Planner/*                            // top-k injection logic
 
-tests/DatumIngest.Tests/Indexing/Vector/
+tests/DatumV.Tests/Indexing/Vector/
   DistanceKernelsTests.cs              // SIMD parity with reference impl
   HnswGraphTests.cs                    // in-memory recall@10 ≥ 0.95
   HnswGraphStoreTests.cs               // crash-safety, COW, reopen
   HnswIndexLifecycleTests.cs           // CREATE / INSERT / DELETE / REINDEX
-tests/DatumIngest.Tests/Execution/Operators/
+tests/DatumV.Tests/Execution/Operators/
   VectorTopKOperatorTests.cs
-tests/DatumIngest.Tests/Sql/
+tests/DatumV.Tests/Sql/
   VectorSearchQueryTests.cs            // end-to-end ORDER BY <=> queries
 ```
 

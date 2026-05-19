@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Plan-time rewrite that replaces a <see cref="ScanOperator"/> + filter pair with

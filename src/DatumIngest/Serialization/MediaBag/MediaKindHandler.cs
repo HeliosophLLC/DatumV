@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// Per-media-kind plumbing for <see cref="MediaBagDeserializer"/>. A handler

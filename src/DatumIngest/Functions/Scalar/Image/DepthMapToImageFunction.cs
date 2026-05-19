@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// <c>depth_map_to_image(values FLOAT32[], source_h INT, source_w INT,

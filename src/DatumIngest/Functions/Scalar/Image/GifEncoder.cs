@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// DIY GIF89a animated-image encoder. Takes a sequence of equally-sized

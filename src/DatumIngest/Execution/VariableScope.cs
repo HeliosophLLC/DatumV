@@ -1,7 +1,7 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Block-scoped visibility for procedural variables. Internally a stack

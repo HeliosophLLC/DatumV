@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end integration tests for composite PRIMARY KEY enforcement
@@ -313,14 +313,14 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // Covered already in MutableBPlusTreeBytesFormatTests but re-stated
         // here for the composite-PK QA narrative.
         string typedPath = Path.Combine(_tempDir, "typed.datum-pkindex");
-        using (DatumIngest.Indexing.BTree.Mutable.MutableBPlusTree typedTree =
-            DatumIngest.Indexing.BTree.Mutable.MutableBPlusTree.Create(typedPath, DatumIngest.Model.DataKind.Int32))
+        using (Heliosoph.DatumV.Indexing.BTree.Mutable.MutableBPlusTree typedTree =
+            Heliosoph.DatumV.Indexing.BTree.Mutable.MutableBPlusTree.Create(typedPath, Heliosoph.DatumV.Model.DataKind.Int32))
         {
             // Just create an empty typed tree.
         }
 
         Assert.Throws<InvalidDataException>(() =>
-            DatumIngest.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Open(typedPath));
+            Heliosoph.DatumV.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Open(typedPath));
     }
 
     [Fact]
@@ -329,13 +329,13 @@ public sealed class CompositePrimaryKeyTests : ServiceTestBase, IAsyncLifetime
         // Bytes-tree file (BKBT magic) opened as a typed tree must throw.
         // The reverse direction — the other half of the firewall.
         string bytesPath = Path.Combine(_tempDir, "bytes.datum-pkindex");
-        using (DatumIngest.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes bytesTree =
-            DatumIngest.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(bytesPath))
+        using (Heliosoph.DatumV.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes bytesTree =
+            Heliosoph.DatumV.Indexing.BTree.MutableBytes.MutableBPlusTreeBytes.Create(bytesPath))
         {
             // Just create an empty bytes tree.
         }
 
         Assert.Throws<InvalidDataException>(() =>
-            DatumIngest.Indexing.BTree.Mutable.MutableBPlusTree.Open(bytesPath));
+            Heliosoph.DatumV.Indexing.BTree.Mutable.MutableBPlusTree.Open(bytesPath));
     }
 }

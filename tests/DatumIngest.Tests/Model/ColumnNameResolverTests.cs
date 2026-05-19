@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Tests for <see cref="ColumnNameResolver"/> covering raw name derivation

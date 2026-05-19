@@ -1,7 +1,7 @@
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// Implements <c>PERCENTILE_DISC(expression, fraction)</c> and the ordered-set form

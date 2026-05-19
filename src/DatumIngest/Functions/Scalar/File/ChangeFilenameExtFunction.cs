@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// Returns <c>path</c> with its file extension replaced by <c>new_ext</c>. The new extension may be passed with or without a leading

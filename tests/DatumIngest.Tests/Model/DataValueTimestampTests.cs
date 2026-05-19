@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Slice-1 contract for the PG-faithful Timestamp / TimestampTz split that
@@ -193,9 +193,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
     {
         Assert.Equal(
             DataKind.TimestampTz,
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.TimestampTz, DataKind.Duration,
-                DatumIngest.Parsing.Ast.BinaryOperator.Add));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Add));
     }
 
     [Fact]
@@ -203,9 +203,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
     {
         Assert.Equal(
             DataKind.Duration,
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.TimestampTz, DataKind.TimestampTz,
-                DatumIngest.Parsing.Ast.BinaryOperator.Subtract));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Subtract));
     }
 
     [Fact]
@@ -213,9 +213,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
     {
         Assert.Equal(
             DataKind.Timestamp,
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.Timestamp, DataKind.Duration,
-                DatumIngest.Parsing.Ast.BinaryOperator.Add));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Add));
     }
 
     [Fact]
@@ -223,9 +223,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
     {
         Assert.Equal(
             DataKind.Duration,
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.Timestamp, DataKind.Timestamp,
-                DatumIngest.Parsing.Ast.BinaryOperator.Subtract));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Subtract));
     }
 
     [Fact]
@@ -235,9 +235,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
         // TimestampTz so `now() + interval` and `interval + now()` both work.
         Assert.Equal(
             DataKind.TimestampTz,
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.Duration, DataKind.TimestampTz,
-                DatumIngest.Parsing.Ast.BinaryOperator.Add));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Add));
     }
 
     [Fact]
@@ -247,9 +247,9 @@ public sealed class DataValueTimestampTests : ServiceTestBase
         // table rejects it — callers must explicitly cast one side to match
         // the other (slice 4 cast matrix).
         Assert.Throws<InvalidOperationException>(() =>
-            DatumIngest.Execution.ExpressionEvaluator.PromoteArithmeticKind(
+            Heliosoph.DatumV.Execution.ExpressionEvaluator.PromoteArithmeticKind(
                 DataKind.Timestamp, DataKind.TimestampTz,
-                DatumIngest.Parsing.Ast.BinaryOperator.Subtract));
+                Heliosoph.DatumV.Parsing.Ast.BinaryOperator.Subtract));
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ public sealed class DataValueTimestampTests : ServiceTestBase
     private static int InvokeScalarByteSize(DataKind kind)
     {
         // ScalarByteSize is internal; tests run against the same assembly
-        // via InternalsVisibleTo for DatumIngest.Tests.
+        // via InternalsVisibleTo for Heliosoph.DatumV.Tests.
         return DataValue.ScalarByteSize(kind);
     }
 

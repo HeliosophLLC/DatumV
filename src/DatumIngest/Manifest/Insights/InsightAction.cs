@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// A structured transformation action recommended by a <see cref="DatasetInsight"/>.

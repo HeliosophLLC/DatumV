@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Text;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// Parsed BINTABLE column descriptor: position, declared name, TFORM

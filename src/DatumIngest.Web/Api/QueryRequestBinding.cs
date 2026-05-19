@@ -1,11 +1,11 @@
 using System.Text.Json;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Web.Dtos.Execution;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Web.Dtos.Execution;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Net.Http.Headers;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// Result of parsing the request envelope. Holds the deserialised

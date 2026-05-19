@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Classifies the domain of a <see cref="DatasetInsight"/>.

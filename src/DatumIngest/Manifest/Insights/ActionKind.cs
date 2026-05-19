@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// The type of transformation an <see cref="InsightAction"/> represents.

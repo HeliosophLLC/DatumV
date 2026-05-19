@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>open_folder(source [, recursion_depth [, path_pattern]]) → table</c>.

@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// PR1 tests for the v4 format additions: header version stamp, footer

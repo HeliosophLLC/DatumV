@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Replaces transaction-stable temporal expressions (<c>CURRENT_DATE</c>, <c>CURRENT_TIMESTAMP</c>,

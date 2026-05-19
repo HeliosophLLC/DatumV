@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// <see cref="StatementPlan"/> for the routine-DDL family: <c>CREATE

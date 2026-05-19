@@ -1,7 +1,7 @@
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// Tests covering the parser's handling of PG-style named function-call
@@ -117,7 +117,7 @@ public sealed class NamedArgumentParsingTests : ServiceTestBase
     /// that's used as a parameter name on a built-in scalar / TVF must
     /// parse on the named-argument side. New collisions discovered by
     /// future param renames should add the corresponding
-    /// <see cref="DatumIngest.Parsing.Tokens.SqlToken"/> to
+    /// <see cref="Heliosoph.DatumV.Parsing.Tokens.SqlToken"/> to
     /// <c>IdentifierOrKeywordAsName</c> and extend this theory.
     /// </summary>
     [Theory]

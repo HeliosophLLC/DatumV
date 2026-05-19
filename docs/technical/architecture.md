@@ -1,6 +1,6 @@
 # Architecture
 
-DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
+DatumV executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
 ## Streaming pipeline
 
@@ -98,9 +98,9 @@ The `LimitOperator` propagates the `RowLimit` hint (LIMIT + OFFSET) downstream t
 ## Project structure
 
 ```
-DatumIngest/
+DatumV/
   src/
-    DatumIngest/             # Core library
+    DatumV/             # Core library
       Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo, SourceSchema
       Parsing/                    # SQL tokenizer and parser (Superpower)
       Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet, .datum), DDL/DML executors, IPrimaryKeyLookup
@@ -111,15 +111,15 @@ DatumIngest/
       Statistics/                 # Column statistics with pluggable accumulators
       Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    DatumIngest.Parsing/     # Extracted tokenizer/parser (shared by core and language server)
-    DatumIngest.Server/      # Session engine: SessionManager, CommandDispatcher, IDatasetStore
-    DatumIngest.Compute/     # gRPC service library wrapping the server engine (embeddable)
-    DatumIngest.LanguageServer/  # SQL language service: completion, diagnostics, hover
-    DatumIngest.Editor/      # SignalR hub for server-side language intelligence
-    DatumIngest.Wasm/        # Blazor WebAssembly host with JSInvokable interop
-    DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
+    DatumV.Parsing/     # Extracted tokenizer/parser (shared by core and language server)
+    DatumV.Server/      # Session engine: SessionManager, CommandDispatcher, IDatasetStore
+    DatumV.Compute/     # gRPC service library wrapping the server engine (embeddable)
+    DatumV.LanguageServer/  # SQL language service: completion, diagnostics, hover
+    DatumV.Editor/      # SignalR hub for server-side language intelligence
+    DatumV.Wasm/        # Blazor WebAssembly host with JSInvokable interop
+    DatumV.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # Unit test suite
+    DatumV.Tests/       # Unit test suite
   benchmarks/
-    DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
+    DatumV.Benchmarks/  # BenchmarkDotNet performance tests
 ```

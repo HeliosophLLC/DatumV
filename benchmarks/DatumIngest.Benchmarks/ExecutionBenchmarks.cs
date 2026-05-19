@@ -1,17 +1,17 @@
 using BenchmarkDotNet.Attributes;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Benchmarks for full query execution including scan, filter, project, and join.

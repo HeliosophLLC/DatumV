@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Audio;
 
 /// <summary>
 /// Round-trip tests for the WAV header parser + the audio inline-metadata stamping path.

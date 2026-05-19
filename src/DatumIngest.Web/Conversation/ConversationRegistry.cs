@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Web.Conversation;
+namespace Heliosoph.DatumV.Web.Conversation;
 
 // Reads / writes against the `conversations` table via the
 // InProcessDatumDb* command/reader surface. INSERTs use RETURNING so we

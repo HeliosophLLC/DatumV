@@ -1,6 +1,6 @@
 # Execution Plans
 
-DatumIngest provides an EXPLAIN facility that produces a tree-structured execution plan describing how a SQL query will be (or was) executed. Plans are available in two modes:
+DatumV provides an EXPLAIN facility that produces a tree-structured execution plan describing how a SQL query will be (or was) executed. Plans are available in two modes:
 
 - **EXPLAIN** — static plan with cost estimates, operator structure, and warnings.
 - **EXPLAIN ANALYZE** — executes the query and annotates the plan with actual runtime metrics (row counts, timings, pruning statistics).

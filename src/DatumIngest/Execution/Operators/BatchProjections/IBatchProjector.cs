@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.BatchProjections;
+namespace Heliosoph.DatumV.Execution.Operators.BatchProjections;
 
 /// <summary>
 /// A projection that can copy/compute output cells for a whole

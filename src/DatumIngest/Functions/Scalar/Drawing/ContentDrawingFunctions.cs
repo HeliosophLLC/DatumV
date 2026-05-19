@@ -2,12 +2,12 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Functions.Scalar.Drawing;
 
 // ---------- draw_text ----------
 

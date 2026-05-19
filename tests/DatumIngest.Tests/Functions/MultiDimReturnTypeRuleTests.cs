@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Verifies that <see cref="ReturnTypeRule.MultiDimArrayOf"/> declares its

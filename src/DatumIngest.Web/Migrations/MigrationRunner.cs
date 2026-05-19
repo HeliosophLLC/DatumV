@@ -1,11 +1,11 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Model;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.Migrations;
+namespace Heliosoph.DatumV.Web.Migrations;
 
 // Discovers embedded `NNN_*.sql` migrations under Migrations/, applies the
 // ones above the catalog's current version (read from __schema_migrations),

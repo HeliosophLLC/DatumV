@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Container for per-table source indexes within a single <c>.datum-index</c> file.

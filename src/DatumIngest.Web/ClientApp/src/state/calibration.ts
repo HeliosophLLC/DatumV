@@ -8,7 +8,7 @@ import {
   onCalibrationRampStarted,
   onCalibrationRampStep,
 } from '@/api/catalogHub';
-import { CalibrationHaltReason } from '@/api/generated/hubs/DatumIngest.Web.Hubs';
+import { CalibrationHaltReason } from '@/api/generated/hubs/Heliosoph.DatumV.Web.Hubs';
 
 // Live calibration state for the status-bar chip. Three concerns:
 //

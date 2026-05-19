@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.Models;
+namespace Heliosoph.DatumV.Tests.Models;
 
 /// <summary>
 /// Unit tests for <see cref="IBatchSizePolicy"/> implementations. The

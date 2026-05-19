@@ -1,9 +1,9 @@
 using System.Buffers;
-using DatumIngest.Execution.Operators.BatchPredicates;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators.BatchPredicates;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Filters rows from a child operator by evaluating a WHERE expression.

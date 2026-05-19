@@ -1,13 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Virtual table that surfaces the contents of a <see cref="UdfRegistry"/> as

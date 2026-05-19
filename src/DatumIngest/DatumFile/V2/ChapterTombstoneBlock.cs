@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Mutable in-memory view of a chapter's 8 KiB tombstone bitmap. One

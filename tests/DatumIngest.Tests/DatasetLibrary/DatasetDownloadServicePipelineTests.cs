@@ -1,19 +1,19 @@
 using System.IO.Compression;
 
-using DatumIngest.DatasetLibrary;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
 using SkiaSharp;
 
-// IManifestStore exists in both DatumIngest.DatasetLibrary and
-// DatumIngest.ModelLibrary; this file only exercises the dataset one.
-using IManifestStore = DatumIngest.DatasetLibrary.IManifestStore;
+// IManifestStore exists in both Heliosoph.DatumV.DatasetLibrary and
+// Heliosoph.DatumV.ModelLibrary; this file only exercises the dataset one.
+using IManifestStore = Heliosoph.DatumV.DatasetLibrary.IManifestStore;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// End-to-end pipeline tests for <see cref="DatasetDownloadService"/>.
@@ -37,7 +37,7 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
     public DatasetDownloadServicePipelineTests()
     {
         _scratchRoot = Path.Combine(Path.GetTempPath(),
-            "DatumIngest.DatasetPipelineTests", Guid.NewGuid().ToString("N"));
+            "Heliosoph.DatumV.DatasetPipelineTests", Guid.NewGuid().ToString("N"));
         _cacheRoot = Path.Combine(_scratchRoot, "cache");
         _ingestedRoot = Path.Combine(_scratchRoot, "ingested");
         Directory.CreateDirectory(_cacheRoot);
@@ -323,7 +323,7 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
             Description: "One variant carrying a synthetic-image zip fixture.",
             Modalities: ["Image"],
             LicenseIds: ["test-license"],
-            Attributions: ["DatumIngest tests"],
+            Attributions: ["Heliosoph.DatumV tests"],
             SuitableForTasks: null,
             Variants: [variant]);
 

@@ -1,14 +1,14 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Indexing;
-using DatumIngest.Ingestion;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR12 — <c>REINDEX</c> rebuilds a table's <c>.datum-index</c> sidecar

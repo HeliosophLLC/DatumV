@@ -1,6 +1,6 @@
 # Special Functions
 
-Reference for DatumIngest functions and syntax that go beyond standard SQL scalar and aggregate semantics.
+Reference for DatumV functions and syntax that go beyond standard SQL scalar and aggregate semantics.
 
 ## Lambda Expressions
 
@@ -528,7 +528,7 @@ FROM ranges
 
 ## TABLESAMPLE — Class-Balanced Sampling
 
-TABLESAMPLE limits the rows returned from a table source to an approximate sample. Beyond standard BERNOULLI and SYSTEM methods, DatumIngest adds STRATIFIED and BALANCED for ML dataset preparation.
+TABLESAMPLE limits the rows returned from a table source to an approximate sample. Beyond standard BERNOULLI and SYSTEM methods, DatumV adds STRATIFIED and BALANCED for ML dataset preparation.
 
 ### Syntax
 

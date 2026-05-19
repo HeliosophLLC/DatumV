@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Detects numeric columns with strong right or left skew beyond configured thresholds.

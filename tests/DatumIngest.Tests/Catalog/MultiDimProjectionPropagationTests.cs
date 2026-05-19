@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Multi-dim status must propagate through <c>SELECT</c> projections so that

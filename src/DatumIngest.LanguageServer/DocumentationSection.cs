@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// A single documentation section parsed from a markdown reference file.

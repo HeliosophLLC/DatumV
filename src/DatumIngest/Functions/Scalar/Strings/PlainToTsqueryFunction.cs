@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Fulltext;
+namespace Heliosoph.DatumV.Functions.Scalar.Fulltext;
 
 /// <summary>
 /// Constructs an AND-of-terms query from plain user text. In v1 the engine

@@ -1,10 +1,10 @@
-namespace DatumIngest.Tests.Statistics;
+namespace Heliosoph.DatumV.Tests.Statistics;
 
 using System.Linq;
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
+using Heliosoph.DatumV.Statistics.Accumulators;
 
 public sealed class ImageStatsAccumulatorTests : ServiceTestBase
 {

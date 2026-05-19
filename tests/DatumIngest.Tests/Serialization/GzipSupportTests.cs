@@ -1,15 +1,15 @@
 using System.IO.Compression;
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Serialization.Idx;
-using DatumIngest.Serialization.Zip;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
+using Heliosoph.DatumV.Serialization.Idx;
+using Heliosoph.DatumV.Serialization.Zip;
 
-namespace DatumIngest.Tests.Serialization;
+namespace Heliosoph.DatumV.Tests.Serialization;
 
 /// <summary>
 /// Covers transparent gzip support on <see cref="FileFormatDescriptor"/>: compression
@@ -94,7 +94,7 @@ public sealed class GzipSupportTests : ServiceTestBase
     {
         const string csvContent = "id,name\n1,alice\n2,bob\n";
         string gzPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.gz");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.gz");
 
         WriteGzipFile(gzPath, csvContent);
 
@@ -121,7 +121,7 @@ public sealed class GzipSupportTests : ServiceTestBase
     {
         const string csvContent = "a\n1\n";
         string gzPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.gz");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.gz");
 
         WriteGzipFile(gzPath, csvContent);
 
@@ -152,7 +152,7 @@ public sealed class GzipSupportTests : ServiceTestBase
         // 1 KiB to force the decompressed-size guard to trip.
         byte[] payload = new byte[4096];
         string gzPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.bin.gz");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.bin.gz");
 
         WriteGzipFile(gzPath, payload);
 
@@ -168,7 +168,7 @@ public sealed class GzipSupportTests : ServiceTestBase
 
             // No temp file should remain — MaterializeGzipAsync's catch deletes it.
             string tempRoot = Path.GetTempPath();
-            string[] stragglers = Directory.GetFiles(tempRoot, "datumingest-*.tmp");
+            string[] stragglers = Directory.GetFiles(tempRoot, "datumv-*.tmp");
             // Not a strict assertion (other tests may leave stragglers momentarily);
             // just ensure the descriptor didn't cling to one.
             Assert.Equal(gzPath, descriptor.EffectivePath);
@@ -190,9 +190,9 @@ public sealed class GzipSupportTests : ServiceTestBase
             "2,2.7,bob\n";
 
         string gzPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.gz");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.gz");
         string datumPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.datum");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.datum");
 
         WriteGzipFile(gzPath, csv);
 

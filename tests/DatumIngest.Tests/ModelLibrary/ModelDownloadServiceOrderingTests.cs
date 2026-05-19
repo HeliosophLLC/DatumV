@@ -1,9 +1,9 @@
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models.Python;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.ModelLibrary;
+namespace Heliosoph.DatumV.Tests.ModelLibrary;
 
 /// <summary>
 /// Pins the install-sequence ordering invariants in
@@ -38,7 +38,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
     public ModelDownloadServiceOrderingTests()
     {
         _root = Path.Combine(Path.GetTempPath(),
-            "DatumIngest.OrderingTests", Guid.NewGuid().ToString("N"));
+            "Heliosoph.DatumV.OrderingTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
     }
 
@@ -68,7 +68,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
             store:         manifest,
             sourceClients: [new NoOpSourceClient()],
             licenses:      new AlwaysAcceptedLicenseService(),
-            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
+            licenseRegistry: Heliosoph.DatumV.Tests.Support.TestLicenseRegistry.Instance,
             reporter:      new NullProgressReporter(),
             installer:     installer,
             python:        new NullPythonEnvironmentManager(),
@@ -113,7 +113,7 @@ public sealed class ModelDownloadServiceOrderingTests : ServiceTestBase
             store:         store,
             sourceClients: [new NoOpSourceClient()],
             licenses:      new AlwaysAcceptedLicenseService(),
-            licenseRegistry: DatumIngest.Tests.Support.TestLicenseRegistry.Instance,
+            licenseRegistry: Heliosoph.DatumV.Tests.Support.TestLicenseRegistry.Instance,
             reporter:      new NullProgressReporter(),
             installer:     installer,
             python:        new NullPythonEnvironmentManager(),

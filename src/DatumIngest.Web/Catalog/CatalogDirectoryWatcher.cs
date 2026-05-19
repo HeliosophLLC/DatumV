@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.Catalog;
+namespace Heliosoph.DatumV.Web.Catalog;
 
 /// <summary>
 /// Watches the catalog directory tree for out-of-band changes (VS Code

@@ -1,16 +1,16 @@
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Functions.Scalar.Vector;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Functions.Scalar.Vector;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Direct-invocation tests for the Tier 3 postprocess helpers: softmax,

@@ -1,9 +1,9 @@
 using System.Numerics;
-using DatumIngest.IO;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.IO;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Tests.Model.Spatial;
+namespace Heliosoph.DatumV.Tests.Model.Spatial;
 
 /// <summary>
 /// Slice A coverage for <see cref="DataKind.PointCloud"/> — header layout

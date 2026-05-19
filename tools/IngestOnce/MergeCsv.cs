@@ -1,16 +1,16 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Ingestion;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Tools.IngestOnce;
+namespace Heliosoph.DatumV.Tools.IngestOnce;
 
 /// <summary>
 /// Multi-source CSV merge: walks a glob, runs the CSV deserializer per file,

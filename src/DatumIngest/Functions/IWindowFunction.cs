@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Interface for window (analytical) SQL functions that compute a value

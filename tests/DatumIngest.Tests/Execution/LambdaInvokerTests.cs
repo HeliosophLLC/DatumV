@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Phase-A4: <see cref="ExpressionEvaluator.InvokeLambdaAsync"/> evaluates
@@ -29,9 +29,9 @@ public sealed class LambdaInvokerTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(
             store: arena, accountant: accountant);
-        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+        Heliosoph.DatumV.Execution.ExecutionContext scoped = context.Derive(
             variableScope: scope, variableStore: arena);
         ExpressionEvaluator evaluator = scoped.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
@@ -110,7 +110,7 @@ public sealed class LambdaInvokerTests : ServiceTestBase
         LambdaExpression ast = ParseLambda("x -> x + 1");
         // Evaluator constructed WITHOUT a VariableScope — should now succeed
         // because the scope is created on demand.
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty);
         ValueRef lambda = ValueRef.FromLambda(LambdaValue.Capture(ast, Row.Empty));
@@ -163,7 +163,7 @@ public sealed class LambdaInvokerTests : ServiceTestBase
     {
         Pool pool = GetService<Pool>();
         Arena arena = pool.Backing.RentArena();
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
         Assert.Same(evaluator, frame.LambdaInvoker);

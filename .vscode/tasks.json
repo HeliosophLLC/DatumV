@@ -18,7 +18,7 @@
 			"command": "npm",
 			"args": ["run", "electron:dev"],
 			"options": {
-				"cwd": "${workspaceFolder}/src/DatumIngest.Web/electron",
+				"cwd": "${workspaceFolder}/src/Heliosoph.DatumV.Web/electron",
 				"shell": {
 					"executable": "powershell.exe",
 					"args": ["-NoProfile", "-Command"]
@@ -51,7 +51,7 @@
 				"background": {
 					"activeOnStart": true,
 					"beginsPattern": ".",
-					"endsPattern": "DatumIngest listening at"
+					"endsPattern": "Heliosoph.DatumV listening at"
 				}
 			}
 		},
@@ -67,7 +67,7 @@
 			"command": "npm",
 			"args": ["run", "electron:dev"],
 			"options": {
-				"cwd": "${workspaceFolder}/src/DatumIngest.Web/electron",
+				"cwd": "${workspaceFolder}/src/Heliosoph.DatumV.Web/electron",
 				"env": {
 					"DOTNET_CONFIGURATION": "Release"
 				},
@@ -94,7 +94,7 @@
 				"background": {
 					"activeOnStart": true,
 					"beginsPattern": ".",
-					"endsPattern": "DatumIngest listening at"
+					"endsPattern": "Heliosoph.DatumV listening at"
 				}
 			}
 		},
@@ -134,7 +134,7 @@
 			"command": "dotnet",
 			"args": [
 				"build",
-				"DatumIngest.slnx",
+				"Heliosoph.DatumV.slnx",
 				"-c", "Release"
 			],
 			"problemMatcher": [
@@ -148,7 +148,7 @@
 			"command": "dotnet",
 			"args": [
 				"pack",
-				"DatumIngest.slnx",
+				"Heliosoph.DatumV.slnx",
 				"-c",
 				"Release",
 				"-o",
@@ -304,7 +304,7 @@
 			"command": "dotnet",
 			"args": [
 				"build",
-				"src/DatumIngest.Web",
+				"src/Heliosoph.DatumV.Web",
 				"-c", "Debug"
 			],
 			"problemMatcher": [
@@ -319,7 +319,7 @@
 			"command": "dotnet",
 			"args": [
 				"build",
-				"src/DatumIngest.Web",
+				"src/Heliosoph.DatumV.Web",
 				"-c", "Release"
 			],
 			"problemMatcher": [

@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Tests for <see cref="ParameterCheckWalker"/>. Each test parses a SQL CHECK

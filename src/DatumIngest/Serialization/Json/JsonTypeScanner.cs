@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Json;
+namespace Heliosoph.DatumV.Serialization.Json;
 
 /// <summary>
 /// First pass of the JSON ingestion pipeline. Walks every row of the document

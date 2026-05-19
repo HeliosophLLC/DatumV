@@ -1,12 +1,12 @@
 using System.Text;
 using System.Text.Json;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Web.Api;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Web.Api;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 
-namespace DatumIngest.Web.Tests;
+namespace Heliosoph.DatumV.Web.Tests;
 
 /// <summary>
 /// Direct tests of <see cref="QueryRequestBinding"/> via in-memory

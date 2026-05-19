@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions.Scalar.Math;
+namespace Heliosoph.DatumV.Functions.Scalar.Math;
 
 /// <summary>
 /// Shared logic for <see cref="LeastFunction"/> and <see cref="GreatestFunction"/>:

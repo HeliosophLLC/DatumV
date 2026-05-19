@@ -1,15 +1,15 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR13a-2 tests for the two-phase commit that auto-refreshes

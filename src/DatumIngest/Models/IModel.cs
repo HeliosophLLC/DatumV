@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Backend-agnostic model abstraction. The engine never names a runtime

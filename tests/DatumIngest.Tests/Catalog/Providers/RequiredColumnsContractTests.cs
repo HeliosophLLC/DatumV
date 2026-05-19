@@ -1,15 +1,15 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Catalog.Providers;
+namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
 /// Verifies the projection-pushdown contract: <c>requiredColumns</c> shipped to a

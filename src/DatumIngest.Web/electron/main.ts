@@ -28,7 +28,7 @@ interface DialogOpenSpec {
 // 'second-instance' handler focuses its main window.
 // Identify the app to the OS. On Windows, toast notifications display the
 // AppUserModelId as their title — without this they read "electron.app.Electron".
-// setName also reframes the default menu item ("About electron" → "About DatumIngest")
+// setName also reframes the default menu item ("About electron" → "About Heliosoph.DatumV")
 // and is the source of `app.getName()` used elsewhere.
 
 
@@ -69,7 +69,7 @@ async function startDotnetBackend(): Promise<string> {
   const dotnetConfig = process.env.DOTNET_CONFIGURATION ?? 'Debug';
   const cmd = isDev
     ? 'dotnet'
-    : path.join(process.resourcesPath, 'backend', 'DatumIngest.Web.exe');
+    : path.join(process.resourcesPath, 'backend', 'Heliosoph.DatumV.Web.exe');
   const args = isDev ? ['run', '--project', projectDir, '-c', dotnetConfig] : [];
 
   const env: NodeJS.ProcessEnv = {
@@ -91,8 +91,8 @@ async function startDotnetBackend(): Promise<string> {
       process.stdout.write(`[dotnet] ${text}`);
 
       if (!resolved) {
-        // Program.RunHeadless prints: "DatumIngest listening at <url>"
-        const match = text.match(/DatumIngest listening at (\S+)/);
+        // Program.RunHeadless prints: "Heliosoph.DatumV listening at <url>"
+        const match = text.match(/Heliosoph.DatumV listening at (\S+)/);
         if (match) {
           resolved = true;
           clearTimeout(timer);
@@ -424,7 +424,7 @@ ipcMain.handle('dialog.open', async (event, spec: DialogOpenSpec) => {
       parent: parentWin,
       modal: spec.modal !== false,
     });
-    dialog.setTitle(`DatumIngest — ${spec.kind}`);
+    dialog.setTitle(`Heliosoph.DatumV — ${spec.kind}`);
 
     let settled = false;
     const settle = (result: unknown) => {

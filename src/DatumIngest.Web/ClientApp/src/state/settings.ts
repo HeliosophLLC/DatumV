@@ -19,12 +19,12 @@ interface SettingsState {
   // a concrete supported locale by state/locale.ts.
   locale: string;
   // User-configured models directory. Empty string = "use the resolution
-  // cascade" ($DATUM_MODELS env → %LOCALAPPDATA%/DatumIngest/models). Read
+  // cascade" ($DATUM_MODELS env → %LOCALAPPDATA%/Heliosoph.DatumV/models). Read
   // once at startup; runtime changes require a restart to take effect.
   modelsDirectory: string;
   // User-configured raw datasets cache directory. Empty string = "use
   // the resolution cascade" ($DATUM_DATASETS env →
-  // %LOCALAPPDATA%/DatumIngest/datasets-cache). Read once at startup;
+  // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache). Read once at startup;
   // runtime changes require a restart to take effect.
   datasetsDirectory: string;
   // What to do with the raw archives in the dataset cache after a

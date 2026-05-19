@@ -1,6 +1,6 @@
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Tests.Models.Calibration;
+namespace Heliosoph.DatumV.Tests.Models.Calibration;
 
 /// <summary>
 /// Unit tests for <see cref="CalibrationCoordinator.ProjectNextRampStep"/>

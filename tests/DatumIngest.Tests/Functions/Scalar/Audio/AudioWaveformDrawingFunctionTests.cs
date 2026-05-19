@@ -1,13 +1,13 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Audio;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Audio;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_drawing(envelope, render)</c>: walks a precomputed
@@ -175,9 +175,9 @@ public sealed class AudioWaveformDrawingFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(
             store: arena, accountant: accountant);
-        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+        Heliosoph.DatumV.Execution.ExecutionContext scoped = context.Derive(
             variableScope: scope, variableStore: arena);
         ExpressionEvaluator evaluator = scoped.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);

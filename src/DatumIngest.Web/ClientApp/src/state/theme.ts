@@ -29,7 +29,7 @@ function applyToDocument(resolved: ResolvedTheme): void {
 // very first frame instead of flashing OS-preference → user-preference
 // once the settings fetch lands. Same origin, so dialog BrowserWindows
 // share this storage with the main window.
-const CACHED_THEME_KEY = 'datumingest.resolvedTheme';
+const CACHED_THEME_KEY = 'datumv.resolvedTheme';
 
 function readCachedTheme(): ResolvedTheme | null {
   try {

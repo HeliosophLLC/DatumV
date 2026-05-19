@@ -1,7 +1,7 @@
 using System.IO.Hashing;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {
@@ -50,7 +50,7 @@ public readonly partial struct DataValue
     /// (<see cref="AsByteSpan"/>, etc.); only the kind discriminator distinguishes them.
     /// JSON's bytes are canonical CBOR (RFC 7049 §3.9); PointCloud's bytes are a 40-byte
     /// header plus interleaved per-point payload (see
-    /// <c>DatumIngest.Model.Spatial.PointCloudHeader</c>); the other three are codec-specific.
+    /// <c>Heliosoph.DatumV.Model.Spatial.PointCloudHeader</c>); the other three are codec-specific.
     /// </summary>
     public bool IsBlobKind =>
         _kind is DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud or DataKind.Mesh;
@@ -103,7 +103,7 @@ public readonly partial struct DataValue
                 "SidecarRegistry. The DataValue references a sidecar that wasn't opened by " +
                 "this query — likely the table provider didn't register its IBlobSource.");
 
-        DatumIngest.Diagnostics.HashGateStats.RecordSidecarFetch();
+        Heliosoph.DatumV.Diagnostics.HashGateStats.RecordSidecarFetch();
         return source.Read(SidecarOffset, SidecarLength);
     }
 

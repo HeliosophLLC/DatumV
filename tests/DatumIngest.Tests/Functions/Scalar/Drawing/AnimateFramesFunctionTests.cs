@@ -1,16 +1,16 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Drawing;
 
 /// <summary>
 /// Phase D-A: <see cref="AnimateFramesFunction"/> drives a lambda over
@@ -198,9 +198,9 @@ public sealed class AnimateFramesFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(
             store: arena, accountant: accountant);
-        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+        Heliosoph.DatumV.Execution.ExecutionContext scoped = context.Derive(
             variableScope: scope, variableStore: arena);
         ExpressionEvaluator evaluator = scoped.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);

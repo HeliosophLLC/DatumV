@@ -1,15 +1,15 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_sample_rate(a Audio) → Int32</c>. Returns the sample rate (Hz) from
 /// the audio value's inline metadata. Every Audio production site routes through
-/// <see cref="DatumIngest.Functions.Audio.AudioDataValueFactory"/>, which parses the
+/// <see cref="Heliosoph.DatumV.Functions.Audio.AudioDataValueFactory"/>, which parses the
 /// container header (WAV today) and stamps the metadata. Returns NULL only when
-/// the format wasn't recognised by <see cref="DatumIngest.Functions.Audio.AudioHeaderParser"/>
+/// the format wasn't recognised by <see cref="Heliosoph.DatumV.Functions.Audio.AudioHeaderParser"/>
 /// (e.g. MP3/FLAC/OGG until those formats are added to the parser).
 /// </summary>
 /// <remarks>

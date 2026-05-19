@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Tests.DatumFile;
+namespace Heliosoph.DatumV.Tests.DatumFile;
 
 /// <summary>
 /// Round-trip and tamper-detection tests for <see cref="SidecarWriteStore"/> and

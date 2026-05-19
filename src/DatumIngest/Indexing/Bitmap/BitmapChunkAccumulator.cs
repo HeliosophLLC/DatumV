@@ -1,8 +1,8 @@
-using DatumIngest.DatumFile;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile;
+using Heliosoph.DatumV.Model;
 using ZstdSharp;
 
-namespace DatumIngest.Indexing.Bitmap;
+namespace Heliosoph.DatumV.Indexing.Bitmap;
 
 /// <summary>
 /// Per-column, per-chunk accumulator that tracks which rows contain each distinct value.

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// A <see cref="FileFormatDescriptor"/> backed by in-memory content.

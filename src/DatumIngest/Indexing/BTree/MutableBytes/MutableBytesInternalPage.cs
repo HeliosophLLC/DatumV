@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing.BTree.MutableBytes;
+namespace Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
 /// <summary>
 /// In-memory representation of a bytes-keyed B+Tree internal (branch) page.

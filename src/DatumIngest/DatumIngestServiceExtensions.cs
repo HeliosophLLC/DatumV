@@ -1,11 +1,11 @@
-using DatumIngest.Inference;
-using DatumIngest.Inference.LlamaSharp;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Pooling;
-using DatumIngest.Functions;
-using DatumIngest.Serialization;
-using DatumIngest.Statistics;
-using DatumIngest.Ingestion;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.LlamaSharp;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Statistics;
+using Heliosoph.DatumV.Ingestion;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,18 +13,18 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Extension methods for registering core DatumIngest services
+/// Extension methods for registering core Heliosoph.DatumV services
 /// in an <see cref="IServiceCollection"/>.
 /// </summary>
-public static class DatumIngestServiceExtensions
+public static class DatumVServiceExtensions
 {
     /// <summary>
-    /// Registers core DatumIngest services: <see cref="FormatRegistry"/>,
+    /// Registers core Heliosoph.DatumV services: <see cref="FormatRegistry"/>,
     /// <see cref="FunctionRegistry"/>, <see cref="PoolBacking"/>, and the
     /// inference layer (<see cref="IInferenceDispatcher"/> with the ORT
     /// and LlamaSharp backends registered).
     /// </summary>
-    public static IServiceCollection AddDatumIngest(this IServiceCollection services)
+    public static IServiceCollection AddDatumV(this IServiceCollection services)
     {
         services.AddSingleton<PoolBacking>();
         services.AddTransient<FormatRegistry>();

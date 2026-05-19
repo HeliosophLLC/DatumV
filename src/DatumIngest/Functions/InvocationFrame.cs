@@ -1,7 +1,7 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Per-call context shared by every function invocation in the pipeline. Carries

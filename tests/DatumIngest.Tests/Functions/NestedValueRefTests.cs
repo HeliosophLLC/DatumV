@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Tests for the recursive <see cref="ValueRef"/> shape (struct / array

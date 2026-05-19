@@ -1,12 +1,12 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Builds a <see cref="LanguageServerManifest"/> from a live <see cref="TableCatalog"/>
@@ -198,7 +198,7 @@ public static class CatalogManifestBuilder
         IReadOnlyList<ModelEntry>? models = null;
         if (catalog.Models is not null)
         {
-            DatumIngest.ModelLibrary.IModelPathResolver pathResolver = catalog.Models.PathResolver;
+            Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver = catalog.Models.PathResolver;
             List<ModelEntry> modelEntries = new(catalog.Models.Entries.Count);
             HashSet<string> seenIdentifiers = new(StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, Models.ModelCatalogEntry> entry in catalog.Models.Entries)
@@ -681,7 +681,7 @@ public static class CatalogManifestBuilder
     /// so completion + introspection agree on what's installed.
     /// </summary>
     private static ModelInstallStatus ResolveInstallStatus(
-        Models.ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver)
+        Models.ModelCatalogEntry entry, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver)
     {
         // Synthetic backends declare no RelativePath (EchoModel and friends);
         // they're always loadable.

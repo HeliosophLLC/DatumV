@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end tests for set-returning function calls (table-valued functions
 /// like <c>unnest</c> and <c>range</c>) appearing in a SELECT projection list,
-/// which the <see cref="DatumIngest.Execution.Planner.ProjectionSetReturningRewriter"/>
+/// which the <see cref="Heliosoph.DatumV.Execution.Planner.ProjectionSetReturningRewriter"/>
 /// rewrites into a synthesized FROM source.
 /// </summary>
 public sealed class ProjectionSetReturningTests : ServiceTestBase

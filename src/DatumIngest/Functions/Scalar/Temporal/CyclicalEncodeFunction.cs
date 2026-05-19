@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Temporal;
+namespace Heliosoph.DatumV.Functions.Scalar.Temporal;
 
 /// <summary>
 /// Encodes a scalar value as a two-element Float32 array using sine and cosine

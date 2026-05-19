@@ -1,7 +1,7 @@
-using DatumIngest.Functions;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Plan-time desugaring of LET-binding-related syntax sugar plus the LET-aware

@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Resolves a textual SQL type annotation (as carried in AST <c>TypeName</c>

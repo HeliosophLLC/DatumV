@@ -1,23 +1,23 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
-using DatumIngest.DatumFile;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.Execution;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.Mutable;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Ingestion;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.DatumFile;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Reads v2 <c>.datum</c> files via the <see cref="DatumFileReaderV2"/>.
@@ -348,7 +348,7 @@ public sealed partial class DatumFileTableProviderV2 : ITableProvider, IDatumFil
     public SidecarRegistry? SidecarRegistry { get; set; }
 
     /// <inheritdoc/>
-    public void EnsureTypeTableLoaded(DatumIngest.Execution.ExecutionContext context)
+    public void EnsureTypeTableLoaded(Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         Snapshot s = AcquireSnapshot();

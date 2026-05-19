@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Source of the <see cref="FooterPrologueV4.WriterId"/> stamp written

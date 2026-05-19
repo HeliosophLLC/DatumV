@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// A completion suggestion returned to the editor. Field names align with the

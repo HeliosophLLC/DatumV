@@ -1,10 +1,10 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution.Operators.Ordering;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution.Operators.Ordering;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Sorts the output of a child operator by one or more expressions.

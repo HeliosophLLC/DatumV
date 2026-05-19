@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Abstract base class for every planned SQL statement — SELECT and CALL

@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// <see cref="IModel"/> backed by a Python subprocess. Bridges the engine's
@@ -85,7 +85,7 @@ public sealed class PythonBackedModel : IModel, IDisposable
     /// <param name="preferredBatchSize">See <see cref="IModel.PreferredBatchSize"/>.</param>
     /// <param name="modelDirectory">
     /// Absolute path to the per-model directory under
-    /// <c>DATUM_MODELS</c> that <see cref="DatumIngest.ModelLibrary.ModelDownloadService"/>
+    /// <c>DATUM_MODELS</c> that <see cref="Heliosoph.DatumV.ModelLibrary.ModelDownloadService"/>
     /// populated with weight files. Forwarded to the worker as the
     /// <c>DATUM_MODEL_DIR</c> environment variable so it can load
     /// weights via <c>from_pretrained(os.environ['DATUM_MODEL_DIR'])</c>

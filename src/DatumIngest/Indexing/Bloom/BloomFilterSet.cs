@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Indexing.Bloom;
+namespace Heliosoph.DatumV.Indexing.Bloom;
 
 /// <summary>
 /// Collection of <see cref="BloomFilter"/> instances keyed by column name and chunk index.

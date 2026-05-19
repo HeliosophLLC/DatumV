@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Models;
-using DatumIngest.Models.Llama;
-using DatumIngest.Web.Hosting;
-using DatumIngest.Web.Settings;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Llama;
+using Heliosoph.DatumV.Web.Hosting;
+using Heliosoph.DatumV.Web.Settings;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.Llm;
+namespace Heliosoph.DatumV.Web.Llm;
 
 // Lazy single-flight loader for the singleton ILlmDriver. The first caller
 // to GetAsync triggers ModelSelector.Select + ModelLease acquisition + driver

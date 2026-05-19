@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Resolves SQL table references — <c>schema.table</c> or unqualified

@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Strings;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Strings;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar;
 
 /// <summary>
 /// Tests for <see cref="ConcatFunction"/> — the pilot implementation that

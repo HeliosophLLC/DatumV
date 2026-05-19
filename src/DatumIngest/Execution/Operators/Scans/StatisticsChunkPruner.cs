@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Diagnostics;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Statistics (zone-map) chunk pruner: checks filter predicates against the

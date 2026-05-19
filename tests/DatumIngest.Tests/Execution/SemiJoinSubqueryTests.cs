@@ -1,14 +1,14 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end tests for IN (SELECT ...), NOT IN (SELECT ...), EXISTS (SELECT ...),

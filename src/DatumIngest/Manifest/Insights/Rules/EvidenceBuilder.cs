@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

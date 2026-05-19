@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Takes a limited number of rows from a child operator, optionally
@@ -259,11 +259,11 @@ public sealed class LimitOperator : QueryOperator
 
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = new(
-            DatumIngest.Model.Row.Empty,
+            Heliosoph.DatumV.Model.Row.Empty,
             context.Store,
             context,
             outerRow: context.OuterRow);
-        DatumIngest.Model.DataValue value = await evaluator
+        Heliosoph.DatumV.Model.DataValue value = await evaluator
             .EvaluateAsync(expression, frame, context.CancellationToken)
             .ConfigureAwait(false);
 
@@ -273,13 +273,13 @@ public sealed class LimitOperator : QueryOperator
         }
         return value.Kind switch
         {
-            DatumIngest.Model.DataKind.Int32 => value.AsInt32(),
-            DatumIngest.Model.DataKind.Int64 => checked((int)value.AsInt64()),
-            DatumIngest.Model.DataKind.Int16 => value.AsInt16(),
-            DatumIngest.Model.DataKind.Int8 => value.AsInt8(),
-            DatumIngest.Model.DataKind.UInt32 => checked((int)value.AsUInt32()),
-            DatumIngest.Model.DataKind.UInt16 => value.AsUInt16(),
-            DatumIngest.Model.DataKind.UInt8 => value.AsUInt8(),
+            Heliosoph.DatumV.Model.DataKind.Int32 => value.AsInt32(),
+            Heliosoph.DatumV.Model.DataKind.Int64 => checked((int)value.AsInt64()),
+            Heliosoph.DatumV.Model.DataKind.Int16 => value.AsInt16(),
+            Heliosoph.DatumV.Model.DataKind.Int8 => value.AsInt8(),
+            Heliosoph.DatumV.Model.DataKind.UInt32 => checked((int)value.AsUInt32()),
+            Heliosoph.DatumV.Model.DataKind.UInt16 => value.AsUInt16(),
+            Heliosoph.DatumV.Model.DataKind.UInt8 => value.AsUInt8(),
             _ => throw new InvalidOperationException(
                 $"{clauseName} expression must yield an integer; got {value.Kind}."),
         };

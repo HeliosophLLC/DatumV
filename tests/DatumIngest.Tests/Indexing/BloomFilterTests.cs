@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Indexing.Bloom;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="BloomFilter"/> — probabilistic membership filter

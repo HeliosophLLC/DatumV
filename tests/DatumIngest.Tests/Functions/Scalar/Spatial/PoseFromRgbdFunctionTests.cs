@@ -1,13 +1,13 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Spatial;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Spatial;
 
 /// <summary>
 /// Tests for <see cref="PoseFromRgbdFunction"/>. Verifies metadata, null

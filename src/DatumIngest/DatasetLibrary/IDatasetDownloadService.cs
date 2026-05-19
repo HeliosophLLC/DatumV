@@ -2,7 +2,7 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 public interface IDatasetDownloadService
 {
@@ -16,7 +16,7 @@ public interface IDatasetDownloadService
     Task<IReadOnlyDictionary<string, DatasetInstallState>> ProbeAllAsync(CancellationToken ct = default);
 
     // Kicks off the install: download the source archives into the raw
-    // cache, then run DatumIngest.Ingestion.Ingester against each ingest
+    // cache, then run Heliosoph.DatumV.Ingestion.Ingester against each ingest
     // job to produce a `.datum` (+ optional sidecar `.datum-blob`) per
     // table under the ingested root. Returns once queued; progress is
     // pushed asynchronously via IDatasetDownloadProgressReporter.
@@ -74,7 +74,7 @@ public interface IDatasetDownloadService
 }
 
 // Per-dataset lifecycle state surfaced to the UI. Mirrors
-// DatumIngest.ModelLibrary.ModelInstallState but with dataset-specific
+// Heliosoph.DatumV.ModelLibrary.ModelInstallState but with dataset-specific
 // transitions:
 //   NotDownloaded -> (download starts) -> Partial (download running, no
 //   .datum yet) -> Installed (every ingest job's .datum is on disk).

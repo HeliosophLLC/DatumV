@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Read-side surface a provider exposes when it backs PK enforcement with

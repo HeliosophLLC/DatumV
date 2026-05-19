@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Post-pass that runs after <see cref="ModelInvocationHoister"/> and

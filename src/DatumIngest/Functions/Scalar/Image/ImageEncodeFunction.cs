@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Image;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// <c>image_encode(img Image, format String[, quality Int32]) → Array&lt;UInt8&gt;</c>.

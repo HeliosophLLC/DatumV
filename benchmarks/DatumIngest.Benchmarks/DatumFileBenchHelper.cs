@@ -1,8 +1,8 @@
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Which table-provider backing a benchmark uses for its source rows.
@@ -12,13 +12,13 @@ namespace DatumIngest.Benchmarks;
 public enum ProviderKind
 {
     /// <summary>
-    /// <see cref="DatumIngest.Catalog.Providers.InMemoryTableProvider"/> over pre-materialized
+    /// <see cref="Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider"/> over pre-materialized
     /// <see cref="Row"/>s. Isolates operator perf — no file I/O, no real binary decode.
     /// </summary>
     InMemory,
 
     /// <summary>
-    /// <see cref="DatumIngest.Catalog.Providers.DatumFileTableProviderV2"/> reading a real
+    /// <see cref="Heliosoph.DatumV.Catalog.Providers.DatumFileTableProviderV2"/> reading a real
     /// <c>.datum</c> file written once in <c>[GlobalSetup]</c>. Measures the engine
     /// end-to-end — closer to what users actually pay and what cross-engine
     /// comparisons (DuckDB, SQLite) measure.

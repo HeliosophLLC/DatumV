@@ -3,15 +3,16 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <!-- Headless backend spawned by the Electron shell. Console output is
-         parsed by electron/main.ts for the "DatumIngest listening at"
+         parsed by electron/main.ts for the "DatumV listening at"
          ready signal, so Exe (not WinExe) is required. -->
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <!-- Binary name matches the published path electron/main.ts looks up
-         at process.resourcesPath/backend/DatumIngest.Web.exe. -->
-    <RootNamespace>DatumIngest.Web</RootNamespace>
+         at process.resourcesPath/backend/Heliosoph.DatumV.Web.exe. -->
+    <RootNamespace>Heliosoph.DatumV.Web</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV.Web</AssemblyName>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 

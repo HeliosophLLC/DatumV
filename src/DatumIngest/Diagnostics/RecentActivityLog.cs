@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Bounded ring buffer of recently-completed <see cref="Activity"/> spans
@@ -63,7 +63,7 @@ public sealed class RecentActivityLog : IDisposable
     /// Creates a listener that records the <paramref name="capacity"/> most
     /// recently completed engine activities. Subscribes to every
     /// <see cref="ActivitySource"/> whose name starts with
-    /// <c>"DatumIngest."</c>.
+    /// <c>"Heliosoph.DatumV."</c>.
     /// </summary>
     public RecentActivityLog(int capacity = 100)
     {
@@ -74,11 +74,11 @@ public sealed class RecentActivityLog : IDisposable
         _listener = new ActivityListener
         {
             // Match every engine source — Operators, Scalars, and any future
-            // sub-source under the DatumIngest namespace. The string prefix
+            // sub-source under the Heliosoph.DatumV namespace. The string prefix
             // gate is the standard idiom for scoping a listener to your own
             // sources without intercepting third-party traffic.
             ShouldListenTo = src =>
-                src.Name.StartsWith("DatumIngest.", StringComparison.Ordinal),
+                src.Name.StartsWith("Heliosoph.DatumV.", StringComparison.Ordinal),
 
             // AllData makes every StartActivity return a non-null Activity
             // (otherwise the sampler suppresses creation and we record
@@ -238,8 +238,8 @@ public sealed class RecentActivityLog : IDisposable
             double offsetMs = (e.StartedAt - start).TotalMilliseconds;
             string sourceTag = e.SourceName switch
             {
-                "DatumIngest.Operators" => "op",
-                "DatumIngest.Scalars" => "fn",
+                "Heliosoph.DatumV.Operators" => "op",
+                "Heliosoph.DatumV.Scalars" => "fn",
                 _ => e.SourceName,
             };
             sb.Append('[').Append(offsetMs.ToString("F2")).Append("ms ").Append(sourceTag).Append("] ");
@@ -264,7 +264,7 @@ public sealed class RecentActivityLog : IDisposable
 /// a monotonic sequence number assigned at enqueue time (used by
 /// <see cref="RecentActivityLog.DrainSince"/> as a cursor), the operator
 /// name, the <see cref="ActivitySource"/> it came from
-/// (<c>"DatumIngest.Operators"</c> vs <c>"DatumIngest.Scalars"</c>), the
+/// (<c>"Heliosoph.DatumV.Operators"</c> vs <c>"Heliosoph.DatumV.Scalars"</c>), the
 /// display name of its parent activity at start (so callers can render the
 /// pull chain), when it started, and how long it ultimately ran.
 /// </summary>

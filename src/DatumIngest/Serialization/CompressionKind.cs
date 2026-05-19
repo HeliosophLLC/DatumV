@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Identifies the compression applied to a data source file.

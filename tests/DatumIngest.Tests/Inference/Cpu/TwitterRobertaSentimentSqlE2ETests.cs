@@ -1,14 +1,14 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// End-to-end test for the SQL-defined Twitter-RoBERTa sentiment classifier.
@@ -68,7 +68,7 @@ public sealed class TwitterRobertaSentimentSqlE2ETests : ServiceTestBase
         if (onnxPath is null) return;
 
         TableCatalog catalog = CreateCatalog();
-        catalog.Models = new DatumIngest.Models.ModelCatalog(modelDirectory: ModelsDirectory);
+        catalog.Models = new Heliosoph.DatumV.Models.ModelCatalog(modelDirectory: ModelsDirectory);
         catalog.InferenceDispatcher = new InferenceDispatcher(
             [new OnnxRuntimeBackend()],
             NullLogger<InferenceDispatcher>.Instance);
@@ -89,14 +89,14 @@ public sealed class TwitterRobertaSentimentSqlE2ETests : ServiceTestBase
         if (onnxPath is null) return;
 
         TableCatalog catalog = CreateCatalog();
-        catalog.Models = new DatumIngest.Models.ModelCatalog(modelDirectory: ModelsDirectory);
+        catalog.Models = new Heliosoph.DatumV.Models.ModelCatalog(modelDirectory: ModelsDirectory);
         catalog.InferenceDispatcher = new InferenceDispatcher(
             [new OnnxRuntimeBackend()],
             NullLogger<InferenceDispatcher>.Instance);
 
         catalog.Plan(LoadCanonicalSql());
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(),
             "data",
             ["t"],

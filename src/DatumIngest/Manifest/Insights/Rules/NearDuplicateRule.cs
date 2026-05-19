@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Detects near-duplicate feature pairs — numeric columns with near-perfect

@@ -1,9 +1,9 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// Decorator that wraps an <see cref="IAggregateAccumulator"/> with a

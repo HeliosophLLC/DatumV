@@ -1,4 +1,4 @@
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 /// <summary>
 /// Async-local ambient context the installer sets so a model registration

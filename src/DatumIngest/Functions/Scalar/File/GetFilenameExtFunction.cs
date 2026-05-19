@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// Returns the file extension of a path, without the leading dot (e.g. <c>"csv"</c>

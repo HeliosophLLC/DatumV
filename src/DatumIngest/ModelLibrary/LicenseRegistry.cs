@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 internal sealed class LicenseRegistry : ILicenseRegistry
 {

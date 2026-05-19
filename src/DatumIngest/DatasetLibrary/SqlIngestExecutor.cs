@@ -1,19 +1,19 @@
 // TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Execution;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 /// <summary>
 /// Executes a SELECT statement against the live <see cref="TableCatalog"/>
@@ -27,7 +27,7 @@ namespace DatumIngest.DatasetLibrary;
 /// <para>
 /// This is the SQL-shaped counterpart to <see cref="Ingester"/>. Where
 /// the classic ingester reads source files via an
-/// <see cref="DatumIngest.Serialization.IFormatDeserializer"/>, the SQL
+/// <see cref="Heliosoph.DatumV.Serialization.IFormatDeserializer"/>, the SQL
 /// executor consumes the planner's operator-tree output instead — any
 /// expression the SQL surface supports (TVFs like <c>open_archive</c>,
 /// computed columns, joins, filters) becomes a valid ingest definition.

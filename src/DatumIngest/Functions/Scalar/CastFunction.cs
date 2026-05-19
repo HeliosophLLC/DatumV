@@ -1,9 +1,9 @@
 using System.Globalization;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace Heliosoph.DatumV.Functions.Scalar;
 
 /// <summary>
 /// Explicit type conversion between <see cref="DataKind"/> values.
@@ -297,7 +297,7 @@ public sealed class CastFunction : IFunction, IScalarFunction
             case (DataKind.String, DataKind.Json):
                 try
                 {
-                    byte[] cbor = DatumIngest.Functions.Json.CborJsonCodec.EncodeFromJsonText(input.AsString());
+                    byte[] cbor = Heliosoph.DatumV.Functions.Json.CborJsonCodec.EncodeFromJsonText(input.AsString());
                     result = ValueRef.FromBytes(DataKind.Json, cbor);
                     return true;
                 }
@@ -311,7 +311,7 @@ public sealed class CastFunction : IFunction, IScalarFunction
                 }
             case (DataKind.Json, DataKind.String):
                 result = ValueRef.FromString(
-                    DatumIngest.Functions.Json.CborJsonCodec.DecodeToJsonText(input.AsByteSpan()));
+                    Heliosoph.DatumV.Functions.Json.CborJsonCodec.DecodeToJsonText(input.AsByteSpan()));
                 return true;
             default:
                 return false;

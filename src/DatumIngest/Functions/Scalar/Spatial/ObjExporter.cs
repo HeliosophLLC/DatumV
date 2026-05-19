@@ -5,12 +5,12 @@ using System.Text;
 
 #pragma warning disable IDE0005 // System.Text usage qualified inline below to avoid Encoding namespace clash
 
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
-/// Serializes a <see cref="DatumIngest.Model.DataKind.Mesh"/> blob to the
+/// Serializes a <see cref="Heliosoph.DatumV.Model.DataKind.Mesh"/> blob to the
 /// Wavefront OBJ ASCII format. Per-vertex colors emitted via the
 /// <c>v X Y Z R G B</c> extension (recognized by MeshLab, CloudCompare,
 /// Open3D, Blender; bare-spec OBJ readers ignore the trailing color

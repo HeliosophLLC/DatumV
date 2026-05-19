@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Joins;
+namespace Heliosoph.DatumV.Execution.Operators.Joins;
 
 /// <summary>
 /// Single-key <see cref="IJoinHashTable"/> backed by a

@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Footer prologue introduced in format v4. Sits at the start of the

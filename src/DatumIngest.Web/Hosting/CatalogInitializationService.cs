@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Web.Migrations;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Web.Migrations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Runs embedded SQL migrations against the local TableCatalog on app
 // startup. Registered only when WebHostOptions.ManageLocalCatalog is true;
@@ -43,7 +43,7 @@ internal sealed class CatalogInitializationService : IHostedService
 
         // Re-apply every persisted CREATE MODEL. The inference dispatcher
         // and models directory were both wired in the TableCatalog factory
-        // (see WebHostExtensions.AddDatumIngestWeb), so by the time this
+        // (see WebHostExtensions.AddDatumVWeb), so by the time this
         // hosted service runs everything ApplyCreateModelAsync needs is
         // in place. The manifest store lets catalog-installed rows resolve
         // their originating installSql by (catalog_id, version) rather

@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
-using DatumIngest.Execution;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_to_mono(audio Audio) → Audio</c>. Decodes the source audio,

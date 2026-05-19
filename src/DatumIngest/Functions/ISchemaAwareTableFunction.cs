@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Superseded by <see cref="ITableValuedFunction.ValidateArguments"/>, which is

@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Reads <c>kind: "python"</c> entries from a <see cref="CatalogManifest"/>

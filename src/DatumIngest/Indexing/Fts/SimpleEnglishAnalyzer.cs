@@ -1,7 +1,7 @@
 using System.Collections.Frozen;
 using System.Text;
 
-namespace DatumIngest.Indexing.Fts;
+namespace Heliosoph.DatumV.Indexing.Fts;
 
 /// <summary>
 /// Minimal English-leaning analyzer: Unicode letter/digit runs are the

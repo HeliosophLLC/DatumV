@@ -3,12 +3,12 @@ using System.IO.Compression;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Functions.Json;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Web.Execution;
+namespace Heliosoph.DatumV.Web.Execution;
 
 internal static class WebCellFormatter
 {

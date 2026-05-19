@@ -1,8 +1,8 @@
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.MutableBytes;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Adapts a <see cref="MutableBPlusTreeBytes"/> to the

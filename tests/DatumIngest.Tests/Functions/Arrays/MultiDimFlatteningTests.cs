@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Arrays;
 
 /// <summary>
 /// Documents the shape-agnostic contract for array functions that consume

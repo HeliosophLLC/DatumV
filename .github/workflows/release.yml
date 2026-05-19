@@ -21,11 +21,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - run: dotnet restore DatumIngest.slnx
+      - run: dotnet restore Heliosoph.DatumV.slnx
 
-      - run: dotnet build DatumIngest.slnx -c Release --no-restore
+      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore
 
-      - run: dotnet test tests/DatumIngest.Tests -c Release --no-build --no-restore
+      - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
 
   pack-and-publish-nuget:
     needs: build-and-test
@@ -51,7 +51,7 @@ jobs:
           echo "Version: $VERSION"
 
       - run: >
-          dotnet pack src/DatumIngest/DatumIngest.csproj
+          dotnet pack src/Heliosoph.DatumV/Heliosoph.DatumV.csproj
           -c Release
           -o ./artifacts/nuget
           /p:Version=${{ steps.version.outputs.version }}
@@ -89,7 +89,7 @@ jobs:
 
       - name: Publish CLI (${{ matrix.rid }})
         run: >
-          dotnet publish src/DatumIngest.Cli/DatumIngest.Cli.csproj
+          dotnet publish src/Heliosoph.DatumV.Cli/Heliosoph.DatumV.Cli.csproj
           -c Release
           -r ${{ matrix.rid }}
           -o ./artifacts/cli/${{ matrix.rid }}

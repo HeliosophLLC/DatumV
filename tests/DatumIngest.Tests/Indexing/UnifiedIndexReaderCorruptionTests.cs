@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Validates that <see cref="UnifiedIndexReader"/> rejects corrupted v5 unified

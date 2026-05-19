@@ -1,7 +1,7 @@
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// Implements <c>MEDIAN(expression)</c>. Computes the median (50th percentile)

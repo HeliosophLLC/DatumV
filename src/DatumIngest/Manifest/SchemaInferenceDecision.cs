@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Records the decision made by the full-file schema scanner for a single column,

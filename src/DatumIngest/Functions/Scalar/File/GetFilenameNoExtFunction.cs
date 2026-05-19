@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// Returns the filename portion of a path with its extension stripped

@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 /// <summary>
 /// SignalR hub for catalog change notifications. Today this is a one-way
 /// push channel — <see cref="CatalogEventBroadcastService"/> subscribes
-/// to the in-process <see cref="DatumIngest.Catalog.CatalogEvents"/> bus
+/// to the in-process <see cref="Heliosoph.DatumV.Catalog.CatalogEvents"/> bus
 /// and forwards each commit to all connected clients via
 /// <see cref="ICatalogHubClient.OnCatalogChanged"/>.
 /// </summary>

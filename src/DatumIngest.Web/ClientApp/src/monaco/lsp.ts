@@ -8,7 +8,7 @@ import { RETOKENIZE_DUMMY_LANGUAGE_ID } from './setup';
 import { DOCS_TAB_ID, MODELS_TAB_ID, selectTab } from '@/state/tabs';
 import { setSelectedId } from '@/state/models';
 
-// SQL language wiring against the DatumIngest LSP REST endpoints. Each
+// SQL language wiring against the Heliosoph.DatumV LSP REST endpoints. Each
 // Monaco provider translates a (model, position) call into a server
 // request, then maps the response back into Monaco's shapes. Providers
 // are language-global (registered once for 'sql'), so this runs at app
@@ -18,7 +18,7 @@ import { setSelectedId } from '@/state/models';
 // model creation and per-model content changes, debounce, then call
 // `setModelMarkers` directly.
 
-const MARKERS_OWNER = 'datum-ingest';
+const MARKERS_OWNER = 'datumv';
 const DIAGNOSTICS_DEBOUNCE_MS = 250;
 const GRAMMAR_URL = '/api/lang/grammar';
 
@@ -111,7 +111,7 @@ function registerHoverCommands(): void {
   // so the v1 handler just focuses the tab; future work can route the
   // sectionKey to a hash + scroll. Registering even the stub keeps the
   // trusted-markdown link from rendering as a broken click target.
-  monaco.editor.registerCommand('datumingest.openDoc', (_accessor, _sectionKey: string) => {
+  monaco.editor.registerCommand('datumv.openDoc', (_accessor, _sectionKey: string) => {
     selectTab(DOCS_TAB_ID);
   });
 }
@@ -216,7 +216,7 @@ function registerHoverProvider(): void {
         ),
         // Trusted so `command:` links emitted by the language server (e.g.
         // the drift hint's "Update to X available" → `datum.openModelInTab`,
-        // function/keyword hovers' "See more" → `datumingest.openDoc`)
+        // function/keyword hovers' "See more" → `datumv.openDoc`)
         // render as clickable instead of being stripped. The LS controls
         // the markdown; both commands are registered in registerHoverCommands.
         contents: [{ value: hover.contents ?? '', isTrusted: true }],

@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Thrown by the query planner when a parsed-but-semantically-invalid SQL statement is

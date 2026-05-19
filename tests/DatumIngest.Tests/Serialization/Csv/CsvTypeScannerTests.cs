@@ -1,9 +1,9 @@
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
-namespace DatumIngest.Tests.Serialization.Csv;
+namespace Heliosoph.DatumV.Tests.Serialization.Csv;
 
 /// <summary>
 /// Covers <see cref="CsvTypeScanner"/> — per-column type inference with range

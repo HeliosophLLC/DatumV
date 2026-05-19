@@ -1,7 +1,7 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Coerces a CLR literal value (as produced by

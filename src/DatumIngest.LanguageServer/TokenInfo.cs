@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 using Superpower.Model;
 
@@ -7,6 +7,6 @@ using Superpower.Model;
 /// Captures the token kind, its text content, and its position in the source.
 /// </summary>
 internal sealed record TokenInfo(
-    DatumIngest.Parsing.Tokens.SqlToken Kind,
+    Heliosoph.DatumV.Parsing.Tokens.SqlToken Kind,
     string Text,
     Position Position);

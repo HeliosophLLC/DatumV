@@ -1,8 +1,8 @@
 using System.Text.Json;
-using DatumIngest.Functions.Json;
-using DatumIngest.Web.Execution;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Web.Execution;
 
-namespace DatumIngest.Web.Tests;
+namespace Heliosoph.DatumV.Web.Tests;
 
 /// <summary>
 /// Covers <see cref="JsonPreviewBuilder"/> — bounded preview construction over

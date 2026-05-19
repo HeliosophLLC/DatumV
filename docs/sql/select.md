@@ -4,7 +4,7 @@ title: SELECT
 
 ## Why Use This
 
-SELECT is the starting point of every query. Beyond basic column selection, DatumIngest extends SELECT with EXCEPT (drop columns you don't need), REPLACE (transform columns in-place), and DISTINCT (deduplicate results).
+SELECT is the starting point of every query. Beyond basic column selection, DatumV extends SELECT with EXCEPT (drop columns you don't need), REPLACE (transform columns in-place), and DISTINCT (deduplicate results).
 
 The SELECT clause specifies which columns and expressions appear in the query result.
 

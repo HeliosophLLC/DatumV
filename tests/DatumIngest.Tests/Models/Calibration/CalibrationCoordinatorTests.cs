@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Tests.Models.Calibration;
+namespace Heliosoph.DatumV.Tests.Models.Calibration;
 
 /// <summary>
 /// Unit tests for <see cref="CalibrationCoordinator"/>. Tests use a real

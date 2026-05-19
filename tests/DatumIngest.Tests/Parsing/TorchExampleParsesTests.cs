@@ -1,6 +1,6 @@
-using DatumIngest.Parsing;
+using Heliosoph.DatumV.Parsing;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// Smoke test for the animated-torch example in <c>docs/examples.md</c>.

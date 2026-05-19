@@ -1,10 +1,10 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Lifecycle tests for full-text indexes — <c>CREATE INDEX ... USING FTS</c>,

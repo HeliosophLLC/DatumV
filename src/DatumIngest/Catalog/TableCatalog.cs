@@ -1,20 +1,20 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Catalog.Executors;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
+using Heliosoph.DatumV.Catalog.Executors;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Registry of named tables and their associated providers.
@@ -436,10 +436,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// shell wires this up via <c>.trace on</c>; production deployments
     /// can attach metric-emitting or structured-logging implementations.
     /// <see cref="Plans.SelectPlan"/> reads this value when constructing each
-    /// query's <see cref="DatumIngest.Execution.ExecutionContext"/>, so
+    /// query's <see cref="Heliosoph.DatumV.Execution.ExecutionContext"/>, so
     /// toggling at runtime affects subsequently planned queries.
     /// </summary>
-    public DatumIngest.Execution.IModelInvocationTracer? ModelTracer { get; set; }
+    public Heliosoph.DatumV.Execution.IModelInvocationTracer? ModelTracer { get; set; }
 
     /// <summary>
     /// Gets the total number of tables registered in this catalog, including
@@ -496,7 +496,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // reapplied below shares the same ambient state (accountant, types,
         // variable scope). Catalog rehydration has no caller context to
         // inherit from, so this context is the root.
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: ct);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: ct);
 
         // Partition by row shape. Catalog-installed rows (CatalogId set)
         // resolve their source from the live manifest's installSql — edits
@@ -614,7 +614,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         IReadOnlyList<PendingModelEntry> rows,
         IManifestStore? manifest,
         List<string> warnings,
-        DatumIngest.Execution.ExecutionContext context,
+        Heliosoph.DatumV.Execution.ExecutionContext context,
         CancellationToken ct,
         Action onLoaded,
         Action onSkipped)
@@ -758,10 +758,10 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// from the catalog; pass overrides for memory budget, value store, type
     /// registry, accountant, video registry, or cancellation token as named
     /// arguments when entering a scope that already owns them (e.g. a
-    /// <see cref="DatumIngest.Execution.ExecutionContext"/> borrowing its accountant across child
+    /// <see cref="Heliosoph.DatumV.Execution.ExecutionContext"/> borrowing its accountant across child
     /// queries).
     /// </summary>
-    public DatumIngest.Execution.ExecutionContext CreateExecutionContext(
+    public Heliosoph.DatumV.Execution.ExecutionContext CreateExecutionContext(
         long? memoryBudgetBytes = null,
         Arena? store = null,
         TypeRegistry? types = null,
@@ -1148,7 +1148,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // rather than silently falling through to an opaque thunk.
         throw new NotSupportedException(
             $"Statement type '{statement.GetType().Name}' is not supported by PlanAsync. " +
-            "Add a structured plan class under DatumIngest.Catalog.Plans and an explicit route in PlanAsync.");
+            "Add a structured plan class under Heliosoph.DatumV.Catalog.Plans and an explicit route in PlanAsync.");
     }
 
     private StatementPlan PlanCall(CallStatement call)
@@ -1222,7 +1222,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: cancellationToken);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(cancellationToken: cancellationToken);
         context.Accountant.StartProfiling();
         return await plan.AnalyzeAsync(cancellationToken, context).ConfigureAwait(false);
     }

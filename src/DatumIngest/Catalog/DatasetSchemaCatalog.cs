@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// An <see cref="ITableCatalog"/> backend whose tables are driven by the

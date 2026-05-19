@@ -1,6 +1,6 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Classifies a column's semantic <see cref="ColumnRole"/> using its

@@ -1,8 +1,8 @@
-﻿using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Tests for the built-in aggregate function implementations

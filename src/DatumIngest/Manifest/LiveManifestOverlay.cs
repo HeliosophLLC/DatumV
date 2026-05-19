@@ -1,6 +1,6 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Composes a fresh <see cref="QueryResultsManifest"/> by overlaying live column

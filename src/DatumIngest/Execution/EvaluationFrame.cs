@@ -1,8 +1,8 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Per-call context for <see cref="ExpressionEvaluator"/>. Carries the current row

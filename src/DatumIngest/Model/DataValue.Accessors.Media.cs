@@ -1,6 +1,6 @@
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {
@@ -113,7 +113,7 @@ public readonly partial struct DataValue
     /// per-point payload). For arena-backed values, reads from <paramref name="store"/>;
     /// for sidecar-backed values, looks up the value's <c>storeId</c> in
     /// <paramref name="registry"/>. Callers parse the header via
-    /// <c>DatumIngest.Model.Spatial.PointCloudHeader.Read</c>.
+    /// <c>Heliosoph.DatumV.Model.Spatial.PointCloudHeader.Read</c>.
     /// </summary>
     public byte[] AsPointCloud(IValueStore store, SidecarRegistry? registry = null)
     {
@@ -132,7 +132,7 @@ public readonly partial struct DataValue
     /// For arena-backed values, reads from <paramref name="store"/>; for
     /// sidecar-backed values, looks up the value's <c>storeId</c> in
     /// <paramref name="registry"/>. Callers parse the header via
-    /// <c>DatumIngest.Model.Spatial.MeshHeader.Read</c>.
+    /// <c>Heliosoph.DatumV.Model.Spatial.MeshHeader.Read</c>.
     /// </summary>
     public byte[] AsMesh(IValueStore store, SidecarRegistry? registry = null)
     {

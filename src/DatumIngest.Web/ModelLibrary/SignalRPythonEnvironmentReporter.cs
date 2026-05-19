@@ -1,8 +1,8 @@
-using DatumIngest.Models.Python;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.Models.Python;
+using Heliosoph.DatumV.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.ModelLibrary;
+namespace Heliosoph.DatumV.Web.ModelLibrary;
 
 // Adapter that bridges the core IPythonEnvironmentReporter to the Web's
 // SignalR hub. Same shape as SignalRDownloadProgressReporter — receives

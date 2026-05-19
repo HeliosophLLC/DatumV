@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Cleans BenchmarkDotNet.Artifacts/results/ (override with -KeepPriorResults),
-    runs `dotnet run -c Release` against benchmarks/DatumIngest.Benchmarks, then
+    runs `dotnet run -c Release` against benchmarks/Heliosoph.DatumV.Benchmarks, then
     globs the per-class `*-report-github.md` files BDN emits, extracts the shared
     environment block once, and appends one `## ClassName` section + table per
     class to BENCHMARKS.md (UTF-8, no BOM).
@@ -67,7 +67,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$BenchProject = Join-Path $RepoRoot "benchmarks/DatumIngest.Benchmarks/DatumIngest.Benchmarks.csproj"
+$BenchProject = Join-Path $RepoRoot "benchmarks/Heliosoph.DatumV.Benchmarks/Heliosoph.DatumV.Benchmarks.csproj"
 $ArtifactsDir = Join-Path $RepoRoot "BenchmarkDotNet.Artifacts/results"
 $OutputFile   = Join-Path $RepoRoot "BENCHMARKS.md"
 
@@ -108,7 +108,7 @@ $envEmitted = $false
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 foreach ($report in $reports) {
     $content = [System.IO.File]::ReadAllText($report.FullName, $utf8)
-    $className = $report.BaseName -replace "^DatumIngest\.Benchmarks\.", "" -replace "-report-github$", ""
+    $className = $report.BaseName -replace "^Heliosoph.DatumV\.Benchmarks\.", "" -replace "-report-github$", ""
 
     # BDN's per-class report is: ``` (env block) ``` then the markdown table.
     # Capture the env block once (identical across classes in a single run),

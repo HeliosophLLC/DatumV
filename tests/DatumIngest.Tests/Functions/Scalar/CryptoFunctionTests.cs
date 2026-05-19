@@ -1,11 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Crypto;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Crypto;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar;
 
 /// <summary>
 /// Tests for cryptographic hash functions and the pgcrypto-style

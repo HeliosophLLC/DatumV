@@ -1,12 +1,12 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Phase-5 + addition: <see cref="PerceptualHashFunction"/> and

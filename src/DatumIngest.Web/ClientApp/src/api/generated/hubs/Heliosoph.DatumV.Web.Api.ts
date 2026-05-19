@@ -2,7 +2,7 @@
 /* eslint-disable */
 /* tslint:disable */
 
-/** Transpiled from DatumIngest.Web.Api.ResidentModelDto */
+/** Transpiled from Heliosoph.DatumV.Web.Api.ResidentModelDto */
 export type ResidentModelDto = {
     /** Transpiled from string */
     name: string;
@@ -12,7 +12,7 @@ export type ResidentModelDto = {
     activeRefs: number;
 }
 
-/** Transpiled from DatumIngest.Web.Api.CalibrationEntryDto */
+/** Transpiled from Heliosoph.DatumV.Web.Api.CalibrationEntryDto */
 export type CalibrationEntryDto = {
     /** Transpiled from int */
     batchSize: number;
@@ -20,7 +20,7 @@ export type CalibrationEntryDto = {
     totalVramBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Api.CalibrationCurveDto */
+/** Transpiled from Heliosoph.DatumV.Web.Api.CalibrationCurveDto */
 export type CalibrationCurveDto = {
     /** Transpiled from string */
     modelName: string;
@@ -28,20 +28,20 @@ export type CalibrationCurveDto = {
     weightCostBytes: number;
     /** Transpiled from string */
     status: string;
-    /** Transpiled from System.Collections.Generic.IReadOnlyList<DatumIngest.Web.Api.CalibrationEntryDto> */
+    /** Transpiled from System.Collections.Generic.IReadOnlyList<Heliosoph.DatumV.Web.Api.CalibrationEntryDto> */
     entries: CalibrationEntryDto[];
 }
 
-/** Transpiled from DatumIngest.Web.Api.EvictStatus */
+/** Transpiled from Heliosoph.DatumV.Web.Api.EvictStatus */
 export enum EvictStatus {
     Evicted = 0,
     NotResident = 1,
     Pinned = 2,
 }
 
-/** Transpiled from DatumIngest.Web.Api.EvictOutcomeDto */
+/** Transpiled from Heliosoph.DatumV.Web.Api.EvictOutcomeDto */
 export type EvictOutcomeDto = {
-    /** Transpiled from DatumIngest.Web.Api.EvictStatus */
+    /** Transpiled from Heliosoph.DatumV.Web.Api.EvictStatus */
     status: EvictStatus;
 }
 

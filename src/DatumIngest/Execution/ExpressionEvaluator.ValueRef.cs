@@ -1,9 +1,9 @@
 using System.Numerics;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 public sealed partial class ExpressionEvaluator
 {

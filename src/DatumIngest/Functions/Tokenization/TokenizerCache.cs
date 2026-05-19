@@ -4,7 +4,7 @@ using System.Text.Json;
 
 using Microsoft.ML.Tokenizers;
 
-namespace DatumIngest.Functions.Tokenization;
+namespace Heliosoph.DatumV.Functions.Tokenization;
 
 /// <summary>
 /// Process-wide cache of loaded <see cref="BpeTokenizer"/> instances, keyed by

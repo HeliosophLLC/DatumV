@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog.Registries;
+namespace Heliosoph.DatumV.Catalog.Registries;
 
 /// <summary>
 /// Engine-defined registry of task contracts — the typed interface a model

@@ -93,7 +93,7 @@ PostgreSQL-compatible fields for `date_part` / `EXTRACT`:
 | `timezone_hour` | Signed hour component of UTC offset | -5 | |
 | `timezone_minute` | Minute component of UTC offset | 30 | |
 
-Backward-compatible aliases (DatumIngest extensions):
+Backward-compatible aliases (DatumV extensions):
 
 | Alias | Equivalent to |
 |-------|---------------|
@@ -309,7 +309,7 @@ SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY
 Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind.
 
 ```sql
--- 15-minute bucketing (DatumIngest style)
+-- 15-minute bucketing (DatumV style)
 SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP BY bucket
 ```
 

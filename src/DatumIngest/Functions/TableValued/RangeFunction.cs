@@ -1,8 +1,8 @@
-using DatumIngest.Manifest;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// Generates a sequence of rows with a single <c>Value</c> column ranging from

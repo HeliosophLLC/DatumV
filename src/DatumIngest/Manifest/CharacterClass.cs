@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Characterizes the dominant character repertoire of a string column, inferred by

@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Models.Onnx;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models.Onnx;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// Aspect-preserving letterbox resize plus per-channel normalisation, packed

@@ -1,7 +1,7 @@
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// The result of indexing a single <c>.datum</c> file.

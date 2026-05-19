@@ -24,7 +24,7 @@ function createCredentialedHttp() {
 }
 
 // Composed API surface. Add new clients here as controllers land in
-// DatumIngest.Web. Default baseUrl is empty (relative URLs → current origin,
+// Heliosoph.DatumV.Web. Default baseUrl is empty (relative URLs → current origin,
 // which is Vite in dev — proxying /api and /hubs to Kestrel — and Kestrel
 // directly in prod).
 export function createApi(baseUrl = '') {

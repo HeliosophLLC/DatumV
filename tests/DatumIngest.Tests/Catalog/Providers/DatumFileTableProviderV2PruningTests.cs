@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog.Providers;
+namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
 /// Verifies three-tier zone-map pruning in <see cref="DatumFileTableProviderV2"/>.

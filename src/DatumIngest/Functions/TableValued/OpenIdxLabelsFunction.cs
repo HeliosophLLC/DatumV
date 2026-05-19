@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Idx;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Idx;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>open_idx_labels(path) → table</c>. Opens an MNIST-style IDX label file

@@ -1,12 +1,12 @@
 using System.Text;
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Web.Dtos.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Web.Dtos.Execution;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// EXPLAIN endpoint companion to <see cref="QueryStreamController"/>.

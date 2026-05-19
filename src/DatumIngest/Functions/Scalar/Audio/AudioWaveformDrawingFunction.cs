@@ -1,12 +1,12 @@
 using System.Collections.Immutable;
 
-using DatumIngest.Execution;
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_drawing(envelope Array&lt;Float32&gt;(bins, 2), render Lambda) → Drawing</c>.

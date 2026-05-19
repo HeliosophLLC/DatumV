@@ -1,15 +1,15 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Strings;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Strings;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions.Scalar.Strings;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Strings;
 
 /// <summary>
 /// Tests for the PG-compliant string-length functions <see cref="LengthFunction"/>

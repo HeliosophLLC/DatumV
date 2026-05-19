@@ -1,6 +1,6 @@
-using DatumIngest.Serialization.Fits;
+using Heliosoph.DatumV.Serialization.Fits;
 
-namespace DatumIngest.Tests.Serialization.Fits;
+namespace Heliosoph.DatumV.Tests.Serialization.Fits;
 
 /// <summary>
 /// Unit tests for <see cref="FitsHduDescriptor"/> covering header parsing,

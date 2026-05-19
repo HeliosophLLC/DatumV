@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
-using DatumIngest.Diagnostics;
+using Heliosoph.DatumV.Diagnostics;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Orchestrates per-model calibration ramps. Ensures concurrent queries

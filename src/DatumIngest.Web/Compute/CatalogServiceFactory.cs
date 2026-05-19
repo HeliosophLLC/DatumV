@@ -1,6 +1,6 @@
-using DatumIngest.Web.Hosting;
+using Heliosoph.DatumV.Web.Hosting;
 
-namespace DatumIngest.Web.Compute;
+namespace Heliosoph.DatumV.Web.Compute;
 
 // Resolves the ICatalogService for a given compute node. Today the only
 // node is "local" and the only implementation throws — we register the seam

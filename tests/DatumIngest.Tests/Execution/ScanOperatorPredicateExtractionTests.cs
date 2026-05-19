@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <c>ScanOperator</c>'s top-level predicate extraction in

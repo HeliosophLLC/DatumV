@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Models.Onnx;
+namespace Heliosoph.DatumV.Models.Onnx;
 
 /// <summary>
 /// Abstract <see cref="IModel"/> base for ONNX Runtime backed models. Holds the

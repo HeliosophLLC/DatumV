@@ -1,6 +1,6 @@
 using System.Linq;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 using Superpower.Parsers;
@@ -8,7 +8,7 @@ using SP = Superpower.Parse;
 
 #pragma warning disable CS8603, CS8604, CS8620 // Superpower combinators lack consistent nullable reference type annotations
 
-namespace DatumIngest.Parsing;
+namespace Heliosoph.DatumV.Parsing;
 
 public static partial class SqlParser
 {
@@ -754,7 +754,7 @@ public static partial class SqlParser
     /// coercion path produces the typed value at runtime; no engine plumbing
     /// changes.
     /// <para>
-    /// The PG forms that DatumIngest's type system doesn't yet represent —
+    /// The PG forms that Heliosoph.DatumV's type system doesn't yet represent —
     /// <c>INTERVAL '...'</c> and <c>TIMETZ '...'</c> — are still recognised
     /// by this combinator so that callers get an explicit "not yet
     /// supported" <see cref="ParseException"/> instead of the misleading

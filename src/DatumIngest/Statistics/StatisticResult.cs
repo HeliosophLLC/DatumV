@@ -1,4 +1,4 @@
-namespace DatumIngest.Statistics;
+namespace Heliosoph.DatumV.Statistics;
 
 /// <summary>
 /// Represents the result of a statistic accumulation with a name and typed value.

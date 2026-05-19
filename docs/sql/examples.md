@@ -192,7 +192,7 @@ time.
 
 ### 8. Promote to a Mesh and export as a real 3D asset
 
-A `PointCloud` is renderable inside DatumIngest's viewer, but to share
+A `PointCloud` is renderable inside DatumV's viewer, but to share
 the result — open in Blender, slice for 3D printing, hand to a colleague
 who lives in Unity — you need a real 3D asset on disk. `mesh_from_organized`
 promotes an organized cloud to an explicit triangle mesh (with per-vertex

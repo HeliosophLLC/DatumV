@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Spawns and talks to a Python subprocess over newline-delimited JSON

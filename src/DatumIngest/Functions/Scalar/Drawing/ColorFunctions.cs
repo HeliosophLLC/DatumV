@@ -1,10 +1,10 @@
 using System.Globalization;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Functions.Scalar.Drawing;
 
 /// <summary>
 /// <c>color(r, g, b)</c> → Color (alpha = 255).

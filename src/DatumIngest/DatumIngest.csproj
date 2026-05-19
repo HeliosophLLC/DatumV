@@ -2,8 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyName>DatumIngest</AssemblyName>
-    <RootNamespace>DatumIngest</RootNamespace>
+    <PackageId>Heliosoph.DatumV</PackageId>
+    <RootNamespace>Heliosoph.DatumV</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -13,15 +14,14 @@
          [Conditional] and must be visible to callers too; that one lives in Directory.Build.props. -->
     <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
     <IsPackable>true</IsPackable>
-    <PackageId>DatumIngest</PackageId>
-    <Description>High-performance dataset query engine for ML ETL pipelines.</Description>
+    <Description></Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="DatumIngest.Tests" />
-    <InternalsVisibleTo Include="DatumIngest.Web" />
+    <InternalsVisibleTo Include="Heliosoph.DatumV.Tests" />
+    <InternalsVisibleTo Include="Heliosoph.DatumV.Web" />
     <InternalsVisibleTo Include="index-inspect" />
   </ItemGroup>
 

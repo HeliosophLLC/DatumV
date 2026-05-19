@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Execution.Operators;
+namespace Heliosoph.DatumV.Tests.Execution.Operators;
 
 /// <summary>
 /// Multi-invocation <see cref="ModelInvocationOperator"/> unit tests.
@@ -149,7 +149,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 "__model_reverse"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         List<Row> rows = await op.CollectRowsAsync(ctx);
 
         Assert.Equal(3, rows.Count);
@@ -202,7 +202,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 "__model_b"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         List<Row> rows = await op.CollectRowsAsync(ctx);
 
         Assert.Equal(2, rows.Count);
@@ -250,7 +250,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 [new ColumnReference("text")], [], "__b"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         await op.CollectRowsAsync(ctx);
 
         Assert.Equal(["first", "second"], order);
@@ -281,7 +281,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 "echo", [new ColumnReference("text")], [], "__out"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         List<Row> rows = await op.CollectRowsAsync(ctx);
 
         Assert.Equal(7, rows.Count);
@@ -313,7 +313,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 "echo", [new ColumnReference("text")], [], "__out"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         await op.CollectRowsAsync(ctx);
 
         Assert.Equal(1, echo.DispatchCount);
@@ -337,7 +337,7 @@ public sealed class ModelInvocationOperatorMultiTests : ServiceTestBase
                 [], "__out"),
         ]);
 
-        using DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
+        using Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext(catalog: catalog);
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => op.CollectRowsAsync(ctx));
         Assert.Contains("needs_one", ex.Message);

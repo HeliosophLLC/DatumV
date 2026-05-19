@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Describes a single column within a <see cref="Schema"/>: its name, data kind, and nullability.

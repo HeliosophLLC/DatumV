@@ -1,4 +1,4 @@
-namespace DatumIngest.Models.Llama;
+namespace Heliosoph.DatumV.Models.Llama;
 
 /// <summary>
 /// Bundles the chat-template formatting primitives and stop-sequence

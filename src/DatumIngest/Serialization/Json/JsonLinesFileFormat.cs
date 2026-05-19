@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Serialization.Json;
+namespace Heliosoph.DatumV.Serialization.Json;
 
 /// <summary>
 /// Format handler for newline-delimited JSON. Matches <c>.jsonl</c> and

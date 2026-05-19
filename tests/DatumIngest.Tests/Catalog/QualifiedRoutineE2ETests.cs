@@ -1,10 +1,10 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.LanguageServer;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// S7f end-to-end pins for schema-qualified UDFs and procedures: the

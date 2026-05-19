@@ -1,10 +1,10 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Convenience extensions over the <see cref="IAsyncEnumerable{RowBatch}"/>
-/// streams produced by <see cref="StatementPlan.ExecuteAsync(CancellationToken, DatumIngest.Execution.ExecutionContext)"/>
+/// streams produced by <see cref="StatementPlan.ExecuteAsync(CancellationToken, Heliosoph.DatumV.Execution.ExecutionContext)"/>
 /// and <see cref="TableCatalog.ExecuteAsync(StatementPlan, CancellationToken)"/>.
 /// </summary>
 public static class RowBatchEnumerableExtensions

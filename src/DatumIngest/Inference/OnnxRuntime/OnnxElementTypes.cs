@@ -1,7 +1,7 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// Bidirectional mapping between engine-side <see cref="DataKind"/> and ONNX
@@ -11,7 +11,7 @@ namespace DatumIngest.Inference.OnnxRuntime;
 /// tensors from engine-side data.
 /// </summary>
 /// <remarks>
-/// The mapping is partial: ONNX has element types DatumIngest does not yet
+/// The mapping is partial: ONNX has element types Heliosoph.DatumV does not yet
 /// model (Complex64, Complex128, BFloat16, sub-byte types). Unmapped types
 /// raise an exception at the boundary so a model with an unsupported
 /// signature fails fast rather than silently producing garbage.
@@ -34,7 +34,7 @@ internal static class OnnxElementTypes
         TensorElementType.UInt32   => DataKind.UInt32,
         TensorElementType.UInt64   => DataKind.UInt64,
         _ => throw new NotSupportedException(
-            $"ONNX tensor element type {ortType} has no DatumIngest DataKind mapping. " +
+            $"ONNX tensor element type {ortType} has no Heliosoph.DatumV DataKind mapping. " +
             "Add a case here if a model needs this element type.")
     };
 

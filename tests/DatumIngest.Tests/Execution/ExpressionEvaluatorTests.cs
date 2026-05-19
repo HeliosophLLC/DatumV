@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 public class ExpressionEvaluatorTests : ServiceTestBase
 {
@@ -11,7 +11,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
 
     public ExpressionEvaluatorTests()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         _evaluator = context.CreateEvaluator();
     }
 
@@ -135,7 +135,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
     [Fact]
     public async Task BinaryDivideByZero_Throws()
     {
-        await Assert.ThrowsAsync<DatumIngest.Execution.ExecutionException>(async () =>
+        await Assert.ThrowsAsync<Heliosoph.DatumV.Execution.ExecutionException>(async () =>
             await _evaluator.EvaluateAsync(
                 new BinaryExpression(
                     new LiteralExpression(1),
@@ -1402,7 +1402,7 @@ public class ExpressionEvaluatorTests : ServiceTestBase
         ColumnInfo structColumn = new("info", false, fieldInfos);
         Schema schema = new([structColumn]);
 
-        using DatumIngest.Execution.ExecutionContext schemaContext = CreateExecutionContext(store: arena);
+        using Heliosoph.DatumV.Execution.ExecutionContext schemaContext = CreateExecutionContext(store: arena);
         ExpressionEvaluator evaluatorWithSchema = schemaContext.CreateEvaluator(sourceSchema: schema);
 
         IndexAccessExpression access = new(

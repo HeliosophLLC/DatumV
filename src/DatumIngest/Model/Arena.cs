@@ -2,9 +2,9 @@ using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
-using DatumIngest.Diagnostics;
+using Heliosoph.DatumV.Diagnostics;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// A growable byte buffer that stores all reference-type payloads contiguously:

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Models.Onnx;
+namespace Heliosoph.DatumV.Models.Onnx;
 
 /// <summary>
 /// Inverse of GPT-2 / RoBERTa byte-level BPE encoding. The encoder maps

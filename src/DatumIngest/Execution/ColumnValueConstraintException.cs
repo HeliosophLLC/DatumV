@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Thrown when an INSERT or UPDATE value would violate a declared

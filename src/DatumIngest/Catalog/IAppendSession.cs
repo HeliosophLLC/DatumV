@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Caller-owned append session for streaming row inserts into a single
@@ -12,7 +12,7 @@ namespace DatumIngest.Catalog;
 /// One session is permitted per provider at a time; concurrent
 /// <c>BeginAppend</c> callers wait until the active session disposes.
 /// This mirrors the .datum format's single-writer constraint
-/// (<see cref="DatumIngest.DatumFile.V2.DatumFileWriterV2.OpenForAppend"/>
+/// (<see cref="Heliosoph.DatumV.DatumFile.V2.DatumFileWriterV2.OpenForAppend"/>
 /// uses <c>FileShare.Read</c> to exclude other writers at the OS
 /// level); the in-process semaphore makes the contention well-defined
 /// across async awaits within one process too.

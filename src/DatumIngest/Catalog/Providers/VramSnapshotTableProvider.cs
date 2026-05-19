@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Diagnostics;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Single-row virtual table exposing the live NVML VRAM reading plus the

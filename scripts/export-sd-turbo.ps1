@@ -3,7 +3,7 @@
 # stabilityai/sd-turbo is a 1-step text-to-image model. The PyTorch
 # weights (~2.5 GB safetensors) get converted into the diffusers-format
 # ONNX layout (text_encoder/, unet/, vae_decoder/, vae_encoder/,
-# tokenizer/, scheduler/) that DatumIngest's StableDiffusionTurboModel
+# tokenizer/, scheduler/) that Heliosoph.DatumV's StableDiffusionTurboModel
 # expects.
 #
 # Why convert instead of downloading a pre-built ONNX? Most published

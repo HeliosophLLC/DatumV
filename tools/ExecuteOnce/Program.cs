@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text;
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Diagnostics;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Model;
 
 // execute-once <datum-file> "<sql>"
 //
@@ -60,7 +60,7 @@ catch (Exception ex)
 using CancellationTokenSource cts = new();
 Console.CancelKeyPress += (_, e) => { cts.Cancel(); e.Cancel = true; };
 
-string displayTableName = opts.TableName ?? DatumIngest.Serialization.PathDetector.DeriveTableName(opts.DatumPath);
+string displayTableName = opts.TableName ?? Heliosoph.DatumV.Serialization.PathDetector.DeriveTableName(opts.DatumPath);
 Console.WriteLine($"Table:  {displayTableName}");
 Console.WriteLine($"Source: {opts.DatumPath}");
 Console.WriteLine($"SQL:    {sql.Trim().ReplaceLineEndings(" ")}");

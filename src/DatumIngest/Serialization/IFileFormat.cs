@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Describes a file format that can be detected and deserialized. Each supported

@@ -1,6 +1,6 @@
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Models.Llama;
 
-namespace DatumIngest.Web.Llm;
+namespace Heliosoph.DatumV.Web.Llm;
 
 // Single-LLM driver. Wraps the loaded model behind a streaming-tokens API.
 // One instance per app — selected at startup by ModelSelector, lease held

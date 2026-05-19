@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// On-disk constants for the <c>.datum-blob</c> sidecar format. The sidecar is a

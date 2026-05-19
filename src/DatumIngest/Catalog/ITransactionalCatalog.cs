@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Marker for catalog backends that support transactional operations.

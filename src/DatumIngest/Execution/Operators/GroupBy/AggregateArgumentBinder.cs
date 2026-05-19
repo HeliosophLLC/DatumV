@@ -1,7 +1,7 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.GroupBy;
+namespace Heliosoph.DatumV.Execution.Operators.GroupBy;
 
 /// <summary>
 /// Owns the reusable scratch buffers used to evaluate aggregate function

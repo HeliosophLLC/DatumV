@@ -1,11 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumIngest.Execution;
-using DatumIngest.Web.Dtos.Execution;
-using DatumIngest.Web.Execution;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Web.Dtos.Execution;
+using Heliosoph.DatumV.Web.Execution;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// Streaming SQL execution endpoint. POST a <see cref="QueryStreamRequest"/>

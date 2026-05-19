@@ -114,7 +114,7 @@ function createHostBridge(): HostBridge {
     // Hitting this means the preload didn't run (mis-configured
     // BrowserWindow) or the SPA is being served standalone.
     throw new Error(
-      'window.electronHost is not available. DatumIngest only runs inside ' +
+      'window.electronHost is not available. Heliosoph.DatumV only runs inside ' +
         'the Electron shell — the SPA must be loaded by electron/main.ts.',
     );
   }

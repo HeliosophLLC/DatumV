@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Running;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Entry point. Defaults to BenchmarkDotNet; <c>profile [select-all|select-where]

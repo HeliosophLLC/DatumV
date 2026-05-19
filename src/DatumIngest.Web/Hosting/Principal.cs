@@ -1,6 +1,6 @@
 using System.Security.Claims;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Which compute node owns this request's catalog data. Used by
 // ICatalogServiceFactory.ForNode to dispatch to the right backend.

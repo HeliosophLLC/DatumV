@@ -1,12 +1,12 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.Models;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// Exercises the <c>inference.onnx_inspect(path)</c> TVF end-to-end:
@@ -40,7 +40,7 @@ public sealed class OnnxInspectFunctionTests : ServiceTestBase
     {
         string fixturePath = FixturePath();
         Assert.True(File.Exists(fixturePath),
-            $"Fixture missing at {fixturePath}. Check tests/DatumIngest.Tests/Fixtures/softmax.onnx is present and copied to bin output.");
+            $"Fixture missing at {fixturePath}. Check tests/Heliosoph.DatumV.Tests/Fixtures/softmax.onnx is present and copied to bin output.");
 
         TableCatalog catalog = CreateCatalogWithRealDispatcher();
 

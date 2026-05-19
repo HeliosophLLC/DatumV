@@ -1,12 +1,12 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform(audio Audio, width Int32, height Int32, options Struct) → Image</c>.

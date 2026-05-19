@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.BatchPredicates;
+namespace Heliosoph.DatumV.Execution.Operators.BatchPredicates;
 
 /// <summary>
 /// Batch predicate for <c>column OP literal</c> where the column is Float32

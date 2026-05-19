@@ -1,9 +1,9 @@
 using Tapper;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 /// <summary>
-/// SignalR push payloads for <see cref="DatumIngest.Models.IModelLifecycleObserver"/>
+/// SignalR push payloads for <see cref="Heliosoph.DatumV.Models.IModelLifecycleObserver"/>
 /// events. Three event records, one per channel method on the hub — kept
 /// separate (rather than one discriminated payload) so the client switch
 /// is on the method name rather than a Kind field, matching the typed-
@@ -21,7 +21,7 @@ public sealed record ModelLoadedEvent(
     long VramUsedBytes);
 
 /// <summary>
-/// Mirror of <see cref="DatumIngest.Models.EvictionReason"/>. Re-declared
+/// Mirror of <see cref="Heliosoph.DatumV.Models.EvictionReason"/>. Re-declared
 /// in the web DTO layer (rather than referenced directly) so the engine
 /// can change its enum members without dragging every consumer through
 /// a transpile bump, and so Tapper doesn't have to reach across the

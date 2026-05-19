@@ -1,9 +1,9 @@
-using DatumIngest.Functions.Image;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// <c>image_stack(img, axis)</c> — concatenates the images in a group along

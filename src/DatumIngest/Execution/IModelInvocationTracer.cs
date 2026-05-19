@@ -1,6 +1,6 @@
-using DatumIngest.Functions;
+using Heliosoph.DatumV.Functions;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Optional hook for observing <c>models.X(...)</c> invocations during query

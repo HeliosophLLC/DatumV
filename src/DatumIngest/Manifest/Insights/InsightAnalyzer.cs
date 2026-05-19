@@ -1,6 +1,6 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
-using DatumIngest.Manifest.Insights.Rules;
+using Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Top-level orchestrator that evaluates all insight rules against a manifest,

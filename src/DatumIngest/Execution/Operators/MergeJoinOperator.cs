@@ -1,12 +1,12 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators.Joins;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using static DatumIngest.Execution.StatisticsPredicateEvaluator;
-using DatumIngest.Indexing.Sorted;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators.Joins;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using static Heliosoph.DatumV.Execution.StatisticsPredicateEvaluator;
+using Heliosoph.DatumV.Indexing.Sorted;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Sort-merge join operator that joins two index-ordered input streams using a

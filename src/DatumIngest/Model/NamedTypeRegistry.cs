@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Process-wide vocabulary of well-known named composite types — the

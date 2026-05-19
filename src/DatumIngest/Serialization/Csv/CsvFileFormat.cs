@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Format handler for CSV and TSV files. Matches <c>.csv</c> and <c>.tsv</c> extensions.

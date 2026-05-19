@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests that <see cref="ExpressionEvaluator"/>'s index-access path can read
@@ -23,7 +23,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
 
     private async Task<DataValue> EvalAsync(IndexAccessExpression access, Row row, Arena arena)
     {
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(row, arena);
         return await evaluator.EvaluateAsync(access, frame);
@@ -32,7 +32,7 @@ public class TypedArrayIndexAccessTests : ServiceTestBase
     private async Task<DataValue> EvalWithRegistryAsync(
         IndexAccessExpression access, Row row, Arena arena, TypeRegistry registry)
     {
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(row, arena);
         return await evaluator.EvaluateAsync(access, frame);

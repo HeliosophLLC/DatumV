@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Models.Python;
+namespace Heliosoph.DatumV.Tests.Models.Python;
 
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Round-trip integration test for the Python-backed model bridge. Runs

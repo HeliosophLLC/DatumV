@@ -1,10 +1,10 @@
 using System.Linq;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Windows;
+namespace Heliosoph.DatumV.Execution.Operators.Windows;
 
 /// <summary>
 /// Sorts a contiguous range of a row-index array by ORDER BY items, used by

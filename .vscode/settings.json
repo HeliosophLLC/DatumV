@@ -20,5 +20,5 @@
         "**/obj": true,
         "**/traces": true
     },
-    "dotnet.unitTests.runSettingsPath": "tests/DatumIngest.Tests/DatumIngest.Tests.runsettings"
+    "dotnet.unitTests.runSettingsPath": "tests/Heliosoph.DatumV.Tests/Heliosoph.DatumV.Tests.runsettings"
 }

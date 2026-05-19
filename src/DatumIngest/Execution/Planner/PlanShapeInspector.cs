@@ -1,6 +1,6 @@
-using DatumIngest.Execution.Operators;
+using Heliosoph.DatumV.Execution.Operators;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Cheap plan-tree introspection helpers used by <see cref="QueryPlanner"/> for

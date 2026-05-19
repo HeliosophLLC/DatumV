@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Thrown when an <see cref="AssertClause"/> with <see cref="AssertFailureMode.Abort"/>

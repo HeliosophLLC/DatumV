@@ -1,7 +1,7 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.BTree.Mutable;
+namespace Heliosoph.DatumV.Indexing.BTree.Mutable;
 
 /// <summary>
 /// In-memory representation of a mutable B+Tree internal (branch) page.

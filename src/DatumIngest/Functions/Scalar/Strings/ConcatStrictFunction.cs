@@ -1,9 +1,9 @@
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Strings;
+namespace Heliosoph.DatumV.Functions.Scalar.Strings;
 
 /// <summary>
 /// Strict, null-propagating string concatenation. Returns <see langword="NULL"/>

@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Assertion;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Assertion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.Assertion;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Assertion;
 
 /// <summary>
 /// Behavioural tests for the <c>assert_*</c> scalar function family. Each

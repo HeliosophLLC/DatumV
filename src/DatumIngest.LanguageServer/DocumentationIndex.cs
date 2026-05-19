@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 using System.Reflection;
 using System.Text;
@@ -77,7 +77,7 @@ public sealed class DocumentationIndex
         // Parse all embedded sql/*.md files.
         foreach (string resourceName in assembly.GetManifestResourceNames())
         {
-            if (!resourceName.StartsWith("DatumIngest.LanguageServer.docs.", StringComparison.Ordinal))
+            if (!resourceName.StartsWith("Heliosoph.DatumV.LanguageServer.docs.", StringComparison.Ordinal))
             {
                 continue;
             }
@@ -90,8 +90,8 @@ public sealed class DocumentationIndex
             string content = ReadResource(assembly, resourceName);
 
             // Determine source ("sql" or "functions") from the resource name.
-            // Format: DatumIngest.LanguageServer.docs.{source}.{filename}.md
-            string withoutPrefix = resourceName["DatumIngest.LanguageServer.docs.".Length..];
+            // Format: Heliosoph.DatumV.LanguageServer.docs.{source}.{filename}.md
+            string withoutPrefix = resourceName["Heliosoph.DatumV.LanguageServer.docs.".Length..];
             string[] parts = withoutPrefix.Split('.');
             if (parts.Length < 3)
             {

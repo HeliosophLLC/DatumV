@@ -1,8 +1,8 @@
-using DatumIngest.Web.Conversation;
-using DatumIngest.Web.Messages;
+using Heliosoph.DatumV.Web.Conversation;
+using Heliosoph.DatumV.Web.Messages;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 [ApiController]
 [Route("api/conversations")]

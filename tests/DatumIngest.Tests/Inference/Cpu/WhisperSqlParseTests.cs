@@ -1,16 +1,16 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// Parse + body-shape smoke for the SQL-defined Whisper bodies. Each
@@ -37,7 +37,7 @@ public sealed class WhisperSqlParseTests : ServiceTestBase
     {
         string root = Environment.GetEnvironmentVariable("DATUM_MODELS_DIRECTORY")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DatumIngest", "models");
+                "Heliosoph.DatumV", "models");
         return File.Exists(Path.Combine(root, folder, "onnx", "encoder_model.onnx"));
     }
 
@@ -65,7 +65,7 @@ public sealed class WhisperSqlParseTests : ServiceTestBase
         if (!BundlePresent("whisper-base")) return;
 
         TableCatalog catalog = CreateCatalog();
-        catalog.Models = new DatumIngest.Models.ModelCatalog(modelDirectory: ModelsDirectory);
+        catalog.Models = new Heliosoph.DatumV.Models.ModelCatalog(modelDirectory: ModelsDirectory);
         catalog.InferenceDispatcher = new InferenceDispatcher(
             [new OnnxRuntimeBackend()],
             NullLogger<InferenceDispatcher>.Instance);

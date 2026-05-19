@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Reads CSV lines from a byte stream into a reusable character buffer, yielding

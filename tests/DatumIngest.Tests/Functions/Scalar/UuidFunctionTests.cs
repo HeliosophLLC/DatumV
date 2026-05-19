@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Uuid;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Uuid;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar;
 
 /// <summary>
 /// Tests for UUID scalar functions: <see cref="UuidExtractTimestampFunction"/>,

@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Strings;
+namespace Heliosoph.DatumV.Functions.Scalar.Strings;
 
 /// <summary>
 /// PostgreSQL-compatible <c>ltrim(string [, characters])</c>. Removes the longest

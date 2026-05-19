@@ -1,5 +1,5 @@
 """
-NDJSON worker host for DatumIngest's Python-backed model bridge.
+NDJSON worker host for Heliosoph.DatumV's Python-backed model bridge.
 
 Per-model worker scripts import this module and call ``run(infer_func)``
 where ``infer_func(inputs, overrides)`` returns one output value per input

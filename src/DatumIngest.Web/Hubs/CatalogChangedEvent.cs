@@ -1,10 +1,10 @@
 using Tapper;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 /// <summary>
 /// Discriminator on <see cref="CatalogChangedEvent"/>. One value per
-/// <see cref="DatumIngest.Catalog.CatalogEvents"/> channel so client code
+/// <see cref="Heliosoph.DatumV.Catalog.CatalogEvents"/> channel so client code
 /// can switch on the change without inspecting payload shape.
 /// </summary>
 [TranspilationSource]

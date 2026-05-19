@@ -1,9 +1,9 @@
-using DatumIngest.Models.Calibration;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.Models.Calibration;
+using Heliosoph.DatumV.Web.Hubs;
 
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 /// <summary>
 /// Bridges <see cref="ICalibrationObserver"/> events to the

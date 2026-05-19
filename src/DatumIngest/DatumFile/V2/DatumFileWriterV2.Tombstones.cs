@@ -1,8 +1,8 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2.Encoding;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2.Encoding;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 public sealed partial class DatumFileWriterV2
 {

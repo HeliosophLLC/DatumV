@@ -1,7 +1,7 @@
-using DatumIngest.Functions;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Plan-time AST rewrite that lifts a table-valued function call appearing as

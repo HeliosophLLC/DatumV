@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Functions;
+namespace Heliosoph.DatumV.Web.Dtos.Functions;
 
 /// <summary>
 /// Response payload for <c>GET /api/functions/models</c>: every SQL-defined

@@ -4,7 +4,7 @@ title: Type System
 
 ## Why Use This
 
-DatumIngest has more types than standard SQL -- typed arrays for embeddings and tensors, durations for time spans, images as a first-class kind, structs for nested values. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
+DatumV has more types than standard SQL -- typed arrays for embeddings and tensors, durations for time spans, images as a first-class kind, structs for nested values. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
 
 ## Quick Start
 
@@ -117,7 +117,7 @@ declared maximum length:
 Lengths are measured in **characters**, not bytes — `VARCHAR(5)` accepts `'héllo'`
 (5 chars, 6 UTF-8 bytes). `information_schema.columns` surfaces both the
 PG-standard `data_type` (`'character varying'`, `'character'`, `'text'`) and the
-DatumIngest-native `data_kind` (`'String'`), plus `character_maximum_length` and
+DatumV-native `data_kind` (`'String'`), plus `character_maximum_length` and
 `is_blank_padded` for full round-trip.
 
 #### Video Frames
@@ -202,7 +202,7 @@ interleaved per-point payload at a fixed stride — 12 bytes (xyz
 
 `Mesh` is the triangulated-surface companion — explicit topology
 (triangle indices) on top of a vertex buffer, exportable as `.glb` /
-`.stl` / `.obj` so the result survives outside DatumIngest. Per-vertex
+`.stl` / `.obj` so the result survives outside DatumV. Per-vertex
 attributes (position, optional color, optional unit normals, future UVs)
 follow the same flag-derived-stride pattern as PointCloud.
 
@@ -435,7 +435,7 @@ Supported conversions include:
 - **Any numeric ↔ Boolean** — zero = false, non-zero = true.
 - **Any numeric/Boolean/Date/Timestamp/TimestampTz/Time/Duration/Uuid ↔ String** — formats or parses.
 - **Date ↔ Timestamp / TimestampTz** — midnight UTC or drop time component.
-- **Timestamp ↔ TimestampTz** — reinterprets the wall-clock ticks as UTC. PG converts via the session time zone; until a session-TZ concept lands, DatumIngest assumes UTC for both directions.
+- **Timestamp ↔ TimestampTz** — reinterprets the wall-clock ticks as UTC. PG converts via the session time zone; until a session-TZ concept lands, DatumV assumes UTC for both directions.
 - **Timestamp / TimestampTz → Time** — extract time-of-day.
 - **Date / Timestamp / TimestampTz → numeric** — epoch days or epoch seconds.
 - **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
@@ -504,7 +504,7 @@ actually carries.
 ### Timestamp Semantics and Divergence from PostgreSQL
 
 PostgreSQL `timestamp` (without time zone) and `timestamptz` (with time zone)
-both store **8 bytes of microsecond/tick precision** and DatumIngest's
+both store **8 bytes of microsecond/tick precision** and DatumV's
 `Timestamp` / `TimestampTz` follow that convention. A few practical points:
 
 - **Equality.** Two `TimestampTz` values for the same instant compare and
@@ -513,7 +513,7 @@ both store **8 bytes of microsecond/tick precision** and DatumIngest's
   byte-identical once stored. This matches PG.
 - **Bare-literal time zone for `TimestampTz`.** PG assumes the **session
   time zone** when parsing a bare `'2026-05-19 12:00'` into a `timestamptz`.
-  DatumIngest currently has no session-TZ concept and assumes **UTC** for
+  DatumV currently has no session-TZ concept and assumes **UTC** for
   bare literals. Literals with an explicit offset suffix
   (`'2026-05-19T12:00:00-07:00'`) work identically to PG. This is the
   one known PG-conformance gap; the workaround is to either include an
@@ -522,7 +522,7 @@ both store **8 bytes of microsecond/tick precision** and DatumIngest's
 - **`AT TIME ZONE`.** Kind-shifting operator — see [§ AT TIME
   ZONE](#at-time-zone) below.
 - **`timestamp ↔ timestamptz` casts.** PG converts via the session TZ;
-  DatumIngest assumes UTC for both directions. Explicit `AT TIME ZONE`
+  DatumV assumes UTC for both directions. Explicit `AT TIME ZONE`
   is the recommended path for the few cases where this matters.
 
 ### Transaction-Stable Temporal Constants
@@ -552,7 +552,7 @@ SELECT CURRENT_TIMESTAMP(3) AS ts
 SELECT CURRENT_TIMESTAMP AS a, CURRENT_TIMESTAMP AS b
 ```
 
-`now()` and `current_time()` are also batch-stable — they resolve to the same constant at plan time. `LOCALTIME` / `LOCALTIMESTAMP` behave identically to `CURRENT_TIME` / `CURRENT_TIMESTAMP` because DatumIngest has no session timezone setting (all times are UTC).
+`now()` and `current_time()` are also batch-stable — they resolve to the same constant at plan time. `LOCALTIME` / `LOCALTIMESTAMP` behave identically to `CURRENT_TIME` / `CURRENT_TIMESTAMP` because DatumV has no session timezone setting (all times are UTC).
 
 #### Non-SQL-standard time functions
 

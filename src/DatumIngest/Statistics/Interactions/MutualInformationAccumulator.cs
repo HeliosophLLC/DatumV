@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Interactions;
+namespace Heliosoph.DatumV.Statistics.Interactions;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Computes mutual information I(X;Y) = Σ P(x,y) log₂(P(x,y) / (P(x)P(y)))

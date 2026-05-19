@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
-/// Serializes a <see cref="DatumIngest.Model.DataKind.Mesh"/> blob to the
+/// Serializes a <see cref="Heliosoph.DatumV.Model.DataKind.Mesh"/> blob to the
 /// binary STL format — the universal 3D-printing exchange. STL carries no
 /// color, no per-vertex normals, no UVs; just triangle positions and a
 /// per-face normal. Every slicer (Bambu Studio, PrusaSlicer, Cura,
@@ -68,7 +68,7 @@ internal static class StlExporter
         // (that prefix is the ASCII-STL magic, and some slicers refuse to
         // parse binary STL whose header starts that way). Embed a short
         // generator tag instead.
-        string headerText = $"DatumIngest STL ({generator})";
+        string headerText = $"Heliosoph.DatumV STL ({generator})";
         int headerBytes = System.Math.Min(headerText.Length, HeaderSize);
         System.Text.Encoding.ASCII.GetBytes(headerText, 0, headerBytes, stl, 0);
         // Remaining bytes already zero from the array allocation.

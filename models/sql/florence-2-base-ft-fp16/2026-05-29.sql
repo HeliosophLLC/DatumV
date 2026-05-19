@@ -5,7 +5,7 @@
 -- Catalog id:  florence-2-base-ft-fp16   (models/catalog.json)
 -- License:     MIT
 -- Upstream:    https://huggingface.co/microsoft/Florence-2-base-ft
---              (Heliosoph fp16 ONNX export — onnx-community Florence-2-base-ft)
+--              (Heliosoph.DatumV fp16 ONNX export — onnx-community Florence-2-base-ft)
 --
 -- One model file (the fp16 build) drives several different tasks selected
 -- by a prompt token at runtime: short caption, detailed caption,

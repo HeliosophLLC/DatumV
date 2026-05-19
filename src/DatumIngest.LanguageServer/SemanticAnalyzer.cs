@@ -1,7 +1,7 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing.Ast;
 
 /// <summary>
 /// Walks a parsed AST and produces <see cref="DiagnosticSeverity.Warning"/>
@@ -15,7 +15,7 @@ internal sealed class SemanticAnalyzer
 
     /// <summary>
     /// Index of table names → (column name → DataKind string) for O(1) lookup.
-    /// Keys are case-insensitive because DatumIngest SQL is case-insensitive.
+    /// Keys are case-insensitive because Heliosoph.DatumV SQL is case-insensitive.
     /// </summary>
     private readonly Dictionary<string, Dictionary<string, string>> _tableColumnTypes;
 

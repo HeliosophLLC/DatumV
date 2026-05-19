@@ -45,7 +45,7 @@ LICENSE.md              # Stability AI Community License
 
 `optimum-cli export onnx --model stabilityai/sdxl-turbo <output>` against a pinned toolchain. No LoRA fuse step — SDXL Turbo is the distilled base, not a fine-tune.
 
-Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-sdxl-turbo.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-sdxl-turbo.ps1) in the DatumIngest repo.
+Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-sdxl-turbo.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-sdxl-turbo.ps1) in the Heliosoph repo.
 
 **Precision note:** fp32 only. The `optimum 1.24` / `torch 2.4` / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models (NaN/Inf cascades through attention softmax + group norm). Same situation noted for [JuggernautXL Lightning](https://huggingface.co/Heliosoph/juggernaut-xl-lightning-onnx). Revisit fp16 when a confirmed working toolchain exists.
 

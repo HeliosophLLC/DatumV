@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// Infers a <see cref="Schema"/> from the first non-empty <see cref="RowBatch"/>.

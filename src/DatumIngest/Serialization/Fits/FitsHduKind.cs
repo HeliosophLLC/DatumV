@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// The kind of a FITS Header-Data Unit. Determined by the primary

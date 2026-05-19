@@ -1,7 +1,7 @@
-using DatumIngest.Data;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Data;
+namespace Heliosoph.DatumV.Tests.Data;
 
 /// <summary>
 /// Sync wrappers over the async <see cref="InProcessDatumDbCommand"/> /

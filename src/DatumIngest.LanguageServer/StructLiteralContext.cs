@@ -1,7 +1,7 @@
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower.Model;
 
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Detects when a cursor sits inside a <c>{ field: value, … }</c> struct

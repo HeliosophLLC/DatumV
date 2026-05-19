@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Assertion;
+namespace Heliosoph.DatumV.Functions.Scalar.Assertion;
 
 /// <summary>
 /// Per-kind sign predicates shared by <see cref="AssertPositiveFunction"/>

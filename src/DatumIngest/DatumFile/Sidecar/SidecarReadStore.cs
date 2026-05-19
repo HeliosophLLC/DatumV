@@ -3,7 +3,7 @@ using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Memory-mapped read-only view over a <c>.datum-blob</c> sidecar file. Returned

@@ -3,7 +3,7 @@
 #
 # microsoft/trocr-base-printed is a ViT-base encoder + RoBERTa-style
 # decoder for printed-text OCR. MIT licensed. After this script
-# completes the DatumIngest engine can register `models.trocr_printed_fp16`
+# completes the Heliosoph.DatumV engine can register `models.trocr_printed_fp16`
 # against the resulting fp16 ONNX files.
 #
 # We export fp32 first via optimum-cli and convert the encoder + merged
@@ -17,7 +17,7 @@
 #     doesn't hit that bug.
 #
 # Output layout — both precisions land in one folder so a single
-# Heliosoph repo (`Heliosoph/trocr-base-printed-onnx`) can serve both
+# Heliosoph.DatumV repo (`Heliosoph.DatumV/trocr-base-printed-onnx`) can serve both
 # variants. Catalog entries pick their precision via include glob:
 #   <OutputDirectory>\onnx\encoder_model.onnx
 #   <OutputDirectory>\onnx\encoder_model_fp16.onnx
@@ -111,7 +111,7 @@ foreach ($f in @($fp32Encoder, $fp32Decoder)) {
 }
 
 # 5. Cast to fp16. keep_io_types=True keeps inputs/outputs fp32 so the
-#    DatumIngest pipeline (image_to_tensor_chw on the host, decode_seq2seq
+#    Heliosoph.DatumV pipeline (image_to_tensor_chw on the host, decode_seq2seq
 #    over the encoder hidden states) doesn't have to know about fp16 at
 #    the wire boundary — only the internal weights and activations run in
 #    half precision.
@@ -142,7 +142,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 6. Copy the fp32 ONNX files into the onnx/ subdir alongside the fp16
-#    siblings. Heliosoph bundles both precisions in one repo for
+#    siblings. Heliosoph.DatumV bundles both precisions in one repo for
 #    distribution symmetry — separate catalog entries pick which they
 #    want via include glob. The non-merged decoder_model.onnx is dropped
 #    (the merged form supersedes it for runtime use; keeping both would

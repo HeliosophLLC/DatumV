@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Detects the delimiter character from file content, options, or extension.

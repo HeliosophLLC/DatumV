@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Uuid;
+namespace Heliosoph.DatumV.Functions.Scalar.Uuid;
 
 /// <summary>
 /// Returns the version number of an RFC 9562 UUID, or NULL for non-RFC 9562 variants.

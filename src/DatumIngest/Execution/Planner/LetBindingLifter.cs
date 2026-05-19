@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Helpers for the "lift LET bindings below WHERE" planner pass that surfaces

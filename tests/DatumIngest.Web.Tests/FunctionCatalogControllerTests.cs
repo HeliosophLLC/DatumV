@@ -1,13 +1,13 @@
-using DatumIngest.Catalog;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Web.Api;
-using DatumIngest.Web.Dtos.Functions;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Web.Api;
+using Heliosoph.DatumV.Web.Dtos.Functions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DatumIngest.Web.Tests;
+namespace Heliosoph.DatumV.Web.Tests;
 
 /// <summary>
 /// Direct tests against <see cref="FunctionCatalogController"/>, using a
@@ -20,7 +20,7 @@ public sealed class FunctionCatalogControllerTests
     private static FunctionCatalogController CreateController()
     {
         ServiceCollection services = new();
-        services.AddDatumIngest();
+        services.AddDatumV();
         ServiceProvider sp = services.BuildServiceProvider();
         Pool pool = sp.GetRequiredService<Pool>();
         TableCatalog catalog = new(pool);
@@ -254,7 +254,7 @@ public sealed class FunctionCatalogControllerTests
     private static async Task<TableCatalog> CreateCatalogWithUdfs(params string[] createStatements)
     {
         ServiceCollection services = new();
-        services.AddDatumIngest();
+        services.AddDatumV();
         ServiceProvider sp = services.BuildServiceProvider();
         Pool pool = sp.GetRequiredService<Pool>();
         TableCatalog catalog = new(pool);

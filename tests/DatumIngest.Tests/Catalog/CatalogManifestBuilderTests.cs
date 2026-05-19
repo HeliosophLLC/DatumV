@@ -1,15 +1,15 @@
-using DatumIngest.Catalog;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar;
-using DatumIngest.Functions.Scalar.Arrays;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Functions.Scalar.Strings;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar;
+using Heliosoph.DatumV.Functions.Scalar.Arrays;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Functions.Scalar.Strings;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="CatalogManifestBuilder"/> — verifies that scalar
@@ -99,7 +99,7 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         FunctionRegistry functions = new();
         functions.RegisterScalar<UpperFunction>();
-        functions.RegisterScalar<DatumIngest.Functions.InferFunction>();
+        functions.RegisterScalar<Heliosoph.DatumV.Functions.InferFunction>();
 
         LanguageServerManifest manifest = CatalogManifestBuilder.Build(catalog, functions);
 

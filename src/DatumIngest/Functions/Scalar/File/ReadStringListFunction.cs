@@ -1,11 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// <c>read_string_list(path String) → Array&lt;String&gt;</c>. Reads a JSON

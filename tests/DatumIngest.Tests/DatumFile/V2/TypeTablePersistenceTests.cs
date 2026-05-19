@@ -1,10 +1,10 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// End-to-end persistence tests for the v5 struct type table. Each test

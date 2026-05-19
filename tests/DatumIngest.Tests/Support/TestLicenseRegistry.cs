@@ -1,6 +1,6 @@
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.Tests.Support;
+namespace Heliosoph.DatumV.Tests.Support;
 
 /// <summary>
 /// In-memory <see cref="ILicenseRegistry"/> for tests that fabricate

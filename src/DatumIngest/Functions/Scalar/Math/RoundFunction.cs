@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Math;
+namespace Heliosoph.DatumV.Functions.Scalar.Math;
 
 /// <summary>
 /// Rounds a numeric value to the specified number of decimal places (default 0).

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// An <see cref="OutputDescriptor"/> backed by an in-memory stream.

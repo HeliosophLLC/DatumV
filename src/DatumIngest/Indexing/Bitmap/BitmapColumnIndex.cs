@@ -1,7 +1,7 @@
 using System.IO.MemoryMappedFiles;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.Bitmap;
+namespace Heliosoph.DatumV.Indexing.Bitmap;
 
 /// <summary>
 /// A bitmap index for a single column, storing one compressed bitset per distinct value
@@ -521,7 +521,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// </summary>
     /// <remarks>
     /// Two coercion paths: numeric widening (via <see cref="DataValue.CoerceToKind"/>) and
-    /// String-parsing (via <see cref="DatumIngest.Model.TypeCoercion.TryCoerceString"/>). The
+    /// String-parsing (via <see cref="Heliosoph.DatumV.Model.TypeCoercion.TryCoerceString"/>). The
     /// String path is what lets a query like <c>WHERE date_col = '2026-01-02'</c> hit the
     /// bitmap pruner — the parsed literal is a String DataValue, but the bitmap dictionary
     /// is keyed on Date. When the string can't be parsed as the target kind, the original

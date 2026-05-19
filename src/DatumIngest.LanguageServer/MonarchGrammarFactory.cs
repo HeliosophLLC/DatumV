@@ -1,9 +1,9 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
-/// Builds the Monarch grammar definition for the DatumIngest SQL dialect.
+/// Builds the Monarch grammar definition for the Heliosoph.DatumV SQL dialect.
 /// Monarch is Monaco Editor's built-in client-side tokenizer format; the
 /// resulting object is serialized to JSON and used by the browser to provide
 /// syntax highlighting without a server round-trip.

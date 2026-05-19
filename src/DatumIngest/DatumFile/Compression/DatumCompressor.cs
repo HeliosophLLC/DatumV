@@ -2,7 +2,7 @@ using System.Buffers;
 using System.IO.Compression;
 using ZstdSharp;
 
-namespace DatumIngest.DatumFile.Compression;
+namespace Heliosoph.DatumV.DatumFile.Compression;
 
 /// <summary>
 /// Compresses and decompresses column page payloads using the codec identified

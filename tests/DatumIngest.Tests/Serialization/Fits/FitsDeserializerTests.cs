@@ -1,9 +1,9 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Fits;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Fits;
 
-namespace DatumIngest.Tests.Serialization.Fits;
+namespace Heliosoph.DatumV.Tests.Serialization.Fits;
 
 /// <summary>
 /// Integration tests for <see cref="FitsDeserializer"/>: the ingest-path

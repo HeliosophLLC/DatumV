@@ -6,9 +6,9 @@ import {
 import type {
   IStreamHub,
   IStreamHubClient,
-} from './generated/hubs/TypedSignalR.Client/DatumIngest.Web.Hubs';
+} from './generated/hubs/TypedSignalR.Client/Heliosoph.DatumV.Web.Hubs';
 // The codegen emits these as `*Dto` types (matching the C# DTO names in
-// DatumIngest.Web.Hubs/ModelDownloadDtos.cs). Alias them to the
+// Heliosoph.DatumV.Web.Hubs/ModelDownloadDtos.cs). Alias them to the
 // suffix-free names that downstream consumers already use, so the file
 // rename + DTO suffix don't leak past this boundary.
 import type {
@@ -36,7 +36,7 @@ import type {
   DatasetTableIngestedDto as DatasetTableIngested,
   DatasetInstalledDto as DatasetInstalled,
   DatasetDownloadFailedDto as DatasetDownloadFailed,
-} from './generated/hubs/DatumIngest.Web.Hubs';
+} from './generated/hubs/Heliosoph.DatumV.Web.Hubs';
 export type {
   ModelDownloadStarted,
   ModelDownloadProgress,

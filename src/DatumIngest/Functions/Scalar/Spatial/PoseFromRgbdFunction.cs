@@ -1,15 +1,15 @@
 using System.Runtime.InteropServices;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using OpenCvSharp;
 using OpenCvSharp.Features2D;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
 /// <c>pose_from_rgbd(prev_image Image, prev_depth Float32[], curr_image Image,
@@ -21,7 +21,7 @@ namespace DatumIngest.Functions.Scalar.Spatial;
 /// <remarks>
 /// <para>
 /// <strong>Output frame.</strong> The 16-element Float32 array is a 4×4
-/// row-major matrix in the <see cref="DatumIngest.Model.Spatial.PointCloudCoordinateFrame.CameraOpenGl"/>
+/// row-major matrix in the <see cref="Heliosoph.DatumV.Model.Spatial.PointCloudCoordinateFrame.CameraOpenGl"/>
 /// frame — the same frame the depth-to-PointCloud constructors emit. The
 /// returned pose composes directly: <c>pc_transform(curr_cloud, pose)</c>
 /// lands curr_cloud's points in prev_cloud's coordinate system, ready for

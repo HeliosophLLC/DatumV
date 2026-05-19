@@ -1,6 +1,6 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 /// <summary>
 /// Single source of truth for "where do this dataset's files live on disk?"

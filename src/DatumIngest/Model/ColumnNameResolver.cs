@@ -1,7 +1,7 @@
-using DatumIngest.Execution;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Derives output column names for SELECT expressions and resolves collisions

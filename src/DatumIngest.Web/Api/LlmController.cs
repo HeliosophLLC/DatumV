@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Web.Llm;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Web.Llm;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 [ApiController]
 [Route("api/llm")]

@@ -1,14 +1,14 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
 /// <c>point_cloud_from_depth_orthographic_with_confidence(color Image, depth Float32[], confidence Float32[], fov_deg Float32, min_confidence Float32) → PointCloud</c>.

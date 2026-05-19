@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Audio;
+namespace Heliosoph.DatumV.Functions.Audio;
 
 /// <summary>
 /// Helpers for constructing <see cref="DataValue"/>s of <see cref="DataKind.Audio"/>

@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Lsp;
+namespace Heliosoph.DatumV.Web.Dtos.Lsp;
 
 /// <summary>
 /// Request payload for SQL-position language endpoints (complete, hover,

@@ -205,7 +205,7 @@ function MeshRenderer({ decoded }: { decoded: DecodedMesh }) {
  * vertices + indices into typed arrays sized for Three.js
  * BufferAttributes.
  *
- * Header layout (matches DatumIngest.Model.Spatial.MeshHeader, little-endian):
+ * Header layout (matches Heliosoph.DatumV.Model.Spatial.MeshHeader, little-endian):
  *   byte  0    : version (= 1)
  *   byte  1    : flags (bit 0 = HasColor, 1 = HasNormals, 2 = HasUVs, 3 = HasTexture)
  *   byte  2    : coordinate frame

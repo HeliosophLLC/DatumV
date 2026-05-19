@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Container for per-table manifests within a single source file.

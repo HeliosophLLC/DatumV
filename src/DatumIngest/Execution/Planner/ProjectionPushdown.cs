@@ -1,13 +1,13 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Builds the set of column references a statement touches across every clause and
 /// projects that set down to the per-alias subset needed at scan time. The planner
 /// then ships the per-alias <c>requiredColumns</c> hint to each
-/// <see cref="DatumIngest.Catalog.ITableProvider"/> so it can skip materialising
+/// <see cref="Heliosoph.DatumV.Catalog.ITableProvider"/> so it can skip materialising
 /// columns the query never reads.
 /// </summary>
 internal static class ProjectionPushdown

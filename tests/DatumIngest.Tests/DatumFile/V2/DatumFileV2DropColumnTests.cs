@@ -1,9 +1,9 @@
-using DatumIngest.DatumFile.V2;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// PR4 tests for soft-drop column. Cover the round-trip (drop → re-open
@@ -154,10 +154,10 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
         string path = WriteThreeColumnFile("drop_provider.datum");
         DatumFileWriterV2.DropColumn(path, "b");
 
-        DatumIngest.Catalog.TableDescriptor descriptor = new("t", path);
-        using DatumIngest.Catalog.Providers.DatumFileTableProviderV2 provider = new(descriptor, new Pool(new PoolBacking()));
+        Heliosoph.DatumV.Catalog.TableDescriptor descriptor = new("t", path);
+        using Heliosoph.DatumV.Catalog.Providers.DatumFileTableProviderV2 provider = new(descriptor, new Pool(new PoolBacking()));
 
-        DatumIngest.Model.Schema schema = provider.GetSchema();
+        Heliosoph.DatumV.Model.Schema schema = provider.GetSchema();
         Assert.Equal(2, schema.Columns.Count);
         Assert.Equal(["a", "c"], schema.Columns.Select(c => c.Name));
     }
@@ -171,7 +171,7 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
         // because the surviving String column still references the
         // sidecar.
         string datumPath = Path.Combine(_tempDir, "drop_with_sidecar.datum");
-        string sidecarPath = datumPath + DatumIngest.DatumFile.Sidecar.SidecarConstants.FileExtension;
+        string sidecarPath = datumPath + Heliosoph.DatumV.DatumFile.Sidecar.SidecarConstants.FileExtension;
 
         ColumnDescriptorV2 idCol = new("id", DataKind.Int32, EncoderKind.FixedWidth, IsNullable: false);
         ColumnDescriptorV2 nameCol = new("name", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
@@ -190,7 +190,7 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
             batch.Add(row);
         }
 
-        using (DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
+        using (Heliosoph.DatumV.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
         {
             using FileStream fs = new(datumPath, FileMode.Create, FileAccess.ReadWrite, FileShare.Read);
             using DatumFileWriterV2 writer = new(fs, sidecar);
@@ -210,9 +210,9 @@ public sealed class DatumFileV2DropColumnTests : ServiceTestBase, IAsyncLifetime
         // wrote a new .datum footer; the .datum-blob is untouched).
         Assert.True(File.Exists(sidecarPath));
 
-        using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource =
-            DatumIngest.DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
-        DatumIngest.DatumFile.Sidecar.SidecarRegistry registry = new();
+        using Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore sidecarSource =
+            Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarRegistry registry = new();
         registry.Register(sidecarSource);
 
         // Read the surviving String column at footer index 1.

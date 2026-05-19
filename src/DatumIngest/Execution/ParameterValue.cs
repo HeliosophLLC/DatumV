@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// A bound value for a parameter referenced by a SQL query as <c>$name</c>.
@@ -25,7 +25,7 @@ public abstract record ParameterValue;
 /// A scalar parameter value already encoded as a <see cref="DataValue"/>.
 /// Primitive kinds (Int8/16/32/64, UInt8, Float32/64, String, Boolean,
 /// Date, Time, Timestamp, Null) are constructed by the caller before
-/// binding and pass through unchanged into a <see cref="DatumIngest.Parsing.Ast.LiteralExpression"/>.
+/// binding and pass through unchanged into a <see cref="Heliosoph.DatumV.Parsing.Ast.LiteralExpression"/>.
 /// </summary>
 /// <param name="Value">The pre-built scalar.</param>
 public sealed record InlineParameter(DataValue Value) : ParameterValue;

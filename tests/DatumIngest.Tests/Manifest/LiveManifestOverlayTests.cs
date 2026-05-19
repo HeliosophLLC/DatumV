@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Indexing;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// PR14h: tests that live column statistics derived from a SourceIndex's

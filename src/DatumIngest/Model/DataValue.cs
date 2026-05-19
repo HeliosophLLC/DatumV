@@ -2,9 +2,9 @@ using System.IO.Hashing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.
@@ -509,7 +509,7 @@ public readonly partial struct DataValue : IEquatable<DataValue>
     /// Backs <c>octet_length(text)</c> and the per-tier fast path for
     /// <c>length(text)</c> on inline strings. Internal because the only
     /// consumers are the string-length function bodies and the
-    /// elider-emitted accessor branch in <see cref="DatumIngest.Execution.ExpressionEvaluator"/>;
+    /// elider-emitted accessor branch in <see cref="Heliosoph.DatumV.Execution.ExpressionEvaluator"/>;
     /// they live in this assembly so no public surface is required.
     /// </remarks>
     internal int StringUtf8ByteLength

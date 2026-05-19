@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <c>GROUP BY ALL</c> — projection-derived grouping that infers

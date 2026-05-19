@@ -1,6 +1,6 @@
-namespace DatumIngest.Parsing;
+namespace Heliosoph.DatumV.Parsing;
 
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
 /// <summary>
 /// The result of parsing SQL text, containing either a valid AST, a partial

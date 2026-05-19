@@ -4,7 +4,7 @@ using System.Collections.Concurrent;
 using System.IO.Hashing;
 using System.Security.Cryptography;
 
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Writes Large Binary Objects (images, byte arrays, future video, etc.) to a

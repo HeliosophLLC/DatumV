@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Evaluates whether a predicate expression is provably unsatisfiable given

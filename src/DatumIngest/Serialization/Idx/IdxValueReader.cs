@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
-using DatumIngest.Functions.Image;
+using Heliosoph.DatumV.Functions.Image;
 
-namespace DatumIngest.Serialization.Idx;
+namespace Heliosoph.DatumV.Serialization.Idx;
 
 /// <summary>
 /// Creates <see cref="DataValue"/> instances from raw IDX item bytes based on

@@ -1,10 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Lifts a chain of row-preserving column-adders (<see cref="ProjectOperator"/>

@@ -1,8 +1,8 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumIngest.Manifest.Insights;
+using Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Serializes and deserializes <see cref="SourceManifest"/> using System.Text.Json

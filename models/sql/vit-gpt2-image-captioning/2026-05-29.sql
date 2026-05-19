@@ -3,7 +3,7 @@
 -- ============================================================================
 --
 -- Catalog id:  vit-gpt2-image-captioning   (models/catalog.json)
--- Folder:      vit-gpt2-image-captioning   (Heliosoph/...-onnx repo contents)
+-- Folder:      vit-gpt2-image-captioning   (Heliosoph.DatumV/...-onnx repo contents)
 -- License:     Apache-2.0
 --
 -- Vision Transformer (ViT-base, 224×224) encoder feeding a GPT-2

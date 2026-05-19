@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR11d end-to-end tests for <c>UPDATE … FROM &lt;single-source&gt;</c>.

@@ -1,7 +1,7 @@
 #if POOL_DIAGNOSTICS
 using System.Diagnostics;
 
-namespace DatumIngest.Pooling;
+namespace Heliosoph.DatumV.Pooling;
 
 /// <summary>
 /// Diagnostic tracker for a <see cref="Model.DataValue"/> array that has passed through

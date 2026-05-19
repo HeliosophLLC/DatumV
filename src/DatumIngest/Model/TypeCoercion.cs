@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Implements the implicit numeric widening rules for the query engine type system.

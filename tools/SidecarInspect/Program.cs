@@ -1,8 +1,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
 
 if (args.Length < 1)
 {

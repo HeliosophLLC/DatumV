@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.GroupBy;
+namespace Heliosoph.DatumV.Execution.Operators.GroupBy;
 
 /// <summary>
 /// Encapsulates GROUP BY key evaluation and key-change detection for the

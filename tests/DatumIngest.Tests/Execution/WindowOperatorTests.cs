@@ -1,14 +1,14 @@
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Functions.Window;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Functions.Window;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="WindowOperator"/> covering partitioning, ordering,
@@ -293,7 +293,7 @@ public class WindowOperatorTests : ServiceTestBase
         cancellationTokenSource.Cancel();
 
         Pool pool = GetService<Pool>();
-        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog(), cancellationToken: cancellationTokenSource.Token);
+        ExecutionContext context = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog(), cancellationToken: cancellationTokenSource.Token);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(window, context));

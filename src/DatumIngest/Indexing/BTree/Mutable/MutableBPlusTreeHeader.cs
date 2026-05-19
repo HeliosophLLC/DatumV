@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.IO.Hashing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.BTree.Mutable;
+namespace Heliosoph.DatumV.Indexing.BTree.Mutable;
 
 /// <summary>
 /// One header slot of a <c>.datum-pkindex</c> file. The file has two slots

@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Static-abstract metadata interface for table-valued functions. Mirrors

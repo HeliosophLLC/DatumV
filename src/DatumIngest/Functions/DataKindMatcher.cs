@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Argument-kind matcher for <see cref="ParameterSpec"/> and
@@ -49,7 +49,7 @@ public abstract class DataKindMatcher
     /// lambda's AST.
     /// </summary>
     /// <param name="contextName">
-    /// Name of the <see cref="DatumIngest.Execution.Contexts.IFunctionContext"/>
+    /// Name of the <see cref="Heliosoph.DatumV.Execution.Contexts.IFunctionContext"/>
     /// the lambda body is scoped to. Used by the function resolver and the
     /// language server to determine which functions are callable inside
     /// the body. Pass <see langword="null"/> for an unscoped lambda (the

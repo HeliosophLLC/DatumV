@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {

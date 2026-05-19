@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Data;
+namespace Heliosoph.DatumV.Data;
 
 /// <summary>
 /// ADO.NET-style command. Holds the SQL text (or a pre-parsed
@@ -79,7 +79,7 @@ public sealed class InProcessDatumDbCommand : IDisposable
     /// <summary>
     /// Opens a reader over the prepared SQL. Multi-statement
     /// <see cref="CommandText"/> opens against a
-    /// <see cref="DatumIngest.Catalog.Plans.StatementBatch"/> (one result set per statement;
+    /// <see cref="Heliosoph.DatumV.Catalog.Plans.StatementBatch"/> (one result set per statement;
     /// advance with <see cref="InProcessDatumDbReader.NextResultAsync"/>);
     /// single-statement <see cref="CommandText"/> or a pre-parsed
     /// <see cref="Statement"/> opens against a single
@@ -132,7 +132,7 @@ public sealed class InProcessDatumDbCommand : IDisposable
     /// <summary>
     /// Builds and returns the <see cref="PreparedSql"/> without iterating
     /// it — either a <see cref="StatementPlan"/> (single statement) or
-    /// a <see cref="DatumIngest.Catalog.Plans.StatementBatch"/> (multi-statement
+    /// a <see cref="Heliosoph.DatumV.Catalog.Plans.StatementBatch"/> (multi-statement
     /// <see cref="CommandText"/>). Use for <c>EXPLAIN</c> — reading the
     /// plan's structure does not apply side effects.
     /// </summary>

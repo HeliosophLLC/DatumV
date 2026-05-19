@@ -393,7 +393,7 @@ $readme = @"
 TripoSR ONNX export -- reproducibility manifest
 ================================================
 
-Produced by:   scripts/export-triposr.ps1 (DatumIngest)
+Produced by:   scripts/export-triposr.ps1 (Heliosoph.DatumV)
 Date (UTC):    $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
 Model:         $ModelId   (HuggingFace Hub)
 Architecture:  $triposrRemote
@@ -416,7 +416,7 @@ How to recreate the ONNX files from scratch
   pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cu124
   git clone https://github.com/VAST-AI-Research/TripoSR.git
   cd TripoSR && git checkout $triposrCommit && cd ..
-  # then run the trace -- see scripts/export-triposr.ps1 in DatumIngest
+  # then run the trace -- see scripts/export-triposr.ps1 in Heliosoph.DatumV
 
 How to use the ONNX files at inference time
 -------------------------------------------
@@ -424,7 +424,7 @@ How to use the ONNX files at inference time
 2. Chunk a (res * res * res, 3) xyz grid (typically 256^3 in chunks of
    ~256K points) and run nerf.onnx per chunk, accumulating density into
    a [res, res, res] float array.
-3. Run marching cubes on the density grid on the host (DatumIngest's
+3. Run marching cubes on the density grid on the host (Heliosoph.DatumV's
    mesh_compute_* family) to extract vertices + indices.
 4. Optionally run nerf.onnx one more time at the vertex positions to
    read per-vertex color from the `color` output.
@@ -451,7 +451,7 @@ Remove-Item $pypiReqTemp, $torchReqTemp -ErrorAction SilentlyContinue
 
 # 6. Optional fp16 siblings. keep_io_types=True keeps the wire-boundary
 #    tensors (image / triplane / xyz / density / color) in fp32, so the
-#    DatumIngest inference layer doesn't need to know about half
+#    Heliosoph.DatumV inference layer doesn't need to know about half
 #    precision -- only internal weights/activations run in fp16.
 #    Matches the pattern in export-trocr-base-printed-fp16.ps1 +
 #    export-zoedepth.ps1.

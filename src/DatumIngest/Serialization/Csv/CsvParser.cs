@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Pure static CSV field parsing helpers. No state, no allocations in the fast path.

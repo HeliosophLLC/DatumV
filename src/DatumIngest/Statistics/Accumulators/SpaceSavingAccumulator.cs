@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
 /// <summary>
 /// Consolidated accumulator that produces <c>top_k</c>, <c>entropy</c>, and

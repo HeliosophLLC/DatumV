@@ -1,7 +1,7 @@
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.ModelLibrary;
+namespace Heliosoph.DatumV.Tests.ModelLibrary;
 
 /// <summary>
 /// URL-shape coverage for <see cref="HuggingFaceSourceClient"/>. The client
@@ -41,7 +41,7 @@ public sealed class HuggingFaceSourceClientTests
         HuggingFaceSourceClient client = NewClient(handler);
 
         HuggingFaceSource source = new(
-            Repo: "Heliosoph/LJ-Speech-Dataset",
+            Repo: "Heliosoph.DatumV/LJ-Speech-Dataset",
             Revision: "main",
             Include: ["*.tar.gz"],
             RepoType: "dataset");
@@ -50,7 +50,7 @@ public sealed class HuggingFaceSourceClientTests
 
         Assert.NotNull(handler.LastRequestUri);
         Assert.Equal(
-            "https://huggingface.co/api/datasets/Heliosoph/LJ-Speech-Dataset/tree/main?recursive=true",
+            "https://huggingface.co/api/datasets/Heliosoph.DatumV/LJ-Speech-Dataset/tree/main?recursive=true",
             handler.LastRequestUri!.AbsoluteUri);
     }
 
@@ -86,7 +86,7 @@ public sealed class HuggingFaceSourceClientTests
         HuggingFaceSourceClient client = NewClient(handler);
 
         HuggingFaceSource source = new(
-            Repo: "Heliosoph/LJ-Speech-Dataset",
+            Repo: "Heliosoph.DatumV/LJ-Speech-Dataset",
             Revision: "main",
             Include: ["a.bin"],
             RepoType: "dataset");
@@ -94,7 +94,7 @@ public sealed class HuggingFaceSourceClientTests
         IReadOnlyList<SourceFile> files = await client.ListFilesAsync(source, CancellationToken.None);
         Assert.Single(files);
 
-        string destPath = Path.Combine(Path.GetTempPath(), $"datumingest-hf-test-{Guid.NewGuid():N}.bin");
+        string destPath = Path.Combine(Path.GetTempPath(), $"datumv-hf-test-{Guid.NewGuid():N}.bin");
         try
         {
             await client.DownloadFileAsync(source, files[0], destPath, progress: null, CancellationToken.None);
@@ -105,7 +105,7 @@ public sealed class HuggingFaceSourceClientTests
         }
 
         Assert.Equal(
-            "https://huggingface.co/datasets/Heliosoph/LJ-Speech-Dataset/resolve/main/a.bin",
+            "https://huggingface.co/datasets/Heliosoph.DatumV/LJ-Speech-Dataset/resolve/main/a.bin",
             handler.LastRequestUri!.AbsoluteUri);
     }
 
@@ -126,7 +126,7 @@ public sealed class HuggingFaceSourceClientTests
 
         IReadOnlyList<SourceFile> files = await client.ListFilesAsync(source, CancellationToken.None);
 
-        string destPath = Path.Combine(Path.GetTempPath(), $"datumingest-hf-test-{Guid.NewGuid():N}.onnx");
+        string destPath = Path.Combine(Path.GetTempPath(), $"datumv-hf-test-{Guid.NewGuid():N}.onnx");
         try
         {
             await client.DownloadFileAsync(source, files[0], destPath, progress: null, CancellationToken.None);

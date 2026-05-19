@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 
-using DatumIngest.DatasetLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// Capturing <see cref="IDatasetDownloadProgressReporter"/> for tests.
-/// Mirrors <see cref="DatumIngest.Tests.Infra.TestDownloadProgressReporter"/>:
+/// Mirrors <see cref="Heliosoph.DatumV.Tests.Infra.TestDownloadProgressReporter"/>:
 /// exposes <see cref="WaitForTerminalAsync"/> so a test can block on a
 /// dataset install reaching a terminal state (success via
 /// <see cref="OnInstalledAsync"/>, failure via

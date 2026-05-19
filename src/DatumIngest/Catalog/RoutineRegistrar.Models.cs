@@ -1,13 +1,13 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 internal sealed partial class RoutineRegistrar
 {
@@ -33,7 +33,7 @@ internal sealed partial class RoutineRegistrar
     ///   <item><description>All other paths are resolved against the
     ///   host's model directory (taken from
     ///   <c>TableCatalog.Models.ModelDirectory</c>). Throws when no
-    ///   <see cref="DatumIngest.Models.ModelCatalog"/> is configured —
+    ///   <see cref="Heliosoph.DatumV.Models.ModelCatalog"/> is configured —
     ///   either supply <c>file://</c> or wire the model catalog before
     ///   issuing <c>CREATE MODEL</c>.</description></item>
     /// </list>
@@ -61,7 +61,7 @@ internal sealed partial class RoutineRegistrar
 
     public async Task ApplyCreateModelAsync(
         CreateModelStatement create,
-        DatumIngest.Execution.ExecutionContext context,
+        Heliosoph.DatumV.Execution.ExecutionContext context,
         string? sourceText = null,
         bool suppressSave = false)
     {
@@ -346,7 +346,7 @@ internal sealed partial class RoutineRegistrar
                 $"'RESET CALIBRATION {ModelsSchema}.{reset.Name}'.");
         }
 
-        DatumIngest.Models.Calibration.CalibrationRegistry? registry =
+        Heliosoph.DatumV.Models.Calibration.CalibrationRegistry? registry =
             _catalog.Models?.CalibrationRegistry;
         bool removed = registry?.Remove(reset.Name) ?? false;
 

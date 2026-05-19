@@ -1,28 +1,28 @@
 ﻿using System.Text.Json.Serialization;
-using DatumIngest.Catalog;
-using DatumIngest.Inference;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
-using DatumIngest.Models.Python;
-using DatumIngest.Pooling;
-using DatumIngest.Web.Catalog;
-using DatumIngest.Web.Compute;
-using DatumIngest.Web.Conversation;
-using DatumIngest.Web.Execution;
-using DatumIngest.Web.Hubs;
-using DatumIngest.Web.Llm;
-using DatumIngest.Web.Lsp;
-using DatumIngest.Web.ModelLibrary;
-using DatumIngest.Web.Settings;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
+using Heliosoph.DatumV.Models.Python;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Web.Catalog;
+using Heliosoph.DatumV.Web.Compute;
+using Heliosoph.DatumV.Web.Conversation;
+using Heliosoph.DatumV.Web.Execution;
+using Heliosoph.DatumV.Web.Hubs;
+using Heliosoph.DatumV.Web.Llm;
+using Heliosoph.DatumV.Web.Lsp;
+using Heliosoph.DatumV.Web.ModelLibrary;
+using Heliosoph.DatumV.Web.Settings;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 public static class WebHostExtensions
 {
-    public static IServiceCollection AddDatumIngestWeb(this IServiceCollection services, WebHostOptions options)
+    public static IServiceCollection AddDatumVWeb(this IServiceCollection services, WebHostOptions options)
     {
         services.AddSingleton(options);
 
@@ -44,7 +44,7 @@ public static class WebHostExtensions
             // Pulls in PoolBacking (singleton) + Pool (transient) +
             // FunctionRegistry etc. that TableCatalog needs. Idempotent
             // re-registration is safe but we only call it on the local path.
-            services.AddDatumIngest();
+            services.AddDatumV();
 
             string catalogRootPath = options.CatalogRootPath;
             bool registerBuiltinModels = options.RegisterBuiltinModels;
@@ -67,7 +67,7 @@ public static class WebHostExtensions
                 // Settings-side override (set via the Settings UI, persisted
                 // to settings.json) beats the host-config value. If neither
                 // is set, ModelCatalog falls back to $DATUM_MODELS env var,
-                // then to %LOCALAPPDATA%/DatumIngest/models.
+                // then to %LOCALAPPDATA%/Heliosoph.DatumV/models.
                 string? effectiveModelsDir =
                     StartupSettingsLoader.LoadModelsDirectory(catalogRootPath)
                     ?? modelsDirectory;
@@ -188,19 +188,19 @@ public static class WebHostExtensions
 
         // Model catalog: manifest reader, HF Hub HTTP client, license
         // acceptance, and the download orchestrator. AddModelLibrary lives in
-        // the DatumIngest core assembly — tests and CLI consumers can pull
+        // the Heliosoph.DatumV core assembly — tests and CLI consumers can pull
         // the same surface without dragging in the Web project. The Web host
         // then registers a SignalR-backed progress reporter that bridges
         // core download events to connected hub clients.
         ModelLibraryOptions modelLibraryOptions = new(
             CatalogRootPath: options.CatalogRootPath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DatumIngest"),
+                "Heliosoph.DatumV"),
             ModelsDirectory: options.ModelsDirectory
                 ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
                 ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "DatumIngest", "models"));
+                    "Heliosoph.DatumV", "models"));
         services.AddModelLibrary(modelLibraryOptions);
 
         services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
@@ -222,7 +222,7 @@ public static class WebHostExtensions
             // download + install pipeline. Lives inside the local-catalog
             // block because DatasetDownloadService.RunIngestJobAsync needs
             // the engine's Pool + IEnumerable<IFileFormat> registered by
-            // AddDatumIngest above — and SaaS hosts don't have a local
+            // AddDatumV above — and SaaS hosts don't have a local
             // catalog to land .datum files into anyway. Replaces the
             // default NullDatasetDownloadProgressReporter (registered
             // inside AddDatasetLibrary) with a SignalR-backed adapter,
@@ -230,7 +230,7 @@ public static class WebHostExtensions
             // settings.json-backed one so user preferences flow through.
             string datasetCatalogRoot = options.CatalogRootPath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DatumIngest");
+                "Heliosoph.DatumV");
             // Settings-side override (set via the Settings UI, persisted to
             // settings.json) beats the host-config value. If neither is
             // set, the cascade falls through to $DATUM_DATASETS and the
@@ -274,13 +274,13 @@ public static class WebHostExtensions
         services.AddOpenApiDocument(s =>
         {
             s.DocumentName = "v1";
-            s.Title = "DatumIngest.Web";
+            s.Title = "Heliosoph.DatumV.Web";
             s.Version = "v1";
         });
         return services;
     }
 
-    public static WebApplication UseDatumIngestWeb(this WebApplication app)
+    public static WebApplication UseDatumVWeb(this WebApplication app)
     {
         app.UseStaticFiles();
         app.UseOpenApi(c => c.Path = "/openapi/{documentName}.json");

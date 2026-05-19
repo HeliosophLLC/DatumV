@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Registries;
+namespace Heliosoph.DatumV.Catalog.Registries;
 
 /// <summary>
 /// A registered procedural-batch macro. Unlike <see cref="UdfDescriptor"/>,

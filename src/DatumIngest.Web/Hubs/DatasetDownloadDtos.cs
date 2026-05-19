@@ -1,9 +1,9 @@
 using Tapper;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 // Wire-format DTOs for dataset-download lifecycle events. Mirror 1:1 of
-// the core records in DatumIngest.DatasetLibrary, but carry
+// the core records in Heliosoph.DatumV.DatasetLibrary, but carry
 // [TranspilationSource] so the TypedSignalR TypeScript codegen emits
 // matching interfaces for the React client. Conversion happens at the
 // host boundary in SignalRDatasetDownloadProgressReporter — core records

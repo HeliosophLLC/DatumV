@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog;
-using DatumIngest.Diagnostics;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Scans rows in the order defined

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Per-column adaptive cache that remembers the last-successful date/time format

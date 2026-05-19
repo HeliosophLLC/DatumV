@@ -94,7 +94,7 @@ Supported table sources:
 
 ## Virtual Schemas
 
-DatumIngest supports **schema-qualified table references** using `schema_name.table_name` syntax. Two virtual schemas are built in: `information_schema` (PostgreSQL-compatible metadata) and `datum_catalog` (DatumIngest-specific catalog views). Virtual schemas are read-only — DDL/DML statements against them are rejected.
+DatumV supports **schema-qualified table references** using `schema_name.table_name` syntax. Two virtual schemas are built in: `information_schema` (PostgreSQL-compatible metadata) and `datum_catalog` (DatumV-specific catalog views). Virtual schemas are read-only — DDL/DML statements against them are rejected.
 
 ### Schema-qualified syntax
 
@@ -145,7 +145,7 @@ ORDER BY table_schema, table_name
 | `ordinal_position` | Int32 | 1-based column position |
 | `data_type` | String | SQL-standard / PostgreSQL type name (`'character varying'`, `'integer'`, `'real'`, `'jsonb'`, `'ARRAY'` for typed arrays, `'USER-DEFINED'` for engine kinds without a PG analog) |
 | `is_nullable` | String | `'YES'` or `'NO'` |
-| `data_kind` | String | DatumIngest-native `DataKind` name (`'String'`, `'Int32'`, `'Float32'`, `'Json'`, …) — the exact engine kind regardless of how `data_type` summarises it |
+| `data_kind` | String | DatumV-native `DataKind` name (`'String'`, `'Int32'`, `'Float32'`, `'Json'`, …) — the exact engine kind regardless of how `data_type` summarises it |
 | `character_maximum_length` | Int32 (nullable) | Declared `N` for `VARCHAR(N)` / `CHAR(N)`; `NULL` for bare strings and non-string kinds |
 | `is_blank_padded` | Boolean | `true` when the column was declared `CHAR(N)` (short values right-padded with spaces); `false` for `VARCHAR(N)`, `TEXT`, and every non-string kind |
 
@@ -244,7 +244,7 @@ SELECT schema_name FROM information_schema.schemata
 
 ### `datum_catalog`
 
-DatumIngest-specific metadata views exposing providers, functions, per-column statistics, indexes, and column interactions from manifests.
+DatumV-specific metadata views exposing providers, functions, per-column statistics, indexes, and column interactions from manifests.
 
 #### `datum_catalog.providers`
 
@@ -300,7 +300,7 @@ ORDER BY ordinal_position
 |--------|------|----------|-------------|
 | `table_name` | String | NO | Source table name |
 | `column_name` | String | NO | Column name |
-| `data_type` | String | NO | DatumIngest `DataKind` name |
+| `data_type` | String | NO | DatumV `DataKind` name |
 | `row_count` | Int64 | NO | Total row count from manifest |
 | `distinct_count` | Int64 | NO | Estimated distinct values (HyperLogLog) |
 | `null_ratio` | Float64 | YES | Fraction of null values |

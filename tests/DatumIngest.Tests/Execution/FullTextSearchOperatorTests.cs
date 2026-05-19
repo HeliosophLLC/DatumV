@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="FullTextSearchOperator"/>: AND-of-terms matching,

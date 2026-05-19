@@ -1,8 +1,8 @@
 using System.IO.Hashing;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// <see cref="MediaKindHandler"/> for audio bags: FLAC, WAV, OGG, MP3 entries.

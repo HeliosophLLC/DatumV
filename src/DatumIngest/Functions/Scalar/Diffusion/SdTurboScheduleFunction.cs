@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Diffusion;
+namespace Heliosoph.DatumV.Functions.Scalar.Diffusion;
 
 /// <summary>
 /// <c>sd_turbo_schedule(steps Int32) → Struct{sigmas: Float32[], timesteps: Float32[]}</c>.

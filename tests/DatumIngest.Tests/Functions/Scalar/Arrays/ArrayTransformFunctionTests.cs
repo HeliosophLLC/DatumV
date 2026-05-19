@@ -1,14 +1,14 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Arrays;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Arrays;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Tests for <see cref="ArrayTransformFunction"/>: the
@@ -193,9 +193,9 @@ public sealed class ArrayTransformFunctionTests : ServiceTestBase
         Arena arena = pool.Backing.RentArena();
         MemoryAccountant accountant = new();
         VariableScope scope = new(accountant);
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(
             store: arena, accountant: accountant);
-        DatumIngest.Execution.ExecutionContext scoped = context.Derive(
+        Heliosoph.DatumV.Execution.ExecutionContext scoped = context.Derive(
             variableScope: scope, variableStore: arena);
         ExpressionEvaluator evaluator = scoped.CreateEvaluator();
         EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);

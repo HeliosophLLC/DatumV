@@ -1,7 +1,7 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Ordering;
+namespace Heliosoph.DatumV.Execution.Operators.Ordering;
 
 /// <summary>
 /// K-way merge of pre-sorted runs into a single sorted output stream. Uses a

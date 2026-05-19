@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Discriminator for the type of value stored in a <see cref="DataValue"/>.
@@ -37,7 +37,7 @@ public enum DataKind : byte
     /// Sits alongside <see cref="Type"/> in the meta/sentinel block because
     /// Lambda is a structural kind (executable computation) rather than a
     /// domain value — the carrier is a managed <c>LambdaValue</c> object
-    /// held in the <see cref="DatumIngest.Functions.ValueRef"/>'s
+    /// held in the <see cref="Heliosoph.DatumV.Functions.ValueRef"/>'s
     /// materialised slot; the <see cref="DataValue"/> form is a null
     /// carrier of kind <c>Lambda</c> with no inline metadata. Functions
     /// that consume lambdas declare
@@ -275,7 +275,7 @@ public enum DataKind : byte
     /// both are procedurally-constructed value types (not encoded-media
     /// bytes like Image/Audio/Video). Carrier is a managed
     /// <c>DrawingPayload</c> object held in the
-    /// <see cref="DatumIngest.Functions.ValueRef"/>'s materialised slot;
+    /// <see cref="Heliosoph.DatumV.Functions.ValueRef"/>'s materialised slot;
     /// the <see cref="DataValue"/> form is a null carrier of kind
     /// <c>Drawing</c> with no inline metadata. The payload is a small
     /// algebraic record tree (Group / Transformed / Shape / Text /
@@ -284,7 +284,7 @@ public enum DataKind : byte
     /// </para>
     /// <para>
     /// <strong>Row-scoped</strong> in the current implementation:
-    /// <see cref="DatumIngest.Functions.ValueRef.ToDataValue"/> throws when
+    /// <see cref="Heliosoph.DatumV.Functions.ValueRef.ToDataValue"/> throws when
     /// the payload is a Drawing — same posture as <see cref="Lambda"/>.
     /// Persisting a Drawing to disk is plausible (the payload is a tree
     /// of small records with embeddable Image leaves) but isn't needed

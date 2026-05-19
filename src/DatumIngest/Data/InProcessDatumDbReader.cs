@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Data;
+namespace Heliosoph.DatumV.Data;
 
 /// <summary>
 /// ADO.NET-style forward-only reader over a <see cref="PreparedSql"/>'s

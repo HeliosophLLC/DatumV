@@ -1,13 +1,13 @@
-using DatumIngest.DatasetLibrary;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
-// IManifestStore exists in both DatumIngest.DatasetLibrary and
-// DatumIngest.ModelLibrary (each catalog owns its own); this controller
+// IManifestStore exists in both Heliosoph.DatumV.DatasetLibrary and
+// Heliosoph.DatumV.ModelLibrary (each catalog owns its own); this controller
 // reaches the dataset one.
-using IManifestStore = DatumIngest.DatasetLibrary.IManifestStore;
+using IManifestStore = Heliosoph.DatumV.DatasetLibrary.IManifestStore;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 [ApiController]
 [Route("api/dataset-catalog")]

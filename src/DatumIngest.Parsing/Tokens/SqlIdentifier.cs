@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace DatumIngest.Parsing.Tokens;
+namespace Heliosoph.DatumV.Parsing.Tokens;
 
 /// <summary>
 /// Utilities for determining whether a SQL identifier requires quoting

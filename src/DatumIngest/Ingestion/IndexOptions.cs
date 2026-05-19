@@ -1,6 +1,6 @@
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// Column selection policy for <see cref="IndexOptions"/>.
@@ -28,7 +28,7 @@ public abstract record IndexColumnSelection
 }
 
 /// <summary>
-/// Memory/throughput knobs for <see cref="Indexer.IndexAsync(DatumIngest.Serialization.DatumFileDescriptor, DatumIngest.Serialization.OutputDescriptor, IndexOptions, System.Threading.CancellationToken)"/>.
+/// Memory/throughput knobs for <see cref="Indexer.IndexAsync(Heliosoph.DatumV.Serialization.DatumFileDescriptor, Heliosoph.DatumV.Serialization.OutputDescriptor, IndexOptions, System.Threading.CancellationToken)"/>.
 /// </summary>
 /// <remarks>
 /// Defaults are tuned for single-tenant bulk indexing. For multi-tenant servers that serve

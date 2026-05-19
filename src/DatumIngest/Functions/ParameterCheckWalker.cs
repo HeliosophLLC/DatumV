@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Canonicalises a parsed SQL <see cref="Expression"/> from a parameter's

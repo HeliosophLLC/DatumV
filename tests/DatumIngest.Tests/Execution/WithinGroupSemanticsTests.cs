@@ -1,9 +1,9 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end coverage for the per-aggregate <c>WITHIN GROUP</c>
@@ -16,7 +16,7 @@ public sealed class WithinGroupSemanticsTests : ServiceTestBase
     private async Task<List<Row>> RunAsync(TableCatalog catalog, string sql)
     {
         StatementPlan plan = catalog.Plan(sql);
-        DatumIngest.Execution.ExecutionContext ctx =
+        Heliosoph.DatumV.Execution.ExecutionContext ctx =
             CreateExecutionContext(catalog: catalog);
         List<Row> result = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan, ctx.CancellationToken))

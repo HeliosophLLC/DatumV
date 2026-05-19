@@ -1,8 +1,8 @@
-using DatumIngest.Ingestion.Sampling;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Ingestion.Sampling;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// The result of ingesting a single source file into a <c>.datum</c> file.

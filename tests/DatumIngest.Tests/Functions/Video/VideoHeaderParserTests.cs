@@ -1,7 +1,7 @@
-using DatumIngest.Functions.Video;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Video;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Video;
+namespace Heliosoph.DatumV.Tests.Functions.Video;
 
 /// <summary>
 /// Tests for the Sdcb.FFmpeg-based video header parser and the inline-metadata

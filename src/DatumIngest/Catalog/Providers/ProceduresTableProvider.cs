@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Virtual table that surfaces the contents of a <see cref="ProcedureRegistry"/>
@@ -139,7 +139,7 @@ public sealed class ProceduresTableProvider : NonSeekableTableProviderBase
             if (p.Default is not null)
             {
                 sb.Append(" = ");
-                sb.Append(DatumIngest.Execution.QueryExplainer.FormatExpression(p.Default));
+                sb.Append(Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(p.Default));
             }
         }
         return sb.ToString();

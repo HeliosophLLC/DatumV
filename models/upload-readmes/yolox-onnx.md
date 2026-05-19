@@ -61,7 +61,7 @@ Reference postprocessing in Python and C++: [Megvii's YOLOX/demo/ONNXRuntime](ht
 
 ## Why not YOLOv8?
 
-YOLOv8 (Ultralytics) is **AGPL-3.0** — using it in commercial or closed-source software triggers strong copyleft obligations. YOLOX is **Apache-2.0** and roughly comparable on accuracy. The DatumIngest catalog uses YOLOX as the default detector for this reason.
+YOLOv8 (Ultralytics) is **AGPL-3.0** — using it in commercial or closed-source software triggers strong copyleft obligations. YOLOX is **Apache-2.0** and roughly comparable on accuracy. The Heliosoph catalog uses YOLOX as the default detector for this reason.
 
 ## License
 

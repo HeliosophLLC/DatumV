@@ -1,11 +1,11 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// Exercises <c>inference.devices()</c>: walks

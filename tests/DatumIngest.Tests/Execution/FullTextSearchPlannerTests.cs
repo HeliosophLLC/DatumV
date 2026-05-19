@@ -1,8 +1,8 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for PR-FTS-A4: the planner rewrite that replaces

@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Pins the side-effect-free contract of <see cref="ViewPlan"/>:

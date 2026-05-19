@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Ordering;
+namespace Heliosoph.DatumV.Execution.Operators.Ordering;
 
 /// <summary>
 /// Pull-stream over a single sorted run produced by <see cref="SortedRunSpiller.Spill"/>.

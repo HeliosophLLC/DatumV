@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {
@@ -49,7 +49,7 @@ public readonly partial struct DataValue
             {
                 if (leftHash != rightHash)
                 {
-                    DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                    Heliosoph.DatumV.Diagnostics.HashGateStats.RecordHashShortCircuit();
                     return false;
                 }
                 return true;
@@ -278,7 +278,7 @@ public readonly partial struct DataValue
         {
             if (leftHash != rightHash)
             {
-                DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                Heliosoph.DatumV.Diagnostics.HashGateStats.RecordHashShortCircuit();
                 return false;
             }
             return true;
@@ -307,7 +307,7 @@ public readonly partial struct DataValue
         {
             if (leftHash != rightHash)
             {
-                DatumIngest.Diagnostics.HashGateStats.RecordHashShortCircuit();
+                Heliosoph.DatumV.Diagnostics.HashGateStats.RecordHashShortCircuit();
                 return false;
             }
             return true;

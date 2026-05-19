@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// Container-agnostic reader over an archive-style media bag (ZIP, TAR, TAR.GZ,

@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.TableValued;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.TableValued;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Functions.TableValued;
+namespace Heliosoph.DatumV.Tests.Functions.TableValued;
 
 /// <summary>
 /// <c>open_idx_images(path)</c> table-valued function: opens an MNIST-style

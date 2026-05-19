@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Detects integer-valued numeric columns with a small number of distinct values,

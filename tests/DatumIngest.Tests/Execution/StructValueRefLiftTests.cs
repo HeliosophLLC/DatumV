@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Round-trip tests for <see cref="ExpressionEvaluator.EvaluateAsValueRefAsync"/>
@@ -46,7 +46,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] s1 = [DataValue.FromString("dog", arena), DataValue.FromFloat32(0.7f)];
             DataValue array = DataValue.FromStructArray([s0, s1], arena, (ushort)structTypeId);
 
-            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
             ExpressionEvaluator evaluator = context.CreateEvaluator();
             EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("detections", array)), arena);
 
@@ -108,7 +108,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] det = [DataValue.FromFloat32(0.95f), landmarks];
             DataValue array = DataValue.FromStructArray([det], arena, (ushort)detectionTypeId);
 
-            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
             ExpressionEvaluator evaluator = context.CreateEvaluator();
             EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("faces", array)), arena);
 
@@ -150,7 +150,7 @@ public class StructValueRefLiftTests : ServiceTestBase
         try
         {
             DataValue nullArray = DataValue.NullArrayOf(DataKind.Struct);
-            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
+            using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena);
             ExpressionEvaluator evaluator = context.CreateEvaluator();
             EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("detections", nullArray)), arena);
 
@@ -184,7 +184,7 @@ public class StructValueRefLiftTests : ServiceTestBase
             DataValue[] fields = [DataValue.FromString("widget", arena), DataValue.FromInt32(42)];
             DataValue s = DataValue.FromStruct(fields, arena, (ushort)typeId);
 
-            using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
+            using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: arena, typeRegistry: registry);
             ExpressionEvaluator evaluator = context.CreateEvaluator();
             EvaluationFrame frame = evaluator.CreateFrame(MakeRow(("s", s)), arena);
 

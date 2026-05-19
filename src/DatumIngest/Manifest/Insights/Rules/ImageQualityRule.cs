@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Detects image columns with quality issues: tiny images (below 32px), huge images

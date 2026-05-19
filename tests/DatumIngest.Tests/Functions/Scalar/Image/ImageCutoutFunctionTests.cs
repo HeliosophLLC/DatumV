@@ -1,10 +1,10 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Tests for <see cref="ImageCutoutFunction"/>. The function pairs with
@@ -131,7 +131,7 @@ public sealed class ImageCutoutFunctionTests : ServiceTestBase
     /// <summary>
     /// Builds a width×height grayscale-as-RGBA mask whose left half is white
     /// (R=G=B=255) and right half is black (R=G=B=0). Mirrors the shape
-    /// <see cref="DatumIngest.Models.Onnx.U2NetModel"/> emits.
+    /// <see cref="Heliosoph.DatumV.Models.Onnx.U2NetModel"/> emits.
     /// </summary>
     private static SKBitmap MakeHalfMask(int width, int height)
     {

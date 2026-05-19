@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Sam;
+namespace Heliosoph.DatumV.Functions.Scalar.Sam;
 
 /// <summary>
 /// <c>mask_nms_planes(planes Float32[], scores Float32[], h Int32, w Int32, iou_threshold Float32) → Array&lt;Image&gt;</c>.

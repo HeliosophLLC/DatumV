@@ -1,6 +1,6 @@
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Data;
+namespace Heliosoph.DatumV.Data;
 
 /// <summary>
 /// ADO.NET-style connection over an in-process <see cref="TableCatalog"/>.

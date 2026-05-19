@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Encodes a tuple of <see cref="DataValue"/>s into a single byte array

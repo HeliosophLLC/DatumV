@@ -3,11 +3,11 @@ using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.MemoryMappedFiles;
 using System.Text;
-using DatumIngest.Diagnostics;
-using DatumIngest.Model;
-using DatumIngest.Indexing.Sorted;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Indexing.Sorted;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// A memory-mapped chunk directory that reads chunk metadata and per-column zone

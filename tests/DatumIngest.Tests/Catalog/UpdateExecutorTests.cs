@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR11c end-to-end tests for the <c>UPDATE</c> executor. Cover plain
@@ -270,14 +270,14 @@ public sealed class UpdateExecutorTests : ServiceTestBase, IAsyncLifetime
 
     private static ulong ReadGeneration(string datumPath)
     {
-        using var reader = DatumIngest.DatumFile.V2.DatumFileReaderV2.Open(datumPath);
+        using var reader = Heliosoph.DatumV.DatumFile.V2.DatumFileReaderV2.Open(datumPath);
         return reader.Footer.Prologue.Generation;
     }
 
     private static async Task<List<(int, string)>> ScanAsTuples(ITableProvider provider)
     {
-        DatumIngest.DatumFile.Sidecar.SidecarRegistry? registry =
-            (provider as DatumIngest.Catalog.Providers.DatumFileTableProviderV2)?.SidecarRegistry;
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarRegistry? registry =
+            (provider as Heliosoph.DatumV.Catalog.Providers.DatumFileTableProviderV2)?.SidecarRegistry;
         List<(int, string)> rows = new();
         await foreach (RowBatch batch in provider.ScanAsync(null, null, null, CancellationToken.None))
         {

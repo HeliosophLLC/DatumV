@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Verification sweep for LET bindings whose bodies contain non-trivial
@@ -102,7 +102,7 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
     /// <summary>
     /// Window function inside a LET binding body. The planner's window-rewrite
     /// pass walks LET binding bodies and lifts the call into a
-    /// <see cref="DatumIngest.Execution.Operators.WindowOperator"/>; the LET
+    /// <see cref="Heliosoph.DatumV.Execution.Operators.WindowOperator"/>; the LET
     /// binding rewrites to a column reference that subsequent SELECT-list
     /// expressions can use.
     /// </summary>

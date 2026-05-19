@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest.Insights.Rules;
+namespace Heliosoph.DatumV.Manifest.Insights.Rules;
 
 /// <summary>
 /// Detects columns where the null ratio exceeds the high-missingness threshold.

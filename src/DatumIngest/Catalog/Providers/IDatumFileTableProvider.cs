@@ -1,6 +1,6 @@
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Common surface for v1 / v2 <c>.datum</c> table providers — exposes the
@@ -54,5 +54,5 @@ public interface IDatumFileTableProvider
     /// through the right translator for this query. The default
     /// implementation throws so format-aware providers must opt in.
     /// </remarks>
-    void EnsureTypeTableLoaded(DatumIngest.Execution.ExecutionContext context);
+    void EnsureTypeTableLoaded(Heliosoph.DatumV.Execution.ExecutionContext context);
 }

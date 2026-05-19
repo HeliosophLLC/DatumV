@@ -1,9 +1,9 @@
 using System.Text;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>read_csv(bytes [, delimiter]) → table</c>. Parses CSV bytes into rows of

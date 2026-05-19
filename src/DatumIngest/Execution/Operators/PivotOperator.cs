@@ -1,10 +1,10 @@
-using DatumIngest.Execution.Operators.Pivot;
-using DatumIngest.Execution.Operators.Sets;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators.Pivot;
+using Heliosoph.DatumV.Execution.Operators.Sets;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Blocking operator that rotates a pivot column's distinct values into output

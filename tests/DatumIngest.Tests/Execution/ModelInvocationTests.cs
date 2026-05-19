@@ -1,14 +1,14 @@
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
 /// <summary>
 /// Phase A smoke tests for the model invocation pipeline:
@@ -182,32 +182,32 @@ public sealed class ModelInvocationTests : ServiceTestBase
     /// hoister path that lifts a model call out of a TVF argument inside a
     /// lateral join.
     /// </summary>
-    private sealed class SplitModel : DatumIngest.Models.IModel
+    private sealed class SplitModel : Heliosoph.DatumV.Models.IModel
     {
         public string Name => "split";
         public bool IsDeterministic => true;
         public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
         public DataKind OutputKind => DataKind.String;
 
-        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+        public Task<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            Heliosoph.DatumV.Functions.ValueRef[] outputs = new Heliosoph.DatumV.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
                 string text = inputs[row][0].AsString();
                 string[] pieces = text.Split(',');
-                DatumIngest.Functions.ValueRef[] elements = new DatumIngest.Functions.ValueRef[pieces.Length];
+                Heliosoph.DatumV.Functions.ValueRef[] elements = new Heliosoph.DatumV.Functions.ValueRef[pieces.Length];
                 for (int i = 0; i < pieces.Length; i++)
                 {
-                    elements[i] = DatumIngest.Functions.ValueRef.FromString(pieces[i]);
+                    elements[i] = Heliosoph.DatumV.Functions.ValueRef.FromString(pieces[i]);
                 }
-                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(DataKind.String, elements);
+                outputs[row] = Heliosoph.DatumV.Functions.ValueRef.FromArray(DataKind.String, elements);
             }
-            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+            return Task.FromResult<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>>(outputs);
         }
     }
 
@@ -382,7 +382,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
     /// Without this distinction the original LIMIT test passed even when
     /// MIO ran the model on every source row and let LIMIT discard the rest.
     /// </summary>
-    private sealed class CountingEchoModel : DatumIngest.Models.IModel
+    private sealed class CountingEchoModel : Heliosoph.DatumV.Models.IModel
     {
         public List<string> SeenInputs { get; } = new();
         public string Name => "counting_echo";
@@ -390,21 +390,21 @@ public sealed class ModelInvocationTests : ServiceTestBase
         public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.String];
         public DataKind OutputKind => DataKind.String;
 
-        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+        public Task<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            Heliosoph.DatumV.Functions.ValueRef[] outputs = new Heliosoph.DatumV.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
-                DatumIngest.Functions.ValueRef value = inputs[row][0];
+                Heliosoph.DatumV.Functions.ValueRef value = inputs[row][0];
                 string text = value.AsString();
                 SeenInputs.Add(text);
-                outputs[row] = DatumIngest.Functions.ValueRef.FromString(text);
+                outputs[row] = Heliosoph.DatumV.Functions.ValueRef.FromString(text);
             }
-            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+            return Task.FromResult<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>>(outputs);
         }
     }
 
@@ -415,7 +415,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
     /// produces values whose kind matches the declared signature, not the
     /// kind the SQL literal happened to bind to.
     /// </summary>
-    private sealed class Float64ProbeModel : DatumIngest.Models.IModel
+    private sealed class Float64ProbeModel : Heliosoph.DatumV.Models.IModel
     {
         public List<(DataKind kind, double value)> SeenArg0 { get; } = new();
         public List<(DataKind kind, double value)> SeenArg1 { get; } = new();
@@ -424,22 +424,22 @@ public sealed class ModelInvocationTests : ServiceTestBase
         public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.Float64, DataKind.Float64];
         public DataKind OutputKind => DataKind.Float64;
 
-        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+        public Task<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            Heliosoph.DatumV.Functions.ValueRef[] outputs = new Heliosoph.DatumV.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
-                DatumIngest.Functions.ValueRef a = inputs[row][0];
-                DatumIngest.Functions.ValueRef b = inputs[row][1];
+                Heliosoph.DatumV.Functions.ValueRef a = inputs[row][0];
+                Heliosoph.DatumV.Functions.ValueRef b = inputs[row][1];
                 SeenArg0.Add((a.Kind, a.AsFloat64()));
                 SeenArg1.Add((b.Kind, b.AsFloat64()));
-                outputs[row] = DatumIngest.Functions.ValueRef.FromFloat64(a.AsFloat64() + b.AsFloat64());
+                outputs[row] = Heliosoph.DatumV.Functions.ValueRef.FromFloat64(a.AsFloat64() + b.AsFloat64());
             }
-            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+            return Task.FromResult<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>>(outputs);
         }
     }
 
@@ -493,24 +493,24 @@ public sealed class ModelInvocationTests : ServiceTestBase
     /// scatter step shows up in fast unit tests rather than only in the
     /// model-files-required MobileSAM smoke tests.
     /// </summary>
-    private sealed class ImageArrayProbeModel : DatumIngest.Models.IModel
+    private sealed class ImageArrayProbeModel : Heliosoph.DatumV.Models.IModel
     {
         public string Name => "image_array_probe";
         public bool IsDeterministic => true;
         public IReadOnlyList<DataKind> InputKinds { get; } = [DataKind.Int32];
         public DataKind OutputKind => DataKind.Image;
 
-        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+        public Task<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DatumIngest.Functions.ValueRef[] outputs = new DatumIngest.Functions.ValueRef[inputs.Count];
+            Heliosoph.DatumV.Functions.ValueRef[] outputs = new Heliosoph.DatumV.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
                 int count = inputs[row][0].AsInt32();
-                DatumIngest.Functions.ValueRef[] images = new DatumIngest.Functions.ValueRef[count];
+                Heliosoph.DatumV.Functions.ValueRef[] images = new Heliosoph.DatumV.Functions.ValueRef[count];
                 for (int i = 0; i < count; i++)
                 {
                     SkiaSharp.SKBitmap bmp = new(
@@ -520,11 +520,11 @@ public sealed class ModelInvocationTests : ServiceTestBase
                         red: (byte)(row * 30 + i * 7),
                         green: 128,
                         blue: 64));
-                    images[i] = DatumIngest.Functions.ValueRef.FromImage(bmp);
+                    images[i] = Heliosoph.DatumV.Functions.ValueRef.FromImage(bmp);
                 }
-                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(DataKind.Image, images);
+                outputs[row] = Heliosoph.DatumV.Functions.ValueRef.FromArray(DataKind.Image, images);
             }
-            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+            return Task.FromResult<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>>(outputs);
         }
     }
 
@@ -1194,7 +1194,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
     /// <c>ResolveElementTypeId</c> in the evaluator/formatters returned 0
     /// because <c>desc.IsArray</c> was false — producing the f0..fN regression.
     /// </summary>
-    private sealed class ArrayStructEchoModel : DatumIngest.Models.IModel
+    private sealed class ArrayStructEchoModel : Heliosoph.DatumV.Models.IModel
     {
         public string Name => "array_struct_echo";
         public bool IsDeterministic => true;
@@ -1206,32 +1206,32 @@ public sealed class ModelInvocationTests : ServiceTestBase
             new ColumnInfo("label", DataKind.String, nullable: false),
         ];
 
-        public Task<IReadOnlyList<DatumIngest.Functions.ValueRef>> InferBatchAsync(
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides,
+        public Task<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> InferBatchAsync(
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides,
             CancellationToken cancellationToken)
         {
             _ = overrides;
-            DatumIngest.Functions.ValueRef[] outputs =
-                new DatumIngest.Functions.ValueRef[inputs.Count];
+            Heliosoph.DatumV.Functions.ValueRef[] outputs =
+                new Heliosoph.DatumV.Functions.ValueRef[inputs.Count];
             for (int row = 0; row < inputs.Count; row++)
             {
                 // Two detections per row to force the InArena layout (N>=2)
                 // so TypeId actually rides along — N=1 inline arrays strip it.
-                DatumIngest.Functions.ValueRef d0 = DatumIngest.Functions.ValueRef.FromStruct(
+                Heliosoph.DatumV.Functions.ValueRef d0 = Heliosoph.DatumV.Functions.ValueRef.FromStruct(
                 [
-                    DatumIngest.Functions.ValueRef.FromFloat32(0.9f),
-                    DatumIngest.Functions.ValueRef.FromString("first"),
+                    Heliosoph.DatumV.Functions.ValueRef.FromFloat32(0.9f),
+                    Heliosoph.DatumV.Functions.ValueRef.FromString("first"),
                 ]);
-                DatumIngest.Functions.ValueRef d1 = DatumIngest.Functions.ValueRef.FromStruct(
+                Heliosoph.DatumV.Functions.ValueRef d1 = Heliosoph.DatumV.Functions.ValueRef.FromStruct(
                 [
-                    DatumIngest.Functions.ValueRef.FromFloat32(0.7f),
-                    DatumIngest.Functions.ValueRef.FromString("second"),
+                    Heliosoph.DatumV.Functions.ValueRef.FromFloat32(0.7f),
+                    Heliosoph.DatumV.Functions.ValueRef.FromString("second"),
                 ]);
-                outputs[row] = DatumIngest.Functions.ValueRef.FromArray(
+                outputs[row] = Heliosoph.DatumV.Functions.ValueRef.FromArray(
                     DataKind.Struct, [d0, d1]);
             }
-            return Task.FromResult<IReadOnlyList<DatumIngest.Functions.ValueRef>>(outputs);
+            return Task.FromResult<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>>(outputs);
         }
     }
 
@@ -1260,7 +1260,7 @@ public sealed class ModelInvocationTests : ServiceTestBase
             new object?[] { "alice" });
         catalog.Models = modelCatalog;
 
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog);
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(catalog: catalog);
         QueryExpression query = SqlParser.Parse("SELECT models.array_struct_echo(name) FROM t");
         QueryPlanner planner = new(catalog, FunctionRegistry.CreateDefault());
         QueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);

@@ -1,10 +1,10 @@
-namespace DatumIngest.Indexing.BTree.MutableBytes;
+namespace Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
 /// <summary>
 /// A single entry in a bytes-keyed B+Tree, mapping an opaque byte-array key
 /// to the chunk and row offset where the source value lives. Mirrors
-/// <see cref="DatumIngest.Indexing.ValueIndexEntry"/> but with the key
-/// already encoded by <see cref="DatumIngest.Indexing.CompositeKeyEncoder"/>
+/// <see cref="Heliosoph.DatumV.Indexing.ValueIndexEntry"/> but with the key
+/// already encoded by <see cref="Heliosoph.DatumV.Indexing.CompositeKeyEncoder"/>
 /// (so the tree never needs to know about <c>DataValue</c>).
 /// </summary>
 /// <param name="Key">

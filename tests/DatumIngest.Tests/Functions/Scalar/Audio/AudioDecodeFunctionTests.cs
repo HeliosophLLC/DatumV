@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Audio;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Audio;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_decode(bytes)</c> scalar: wraps an encoded audio byte array as
@@ -47,7 +47,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
         // Metadata is stamped at the materialization boundary (ToDataValue), not
         // inside ExecuteAsync — verify by walking through ToDataValue and reading
         // the inline accessors on the resulting DataValue.
-        using DatumIngest.Model.Arena store = CreateArena();
+        using Heliosoph.DatumV.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(22050u, audio.AudioSampleRate);
@@ -66,7 +66,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
             new[] { ValueRef.FromBytes(DataKind.UInt8, flac, isArray: true) },
             CreateEvaluationFrame(), default);
 
-        using DatumIngest.Model.Arena store = CreateArena();
+        using Heliosoph.DatumV.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(16000u, audio.AudioSampleRate);
@@ -88,7 +88,7 @@ public sealed class AudioDecodeFunctionTests : ServiceTestBase
             new[] { ValueRef.FromBytes(DataKind.UInt8, mystery, isArray: true) },
             CreateEvaluationFrame(), default);
 
-        using DatumIngest.Model.Arena store = CreateArena();
+        using Heliosoph.DatumV.Model.Arena store = CreateArena();
         DataValue audio = result.ToDataValue(store);
         Assert.Equal(DataKind.Audio, audio.Kind);
         Assert.Equal(0u, audio.AudioSampleRate);

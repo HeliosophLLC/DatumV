@@ -1,18 +1,18 @@
 using System.Text;
 
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Inference.LlamaSharp;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.LlamaSharp;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models.Llama;
 
 using LLama;
 using LLama.Common;
 using LLama.Sampling;
 using LLama.Transformers;
 
-namespace DatumIngest.Functions.Scalar.Vector;
+namespace Heliosoph.DatumV.Functions.Scalar.Vector;
 
 /// <summary>
 /// One-shot LLM completion against a GGUF-backed session. The

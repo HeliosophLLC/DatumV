@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Heuristic-driven join-order optimization for <see cref="QueryPlanner"/>:

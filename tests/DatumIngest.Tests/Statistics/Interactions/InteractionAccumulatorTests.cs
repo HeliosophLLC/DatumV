@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.Statistics.Interactions;
+namespace Heliosoph.DatumV.Tests.Statistics.Interactions;
 
-using DatumIngest.Model;
-using DatumIngest.Statistics.Interactions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics.Interactions;
 
 public sealed class PearsonAccumulatorTests : ServiceTestBase
 {

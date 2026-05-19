@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Crypto;
+namespace Heliosoph.DatumV.Functions.Scalar.Crypto;
 
 /// <summary>
 /// pgcrypto-style <c>digest(data, algorithm)</c> dispatcher. Computes a

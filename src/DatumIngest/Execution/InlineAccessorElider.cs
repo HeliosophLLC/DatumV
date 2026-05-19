@@ -1,14 +1,14 @@
-using DatumIngest.Functions;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan-time AST rewrite that replaces <see cref="FunctionCallExpression"/>
 /// calls to <see cref="IInlineMetadataAccessor"/>-marked scalar functions
 /// (<c>image_width</c>, <c>video_height</c>, <c>point_cloud_count</c>, …)
 /// with <see cref="InlineAccessorExpression"/> nodes the evaluator handles
-/// via direct <see cref="DatumIngest.Model.DataValue"/> payload reads.
+/// via direct <see cref="Heliosoph.DatumV.Model.DataValue"/> payload reads.
 /// </summary>
 /// <remarks>
 /// <para>

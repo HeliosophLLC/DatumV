@@ -1,13 +1,13 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Phase D-B: <see cref="FramesToGifFunction"/> + <see cref="GifEncoder"/>.

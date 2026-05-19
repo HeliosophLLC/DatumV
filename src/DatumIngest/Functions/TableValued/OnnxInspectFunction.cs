@@ -1,11 +1,11 @@
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>inference.onnx_inspect(path) → table</c>. Opens an ONNX model and emits

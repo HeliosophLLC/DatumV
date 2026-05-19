@@ -1,13 +1,13 @@
 using System.Diagnostics;
-using DatumIngest.Ingestion;
-using DatumIngest.Manifest;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Serialization.Idx;
-using DatumIngest.Serialization.Json;
-using DatumIngest.Serialization.Zip;
-using DatumIngest.Tools.IngestOnce;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
+using Heliosoph.DatumV.Serialization.Idx;
+using Heliosoph.DatumV.Serialization.Json;
+using Heliosoph.DatumV.Serialization.Zip;
+using Heliosoph.DatumV.Tools.IngestOnce;
 
 // Sub-command dispatch. The original single-file mode is the default
 // when args[0] doesn't match a known sub-command — preserves existing

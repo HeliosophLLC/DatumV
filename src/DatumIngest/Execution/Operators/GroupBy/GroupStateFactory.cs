@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.GroupBy;
+namespace Heliosoph.DatumV.Execution.Operators.GroupBy;
 
 /// <summary>
 /// Builds <see cref="GroupState"/> instances for a GROUP BY pipeline. Owns

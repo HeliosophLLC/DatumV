@@ -1,10 +1,10 @@
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>inference.onnx_inspect_meta(path) → table</c>. One-row TVF returning

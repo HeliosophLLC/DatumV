@@ -1,8 +1,8 @@
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// In-memory representation of a v8 unified <c>.datum-index</c> file. Aggregates the

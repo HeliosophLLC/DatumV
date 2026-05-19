@@ -2,15 +2,15 @@ using System.Diagnostics;
 
 using SkiaSharp;
 
-using DatumIngest.Diagnostics;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Operator that runs one or more registered <see cref="IModel"/>

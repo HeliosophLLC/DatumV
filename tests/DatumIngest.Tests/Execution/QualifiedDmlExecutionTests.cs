@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// S8: end-to-end execution of <c>schema.table</c>-qualified

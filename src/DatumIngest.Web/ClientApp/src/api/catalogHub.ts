@@ -6,7 +6,7 @@ import {
 import type {
   ICatalogHub,
   ICatalogHubClient,
-} from './generated/hubs/TypedSignalR.Client/DatumIngest.Web.Hubs';
+} from './generated/hubs/TypedSignalR.Client/Heliosoph.DatumV.Web.Hubs';
 import type {
   CatalogChangedEvent,
   ModelLoadedEvent,
@@ -16,7 +16,7 @@ import type {
   CalibrationRampStepEvent,
   CalibrationRampHaltedEvent,
   CalibrationRampCompletedEvent,
-} from './generated/hubs/DatumIngest.Web.Hubs';
+} from './generated/hubs/Heliosoph.DatumV.Web.Hubs';
 
 // Singleton HubConnection + proxy + fan-out dispatcher for the catalog-
 // change push channel. Mirrors the shape of `hub.ts` but on a separate
@@ -143,12 +143,12 @@ export type {
   CalibrationRampStepEvent,
   CalibrationRampHaltedEvent,
   CalibrationRampCompletedEvent,
-} from './generated/hubs/DatumIngest.Web.Hubs';
+} from './generated/hubs/Heliosoph.DatumV.Web.Hubs';
 export {
   CatalogChangeKind,
   ModelEvictionReason,
   CalibrationHaltReason,
-} from './generated/hubs/DatumIngest.Web.Hubs';
+} from './generated/hubs/Heliosoph.DatumV.Web.Hubs';
 
 // ───────────────────────── The dispatcher receiver ─────────────────────────
 

@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using DatumIngest.Execution;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="CompositeKeyEncoder"/>: per-kind ordering invariants

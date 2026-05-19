@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Phase-A3: <see cref="FunctionRegistry.IsVisibleInContext"/> resolves

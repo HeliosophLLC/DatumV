@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="SpillPartition"/>, verifying in-memory lifecycle,
@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Execution;
 public sealed class SpillPartitionTests : ServiceTestBase
 {
     private readonly string _spillDirectory;
-    private readonly DatumIngest.Execution.ExecutionContext _ctx;
+    private readonly Heliosoph.DatumV.Execution.ExecutionContext _ctx;
 
     /// <summary>
     /// Creates a unique temporary directory for each test run.

@@ -1,6 +1,6 @@
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// <see cref="IInferenceSession"/> implementation wrapping an ONNX Runtime
@@ -183,6 +183,6 @@ internal sealed class OnnxRuntimeSession : IInferenceSession
         if (t == typeof(uint))      return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.UInt32;
         if (t == typeof(ulong))     return Microsoft.ML.OnnxRuntime.Tensors.TensorElementType.UInt64;
         throw new NotSupportedException(
-            $"ORT NodeMetadata exposes element type {t.FullName} which has no DatumIngest mapping.");
+            $"ORT NodeMetadata exposes element type {t.FullName} which has no Heliosoph.DatumV mapping.");
     }
 }

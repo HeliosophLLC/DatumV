@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// Decodes the pixel data section of a FITS image HDU into two

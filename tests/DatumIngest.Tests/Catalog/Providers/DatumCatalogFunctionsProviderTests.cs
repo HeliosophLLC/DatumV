@@ -1,9 +1,9 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog.Providers;
+namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
 /// Tests for the <c>body_scope</c> column on <c>datum_catalog.functions</c>.

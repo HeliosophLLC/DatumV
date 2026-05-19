@@ -1,13 +1,13 @@
-using DatumIngest.Catalog;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Execution.Operators.Joins;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Execution.Operators.Joins;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Executes an equi-join by probing a column index on the build side for each

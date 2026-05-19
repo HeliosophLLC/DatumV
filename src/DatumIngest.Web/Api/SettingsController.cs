@@ -1,8 +1,8 @@
-using DatumIngest.Web.Dtos.Settings;
-using DatumIngest.Web.Settings;
+using Heliosoph.DatumV.Web.Dtos.Settings;
+using Heliosoph.DatumV.Web.Settings;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 [ApiController]
 [Route("api/settings")]

@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan-time validator that walks every <see cref="FunctionCallExpression"/>
@@ -19,7 +19,7 @@ namespace DatumIngest.Execution;
 ///   <item><description><strong>Body-scoped calls outside a body.</strong>
 ///     <c>infer()</c> and similar <see cref="BodyScopeRequirement.ModelBody"/>
 ///     functions are only valid inside CREATE [OR REPLACE] MODEL bodies, which
-///     are interpreted by <c>DatumIngest.Functions.ProceduralModelFunction</c>
+///     are interpreted by <c>Heliosoph.DatumV.Functions.ProceduralModelFunction</c>
 ///     directly and never reach this gate. Any body-scoped call we see here
 ///     is unambiguously out of context.</description></item>
 /// </list>

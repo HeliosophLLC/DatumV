@@ -2,15 +2,15 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 // Lifecycle events emitted by DatasetDownloadService through
 // IDatasetDownloadProgressReporter. Pure data — hosts that surface these
 // over the wire (the Web project's SignalR hub) wrap them in their own
 // DTO types and convert at the boundary.
 //
-// Parallel to DatumIngest.ModelLibrary.ModelDownload* but distinct types:
-// dataset install has an `Ingesting` stage (running DatumIngest.Ingestion.Ingester
+// Parallel to Heliosoph.DatumV.ModelLibrary.ModelDownload* but distinct types:
+// dataset install has an `Ingesting` stage (running Heliosoph.DatumV.Ingestion.Ingester
 // against the downloaded source) that doesn't exist on the model side,
 // and reusing the model records would force the UI to discriminate on a
 // kind field for every event. Two parallel streams stay clearer.

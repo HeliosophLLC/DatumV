@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog.Executors;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Executors;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// <see cref="StatementPlan"/> for the index-DDL + table-maintenance
@@ -104,7 +104,7 @@ internal sealed class IndexPlan : StatementPlan
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        DatumIngest.Execution.ExecutionContext context)
+        Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {

@@ -1,13 +1,13 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Tools.IngestOnce;
+namespace Heliosoph.DatumV.Tools.IngestOnce;
 
 /// <summary>
 /// Walks a glob of image files and emits a single <c>.datum</c> file with

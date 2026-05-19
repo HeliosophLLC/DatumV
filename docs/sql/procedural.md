@@ -4,7 +4,7 @@ title: Procedural Statements
 
 ## Why Use This
 
-DatumIngest treats a script as a *batch* — a sequence of statements executed
+DatumV treats a script as a *batch* — a sequence of statements executed
 in order against a shared procedural scope. Inside a batch you can declare
 variables, branch, loop over either a counter or a query result, and pin
 intermediate values with `SELECT var := ...`. The result is that

@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution.Contexts;
+namespace Heliosoph.DatumV.Execution.Contexts;
 
 /// <summary>
 /// <see cref="IFunctionContext"/> for the per-column lambda accepted by

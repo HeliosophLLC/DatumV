@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using System.Text;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Model;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.IO;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.IO;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Opens a v8 unified <c>.datum-index</c> file as a memory-mapped file,

@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Decoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Decoding;
 
 /// <summary>
 /// Per-column page decoder for the v2 columnar format. One instance per

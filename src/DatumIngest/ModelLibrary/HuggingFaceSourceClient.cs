@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // IModelSourceClient implementation for HuggingFace Hub repos. Handles both
 // model and dataset repos; <see cref="HuggingFaceSource.RepoType"/>
@@ -69,7 +69,7 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
         {
             _http.BaseAddress = new Uri("https://huggingface.co/");
         }
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("DatumIngest/0.1 (+https://github.com/Heliosoph)");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
     }
 
     public async ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(

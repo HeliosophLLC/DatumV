@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing.BTree.Mutable;
+namespace Heliosoph.DatumV.Indexing.BTree.Mutable;
 
 /// <summary>
 /// Per-tree page-size configuration. Production trees use 8 KiB pages

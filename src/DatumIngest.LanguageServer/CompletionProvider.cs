@@ -1,7 +1,7 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing.Tokens;
 
 /// <summary>
 /// Generates context-aware completion items from a <see cref="LanguageServerManifest"/>
@@ -366,7 +366,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterCall:
-                // CALL is permissive in DatumIngest: PlanCall lowers
+                // CALL is permissive in Heliosoph.DatumV: PlanCall lowers
                 // `CALL fn(args)` to `SELECT fn(args)`, so procedures,
                 // UDFs, and built-in scalar functions are all callable
                 // through it. Surface every callable kind from the
@@ -916,7 +916,7 @@ public sealed class CompletionProvider
     /// <summary>
     /// Surfaces user-defined functions whose schema is on the search
     /// path as bare callable names. Used by the <c>CALL</c> popup:
-    /// DatumIngest lowers <c>CALL udf.fn(args)</c> to
+    /// Heliosoph.DatumV lowers <c>CALL udf.fn(args)</c> to
     /// <c>SELECT udf.fn(args)</c> (see <c>TableCatalog.PlanCall</c>), so
     /// UDFs are CALLable just like procedures. Without this, a user who
     /// runs <c>CREATE FUNCTION Test()</c> and then types <c>CALL </c>
@@ -956,7 +956,7 @@ public sealed class CompletionProvider
 
         /// <summary>
         /// Everything CALLable: procedures (CALL-canonical) plus
-        /// functions and UDFs (DatumIngest lowers <c>CALL fn(args)</c>
+        /// functions and UDFs (Heliosoph.DatumV lowers <c>CALL fn(args)</c>
         /// to <c>SELECT fn(args)</c>, so all scalar callables apply).
         /// Excludes tables — nothing is CALLable from a table-only
         /// schema like datum_catalog or information_schema.
@@ -2040,8 +2040,8 @@ public sealed class CompletionProvider
 
         string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
         return string.IsNullOrEmpty(section.Excerpt)
-            ? $"[See more](command:datumingest.openDoc?{encodedKey})"
-            : $"{section.Excerpt}\n\n[See more](command:datumingest.openDoc?{encodedKey})";
+            ? $"[See more](command:datumv.openDoc?{encodedKey})"
+            : $"{section.Excerpt}\n\n[See more](command:datumv.openDoc?{encodedKey})";
     }
 
     /// <summary>
@@ -2075,8 +2075,8 @@ public sealed class CompletionProvider
 
         string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
         return string.IsNullOrEmpty(section.Excerpt)
-            ? $"[See more](command:datumingest.openDoc?{encodedKey})"
-            : $"{section.Excerpt}\n\n[See more](command:datumingest.openDoc?{encodedKey})";
+            ? $"[See more](command:datumv.openDoc?{encodedKey})"
+            : $"{section.Excerpt}\n\n[See more](command:datumv.openDoc?{encodedKey})";
     }
 
     private static string FormatParameter(ParameterSignature parameter)

@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 
-using DatumIngest.Catalog;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Registry for looking up scalar, table-valued, aggregate, and window functions
@@ -405,12 +405,12 @@ public sealed class FunctionRegistry
     ///     <em>only</em> inside lambda bodies whose declared context name
     ///     matches one of the list entries, or matches any ancestor of one
     ///     of those entries via
-    ///     <see cref="DatumIngest.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>.
+    ///     <see cref="Heliosoph.DatumV.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>.
     ///     Calling such a function from the top-level scope (or from a
     ///     differently-contexted lambda) returns <see langword="false"/>.
     ///   </item>
     ///   <item>
-    ///     A context's <see cref="DatumIngest.Execution.Contexts.FunctionContextDescriptor.Borrows"/>
+    ///     A context's <see cref="Heliosoph.DatumV.Execution.Contexts.FunctionContextDescriptor.Borrows"/>
     ///     list provides the complementary opt-in: a globally-visible
     ///     function listed in a context's borrows is still visible there
     ///     (no change). A context-restricted function listed in a different

@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan-time pass that hoists every <c>models.&lt;name&gt;(...)</c> call out of

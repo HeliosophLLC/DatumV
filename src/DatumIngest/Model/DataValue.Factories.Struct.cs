@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {

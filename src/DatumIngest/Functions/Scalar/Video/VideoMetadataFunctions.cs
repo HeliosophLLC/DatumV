@@ -1,14 +1,14 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Video;
+namespace Heliosoph.DatumV.Functions.Scalar.Video;
 
 /// <summary>
 /// <c>video_width(v Video) → Int32</c>. Returns the pixel width parsed from the
 /// video's inline metadata. Every Video production site routes through
-/// <see cref="DatumIngest.Functions.Video.VideoDataValueFactory"/>, which uses
-/// FFmpeg (via <see cref="DatumIngest.Functions.Video.VideoHeaderParser"/>) to
+/// <see cref="Heliosoph.DatumV.Functions.Video.VideoDataValueFactory"/>, which uses
+/// FFmpeg (via <see cref="Heliosoph.DatumV.Functions.Video.VideoHeaderParser"/>) to
 /// extract dimensions at construction time. Returns NULL only when FFmpeg fails
 /// to open the bytes (corrupt input, missing demuxer, no video stream).
 /// </summary>

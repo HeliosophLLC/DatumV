@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Seeks via <c>column IN (v1, v2, ...)</c> predicates. For each extracted

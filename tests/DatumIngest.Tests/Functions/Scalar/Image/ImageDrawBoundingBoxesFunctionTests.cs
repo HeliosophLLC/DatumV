@@ -1,12 +1,12 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Tests for <see cref="ImageDrawBoundingBoxesFunction"/>. The function is the
@@ -187,7 +187,7 @@ public sealed class ImageDrawBoundingBoxesFunctionTests : ServiceTestBase
 
     private EvaluationFrame MakeFrame(TypeRegistry registry)
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(typeRegistry: registry);
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(typeRegistry: registry);
         return CreateEvaluationFrame(context);
     }
 }

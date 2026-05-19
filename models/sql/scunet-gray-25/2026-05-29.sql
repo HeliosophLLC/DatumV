@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_gray_25.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Single-channel Gaussian denoising at σ=25 — the standard benchmark
 -- reference level for grayscale denoising. Pair with chest X-ray /

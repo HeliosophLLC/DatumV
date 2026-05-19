@@ -1,9 +1,9 @@
-namespace DatumIngest.Tests.Manifest.Insights;
+namespace Heliosoph.DatumV.Tests.Manifest.Insights;
 
-using DatumIngest.Manifest;
-using DatumIngest.Manifest.Insights;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Manifest.Insights;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
 /// <summary>
 /// Integration tests verifying that <see cref="ManifestBuilder.Build"/> correctly wires

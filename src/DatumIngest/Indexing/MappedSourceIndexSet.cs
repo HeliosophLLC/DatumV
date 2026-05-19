@@ -1,7 +1,7 @@
 using System.IO.MemoryMappedFiles;
-using DatumIngest.Indexing.Sorted;
+using Heliosoph.DatumV.Indexing.Sorted;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Owns the memory-mapped file backing a v5 unified index, exposing a

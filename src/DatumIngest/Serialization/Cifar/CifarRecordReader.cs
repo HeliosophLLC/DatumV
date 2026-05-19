@@ -1,8 +1,8 @@
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Serialization.Cifar;
+namespace Heliosoph.DatumV.Serialization.Cifar;
 
 /// <summary>
 /// Decodes records from the CIFAR binary format used by CIFAR-10 / CIFAR-100.

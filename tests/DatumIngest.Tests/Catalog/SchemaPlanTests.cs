@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Pins the side-effect-free contract of <see cref="SchemaPlan"/>:

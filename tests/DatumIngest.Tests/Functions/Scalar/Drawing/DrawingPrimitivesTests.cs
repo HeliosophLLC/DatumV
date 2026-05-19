@@ -1,10 +1,10 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Drawing;
 
 /// <summary>
 /// Phase C: color constructors, shape draw primitives, composition

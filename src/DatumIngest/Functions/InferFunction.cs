@@ -1,13 +1,13 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// The runtime bridge from a <c>CREATE MODEL</c> body to its bound

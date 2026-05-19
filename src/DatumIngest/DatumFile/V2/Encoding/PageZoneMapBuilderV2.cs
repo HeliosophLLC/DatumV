@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
 /// Per-column-page zone-map accumulator. Records each appended

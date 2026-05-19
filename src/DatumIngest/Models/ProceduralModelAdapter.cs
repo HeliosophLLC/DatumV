@@ -1,14 +1,14 @@
 using System.Diagnostics;
 
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Wraps a SQL-defined model (a <see cref="ModelDescriptor"/> registered via
@@ -28,12 +28,12 @@ namespace DatumIngest.Models;
 /// <strong>Lifecycle.</strong> Constructed at <c>CREATE MODEL</c> time and
 /// stored on the underlying <see cref="ModelDescriptor"/>'s
 /// <see cref="ModelCatalogEntry.Loader"/>. The descriptor's
-/// <c>BoundSessions</c> own the ONNX <see cref="DatumIngest.Inference.IInferenceSession"/>
+/// <c>BoundSessions</c> own the ONNX <see cref="Heliosoph.DatumV.Inference.IInferenceSession"/>
 /// lifecycle. <c>DROP MODEL</c> tears the descriptor down explicitly via
 /// <c>LazyModelSessions.DisposeLoaded</c>; the adapter itself is now
 /// <see cref="IDisposable"/> so <see cref="ModelResidencyManager"/>'s
 /// eviction path can actually free VRAM by calling
-/// <see cref="DatumIngest.Catalog.Registries.LazyModelSessions.Reset"/> —
+/// <see cref="Heliosoph.DatumV.Catalog.Registries.LazyModelSessions.Reset"/> —
 /// dropping the cached sessions while leaving the descriptor + path map
 /// intact for a future re-acquire to reload from disk. Re-acquires
 /// always go through the loader, which pre-warms the sessions again, so
@@ -98,7 +98,7 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
     /// Builds an adapter for <paramref name="descriptor"/>. The
     /// <paramref name="catalog"/> is the catalog under which the model was
     /// registered; <c>InferBatchAsync</c> uses it to construct the
-    /// per-call <see cref="DatumIngest.Execution.ExecutionContext"/> the body evaluates against
+    /// per-call <see cref="Heliosoph.DatumV.Execution.ExecutionContext"/> the body evaluates against
     /// (function registry, sidecar registry, pool). Pulling these from the
     /// catalog at call time rather than capturing each individually keeps
     /// the adapter aligned with how every other body-evaluator builds its

@@ -1,20 +1,20 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Identifies an inline-metadata field on <see cref="DataValue"/> that can
 /// be read directly from the struct's per-kind payload bytes without
-/// dispatching through <see cref="DatumIngest.Functions.IScalarFunction.ExecuteAsync"/>.
+/// dispatching through <see cref="Heliosoph.DatumV.Functions.IScalarFunction.ExecuteAsync"/>.
 /// One value per supported accessor function; the elider matches function
 /// calls against this enum via the
-/// <see cref="DatumIngest.Functions.IInlineMetadataAccessor"/> marker.
+/// <see cref="Heliosoph.DatumV.Functions.IInlineMetadataAccessor"/> marker.
 /// </summary>
 /// <remarks>
 /// New entries arrive in pairs with their owning function class: extend
 /// this enum, add a descriptor in
 /// <see cref="InlineAccessorDescriptors"/>, then have the function
-/// implement <see cref="DatumIngest.Functions.IInlineMetadataAccessor"/>
+/// implement <see cref="Heliosoph.DatumV.Functions.IInlineMetadataAccessor"/>
 /// and return the new value from its <c>Field</c> getter.
 /// </remarks>
 public enum InlineAccessorField
@@ -74,7 +74,7 @@ public enum InlineAccessorField
 /// by the evaluator when reading them. Each descriptor captures the
 /// argument's expected <see cref="DataKind"/>, the result kind, and the
 /// canonical SQL function name (so the evaluator can locate the fallback
-/// <see cref="DatumIngest.Functions.IScalarFunction"/> when the inline
+/// <see cref="Heliosoph.DatumV.Functions.IScalarFunction"/> when the inline
 /// metadata is unstamped).
 /// </summary>
 public static class InlineAccessorDescriptors
@@ -85,7 +85,7 @@ public static class InlineAccessorDescriptors
     /// <param name="Field">The field this descriptor describes.</param>
     /// <param name="ArgumentKind">Expected <see cref="DataKind"/> of the single argument.</param>
     /// <param name="ResultKind">The function's declared return kind.</param>
-    /// <param name="FunctionName">Canonical SQL function name, used to recover the fallback <see cref="DatumIngest.Functions.IScalarFunction"/>.</param>
+    /// <param name="FunctionName">Canonical SQL function name, used to recover the fallback <see cref="Heliosoph.DatumV.Functions.IScalarFunction"/>.</param>
     public sealed record Descriptor(
         InlineAccessorField Field,
         DataKind ArgumentKind,

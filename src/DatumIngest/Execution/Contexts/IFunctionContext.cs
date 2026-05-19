@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Contexts;
+namespace Heliosoph.DatumV.Execution.Contexts;
 
 /// <summary>
 /// A named scope that constrains which functions and variables are visible

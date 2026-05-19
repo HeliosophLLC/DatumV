@@ -2,7 +2,7 @@ using System.Formats.Cbor;
 using System.Text;
 using System.Text.Json;
 
-namespace DatumIngest.Functions.Json;
+namespace Heliosoph.DatumV.Functions.Json;
 
 /// <summary>
 /// Builds a bounded JSON-text preview of a <c>DataKind.Json</c> value's CBOR payload.
@@ -28,7 +28,7 @@ public static class JsonPreviewBuilder
 {
     /// <summary>
     /// Default per-cell preview cap on array/object element count. Matches
-    /// <see cref="DatumIngest.Ingestion.Sampling.SamplePreviewCollector"/>'s
+    /// <see cref="Heliosoph.DatumV.Ingestion.Sampling.SamplePreviewCollector"/>'s
     /// <c>MaxArrayPreviewElements</c> so a column rendered both as a sample-card
     /// chip and as a query-result cell shows the same number of entries.
     /// </summary>

@@ -1,7 +1,7 @@
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Deserializes a file format into a stream of <see cref="RowBatch"/> instances.

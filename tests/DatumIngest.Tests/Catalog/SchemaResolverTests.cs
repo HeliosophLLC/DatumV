@@ -1,6 +1,6 @@
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Unit tests for <see cref="SchemaResolver"/> covering the four cases:

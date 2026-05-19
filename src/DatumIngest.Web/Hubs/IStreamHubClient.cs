@@ -1,6 +1,6 @@
 ﻿using TypedSignalR.Client;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 // Methods the server invokes on connected clients.
 [Receiver]
@@ -38,7 +38,7 @@ public interface IStreamHubClient
     // host); venv events carry VenvName == catalog id so the client can
     // surface sub-steps on the specific model card that's installing.
     // Populated by SignalRPythonEnvironmentReporter from the core
-    // DatumIngest.Models.Python event records.
+    // Heliosoph.DatumV.Models.Python event records.
     Task OnUvDownloadStarted(UvDownloadStartedDto started);
     Task OnUvDownloadProgress(UvDownloadProgressDto progress);
     Task OnUvDownloadComplete(UvDownloadCompleteDto complete);
@@ -53,7 +53,7 @@ public interface IStreamHubClient
     // Dataset-download lifecycle events. Broadcast to all clients (same
     // single-user-desktop assumption as the model events). Populated by
     // SignalRDatasetDownloadProgressReporter from the core
-    // DatumIngest.DatasetLibrary event records. Lifecycle:
+    // Heliosoph.DatumV.DatasetLibrary event records. Lifecycle:
     //   OnDatasetDownloadStarted -> N x OnDatasetDownloadProgress ->
     //   OnDatasetDownloadComplete -> N x (OnDatasetIngesting ->
     //   OnDatasetTableIngested) -> OnDatasetInstalled.

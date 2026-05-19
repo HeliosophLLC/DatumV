@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// In-memory <see cref="IValueStore"/> backed by a single managed <see cref="byte"/> array.

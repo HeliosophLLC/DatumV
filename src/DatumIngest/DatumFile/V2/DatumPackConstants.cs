@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// On-disk layout of the <c>.datum-pack</c> sidecar — a stripped-down

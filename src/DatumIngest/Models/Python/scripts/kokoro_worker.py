@@ -1,5 +1,5 @@
 """
-Kokoro-82M TTS worker for DatumIngest's Python bridge.
+Kokoro-82M TTS worker for Heliosoph.DatumV's Python bridge.
 
 Wraps the `kokoro-onnx` Python package, which handles the phonemizer
 (misaki) + ONNX inference pipeline end to end. The worker takes text
@@ -72,7 +72,7 @@ def _encode_wav_pcm16(samples, sample_rate):
     soundfile BytesIO write path goes through libsndfile's format
     detection, which flakes on some installs ('Format not recognised').
     The 44-byte RIFF/WAVE/fmt/data header is well-defined and the PCM_16
-    payload is universal — any WAV decoder (including DatumIngest's
+    payload is universal — any WAV decoder (including Heliosoph.DatumV's
     WhisperAudioInput) accepts it.
     """
     # 1D + contiguous, clamp + quantise to int16.

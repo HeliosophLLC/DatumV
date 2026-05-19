@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Describes a single named field within a <see cref="TypeDescriptor"/> for a struct type.

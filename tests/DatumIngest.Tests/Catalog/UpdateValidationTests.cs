@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR11a tests for plan-time validation of <c>UPDATE</c> statements.

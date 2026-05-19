@@ -1,8 +1,8 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Canonical lists of SQL keywords, type names, date-part names, and built-in
-/// function names recognized by the DatumIngest dialect. Used as a single source
+/// function names recognized by the Heliosoph.DatumV dialect. Used as a single source
 /// of truth for Monaco's <c>MonarchGrammarFactory</c>, the catalog-driven
 /// <c>LanguageServerManifest</c> builder, and any future tooling that needs to
 /// surface the dialect surface area without re-parsing tokens.
@@ -47,7 +47,7 @@ public static class SqlKeywordRegistry
         // Set operations
         "UNION", "ALL", "INTERSECT", "EXCEPT",
 
-        // DatumIngest extensions
+        // Heliosoph.DatumV extensions
         "LET", "SCAN", "INIT", "PIVOT", "UNPIVOT", "FOR", "INCLUDE",
 
         // ASSERT / DEFINE clause keywords

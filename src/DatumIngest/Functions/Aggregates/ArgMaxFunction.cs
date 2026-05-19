@@ -1,7 +1,7 @@
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// Implements <c>ARG_MAX(value, key)</c>. Returns the <c>value</c> from the

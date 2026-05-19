@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Per-page directory entry. One <see cref="PageDescriptorV2"/> per

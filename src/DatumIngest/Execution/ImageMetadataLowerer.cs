@@ -1,15 +1,15 @@
-using DatumIngest.Functions;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan-time AST rewrite that decomposes the composite image-metadata
 /// functions <c>pixel_count(img)</c> and <c>dimensions(img, format)</c>
 /// into compositions of the elidable accessors
-/// <see cref="DatumIngest.Functions.Scalar.Image.ImageWidthFunction"/>,
-/// <see cref="DatumIngest.Functions.Scalar.Image.ImageHeightFunction"/>, and
-/// <see cref="DatumIngest.Functions.Scalar.Image.ImageChannelsFunction"/>.
+/// <see cref="Heliosoph.DatumV.Functions.Scalar.Image.ImageWidthFunction"/>,
+/// <see cref="Heliosoph.DatumV.Functions.Scalar.Image.ImageHeightFunction"/>, and
+/// <see cref="Heliosoph.DatumV.Functions.Scalar.Image.ImageChannelsFunction"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,7 +35,7 @@ namespace DatumIngest.Execution;
 ///   <c>array(...)</c> of the appropriate accessor calls when the
 ///   <c>format</c> argument is a string literal. Non-literal format
 ///   (e.g. a column reference) passes through and is handled by the
-///   runtime <see cref="DatumIngest.Functions.Scalar.Image.ImageDimensionsFunction"/>
+///   runtime <see cref="Heliosoph.DatumV.Functions.Scalar.Image.ImageDimensionsFunction"/>
 ///   body.</item>
 /// </list>
 /// </para>

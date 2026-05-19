@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Per-model VRAM calibration: how many bytes the weights themselves

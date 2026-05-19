@@ -1,11 +1,11 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Spatial;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Spatial;
 
 public sealed class PointCloudFromDepthIntrinsicsFunctionTests : ServiceTestBase
 {

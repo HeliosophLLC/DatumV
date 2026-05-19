@@ -1,10 +1,10 @@
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 using System.Diagnostics;
 
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Unit tests for <see cref="ModelResidencyManager"/>. Each <see cref="ModelCatalogEntry"/>

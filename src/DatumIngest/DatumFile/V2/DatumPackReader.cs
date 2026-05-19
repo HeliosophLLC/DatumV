@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Memory-mapped read-only view over a <c>.datum-pack</c> file.

@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Joins;
+namespace Heliosoph.DatumV.Execution.Operators.Joins;
 
 /// <summary>
 /// Caches a single null-padded <see cref="Row"/> for a join's outer-side

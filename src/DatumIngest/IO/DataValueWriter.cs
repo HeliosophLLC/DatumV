@@ -1,6 +1,6 @@
-﻿using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.IO;
+namespace Heliosoph.DatumV.IO;
 
 /// <summary>
 /// Low-level <see cref="DataValue"/> serialization helpers shared across index writing

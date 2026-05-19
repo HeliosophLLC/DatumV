@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// 16-byte pointer-slot codec used by reference-type arrays

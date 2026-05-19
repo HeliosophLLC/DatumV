@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Json;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Json;
+namespace Heliosoph.DatumV.Functions.Scalar.Json;
 
 /// <summary>
 /// Re-emits a Json value as JSON text. Used by output writers and explicit

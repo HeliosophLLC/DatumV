@@ -1,7 +1,7 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution.Operators;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution.Operators;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan post-pass hook that historically lowered a SQL-defined model's
@@ -11,7 +11,7 @@ namespace DatumIngest.Execution;
 /// SQL-defined model invocation now flows through
 /// <see cref="ModelInvocationOperator"/> + <c>ProceduralModelAdapter</c>
 /// alongside built-in models. Cross-row batching for batchable ONNX
-/// shapes lives on <see cref="DatumIngest.Functions.IScalarFunction.ExecuteBatchAsync"/>
+/// shapes lives on <see cref="Heliosoph.DatumV.Functions.IScalarFunction.ExecuteBatchAsync"/>
 /// (see <c>InferFunction.ExecuteBatchAsync</c>) rather than the plan layer.
 /// </summary>
 /// <remarks>

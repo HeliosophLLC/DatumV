@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Operators.Sets;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution.Operators.Sets;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Streaming duplicate-elimination operator that yields only the first occurrence

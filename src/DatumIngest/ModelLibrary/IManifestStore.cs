@@ -2,7 +2,7 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // Singleton facade over the on-disk catalog.json + license text files.
 // Loaded once at startup; the underlying files are content shipped with

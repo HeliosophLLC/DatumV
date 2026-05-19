@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
 string sourcePath = args.Length > 0
     ? args[0]

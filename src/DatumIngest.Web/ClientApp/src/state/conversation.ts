@@ -8,7 +8,7 @@ import {
 } from '@/api/hub';
 import { refreshAvailableLlms } from './llm';
 
-// Server-side sentinel (DatumIngest.Web.Llm.NoLlmInstalledException.Marker).
+// Server-side sentinel (Heliosoph.DatumV.Web.Llm.NoLlmInstalledException.Marker).
 // When an OnError message starts with this token we suppress the generic
 // "something went wrong" banner — the chat surface renders its own empty
 // state via llmState.available being empty.

@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// Internal helper shared by the pixel-statistics image functions

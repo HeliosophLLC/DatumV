@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Builds the dictionary of <see cref="CommonTableExpressionOperator"/>

@@ -1,8 +1,8 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Provides shared resources for format serialization and deserialization: a

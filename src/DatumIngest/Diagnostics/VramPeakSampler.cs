@@ -1,4 +1,4 @@
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Background NVML poll that captures peak VRAM usage during a

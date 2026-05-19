@@ -1,17 +1,17 @@
 using System.Diagnostics;
 using System.Text.Json;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Web.Execution;
+namespace Heliosoph.DatumV.Web.Execution;
 
 /// <summary>
 /// Runs SQL batches through the <see cref="BatchExecutor"/> and streams
@@ -605,9 +605,9 @@ public sealed class QueryStreamService
         // a HashSet lookup downstream.
         if (!trace.IsEnabled) return Array.Empty<string>();
         if (trace.Operators && trace.Scalars)
-            return new[] { "DatumIngest.Operators", "DatumIngest.Scalars" };
-        if (trace.Operators) return new[] { "DatumIngest.Operators" };
-        return new[] { "DatumIngest.Scalars" };
+            return new[] { "Heliosoph.DatumV.Operators", "Heliosoph.DatumV.Scalars" };
+        if (trace.Operators) return new[] { "Heliosoph.DatumV.Operators" };
+        return new[] { "Heliosoph.DatumV.Scalars" };
     }
 
     // 1Hz periodic drain of the trace ring. Runs on a background task for
@@ -781,8 +781,8 @@ internal sealed class TraceState
 
     private static string ShortSource(string fullName) => fullName switch
     {
-        "DatumIngest.Operators" => "op",
-        "DatumIngest.Scalars" => "fn",
+        "Heliosoph.DatumV.Operators" => "op",
+        "Heliosoph.DatumV.Scalars" => "fn",
         _ => fullName,
     };
 

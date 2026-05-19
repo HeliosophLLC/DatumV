@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 
-namespace DatumIngest.IO;
+namespace Heliosoph.DatumV.IO;
 
 /// <summary>
 /// High-throughput binary writer that batches small writes into a rented buffer

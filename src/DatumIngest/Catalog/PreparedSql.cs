@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Abstract base for any catalog-bound preparable unit that the

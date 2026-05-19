@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Hosting;
 
-namespace DatumIngest.Web.Lsp;
+namespace Heliosoph.DatumV.Web.Lsp;
 
 /// <summary>
 /// Forces eager resolution of <see cref="LanguageManifestService"/> at

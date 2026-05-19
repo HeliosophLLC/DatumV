@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
 using LLama;
 using LLama.Abstractions;
@@ -10,7 +10,7 @@ using LLama.Common;
 using LLama.Native;
 using LLama.Sampling;
 
-namespace DatumIngest.Models.Llama;
+namespace Heliosoph.DatumV.Models.Llama;
 
 /// <summary>
 /// LlamaSharp-backed <see cref="IModel"/> for one-shot LLM inference. Loads a

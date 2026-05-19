@@ -1,13 +1,13 @@
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Virtual table surfacing every model declared for each task contract

@@ -1,15 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Origin-of-definition discriminator for <see cref="ModelsTableProvider"/>'s
@@ -225,7 +225,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         }
         rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
 
-        DatumIngest.ModelLibrary.IModelPathResolver pathResolver = _modelCatalog.PathResolver;
+        Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver = _modelCatalog.PathResolver;
         CalibrationRegistry calibrationRegistry = _modelCatalog.CalibrationRegistry;
 
         // requiredColumns / filterHint are advisory; we materialise the full row
@@ -291,7 +291,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// reflect current disk state.
     /// </summary>
     private static void FillRow(
-        DataValue[] cells, ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
+        DataValue[] cells, ModelCatalogEntry entry, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
     {
         // RelativePath is id-prefixed (e.g. "all-minilm-l6-v2/model.onnx");
         // route through the resolver so per-version installs surface as
@@ -384,7 +384,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// is still callable.
     /// </summary>
     private static void FillRowFromDescriptor(
-        DataValue[] cells, ModelDescriptor descriptor, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
+        DataValue[] cells, ModelDescriptor descriptor, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver, Arena arena, ICatalogVocabulary? vocabulary)
     {
         long? fileSize = descriptor.UsingPath is { } usingPath
             ? TryStatUsingPath(usingPath, pathResolver)
@@ -450,7 +450,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// <c>kind = "discovered"</c> + <c>residency = "discovered"</c>.
     /// </summary>
     private static void FillDiscoveredRow(
-        DataValue[] cells, CatalogVocabularyEntry vocab, DatumIngest.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
+        DataValue[] cells, CatalogVocabularyEntry vocab, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
     {
         CatalogModel owner = vocab.Owner;
 
@@ -492,7 +492,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     /// model directory) and stat-s the result. Returns <see langword="null"/>
     /// when the file is gone or the path can't be resolved.
     /// </summary>
-    private static long? TryStatUsingPath(string usingPath, DatumIngest.ModelLibrary.IModelPathResolver pathResolver)
+    private static long? TryStatUsingPath(string usingPath, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver)
     {
         string resolved;
         if (usingPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))

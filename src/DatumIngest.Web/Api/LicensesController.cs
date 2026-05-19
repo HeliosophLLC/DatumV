@@ -1,7 +1,7 @@
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 // Read-only window onto the central license registry. The license
 // metadata used to ride along on each catalog manifest; with the

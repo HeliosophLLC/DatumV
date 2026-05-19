@@ -17,7 +17,7 @@ ONNX export of [Intel/zoedepth-nyu-kitti](https://huggingface.co/Intel/zoedepth-
 
 Re-exported from upstream PyTorch weights — Intel publishes only safetensors at the source repo. Provenance trail: Bhat et al. → Intel/zoedepth-nyu-kitti → `transformers.ZoeDepthForDepthEstimation` + thin wrapper → `torch.onnx.export` → these files. fp16 sibling produced from the fp32 trace via onnxconverter-common.
 
-Toolchain: `torch 2.4.x` (CUDA 12.4), `torchvision 0.19` (matched ABI), `transformers 4.45.2`, `optimum[onnxruntime] 1.24.0`, `onnxconverter-common>=1.14`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-zoedepth.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-zoedepth.ps1) in the DatumIngest repo (run once for fp32, again with `-Fp16` for the half-precision sibling).
+Toolchain: `torch 2.4.x` (CUDA 12.4), `torchvision 0.19` (matched ABI), `transformers 4.45.2`, `optimum[onnxruntime] 1.24.0`, `onnxconverter-common>=1.14`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-zoedepth.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-zoedepth.ps1) in the Heliosoph repo (run once for fp32, again with `-Fp16` for the half-precision sibling).
 
 Credit: Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller (Intel Intelligent Systems Lab). Paper: *"ZoeDepth: Zero-shot Transfer by Combining Relative and Metric Depth"*, 2023.
 

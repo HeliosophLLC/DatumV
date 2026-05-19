@@ -1,8 +1,8 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
 /// <summary>
 /// Resolves <c>WITH</c>-clause CTE projections to a name-and-kind list the

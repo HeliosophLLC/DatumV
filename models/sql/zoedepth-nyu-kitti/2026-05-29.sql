@@ -6,7 +6,7 @@
 -- ONNX file:   model.onnx
 -- License:     MIT
 -- Upstream:    https://github.com/isl-org/ZoeDepth
---              (Heliosoph ONNX export from Intel/zoedepth-nyu-kitti)
+--              (Heliosoph.DatumV ONNX export from Intel/zoedepth-nyu-kitti)
 --
 -- Intel ISL's ZoeDepth combines DPT-Large's relative-depth backbone with
 -- dual metric heads (NYU indoor + KITTI outdoor calibration) to emit

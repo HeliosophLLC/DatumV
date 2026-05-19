@@ -1,4 +1,4 @@
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Collection definition for allocation regression tests. Disables parallel execution

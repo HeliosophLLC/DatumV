@@ -1,7 +1,7 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Pivot;
+namespace Heliosoph.DatumV.Execution.Operators.Pivot;
 
 /// <summary>
 /// Output-side plumbing for <see cref="PivotOperator"/>. One group becomes one

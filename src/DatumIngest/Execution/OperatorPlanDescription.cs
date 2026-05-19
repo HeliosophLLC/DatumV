@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Self-description of an operator for EXPLAIN output. Each <see cref="QueryOperator"/>

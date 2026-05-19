@@ -1,7 +1,7 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Image;
+namespace Heliosoph.DatumV.Functions.Image;
 
 /// <summary>
 /// Helpers for constructing <see cref="DataValue"/>s of <see cref="DataKind.Image"/>

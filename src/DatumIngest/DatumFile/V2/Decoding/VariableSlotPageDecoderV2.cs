@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Image;
-using DatumIngest.IO;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.IO;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Decoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Decoding;
 
 /// <summary>
 /// V2 variable-length page decoder. Random-access reader over a page laid

@@ -1,16 +1,16 @@
 using System.Diagnostics;
 using System.Text;
 
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Diagnostics;
-using DatumIngest.Functions;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -33,9 +33,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 //                                              as `crimes`.
 //
 // Catalog resolution:
-//   --catalog-root <path>     defaults to %LOCALAPPDATA%\DatumIngest
+//   --catalog-root <path>     defaults to %LOCALAPPDATA%\Heliosoph.DatumV
 //   --models-dir   <path>     defaults to $DATUM_MODELS, then
-//                              %LOCALAPPDATA%\DatumIngest\models
+//                              %LOCALAPPDATA%\Heliosoph.DatumV\models
 //   --no-builtins             skip BuiltinModels.AttachStandardModels (faster
 //                             startup when you only need SQL-defined models)
 //   --no-rehydrate            don't re-apply persisted CREATE MODEL statements
@@ -74,8 +74,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 //                             only show spans from sources named <name>.
 //                             Accepts the short forms "op" (operator pulls)
 //                             and "fn" (scalar function calls), or the full
-//                             source name "DatumIngest.Operators" /
-//                             "DatumIngest.Scalars". Omit to see all.
+//                             source name "Heliosoph.DatumV.Operators" /
+//                             "Heliosoph.DatumV.Scalars". Omit to see all.
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -121,7 +121,7 @@ string modelsDir = opts.ModelsDir
     ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
     ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DatumIngest", "models");
+        "Heliosoph.DatumV", "models");
 
 bool catalogRootIsScratch = opts.CatalogRoot is null;
 Directory.CreateDirectory(catalogRoot);
@@ -521,8 +521,8 @@ static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "â
 
 static string ShortSource(string fullName) => fullName switch
 {
-    "DatumIngest.Operators" => "op",
-    "DatumIngest.Scalars" => "fn",
+    "Heliosoph.DatumV.Operators" => "op",
+    "Heliosoph.DatumV.Scalars" => "fn",
     _ => fullName,
 };
 
@@ -640,8 +640,8 @@ sealed record Options(
                     if (++i >= args.Length) throw new ArgumentException("--activity-source requires a name.");
                     activitySources.Add(args[i] switch
                     {
-                        "op" => "DatumIngest.Operators",
-                        "fn" => "DatumIngest.Scalars",
+                        "op" => "Heliosoph.DatumV.Operators",
+                        "fn" => "Heliosoph.DatumV.Scalars",
                         string s => s,
                     });
                     break;

@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Arrays;
 
 /// <summary>
 /// End-to-end SQL tests for <c>array_shape</c> and <c>array_get</c> against
@@ -159,7 +159,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         // 2-D array, only 1 index supplied → expected to throw at execution.
-        await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
+        await Assert.ThrowsAsync<Heliosoph.DatumV.Execution.ExpressionEvaluationException>(
             () => ExecuteQueryAsync("SELECT array_get(m, 1) FROM t", catalog));
     }
 
@@ -171,7 +171,7 @@ public sealed class ArrayShapeGetFunctionTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         // Second dim is 3 (valid indices 1..3); 5 is out of range.
-        await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
+        await Assert.ThrowsAsync<Heliosoph.DatumV.Execution.ExpressionEvaluationException>(
             () => ExecuteQueryAsync("SELECT array_get(m, 1, 5) FROM t", catalog));
     }
 }

@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Rewrites CROSS VALIDATE fold-alias references in SELECT columns and GROUP BY

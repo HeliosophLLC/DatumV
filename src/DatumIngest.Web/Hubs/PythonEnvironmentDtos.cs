@@ -1,9 +1,9 @@
 using Tapper;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 // Wire-format DTOs mirroring the Python env event records in
-// DatumIngest.Models.Python. Same layering rationale as ModelDownloadDtos:
+// Heliosoph.DatumV.Models.Python. Same layering rationale as ModelDownloadDtos:
 // Tapper attributes live on the Web side so TypedSignalR's TypeScript
 // codegen emits matching interfaces for the React client, without
 // dragging that concern into the core engine.

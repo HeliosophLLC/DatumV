@@ -1,6 +1,6 @@
-using DatumIngest.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
 
-namespace DatumIngest.Indexing.BTree.MutableBytes;
+namespace Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
 /// <summary>
 /// A crash-safe, single-writer, append-mostly B+Tree backed by a dedicated
@@ -11,7 +11,7 @@ namespace DatumIngest.Indexing.BTree.MutableBytes;
 /// </summary>
 /// <remarks>
 /// <para>Key shape is the caller's concern — typically the output of
-/// <see cref="DatumIngest.Indexing.CompositeKeyEncoder"/> which converts
+/// <see cref="Heliosoph.DatumV.Indexing.CompositeKeyEncoder"/> which converts
 /// a tuple of <c>DataValue</c>s into a memcmp-orderable byte string.
 /// The tree itself knows nothing about column kinds.</para>
 ///

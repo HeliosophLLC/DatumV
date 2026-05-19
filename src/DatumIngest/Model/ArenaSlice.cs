@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// A read-only view over a sub-region ("page") of an <see cref="Arena"/>.

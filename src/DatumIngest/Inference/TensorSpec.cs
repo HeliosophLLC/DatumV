@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// Describes one tensor in a model's input or output signature: name,

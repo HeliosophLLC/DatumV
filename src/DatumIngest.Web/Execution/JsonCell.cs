@@ -1,6 +1,6 @@
-using DatumIngest.Functions.Json;
+using Heliosoph.DatumV.Functions.Json;
 
-namespace DatumIngest.Web.Execution;
+namespace Heliosoph.DatumV.Web.Execution;
 
 internal sealed record JsonCell(
     string Kind,

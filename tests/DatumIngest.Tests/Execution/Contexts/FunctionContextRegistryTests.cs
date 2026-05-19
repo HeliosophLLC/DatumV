@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution.Contexts;
+namespace Heliosoph.DatumV.Tests.Execution.Contexts;
 
 /// <summary>
 /// Phase-A2 substrate: registration, lookup, and ancestor-walk behaviours

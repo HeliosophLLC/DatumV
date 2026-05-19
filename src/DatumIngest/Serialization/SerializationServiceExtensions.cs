@@ -1,10 +1,10 @@
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Serialization.Fits;
-using DatumIngest.Serialization.Idx;
-using DatumIngest.Serialization.Json;
-using DatumIngest.Serialization.Tar;
-using DatumIngest.Serialization.Zip;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
+using Heliosoph.DatumV.Serialization.Fits;
+using Heliosoph.DatumV.Serialization.Idx;
+using Heliosoph.DatumV.Serialization.Json;
+using Heliosoph.DatumV.Serialization.Tar;
+using Heliosoph.DatumV.Serialization.Zip;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -17,7 +17,7 @@ public static class SerializationServiceExtensions
     /// <summary>
     /// Registers all built-in <see cref="IFileFormat"/> implementations as transient services.
     /// Resolve them as <c>IEnumerable&lt;IFileFormat&gt;</c> to feed into
-    /// <see cref="DatumIngest.Serialization.FormatRegistry"/>.
+    /// <see cref="Heliosoph.DatumV.Serialization.FormatRegistry"/>.
     /// </summary>
     public static IServiceCollection AddFileFormats(this IServiceCollection services)
     {

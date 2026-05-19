@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// Sync <c>Plan(...)</c> overloads for tests. The production

@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using DatumIngest.Functions.Audio;
+using Heliosoph.DatumV.Functions.Audio;
 
-namespace DatumIngest.Tests.Functions.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Audio;
 
 /// <summary>
 /// FFmpeg-backed PCM decode tests. Exercises mono WAV decode + resample

@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Thrown by <c>InsertExecutor</c> (via <c>DatumAppendSession</c>) when a row

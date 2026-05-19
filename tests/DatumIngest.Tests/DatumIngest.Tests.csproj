@@ -5,7 +5,9 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefineConstants>$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
-    <RunSettingsFilePath>$(MSBuildThisFileDirectory)DatumIngest.Tests.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory)Heliosoph.DatumV.Tests.runsettings</RunSettingsFilePath>
+    <RootNamespace>Heliosoph.DatumV.Tests</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV.Tests</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

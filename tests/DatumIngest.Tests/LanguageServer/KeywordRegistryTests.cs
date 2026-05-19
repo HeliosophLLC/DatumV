@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
-using DatumIngest.LanguageServer;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Parsing.Tokens;
 
 /// <summary>
 /// Tests for <see cref="KeywordRegistry"/> — enforces that every SQL keyword token is

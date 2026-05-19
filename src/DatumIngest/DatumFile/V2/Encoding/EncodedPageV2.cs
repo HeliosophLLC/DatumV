@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
 /// Result of flushing a column page: the on-disk byte payload, the

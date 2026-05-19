@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// PR2 tests for crash-safe append. Cover append round-trip,
@@ -193,7 +193,7 @@ public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
         // Both sets of payloads must remain readable.
         ColumnDescriptorV2 col = new("s", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
         string datumPath = Path.Combine(_tempDir, "append_sidecar.datum");
-        string sidecarPath = datumPath + DatumIngest.DatumFile.Sidecar.SidecarConstants.FileExtension;
+        string sidecarPath = datumPath + Heliosoph.DatumV.DatumFile.Sidecar.SidecarConstants.FileExtension;
 
         // Initial write: 5 long strings (each > 16 bytes → sidecar).
         Pool pool = CreatePool();
@@ -208,7 +208,7 @@ public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
         }
 
         ulong initialFingerprint;
-        DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath);
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath);
         try
         {
             initialFingerprint = sidecar.Fingerprint;
@@ -239,15 +239,15 @@ public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
         // Read back all 8 strings — sidecar fingerprint preserved, both
         // initial and appended payloads resolvable.
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
-        using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource =
-            DatumIngest.DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
+        using Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore sidecarSource =
+            Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
 
         Assert.Equal(8L, reader.TotalRowCount);
         Assert.True((reader.Header.Flags & DatumFileFlagsV2.HasSidecarReferences) != 0,
             "HasSidecarReferences should be sticky across append");
 
         Arena readArena = CreateArena();
-        DatumIngest.DatumFile.Sidecar.SidecarRegistry registry = new();
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarRegistry registry = new();
         registry.Register(sidecarSource);
         IPageDecoderV2 decoder = reader.OpenPageDecoder(
             columnIndex: 0,
@@ -315,7 +315,7 @@ public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
         // sidecar is still required at read time.
         ColumnDescriptorV2 col = new("s", DataKind.String, EncoderKind.VariableSlot, IsNullable: false);
         string datumPath = Path.Combine(_tempDir, "append_sticky.datum");
-        string sidecarPath = datumPath + DatumIngest.DatumFile.Sidecar.SidecarConstants.FileExtension;
+        string sidecarPath = datumPath + Heliosoph.DatumV.DatumFile.Sidecar.SidecarConstants.FileExtension;
 
         Pool pool = CreatePool();
         ColumnLookup lookup = new(["s"]);
@@ -328,7 +328,7 @@ public sealed class DatumFileV2AppendTests : ServiceTestBase, IAsyncLifetime
         r1[0] = DataValue.FromString("short", arena);
         batch.Add(r1);
 
-        using (DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
+        using (Heliosoph.DatumV.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
         {
             using FileStream fs = new(datumPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
             using DatumFileWriterV2 writer = new(fs, sidecar);

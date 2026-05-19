@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Messages;
+namespace Heliosoph.DatumV.Web.Messages;
 
 // v1 chat persistence over a flat `messages` table. Named for the eventual
 // shape (per project_message_graph_design memory) so that when message_links

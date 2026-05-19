@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Validity state of a table's <c>.datum-index</c> acceleration sidecar.

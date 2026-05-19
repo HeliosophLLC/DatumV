@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
-using DatumIngest.Catalog;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 /// <summary>
 /// LET visibility from WHERE — Phase 1 of the LET-as-first-class-plan-time-

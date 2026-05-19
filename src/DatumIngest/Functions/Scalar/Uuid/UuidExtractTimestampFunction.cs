@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Uuid;
+namespace Heliosoph.DatumV.Functions.Scalar.Uuid;
 
 /// <summary>
 /// Returns the embedded timestamp from an RFC 9562 UUID of version 1, 6, or 7.

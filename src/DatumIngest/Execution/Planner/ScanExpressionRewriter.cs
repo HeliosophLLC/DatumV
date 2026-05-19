@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Detects and rewrites <see cref="ScanExpression"/> nodes (SQL <c>SCAN</c> /

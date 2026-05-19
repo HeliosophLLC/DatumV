@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_envelope(audio Audio, bins Int32) → Array&lt;Float32&gt;(bins, 2)</c>.

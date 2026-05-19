@@ -3,14 +3,14 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 /// <summary>
 /// Walks the dataset manifest at boot (and after every install /

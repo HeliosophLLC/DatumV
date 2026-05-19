@@ -6,7 +6,7 @@
 -- ONNX files:  int8/face_detector.onnx, int8/face_landmark_detector.onnx
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/google-ai-edge/mediapipe
---              (Qualcomm AI Hub W8A8-quantized ONNX export via Heliosoph)
+--              (Qualcomm AI Hub W8A8-quantized ONNX export via Heliosoph.DatumV)
 --
 -- INT8-quantized sibling of `mediapipe_face`. Same input/output interface
 -- as the float variant, ~half the disk footprint. Pick for CPU / NPU /

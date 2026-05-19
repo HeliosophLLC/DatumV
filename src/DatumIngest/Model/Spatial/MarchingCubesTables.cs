@@ -1,4 +1,4 @@
-namespace DatumIngest.Model.Spatial;
+namespace Heliosoph.DatumV.Model.Spatial;
 
 /// <summary>
 /// Lookup tables for the Marching Cubes algorithm (Lorensen &amp; Cline 1987).

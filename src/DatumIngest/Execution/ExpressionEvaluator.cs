@@ -3,16 +3,16 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Text.RegularExpressions;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Diagnostics;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Image;
-using DatumIngest.Functions.Video;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Functions.Video;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Evaluates AST <see cref="Expression"/> nodes against a <see cref="Row"/>.

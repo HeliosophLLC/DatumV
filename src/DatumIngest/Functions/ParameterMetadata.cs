@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Per-parameter metadata surfaced to UI clients (function-executor forms,

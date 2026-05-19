@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="ExecutionContext"/> cloning and property propagation.
@@ -20,7 +20,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     public void Derive_WithOuterRow_PropagatesAllProperties()
     {
         Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
-        ExecutionContext original = new DatumIngest.Execution.ExecutionContext(
+        ExecutionContext original = new Heliosoph.DatumV.Execution.ExecutionContext(
             CreateCatalog(),
             memoryBudgetBytes: 512)
         {
@@ -62,7 +62,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void Dispose_OwnedAccountant_IsReleased()
     {
-        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
+        ExecutionContext context = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog());
 
         MemoryAccountant accountant = context.Accountant;
         context.Dispose();
@@ -79,7 +79,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     public void Derive_ChildContextSharesAccountant_AndDoesNotDisposeIt()
     {
         Row outerRow = MakeRow(["x"], DataValue.FromFloat32(1f));
-        using ExecutionContext parent = new DatumIngest.Execution.ExecutionContext(
+        using ExecutionContext parent = new Heliosoph.DatumV.Execution.ExecutionContext(
             CreateCatalog(),
             memoryBudgetBytes: 1000);
 
@@ -105,7 +105,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
         using MemoryAccountant borrowed = new(memoryBudgetBytes: 1000);
         borrowed.NotifyMaterialized(200);
 
-        ExecutionContext context = new DatumIngest.Execution.ExecutionContext(
+        ExecutionContext context = new Heliosoph.DatumV.Execution.ExecutionContext(
             CreateCatalog(),
             accountant: borrowed);
         context.Dispose();
@@ -145,7 +145,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void DefaultContext_HasZeroDepthAndNoOpPrintSink()
     {
-        using ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
+        using ExecutionContext ctx = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog());
         Assert.Equal(0, ctx.ProcedureCallDepth);
         Assert.NotNull(ctx.PrintSink);
         ctx.PrintSink("dropped");   // no-op; must not throw
@@ -160,7 +160,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void DefaultContext_AllocatesVariableSubstrate()
     {
-        using ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
+        using ExecutionContext ctx = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog());
 
         Assert.Equal(1, ctx.VariableScope.FrameCount);
         Assert.NotNull(ctx.VariableStore);
@@ -175,7 +175,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(CreateCatalog());
+        ExecutionContext ctx = new Heliosoph.DatumV.Execution.ExecutionContext(CreateCatalog());
         ctx.Dispose();
         ctx.Dispose();
         // Reaching here without throwing is the assertion.
@@ -193,7 +193,7 @@ public sealed class ExecutionContextTests : ServiceTestBase
     {
         Arena caller = CreateArena();
 
-        ExecutionContext ctx = new DatumIngest.Execution.ExecutionContext(
+        ExecutionContext ctx = new Heliosoph.DatumV.Execution.ExecutionContext(
             CreateCatalog(),
             variableStore: caller);
 

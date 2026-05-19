@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

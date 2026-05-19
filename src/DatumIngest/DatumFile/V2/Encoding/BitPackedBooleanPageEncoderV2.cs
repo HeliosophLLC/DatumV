@@ -1,7 +1,7 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
 /// V2 boolean encoder. Lays out one page as two parallel bitmaps —

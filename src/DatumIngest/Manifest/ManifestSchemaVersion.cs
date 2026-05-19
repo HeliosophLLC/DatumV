@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// On-disk schema version of <c>.datum-manifest</c> files. Surfaces incompatibility

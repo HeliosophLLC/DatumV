@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumIngest.Functions.Json;
+using Heliosoph.DatumV.Functions.Json;
 
-namespace DatumIngest.Ingestion.Sampling;
+namespace Heliosoph.DatumV.Ingestion.Sampling;
 
 /// <summary>
 /// Serializes and deserializes <see cref="SamplePreview"/> instances to and from JSON.

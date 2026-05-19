@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.IO.Hashing;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Computes a content-based fingerprint of a model file on disk. Used as

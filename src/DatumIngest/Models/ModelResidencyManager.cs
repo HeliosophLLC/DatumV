@@ -1,8 +1,8 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Tracks which models are loaded into VRAM, enforces a configurable budget,

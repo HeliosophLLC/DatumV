@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Joins;
+namespace Heliosoph.DatumV.Execution.Operators.Joins;
 
 /// <summary>
 /// Owns the output-batch lifecycle for a join: renting from the

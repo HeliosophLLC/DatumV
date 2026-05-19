@@ -1,6 +1,6 @@
 using System.Security.Claims;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Per-request, immutable to consumers. Populated by ContextResolverMiddleware
 // before any controller/hub runs. Inject this into controllers/services to

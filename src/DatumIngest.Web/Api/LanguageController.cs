@@ -1,9 +1,9 @@
-using DatumIngest.LanguageServer;
-using DatumIngest.Web.Dtos.Lsp;
-using DatumIngest.Web.Lsp;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Web.Dtos.Lsp;
+using Heliosoph.DatumV.Web.Lsp;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// SQL language-intelligence endpoints. Each route translates a JSON

@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 public sealed record StartedWebHost(WebApplication App, Uri Url) : IAsyncDisposable
 {

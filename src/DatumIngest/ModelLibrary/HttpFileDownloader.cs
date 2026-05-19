@@ -5,7 +5,7 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // Shared streaming-download core for source clients that don't have their
 // own tree/list-API quirks. Used by GithubReleaseSourceClient and

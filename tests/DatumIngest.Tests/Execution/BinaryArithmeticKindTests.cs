@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Pins the runtime kind-promotion rules for binary and unary arithmetic.
@@ -337,13 +337,13 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
             [DataValue.FromInt64(2_500_000_001L)],
             [DataValue.FromInt64(3_500_000_002L)]);
 
-        IReadOnlyList<DatumIngest.Parsing.Ast.Statement> stmts = DatumIngest.Parsing.SqlParser.ParseBatch(
+        IReadOnlyList<Heliosoph.DatumV.Parsing.Ast.Statement> stmts = Heliosoph.DatumV.Parsing.SqlParser.ParseBatch(
             "DECLARE sum INT64 = 0 " +
             "FOR row IN (SELECT size FROM files) " +
             "  SET sum = sum + row['size']");
 
-        DatumIngest.Execution.BatchExecutor exec = new(catalog);
-        DatumIngest.Execution.BatchResult result = await exec.ExecuteAsync(stmts, CancellationToken.None);
+        Heliosoph.DatumV.Execution.BatchExecutor exec = new(catalog);
+        Heliosoph.DatumV.Execution.BatchResult result = await exec.ExecuteAsync(stmts, CancellationToken.None);
 
         // Convert.ToInt64 round-trips correctly only if sum was bound as
         // an integer kind through the whole loop — Float32 would have

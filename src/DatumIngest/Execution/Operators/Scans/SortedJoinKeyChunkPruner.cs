@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Diagnostics;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Sorted-index chunk pruner driven by join keys. For each column with a

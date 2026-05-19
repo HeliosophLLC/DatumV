@@ -1,11 +1,11 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar;
-using DatumIngest.Functions.Scalar.Json;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar;
+using Heliosoph.DatumV.Functions.Scalar.Json;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar;
 
 /// <summary>
 /// End-to-end smoke tests for the json_parse → json_value / json_query →

@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-namespace DatumIngest.Indexing.Bitmap;
+namespace Heliosoph.DatumV.Indexing.Bitmap;
 
 /// <summary>
 /// Provides SIMD-accelerated bitwise composition operations on bitmap byte spans.

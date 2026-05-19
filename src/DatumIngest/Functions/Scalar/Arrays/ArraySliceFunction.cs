@@ -1,9 +1,9 @@
 using System.Numerics;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Functions.Scalar.Arrays;
 
 /// <summary>
 /// <c>array_slice(arr, start, length) → Array&lt;T&gt;</c>. Returns a

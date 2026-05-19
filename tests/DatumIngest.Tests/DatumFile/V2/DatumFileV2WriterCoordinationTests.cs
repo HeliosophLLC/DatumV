@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// PR3 tests for writer coordination: WriterId stamping (initial +

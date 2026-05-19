@@ -1,6 +1,6 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 /// <summary>
 /// Single source of truth for "where does this model's files live on disk?"
@@ -99,7 +99,7 @@ public interface IModelPathResolver
 /// <c>&lt;root&gt;/&lt;id&gt;/&lt;version&gt;/&lt;rest&gt;</c>. The active
 /// version is resolved through <see cref="ICatalogActiveVersionLookup"/>
 /// (typically a query against the live catalog rows in
-/// <see cref="DatumIngest.Catalog.TableCatalog"/>) with an
+/// <see cref="Heliosoph.DatumV.Catalog.TableCatalog"/>) with an
 /// <see cref="ModelInstallContext.CurrentVersionPin"/> override for
 /// in-flight installs / rehydrates.
 /// </summary>

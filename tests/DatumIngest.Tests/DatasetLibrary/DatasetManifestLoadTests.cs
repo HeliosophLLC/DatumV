@@ -1,13 +1,13 @@
-using DatumIngest.DatasetLibrary;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-// ManifestStore exists in both DatumIngest.DatasetLibrary and
-// DatumIngest.ModelLibrary; this file only exercises the dataset one.
-using ManifestStore = DatumIngest.DatasetLibrary.ManifestStore;
+// ManifestStore exists in both Heliosoph.DatumV.DatasetLibrary and
+// Heliosoph.DatumV.ModelLibrary; this file only exercises the dataset one.
+using ManifestStore = Heliosoph.DatumV.DatasetLibrary.ManifestStore;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// Smoke test for the production datasets/catalog.json: loads it through

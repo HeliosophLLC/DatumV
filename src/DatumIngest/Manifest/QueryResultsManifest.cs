@@ -1,6 +1,6 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
-using DatumIngest.Manifest.Insights;
+using Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Top-level manifest describing a query result set, containing one <see cref="FeatureManifest"/>
@@ -24,7 +24,7 @@ public sealed class QueryResultsManifest
     public IReadOnlyList<DatasetInsight>? Insights { get; init; }
 
     /// <summary>
-    /// Gets the recommended DatumIngest SQL query containing only actions from insights
+    /// Gets the recommended Heliosoph.DatumV SQL query containing only actions from insights
     /// with <see cref="ApplyMode.AutoSafe"/> or <see cref="ApplyMode.Suggest"/> apply modes.
     /// Null when no actionable insights exist.
     /// </summary>

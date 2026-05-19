@@ -1,12 +1,12 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.Models;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// Tier 2 of the inference toolkit: <c>onnx_inspect_meta</c>,

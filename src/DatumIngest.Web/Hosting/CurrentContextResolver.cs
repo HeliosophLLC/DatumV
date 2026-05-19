@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Single point where principal + catalog path are resolved per request.
 // Swap implementations to change auth/routing without touching controllers.

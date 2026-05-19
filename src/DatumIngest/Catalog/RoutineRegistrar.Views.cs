@@ -1,7 +1,7 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 internal sealed partial class RoutineRegistrar
 {

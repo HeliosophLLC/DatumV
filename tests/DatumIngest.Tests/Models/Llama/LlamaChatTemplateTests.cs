@@ -1,6 +1,6 @@
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Models.Llama;
 
-namespace DatumIngest.Tests.Models.Llama;
+namespace Heliosoph.DatumV.Tests.Models.Llama;
 
 /// <summary>
 /// Pure-string round-trip tests for the per-family <see cref="LlamaChatTemplate"/>

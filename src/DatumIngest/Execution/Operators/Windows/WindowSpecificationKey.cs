@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Windows;
+namespace Heliosoph.DatumV.Execution.Operators.Windows;
 
 /// <summary>
 /// Structural-equality key for <see cref="WindowSpecification"/>, used by the

@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// Test-only helpers for working with <see cref="Row"/>. These deliberately live in the

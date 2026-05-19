@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// The policy layer between SQL MODEL declarations and the backend

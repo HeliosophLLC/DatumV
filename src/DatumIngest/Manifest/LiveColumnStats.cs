@@ -1,6 +1,6 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Per-column statistics derived live from a <see cref="SourceIndex"/>'s per-chunk

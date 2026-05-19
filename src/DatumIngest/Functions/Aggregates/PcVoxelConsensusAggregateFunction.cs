@@ -1,11 +1,11 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// <c>pc_voxel_consensus_agg(pc PointCloud, cell_size Float32, min_votes Int32) → PointCloud</c>.

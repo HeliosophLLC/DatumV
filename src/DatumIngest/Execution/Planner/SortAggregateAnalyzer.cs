@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Indexing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Sort-elimination and streaming-aggregation analysis. Used by

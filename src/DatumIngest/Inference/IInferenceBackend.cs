@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// One concrete inference runtime — ONNX Runtime, OpenVINO, etc. Backends

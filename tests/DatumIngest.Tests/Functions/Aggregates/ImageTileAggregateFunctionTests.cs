@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Aggregates;
+namespace Heliosoph.DatumV.Tests.Functions.Aggregates;
 
 /// <summary>
 /// Tests for <see cref="ImageTileAggregateFunction"/> — packs images into a

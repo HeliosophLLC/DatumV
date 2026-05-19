@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Windows;
+namespace Heliosoph.DatumV.Execution.Operators.Windows;
 
 /// <summary>
 /// Groups a row index array into contiguous partitions by evaluating the

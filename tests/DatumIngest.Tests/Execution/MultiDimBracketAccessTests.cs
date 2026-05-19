@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end tests for the multi-dim bracket-access syntax: <c>arr[y, x]</c>.
@@ -115,7 +115,7 @@ public sealed class MultiDimBracketAccessTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("INSERT INTO t VALUES ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])");
 
         // 2-D column, only 1 index supplied.
-        await Assert.ThrowsAsync<DatumIngest.Execution.ExpressionEvaluationException>(
+        await Assert.ThrowsAsync<Heliosoph.DatumV.Execution.ExpressionEvaluationException>(
             () => ExecuteQueryAsync("SELECT m[1] FROM t", catalog));
     }
 

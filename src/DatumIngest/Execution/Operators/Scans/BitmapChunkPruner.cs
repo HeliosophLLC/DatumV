@@ -1,10 +1,10 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Bitmap-index chunk pruner driven by filter literals. For equality and IN

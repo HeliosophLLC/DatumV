@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Read-only random-access source for Large Binary Objects, typically backed by a

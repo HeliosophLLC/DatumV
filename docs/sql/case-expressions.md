@@ -55,7 +55,7 @@ FROM users
 
 ### Branch Type Coercion
 
-When THEN/ELSE branches return different data types, DatumIngest applies
+When THEN/ELSE branches return different data types, DatumV applies
 implicit type coercion following SQL Server-style type precedence rules:
 
 1. **Common type wins.** If all branches share a common type through the

@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// A single data entry yielded by an <see cref="IMediaBagReader"/>: the

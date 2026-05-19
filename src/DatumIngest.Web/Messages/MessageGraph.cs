@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Web.Messages;
+namespace Heliosoph.DatumV.Web.Messages;
 
 // INSERT-only wrapper over TableCatalog via the InProcessDatumDb*
 // command/reader surface. Parameters round-trip through the command's

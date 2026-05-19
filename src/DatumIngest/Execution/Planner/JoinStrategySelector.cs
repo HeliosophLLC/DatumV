@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Indexing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Plan-time strategy selection between hash join, merge join, and index

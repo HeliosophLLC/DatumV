@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_color_15.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Color Gaussian-noise specialist trained at σ=15 (light noise —
 -- ISO-grain territory). Beats the blind variant when input noise actually

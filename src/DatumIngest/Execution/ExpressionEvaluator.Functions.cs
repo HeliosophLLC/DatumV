@@ -1,11 +1,11 @@
 using System.Buffers;
 using System.Diagnostics;
-using DatumIngest.Diagnostics;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 public sealed partial class ExpressionEvaluator
 {

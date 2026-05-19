@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Tests for <see cref="ColumnRoleClassifier"/>.
@@ -510,7 +510,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     [Fact]
     public void ManifestBuilder_SetsRoleOnFeatures()
     {
-        DatumIngest.Statistics.StatisticsCollector collector = new();
+        Heliosoph.DatumV.Statistics.StatisticsCollector collector = new();
 
         ColumnLookup columnLookup = new (["id", "category", "score", "name"]);
 
@@ -523,10 +523,10 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
                 DataValue.FromFloat64(index * 1.5 + 0.1),
                 DataValue.FromString($"item_{index}", _arena)
             ];
-            collector.AddRow(new DatumIngest.Model.Row(columnLookup, values), _arena);
+            collector.AddRow(new Heliosoph.DatumV.Model.Row(columnLookup, values), _arena);
         }
 
-        IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();
+        IReadOnlyDictionary<string, Heliosoph.DatumV.Statistics.ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
         {
             ["id"] = DataKind.Int64,
@@ -551,7 +551,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
     [Fact]
     public void ManifestBuilder_BooleanColumn_CreatesBooleanManifest()
     {
-        DatumIngest.Statistics.StatisticsCollector collector = new();
+        Heliosoph.DatumV.Statistics.StatisticsCollector collector = new();
 
         ColumnLookup columnLookup = new (["flag"]);
         for (int index = 0; index < 100; index++)
@@ -560,7 +560,7 @@ public sealed class ColumnRoleClassifierTests : ServiceTestBase
             collector.AddRow(new Row(columnLookup, values), _arena);
         }
 
-        IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();
+        IReadOnlyDictionary<string, Heliosoph.DatumV.Statistics.ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);

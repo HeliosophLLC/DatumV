@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR2: <see cref="LiteralCoercion.EnforceFixedShape"/> attaches the declared
@@ -108,7 +108,7 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
         DataValue source = DataValue.FromArenaArray<float>([1f, 2f, 3f], DataKind.Float32, arena);
 
         ColumnInfo target = Column("matrix", DataKind.Float32, fixedShape: [2, 2]);
-        Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
             LiteralCoercion.EnforceFixedShape(source, target, "matrix", arena));
     }
 }

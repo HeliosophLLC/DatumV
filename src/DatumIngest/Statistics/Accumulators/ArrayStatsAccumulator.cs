@@ -1,7 +1,7 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
 using System.Numerics;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Accumulates aggregate element-wise statistics for typed-array columns. Dispatches

@@ -1,6 +1,6 @@
-using DatumIngest.Indexing;
+using Heliosoph.DatumV.Indexing;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// PR13a-1 tests for the IDXT tail-flip-as-commit protocol on

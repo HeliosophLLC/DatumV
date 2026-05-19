@@ -1,7 +1,7 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
-/// Describes a <c>.datum</c> file as input to <see cref="DatumIngest.Ingestion.Indexer"/>.
+/// Describes a <c>.datum</c> file as input to <see cref="Heliosoph.DatumV.Ingestion.Indexer"/>.
 /// Distinct from <see cref="FileFormatDescriptor"/>: this type only ever points at a
 /// native column-store file, so no gzip handling, no temp-file materialization, and
 /// no provider-specific options are exposed.

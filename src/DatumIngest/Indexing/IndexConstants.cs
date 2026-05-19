@@ -1,4 +1,4 @@
-﻿namespace DatumIngest.Indexing;
+﻿namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Shared numeric constants for index building, fingerprinting, and automatic

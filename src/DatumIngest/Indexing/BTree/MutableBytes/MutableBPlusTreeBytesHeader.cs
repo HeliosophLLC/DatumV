@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.IO.Hashing;
-using DatumIngest.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
 
-namespace DatumIngest.Indexing.BTree.MutableBytes;
+namespace Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
 /// <summary>
 /// One header slot of a bytes-keyed mutable B+Tree file. Mirrors

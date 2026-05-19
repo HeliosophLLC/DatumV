@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Interactions;
+namespace Heliosoph.DatumV.Statistics.Interactions;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Computes the one-way ANOVA F-statistic for testing whether the means of a numeric

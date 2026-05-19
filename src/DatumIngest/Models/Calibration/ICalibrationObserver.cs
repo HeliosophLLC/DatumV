@@ -1,4 +1,4 @@
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Observer interface for <see cref="CalibrationCoordinator"/> ramp

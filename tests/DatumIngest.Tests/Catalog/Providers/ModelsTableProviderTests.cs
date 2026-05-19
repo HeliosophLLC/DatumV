@@ -1,12 +1,12 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog.Providers;
+namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
 /// End-to-end tests for <see cref="ModelsTableProvider"/> — verifies the
@@ -207,12 +207,12 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
             $"file://{filePath}",
             body:
             [
-                new DatumIngest.Parsing.Ast.DeclareStatement(
+                new Heliosoph.DatumV.Parsing.Ast.DeclareStatement(
                     VariableName: "x",
                     TypeName: "Float32",
                     Initializer: null,
                     Span: null),
-                new DatumIngest.Parsing.Ast.ReturnStatement(
+                new Heliosoph.DatumV.Parsing.Ast.ReturnStatement(
                     Value: new LiteralValueExpression(DataValue.FromFloat32(0.0f)),
                     Span: null),
             ]));
@@ -245,14 +245,14 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
             $"file://{filePath}",
             body:
             [
-                new DatumIngest.Parsing.Ast.IfStatement(
+                new Heliosoph.DatumV.Parsing.Ast.IfStatement(
                     Predicate: new LiteralValueExpression(DataValue.FromBoolean(true)),
-                    Then: new DatumIngest.Parsing.Ast.ReturnStatement(
+                    Then: new Heliosoph.DatumV.Parsing.Ast.ReturnStatement(
                         Value: new LiteralValueExpression(DataValue.FromFloat32(1.0f)),
                         Span: null),
                     Else: null,
                     Span: null),
-                new DatumIngest.Parsing.Ast.ReturnStatement(
+                new Heliosoph.DatumV.Parsing.Ast.ReturnStatement(
                     Value: new LiteralValueExpression(DataValue.FromFloat32(0.0f)),
                     Span: null),
             ]));
@@ -464,18 +464,18 @@ public sealed class ModelsTableProviderTests : ServiceTestBase, IDisposable
     private static ModelDescriptor MakeDescriptor(
         string name,
         string usingPath,
-        IReadOnlyList<DatumIngest.Parsing.Ast.Statement>? body = null) => new(
+        IReadOnlyList<Heliosoph.DatumV.Parsing.Ast.Statement>? body = null) => new(
         SchemaName: "models",
         Name: name,
-        Parameters: Array.Empty<DatumIngest.Parsing.Ast.UdfParameter>(),
+        Parameters: Array.Empty<Heliosoph.DatumV.Parsing.Ast.UdfParameter>(),
         ReturnTypeName: "Float32",
         UsingPath: usingPath,
         ResolvedUsingPath: usingPath,
-        StatementBody: body ?? Array.Empty<DatumIngest.Parsing.Ast.Statement>(),
+        StatementBody: body ?? Array.Empty<Heliosoph.DatumV.Parsing.Ast.Statement>(),
         // Empty alias map — the table-provider tests inspect descriptor
         // metadata only and never trigger a session load, so the dispatcher
         // reference is never dereferenced.
-        BoundSessions: new DatumIngest.Catalog.Registries.LazyModelSessions(
+        BoundSessions: new Heliosoph.DatumV.Catalog.Registries.LazyModelSessions(
             dispatcher: null!,
             resolvedPaths: new Dictionary<string, string>(StringComparer.Ordinal),
             bundleId: $"test:{name}"),

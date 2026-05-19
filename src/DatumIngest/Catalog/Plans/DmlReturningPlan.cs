@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog.Executors;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Executors;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// Which DML statement produced this plan. Drives the explain-tree label and

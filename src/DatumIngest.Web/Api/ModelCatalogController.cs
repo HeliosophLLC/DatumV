@@ -1,8 +1,8 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.ModelLibrary;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 // Lightweight DTO describing one task contract for the front-end filter UI.
 // Family is stringified (e.g. "ComputerVision") so the JSON wire form

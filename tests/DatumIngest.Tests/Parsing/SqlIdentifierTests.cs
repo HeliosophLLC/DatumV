@@ -1,6 +1,6 @@
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 /// <summary>
 /// Tests for <see cref="SqlIdentifier"/> quoting and unquoting utilities.

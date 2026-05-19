@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Accumulates size statistics for binary (UInt8Array) columns using Welford's algorithm.

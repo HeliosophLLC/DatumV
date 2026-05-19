@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.Catalog;
+namespace Heliosoph.DatumV.Web.Catalog;
 
 /// <summary>
 /// Background service that bridges the in-process

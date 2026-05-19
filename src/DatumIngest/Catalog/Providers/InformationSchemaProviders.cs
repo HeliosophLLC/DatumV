@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// <c>information_schema.tables</c> — lists every table registered in the catalog,
@@ -117,7 +117,7 @@ internal sealed class InformationSchemaTablesProvider : NonSeekableTableProvider
 /// <para>
 /// <c>data_type</c> uses PG-standard names (<c>'character varying'</c>,
 /// <c>'integer'</c>, <c>'ARRAY'</c>, <c>'USER-DEFINED'</c>, …) for
-/// portability. <c>data_kind</c> sits alongside with the DatumIngest-native
+/// portability. <c>data_kind</c> sits alongside with the Heliosoph.DatumV-native
 /// <see cref="DataKind"/> name (<c>'String'</c>, <c>'Int32'</c>, …) —
 /// useful when <c>data_type</c> is <c>'USER-DEFINED'</c> or <c>'ARRAY'</c>
 /// and the consumer wants the exact engine kind.
@@ -666,12 +666,12 @@ internal sealed class InformationSchemaSchemataProvider : NonSeekableTableProvid
 /// <c>is_insertable_into</c>, <c>is_trigger_updatable</c>,
 /// <c>is_trigger_deletable</c>, <c>is_trigger_insertable_into</c>.
 /// <para>
-/// Views in DatumIngest are pure macros: the planner substitutes the body
+/// Views in Heliosoph.DatumV are pure macros: the planner substitutes the body
 /// at every FROM reference and runs the expanded query. They are not
 /// updatable and do not support DML, so <c>is_updatable</c>,
 /// <c>is_insertable_into</c>, and the three <c>is_trigger_*</c> columns
 /// always report <c>"NO"</c>. <c>check_option</c> is always
-/// <c>"NONE"</c> — DatumIngest does not implement WITH CHECK OPTION.
+/// <c>"NONE"</c> — Heliosoph.DatumV does not implement WITH CHECK OPTION.
 /// </para>
 /// </remarks>
 internal sealed class InformationSchemaViewsProvider : NonSeekableTableProviderBase

@@ -1,8 +1,8 @@
 using System.IO.Hashing;
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// <see cref="MediaKindHandler"/> for image bags: JPEG, PNG, WebP, GIF entries.

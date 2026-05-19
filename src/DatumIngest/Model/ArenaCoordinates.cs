@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Strongly-typed offset into an <see cref="IValueStore"/> — typically a byte offset

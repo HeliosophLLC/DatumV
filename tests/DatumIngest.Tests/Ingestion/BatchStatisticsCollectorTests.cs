@@ -1,9 +1,9 @@
-using DatumIngest.Pooling;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
-namespace DatumIngest.Tests.Ingestion;
+namespace Heliosoph.DatumV.Tests.Ingestion;
 
 public sealed class BatchStatisticsCollectorTests : ServiceTestBase
 {

@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Statistics;
+namespace Heliosoph.DatumV.Tests.Statistics;
 
-using DatumIngest.Model;
-using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
+using Heliosoph.DatumV.Statistics.Accumulators;
 
 public sealed class StatisticsCollectorTests : ServiceTestBase
 {

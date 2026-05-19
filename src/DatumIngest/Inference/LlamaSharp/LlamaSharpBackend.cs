@@ -1,8 +1,8 @@
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Models.Llama;
 using LLama;
 using LLama.Common;
 
-namespace DatumIngest.Inference.LlamaSharp;
+namespace Heliosoph.DatumV.Inference.LlamaSharp;
 
 /// <summary>
 /// <see cref="IInferenceBackend"/> implementation backed by LlamaSharp /

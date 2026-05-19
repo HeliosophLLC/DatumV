@@ -1,7 +1,7 @@
-using DatumIngest.Indexing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Common contract every mutable B+Tree implementation must satisfy. The

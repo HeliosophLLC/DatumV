@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Crypto;
+namespace Heliosoph.DatumV.Functions.Scalar.Crypto;
 
 /// <summary>
 /// Shared signature shape for hash functions that accept either a string

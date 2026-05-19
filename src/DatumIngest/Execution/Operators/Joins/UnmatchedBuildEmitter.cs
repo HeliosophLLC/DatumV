@@ -1,7 +1,7 @@
 using System.Collections;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Joins;
+namespace Heliosoph.DatumV.Execution.Operators.Joins;
 
 /// <summary>
 /// Emits unmatched build-side rows after the probe phase completes. Used by

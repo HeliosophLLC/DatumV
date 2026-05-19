@@ -5,11 +5,11 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using DatumIngest.Catalog.Registries;
+using Heliosoph.DatumV.Catalog.Registries;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 internal sealed class ManifestStore : IManifestStore
 {

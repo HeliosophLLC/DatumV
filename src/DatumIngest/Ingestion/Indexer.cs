@@ -1,13 +1,13 @@
 using System.Diagnostics;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.Mutable;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
 
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// Builds a <c>.datum-index</c> sidecar for a single <c>.datum</c> file. Parallel to

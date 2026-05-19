@@ -1,6 +1,6 @@
 # Statistics & Manifest
 
-DatumIngest collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
+DatumV collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
 
 ## Statistics
 

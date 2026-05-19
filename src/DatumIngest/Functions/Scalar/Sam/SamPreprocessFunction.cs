@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Sam;
+namespace Heliosoph.DatumV.Functions.Scalar.Sam;
 
 /// <summary>
 /// <c>sam_preprocess(img Image) → Struct{tensor: Float32[], scale: Float32, height: Int32, width: Int32}</c>.

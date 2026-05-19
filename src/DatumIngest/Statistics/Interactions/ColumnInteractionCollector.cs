@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Interactions;
+namespace Heliosoph.DatumV.Statistics.Interactions;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Manages pairwise interaction accumulators for all eligible column pairs in a result set.

@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Sets;
+namespace Heliosoph.DatumV.Execution.Operators.Sets;
 
 /// <summary>
 /// Wraps a <see cref="SpillReaderWriter"/> plus the per-partition row-batch buffer

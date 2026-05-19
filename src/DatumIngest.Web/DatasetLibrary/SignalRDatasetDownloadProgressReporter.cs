@@ -1,8 +1,8 @@
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.DatasetLibrary;
+namespace Heliosoph.DatumV.Web.DatasetLibrary;
 
 // Adapter that bridges the core IDatasetDownloadProgressReporter to the
 // Web's SignalR hub. Receives core event records from DatasetDownloadService,

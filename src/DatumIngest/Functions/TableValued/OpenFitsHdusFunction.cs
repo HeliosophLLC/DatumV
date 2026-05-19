@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Fits;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Fits;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>open_fits_hdus(path) → table</c>. Opens a FITS file and yields one

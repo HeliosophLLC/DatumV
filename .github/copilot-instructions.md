@@ -1,4 +1,4 @@
-# Copilot Instructions — DatumIngest
+# Copilot Instructions — DatumV
 
 ## Code style
 
@@ -28,7 +28,7 @@
 
 ## Benchmarks
 
-- **Update README after every benchmark run.** After running benchmarks (`dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks`), read the updated result files from `BenchmarkDotNet.Artifacts/results/*-report-github.md` and update the **Benchmarks → Results** section in `README.md` with the new numbers. Include Mean, Error, StdDev, and Allocated columns for each suite (Parsing, Providers, Execution, Statistics, Output). Update the environment header block and the analysis commentary beneath each table if the numbers have changed materially.
+- **Update README after every benchmark run.** After running benchmarks (`dotnet run -c Release --project benchmarks/DatumV.Benchmarks`), read the updated result files from `BenchmarkDotNet.Artifacts/results/*-report-github.md` and update the **Benchmarks → Results** section in `README.md` with the new numbers. Include Mean, Error, StdDev, and Allocated columns for each suite (Parsing, Providers, Execution, Statistics, Output). Update the environment header block and the analysis commentary beneath each table if the numbers have changed materially.
 
 ## Project context
 

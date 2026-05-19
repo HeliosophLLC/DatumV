@@ -1,6 +1,6 @@
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="MemoryAccountant"/>: residency counter, budget enforcement,

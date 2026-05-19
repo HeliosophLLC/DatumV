@@ -6,7 +6,7 @@
 -- ONNX files:  float/face_detector.onnx, float/face_landmark_detector.onnx
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/google-ai-edge/mediapipe
---              (Qualcomm AI Hub ONNX export via Heliosoph mirror)
+--              (Qualcomm AI Hub ONNX export via Heliosoph.DatumV mirror)
 --
 -- BlazeFace short-range face detector (256×256, two-layer SSD anchor
 -- pyramid). Emits a bounding box per detected face plus the 6 BlazeFace

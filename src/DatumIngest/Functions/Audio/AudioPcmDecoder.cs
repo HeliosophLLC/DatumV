@@ -3,7 +3,7 @@ using Sdcb.FFmpeg.Formats;
 using Sdcb.FFmpeg.Raw;
 using Sdcb.FFmpeg.Utils;
 
-namespace DatumIngest.Functions.Audio;
+namespace Heliosoph.DatumV.Functions.Audio;
 
 /// <summary>
 /// FFmpeg-backed PCM decoder. Takes an encoded audio container blob

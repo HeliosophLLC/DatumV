@@ -1,11 +1,11 @@
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar;
+namespace Heliosoph.DatumV.Functions.Scalar;
 
 /// <summary>
 /// Returns a deterministic <see cref="DataKind.Float32"/> in the half-open

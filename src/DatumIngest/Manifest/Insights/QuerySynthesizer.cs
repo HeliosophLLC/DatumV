@@ -1,7 +1,7 @@
-namespace DatumIngest.Manifest.Insights;
+namespace Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
-/// Synthesizes DatumIngest SQL queries from finalized <see cref="DatasetInsight"/> lists.
+/// Synthesizes Heliosoph.DatumV SQL queries from finalized <see cref="DatasetInsight"/> lists.
 /// Produces a recommended query (AutoSafe + Suggest actions only) and a full query
 /// (all actions including ManualOnly proposals). Respects bundle atomicity and
 /// conflict group resolution.

@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Catalog-side metadata for a registered aggregate function. Built once at

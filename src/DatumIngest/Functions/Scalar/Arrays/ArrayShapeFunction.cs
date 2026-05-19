@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Returns the declared shape of a multi-dimensional typed-array value as an

@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Executors;
+namespace Heliosoph.DatumV.Catalog.Executors;
 
 /// <summary>
 /// Owns the <c>ALTER TABLE</c>-statement pipeline for

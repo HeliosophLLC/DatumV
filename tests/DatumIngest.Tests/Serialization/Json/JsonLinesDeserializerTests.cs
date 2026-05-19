@@ -1,9 +1,9 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Json;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Json;
 
-namespace DatumIngest.Tests.Serialization.Json;
+namespace Heliosoph.DatumV.Tests.Serialization.Json;
 
 /// <summary>
 /// End-to-end coverage for <see cref="JsonLinesDeserializer"/>: file detection,

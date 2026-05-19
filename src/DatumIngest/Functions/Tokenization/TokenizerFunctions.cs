@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using Microsoft.ML.Tokenizers;
 
-namespace DatumIngest.Functions.Tokenization;
+namespace Heliosoph.DatumV.Functions.Tokenization;
 
 /// <summary>
 /// <c>tokenizer.encode(text, tokenizer_json_path) → INT64[]</c>. Encodes
@@ -335,7 +335,7 @@ public sealed class TokenizerByteLevelDecodeFunction : IFunction, IScalarFunctio
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.String));
         }
         string raw = args[0].AsString();
-        string decoded = DatumIngest.Models.Onnx.ByteLevelBpeDecoder.Decode(raw).Trim();
+        string decoded = Heliosoph.DatumV.Models.Onnx.ByteLevelBpeDecoder.Decode(raw).Trim();
         return new ValueTask<ValueRef>(ValueRef.FromString(decoded));
     }
 }

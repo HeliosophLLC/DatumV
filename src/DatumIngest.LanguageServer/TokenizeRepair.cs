@@ -1,4 +1,4 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Computes a minimal "close the dangling stuff" suffix that, when
@@ -11,7 +11,7 @@ namespace DatumIngest.LanguageServer;
 /// <remarks>
 /// <para>
 /// Mirrors the engine tokenizer's template/splice scan
-/// (<see cref="DatumIngest.Parsing.Tokens.SqlTokenizer"/>) to detect the
+/// (<see cref="Heliosoph.DatumV.Parsing.Tokens.SqlTokenizer"/>) to detect the
 /// trailing state at end-of-input: outside any lexical scope, inside a
 /// template, inside a splice body, or inside a comment / string. Only
 /// the template and splice tails produce a repair; everything else is a

@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace DatumIngest.Web.Conversation;
+namespace Heliosoph.DatumV.Web.Conversation;
 
 // Stand-in IConversationAgent for builds where the chat surface is
 // intentionally disabled (see the commented LLM wiring block in

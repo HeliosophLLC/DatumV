@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Per-query, per-storeId translation table from a file's on-disk struct
@@ -12,7 +12,7 @@ namespace DatumIngest.Model;
 /// <para>
 /// <strong>Why per-query, not catalog-scoped.</strong> On-disk type-ids
 /// are stable per file but runtime type-ids are per-<see cref="TypeRegistry"/>,
-/// and registries are per-<see cref="DatumIngest.Execution.ExecutionContext"/>.
+/// and registries are per-<see cref="Heliosoph.DatumV.Execution.ExecutionContext"/>.
 /// A catalog-scoped translator would mix runtime ids from different queries
 /// and resolve to descriptors the consuming query's registry doesn't carry.
 /// The companion <see cref="DatumFile.Sidecar.SidecarRegistry"/> tracks

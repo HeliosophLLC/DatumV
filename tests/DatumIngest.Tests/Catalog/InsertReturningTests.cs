@@ -1,8 +1,8 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// C1b tests: <c>INSERT INTO … VALUES (…) RETURNING …</c>. Covers single-row

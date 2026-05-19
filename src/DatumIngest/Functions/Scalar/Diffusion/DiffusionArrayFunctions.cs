@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Diffusion;
+namespace Heliosoph.DatumV.Functions.Scalar.Diffusion;
 
 /// <summary>
 /// <c>array_axpy(y Float32[], a Float32, x Float32[]) → Float32[]</c>. Computes

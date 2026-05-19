@@ -7,7 +7,7 @@ CSE is the engine's answer to two distinct sources of redundant work:
 1. **Pure scalar duplication** — `WHERE expensive(x) > 10 AND expensive(x) < 100`, `ORDER BY upper(name)` paired with `SELECT upper(name)`, etc.
 2. **Model call duplication** — `SELECT models.phi3('test'), models.phi3('test')` should dispatch the model once, not twice.
 
-The first is handled by [`CommonSubexpressionEliminator`](../../src/DatumIngest/Execution/CommonSubexpressionEliminator.cs); the second by [`ModelInvocationHoister`](../../src/DatumIngest/Execution/ModelInvocationHoister.cs). They run in series during planning and share the same dependency-ordering helper. This page documents both.
+The first is handled by [`CommonSubexpressionEliminator`](../../src/DatumV/Execution/CommonSubexpressionEliminator.cs); the second by [`ModelInvocationHoister`](../../src/DatumV/Execution/ModelInvocationHoister.cs). They run in series during planning and share the same dependency-ordering helper. This page documents both.
 
 ## Why It's Worth Doing
 
@@ -90,13 +90,13 @@ The pass detects this and stacks `RowEnricherOperator`s in dependency order:
             └─ Scan
 ```
 
-[`HoistDependencyOrdering.OrderByDependency`](../../src/DatumIngest/Execution/HoistDependencyOrdering.cs) topologically groups the hoists into levels — level 0 references no other hoists, level *n* may reference any earlier level. One operator is emitted per level, with level 0 closest to the source. Within a level, the order is unspecified (level peers don't depend on each other).
+[`HoistDependencyOrdering.OrderByDependency`](../../src/DatumV/Execution/HoistDependencyOrdering.cs) topologically groups the hoists into levels — level 0 references no other hoists, level *n* may reference any earlier level. One operator is emitted per level, with level 0 closest to the source. Within a level, the order is unspecified (level peers don't depend on each other).
 
 The same machinery applies to model hoists. If a query nests one model call inside another (`models.classifier(models.embedder(x))`), the embedder's `ModelInvocationOperator` lands below the classifier's, and the classifier's argument rewrites to the embedder's hidden column.
 
 ## Pass Ordering
 
-In [`QueryPlanner.Finalize`](../../src/DatumIngest/Execution/QueryPlanner.cs):
+In [`QueryPlanner.Finalize`](../../src/DatumV/Execution/QueryPlanner.cs):
 
 ```
 ModelInvocationHoister.Hoist(plan, modelCatalog)

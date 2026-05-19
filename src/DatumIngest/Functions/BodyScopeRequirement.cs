@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Declares the procedural-context a scalar function requires to be
@@ -24,7 +24,7 @@ public enum BodyScopeRequirement
 
     /// <summary>
     /// Callable only from inside a <c>CREATE [OR REPLACE] MODEL ... AS BEGIN ... END</c>
-    /// body, where <see cref="DatumIngest.Execution.EvaluationFrame.CurrentModel"/> is
+    /// body, where <see cref="Heliosoph.DatumV.Execution.EvaluationFrame.CurrentModel"/> is
     /// non-null. <c>infer()</c> is the v1 user; future body-scoped scalars
     /// (e.g. session-name resolution helpers) reuse the same flag.
     /// </summary>

@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution.Contexts;
+namespace Heliosoph.DatumV.Execution.Contexts;
 
 /// <summary>
 /// The root <see cref="IFunctionContext"/>. A lambda parameter slot that

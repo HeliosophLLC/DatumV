@@ -1,13 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Fits;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Fits;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>open_fits_table(path, ext) → table</c>. Opens a FITS binary-table

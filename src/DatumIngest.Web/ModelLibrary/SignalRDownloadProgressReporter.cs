@@ -1,8 +1,8 @@
-using DatumIngest.ModelLibrary;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
-namespace DatumIngest.Web.ModelLibrary;
+namespace Heliosoph.DatumV.Web.ModelLibrary;
 
 // Adapter that bridges the core IDownloadProgressReporter to the Web's
 // SignalR hub. Receives core event records from ModelDownloadService,

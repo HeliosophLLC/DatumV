@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Substrate-only tests for <see cref="VariableScope"/>: push/pop, declare,
@@ -311,11 +311,11 @@ public sealed class VariableScopeTests : ServiceTestBase
         store.AddReference();
         long bytesBeforeRead = store.BytesWritten;
 
-        using DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(store: store, accountant: accountant);
-        DatumIngest.Execution.ExecutionContext scoped = context.Derive(variableScope: scope, variableStore: store);
+        using Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(store: store, accountant: accountant);
+        Heliosoph.DatumV.Execution.ExecutionContext scoped = context.Derive(variableScope: scope, variableStore: store);
         ExpressionEvaluator evaluator = scoped.CreateEvaluator();
 
-        DatumIngest.Parsing.Ast.ColumnReference ref_ = new(
+        Heliosoph.DatumV.Parsing.Ast.ColumnReference ref_ = new(
             ColumnName: "tensor",
             TableName: null,
             Span: null);

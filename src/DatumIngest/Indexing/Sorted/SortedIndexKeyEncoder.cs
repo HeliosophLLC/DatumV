@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.Sorted;
+namespace Heliosoph.DatumV.Indexing.Sorted;
 
 /// <summary>
 /// Encodes and decodes <see cref="DataValue"/> keys in a fixed-width, sort-preserving binary format

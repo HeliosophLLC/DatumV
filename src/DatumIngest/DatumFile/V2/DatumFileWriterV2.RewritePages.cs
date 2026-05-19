@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.DatumFile.V2.Encoding;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.DatumFile.V2.Encoding;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Page-COW rewrite primitive (PR11b). Lets the catalog's UPDATE path

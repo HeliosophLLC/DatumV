@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Plan-wide memory accounting for a query (or a procedural batch). Owns:
@@ -46,7 +46,7 @@ public sealed class MemoryAccountant : IDisposable
     /// Historically <see cref="MemoryBudgetBytes"/> defaulted to <see langword="null"/>
     /// (= "no budget, never spill"). That had the side effect that any test or in-process
     /// caller that didn't set a budget silently bypassed every spill-aware code path —
-    /// hiding real bugs in <see cref="DatumIngest.Execution.GraceHashJoinExecutor"/> and
+    /// hiding real bugs in <see cref="Heliosoph.DatumV.Execution.GraceHashJoinExecutor"/> and
     /// friends until they hit production. We now always have a real budget; callers that
     /// genuinely want unbounded memory must pass <see cref="long.MaxValue"/> explicitly
     /// to make that intent visible at the call site.

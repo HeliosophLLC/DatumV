@@ -1,13 +1,13 @@
 using System.Collections.Immutable;
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Functions.Scalar.Drawing;
 
 /// <summary>
 /// <c>draw_particles(t, emit_at, rate, lifetime, velocity, jitter, sprite)</c> → Drawing.

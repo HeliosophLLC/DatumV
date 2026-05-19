@@ -1,9 +1,9 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>video_unnest_frames(path[, start_frame[, stride[, max_frames]]]) → table</c>.

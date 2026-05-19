@@ -1,6 +1,6 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 
 /// <summary>
 /// Single source of truth for SQL keyword completions. Owns two mappings:
@@ -83,7 +83,7 @@ internal static class KeywordRegistry
 
     /// <summary>
     /// Date part field names offered inside <c>EXTRACT(</c> completions.
-    /// PostgreSQL-compatible fields plus DatumIngest extensions.
+    /// PostgreSQL-compatible fields plus Heliosoph.DatumV extensions.
     /// </summary>
     internal static readonly string[] DatePartFieldNames =
     [

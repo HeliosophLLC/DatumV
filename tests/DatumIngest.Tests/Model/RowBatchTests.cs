@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Tests for the <see cref="RowBatch"/> pooled row-major batch.

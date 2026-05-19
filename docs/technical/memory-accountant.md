@@ -1,6 +1,6 @@
 # Memory Accountant
 
-DatumIngest tracks the in-RAM residency of a running query (or procedural batch) through a single per-plan `MemoryAccountant`. Every materializing operator reports the bytes it holds, and every spill decision consults that one counter. This means the system can:
+DatumV tracks the in-RAM residency of a running query (or procedural batch) through a single per-plan `MemoryAccountant`. Every materializing operator reports the bytes it holds, and every spill decision consults that one counter. This means the system can:
 
 - Detect when a single statement would push a host past its budget and trigger spill *before* the OOM.
 - Recognize that two materializing operators in the same plan cumulatively pressure the budget — a CTE holding 1.5 GiB and a downstream GROUP BY building a hash table both see the *same* counter, not 100% of the budget each.

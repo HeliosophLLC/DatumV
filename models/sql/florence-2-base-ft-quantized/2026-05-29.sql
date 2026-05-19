@@ -4,7 +4,7 @@
 --
 -- Catalog id:  florence-2-base-ft-quantized   (models/catalog.json)
 -- License:     MIT
--- Upstream:    Heliosoph/florence-2-base-ft-quantized-onnx
+-- Upstream:    Heliosoph.DatumV/florence-2-base-ft-quantized-onnx
 --              (onnx-community Florence-2-base-ft, INT8-quantized export)
 --
 -- Same body shape as the fp16 sibling — see florence-2-base-ft-fp16.sql for

@@ -1,9 +1,9 @@
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
-using DatumIngest.Catalog;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Regression for the user's <c>SELECT models.llama31_8b(concat('long literal', "Description"))</c>

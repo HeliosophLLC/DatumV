@@ -1,6 +1,6 @@
 # Contributing to Documentation
 
-This guide governs the DatumIngest documentation: how to think about voice and positioning when writing user-facing content, and the mechanical conventions for file structure, templates, and TOC integration.
+This guide governs the DatumV documentation: how to think about voice and positioning when writing user-facing content, and the mechanical conventions for file structure, templates, and TOC integration.
 
 It is an internal contributor document — not shipped in the in-app docs viewer.
 
@@ -10,11 +10,11 @@ It is an internal contributor document — not shipped in the in-app docs viewer
 
 ### Positioning one-liner
 
-> DatumIngest runs ML models on your data — locally, batched, no Python. You describe what you want in SQL, and the engine handles inference, batching, calibration, and I/O across dozens of vision, audio, and text models from a built-in catalog.
+> DatumV runs ML models on your data — locally, batched, no Python. You describe what you want in SQL, and the engine handles inference, batching, calibration, and I/O across dozens of vision, audio, and text models from a built-in catalog.
 
 Use this verbatim or paraphrase as the lede on any high-level entry point (`README.md`, `docs/getting-started.md`, the in-app shell's "what is this?" panel). Downstream pages can assume the reader has already encountered the headline.
 
-### What DatumIngest is
+### What DatumV is
 
 - An app for running ML models on your data.
 - Self-contained: one binary, no cluster, no service, no API account.
@@ -22,7 +22,7 @@ Use this verbatim or paraphrase as the lede on any high-level entry point (`READ
 - Local-first: data and models live on the user's machine. Inference runs offline.
 - SQL is the syntax. It is load-bearing — but it is not the headline.
 
-### What DatumIngest is NOT
+### What DatumV is NOT
 
 Use these as a "do I have my framing right?" checklist:
 
@@ -34,7 +34,7 @@ Use these as a "do I have my framing right?" checklist:
 
 ### Tone
 
-- **Declarative, present tense.** "DatumIngest runs YOLO." Not "will run," "can run," or "is designed to run."
+- **Declarative, present tense.** "DatumV runs YOLO." Not "will run," "can run," or "is designed to run."
 - **Concrete over abstract.** Lead with a working query before any prose about "primitives" or "abstractions."
 - **Every concept earns a runnable example.** Code blocks before tables; tables before paragraphs.
 - **No marketing-speak.** "200+ built-in functions" is fine. "Powerful," "blazing-fast," "enterprise-grade" are not.
@@ -45,7 +45,7 @@ Use these as a "do I have my framing right?" checklist:
 
 When a question would naturally invite a "coming soon" answer, use a calibrated non-answer instead of specifics:
 
-> DatumIngest is under active development. This release covers [X]. Additional capabilities will be announced as they ship.
+> DatumV is under active development. This release covers [X]. Additional capabilities will be announced as they ship.
 
 Avoid in user-facing docs:
 
@@ -73,7 +73,7 @@ These exist once, here. Documents that touch a recurring question quote or parap
 
 #### Why not just Python (PyTorch + Hugging Face + pandas)?
 
-Python is the most common way to run ML models today, and it works. DatumIngest is a different shape:
+Python is the most common way to run ML models today, and it works. DatumV is a different shape:
 
 - **Batched by default.** Inference is a column operation, batched across thousands of rows transparently — no manual `DataLoader` wiring.
 - **Queryable.** Filter, join, and group on model outputs without writing glue code.
@@ -84,11 +84,11 @@ Python is the most common way to run ML models today, and it works. DatumIngest 
 
 #### Why not DuckDB + an inference extension?
 
-DuckDB is the obvious "lightweight columnar SQL engine" alternative, and there are community extensions that bolt inference onto it. The reasons DatumIngest isn't an extension on top of DuckDB:
+DuckDB is the obvious "lightweight columnar SQL engine" alternative, and there are community extensions that bolt inference onto it. The reasons DatumV isn't an extension on top of DuckDB:
 
 1. **Type system.** DuckDB has `BLOB`, fixed-size vectors, `LIST`, and `STRUCT`. It does not have `Image`, `Audio`, `Video`, `PointCloud`, or `Mesh` as semantic types with type-aware operators. As an extension, an image becomes a BLOB and loses everything that makes image pipelines fuse (decode-once, encode-once, transform pushdown).
 2. **Model lifecycle.** Extensions can register UDFs but have nowhere to hang model state across queries — no `CREATE MODEL`, no calibration storage, no eviction, no memory-budget participation.
-3. **Execution shape.** A model returning `Array<Struct<box: Vector, label: String, score: Float32>>` per row is the common case for vision models. DatumIngest's planner is built around that shape; in an extension, it has to be threaded through manually.
+3. **Execution shape.** A model returning `Array<Struct<box: Vector, label: String, score: Float32>>` per row is the common case for vision models. DatumV's planner is built around that shape; in an extension, it has to be threaded through manually.
 
 DuckDB is excellent for "fast SQL over my parquet files." It is a less-good substrate for "engine built around model invocation as a first-class citizen."
 
@@ -98,11 +98,11 @@ The columnar-execution and type-system arguments above apply more strongly. SQLi
 
 #### Why not a VSCode extension?
 
-DatumIngest is an app, not an editor. It manages downloaded model weights, holds GPU memory across queries, runs headlessly, and is designed to participate in workflows that aren't tied to a code editor. An extension is the right shape when the work is *editing*; DatumIngest's work is *executing*.
+DatumV is an app, not an editor. It manages downloaded model weights, holds GPU memory across queries, runs headlessly, and is designed to participate in workflows that aren't tied to a code editor. An extension is the right shape when the work is *editing*; DatumV's work is *executing*.
 
 #### How does this compare to Modal / Replicate / Anyscale?
 
-Cloud inference services are great for production. DatumIngest is built for the phase *before* production — exploration, iteration, and dataset-scale work where you don't want a meter running.
+Cloud inference services are great for production. DatumV is built for the phase *before* production — exploration, iteration, and dataset-scale work where you don't want a meter running.
 
 - **Local-first.** Data never leaves your machine.
 - **No API credits.** Iterate freely; throw a thousand queries at the catalog without watching a bill.
@@ -111,9 +111,9 @@ Cloud inference services are great for production. DatumIngest is built for the 
 
 #### Does this work offline?
 
-Yes — fully. Once installed, DatumIngest does not require an internet connection for queries, inference, or workflow execution. Model weights are downloaded once and cached locally; everything else runs on your machine.
+Yes — fully. Once installed, DatumV does not require an internet connection for queries, inference, or workflow execution. Model weights are downloaded once and cached locally; everything else runs on your machine.
 
-This is a significant difference from cloud inference services and from tools like ComfyUI, which is focused on visual generative models. DatumIngest spans vision, audio, text, embeddings, depth estimation, OCR, and classical CV — and operates over datasets rather than one image at a time.
+This is a significant difference from cloud inference services and from tools like ComfyUI, which is focused on visual generative models. DatumV spans vision, audio, text, embeddings, depth estimation, OCR, and classical CV — and operates over datasets rather than one image at a time.
 
 #### What models can I run? Can I add my own?
 
@@ -127,7 +127,7 @@ ONNX is the supported model format today. A Python bridge for additional formats
 
 #### Does training work?
 
-No — DatumIngest runs inference against pre-trained models. Training is out of scope.
+No — DatumV runs inference against pre-trained models. Training is out of scope.
 
 #### What about GPU support?
 
@@ -140,7 +140,7 @@ NVIDIA GPUs (CUDA) and CPU. Other hardware is in development.
 ### Directory layout
 
 ```
-DatumIngest/
+DatumV/
   CONTRIBUTING-DOCS.md    ← you are here
   README.md
   docs/

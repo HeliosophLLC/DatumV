@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for UDF DDL through <see cref="TableCatalog.Plan(string)"/>:
@@ -63,7 +63,7 @@ public class UdfIntegrationTests : ServiceTestBase
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
         // Body changed from upper to lower — verify by formatting.
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
+        string body = Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -77,7 +77,7 @@ public class UdfIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE OR ALTER FUNCTION shout(s STRING) AS lower(s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
+        string body = Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -91,7 +91,7 @@ public class UdfIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE FUNCTION IF NOT EXISTS shout(s STRING) AS lower(s)");
 
         Assert.True(catalog.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
+        string body = Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("upper", body, StringComparison.OrdinalIgnoreCase);
     }
 

@@ -3,7 +3,7 @@
   "defaultVariables": null,
   "documentGenerator": {
     "aspNetCoreToOpenApi": {
-      "project": "DatumIngest.Web.csproj",
+      "project": "Heliosoph.DatumV.Web.csproj",
       "documentName": "v1",
       "msBuildProjectExtensionsPath": null,
       "configuration": "$(Configuration)",

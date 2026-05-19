@@ -1,15 +1,15 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
 using SkiaSharp;
 
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Tests for <see cref="VideoFrameToImageFunction"/>. Direct unit tests
@@ -151,7 +151,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         string videoPath = SpikeVideoPath().Replace('\\', '/');
         string sql = $"SELECT video_frame_to_image(frame) AS img FROM video_unnest_frames('{videoPath}', 0, 1, 3)";
 
-        DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
+        Heliosoph.DatumV.Catalog.TableCatalog catalog = CreateCatalog();
         StatementPlan plan = catalog.Plan(sql);
 
         int rowsSeen = 0;
@@ -180,7 +180,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
     {
         string videoPath = SpikeVideoPath().Replace('\\', '/');
         string sql = $"SELECT video_frame_to_image(frame, 384) AS img FROM video_unnest_frames('{videoPath}', 0, 1, 2)";
-        DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
+        Heliosoph.DatumV.Catalog.TableCatalog catalog = CreateCatalog();
         StatementPlan plan = catalog.Plan(sql);
 
         int rowsSeen = 0;
@@ -205,8 +205,8 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
         // a Video column joined to video_unnest_frames via CROSS APPLY, with
         // each emitted frame fed through video_frame_to_image.
         byte[] videoBytes = System.IO.File.ReadAllBytes(SpikeVideoPath());
-        DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        Heliosoph.DatumV.Catalog.TableCatalog catalog = CreateCatalog();
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "videos", ["video"], [DataKind.Video],
             [new object?[] { videoBytes }]));
 
@@ -235,7 +235,7 @@ public sealed class VideoFrameToImageFunctionTests : ServiceTestBase
 
     private EvaluationFrame MakeFrameWith(VideoRegistry registry)
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext(
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext(
             videoRegistry: registry
         );
         return CreateEvaluationFrame(context: context);

@@ -44,7 +44,7 @@ LICENSE.md              # Stability AI Community License
 
 `optimum-cli export onnx --model stabilityai/sd-turbo <output>` against a pinned toolchain. No LoRA fuse step — SD Turbo is the distilled base, not a fine-tune.
 
-Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-sd-turbo.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-sd-turbo.ps1) in the DatumIngest repo.
+Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-sd-turbo.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-sd-turbo.ps1) in the Heliosoph repo.
 
 ## Inference notes
 

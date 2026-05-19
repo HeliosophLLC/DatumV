@@ -1,15 +1,15 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.Models;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// End-to-end Phase 4 test: CREATE MODEL → SELECT → real ONNX session →
@@ -44,7 +44,7 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
     {
         string fixturePath = FixturePath();
         Assert.True(File.Exists(fixturePath),
-            $"Fixture missing at {fixturePath}. Check tests/DatumIngest.Tests/Fixtures/softmax.onnx is present and copied to bin output.");
+            $"Fixture missing at {fixturePath}. Check tests/Heliosoph.DatumV.Tests/Fixtures/softmax.onnx is present and copied to bin output.");
 
         TableCatalog catalog = CreateCatalogWithRealDispatcher();
         catalog.Add(new InMemoryTableProvider(
@@ -495,8 +495,8 @@ public sealed class SoftmaxE2ETests : ServiceTestBase
         public void OnDispatchStarted(
             string modelName,
             int rowCount,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> inputs,
-            IReadOnlyList<IReadOnlyList<DatumIngest.Functions.ValueRef>> overrides)
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> inputs,
+            IReadOnlyList<IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef>> overrides)
         {
             StartedCount++;
             ObservedModels.Add(modelName);

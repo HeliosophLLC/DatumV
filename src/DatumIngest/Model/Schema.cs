@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// An immutable ordered collection of <see cref="ColumnInfo"/> entries that describes

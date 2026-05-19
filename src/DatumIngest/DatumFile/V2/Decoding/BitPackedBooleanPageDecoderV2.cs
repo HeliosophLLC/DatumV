@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Decoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Decoding;
 
 /// <summary>
 /// V2 boolean page decoder. Random-access reader over a page laid out by

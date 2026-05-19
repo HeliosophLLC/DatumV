@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Per-query intern table for <see cref="TypeDescriptor"/>s. Assigns a stable 16-bit type-id to
@@ -6,7 +6,7 @@ namespace DatumIngest.Model;
 /// self-describing without threading <see cref="ColumnInfo"/> through every consumer.
 /// </summary>
 /// <remarks>
-/// Lifetime matches the enclosing <see cref="DatumIngest.Execution.ExecutionContext"/>. Child
+/// Lifetime matches the enclosing <see cref="Heliosoph.DatumV.Execution.ExecutionContext"/>. Child
 /// contexts share the same instance so type-ids are consistent across the operator tree.
 /// Thread-safe: all mutations are guarded by a lock; reads of already-assigned ids are lock-free.
 /// </remarks>

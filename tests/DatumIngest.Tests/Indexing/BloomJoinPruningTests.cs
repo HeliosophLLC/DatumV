@@ -1,13 +1,13 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Catalog.Providers;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Catalog.Providers;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Integration tests for bloom-filter-based chunk pruning during hash joins.

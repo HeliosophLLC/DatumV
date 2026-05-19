@@ -1,9 +1,9 @@
 using System.Text.Json;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Serialization.Json;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Serialization.Json;
 
-namespace DatumIngest.Tests.Serialization.Json;
+namespace Heliosoph.DatumV.Tests.Serialization.Json;
 
 /// <summary>
 /// Covers <see cref="JsonTypeScanner"/> — per-column kind inference, integer

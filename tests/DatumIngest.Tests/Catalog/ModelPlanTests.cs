@@ -1,11 +1,11 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Inference;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Pins the side-effect-free contract of <see cref="ModelPlan"/>:

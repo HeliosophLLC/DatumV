@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Inference;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Registries;
+namespace Heliosoph.DatumV.Catalog.Registries;
 
 /// <summary>
 /// A registered SQL-bodied model — a procedural function with an additional
@@ -87,7 +87,7 @@ namespace DatumIngest.Catalog.Registries;
 /// </param>
 /// <param name="UsingFiles">
 /// Optional multi-session bundle declaration mirroring
-/// <see cref="DatumIngest.Parsing.Ast.CreateModelStatement.UsingFiles"/>.
+/// <see cref="Heliosoph.DatumV.Parsing.Ast.CreateModelStatement.UsingFiles"/>.
 /// When non-null, every entry's session is loaded into
 /// <see cref="BoundSessions"/> keyed by its alias; the body's
 /// <c>infer('alias', value)</c> calls dispatch by name. When null (legacy
@@ -98,7 +98,7 @@ namespace DatumIngest.Catalog.Registries;
 /// Parent catalog entry id (kebab-case, e.g. <c>"sd-turbo"</c>) when this
 /// descriptor was registered by a catalog-driven install; <see langword="null"/>
 /// for user-authored <c>CREATE MODEL</c> registrations. Populated by
-/// <see cref="DatumIngest.ModelLibrary.ModelInstallContext.CurrentCatalogId"/>
+/// <see cref="Heliosoph.DatumV.ModelLibrary.ModelInstallContext.CurrentCatalogId"/>
 /// at registration time. Persists into the catalog file's model row so
 /// rehydrate can resolve the originating installSql by
 /// <c>(CatalogId, CatalogVersion)</c> instead of replaying a stale snapshot
@@ -142,7 +142,7 @@ public sealed record ModelDescriptor(
 }
 
 /// <summary>
-/// Runtime-resolved counterpart to <see cref="DatumIngest.Parsing.Ast.UsingFileSpec"/>.
+/// Runtime-resolved counterpart to <see cref="Heliosoph.DatumV.Parsing.Ast.UsingFileSpec"/>.
 /// The registrar resolves each declared path against the host's models
 /// directory at <c>CREATE MODEL</c> time and threads the resolved absolute
 /// path here so downstream consumers (sidecar-relative file resolution,
@@ -159,7 +159,7 @@ public sealed record ResolvedUsingFile(string Path, string Alias, string Resolve
 /// <see cref="QualifiedName"/>, lookup is search-path-aware — but
 /// deliberately separate storage so <c>system.udfs</c> stays focused on
 /// pure SQL routines and <c>system.models</c> surfaces both built-in
-/// <see cref="DatumIngest.Models.ModelCatalog"/> entries and these
+/// <see cref="Heliosoph.DatumV.Models.ModelCatalog"/> entries and these
 /// SQL-defined ones.
 /// </summary>
 /// <remarks>

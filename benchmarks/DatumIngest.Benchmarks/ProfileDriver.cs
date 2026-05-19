@@ -1,15 +1,15 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Standalone profile driver that bypasses BenchmarkDotNet. Sets up a DatumFile
@@ -21,10 +21,10 @@ namespace DatumIngest.Benchmarks;
 /// Usage:
 /// <code>
 /// # Terminal 1 — start the loop:
-/// dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks --no-restore -- profile select-where 30
+/// dotnet run -c Release --project benchmarks/Heliosoph.DatumV.Benchmarks --no-restore -- profile select-where 30
 ///
 /// # Terminal 2 — attach dotnet-trace by name (BDN spawns the worker as dotnet.exe):
-/// dotnet-trace collect --name DatumIngest.Benchmarks --duration 00:00:25 \
+/// dotnet-trace collect --name Heliosoph.DatumV.Benchmarks --duration 00:00:25 \
 ///     --providers Microsoft-DotNETCore-SampleProfiler --output profile.nettrace
 ///
 /// # Convert to speedscope JSON for browser viewing:

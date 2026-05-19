@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for the schema-aware DDL added in S3:
@@ -218,7 +218,7 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
 
         catalog.Plan("ALTER TABLE myapp.t ADD COLUMN name String");
 
-        DatumIngest.Model.Schema schema = catalog["myapp.t"].GetSchema();
+        Heliosoph.DatumV.Model.Schema schema = catalog["myapp.t"].GetSchema();
         Assert.Equal(2, schema.Columns.Count);
         Assert.Equal("name", schema.Columns[1].Name);
     }

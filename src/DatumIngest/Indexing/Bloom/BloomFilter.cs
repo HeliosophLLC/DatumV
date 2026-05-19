@@ -3,9 +3,9 @@ using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.Bloom;
+namespace Heliosoph.DatumV.Indexing.Bloom;
 
 /// <summary>
 /// Probabilistic membership filter using double hashing. Tests whether a value

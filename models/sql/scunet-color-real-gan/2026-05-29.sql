@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_color_real_gan.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Same blind real-world denoiser as the PSNR variant, trained with
 -- adversarial loss. Output is sharper and more "photographic" — invents

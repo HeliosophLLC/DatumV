@@ -1,8 +1,8 @@
-using DatumIngest.Indexing;
-using DatumIngest.IO;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.IO;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Round-trip tests for <see cref="IndexWriter.WriteDataValue"/> and

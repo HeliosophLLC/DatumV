@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// All the inputs the dispatcher passes to <see cref="IInferenceBackend.LoadAsync"/>

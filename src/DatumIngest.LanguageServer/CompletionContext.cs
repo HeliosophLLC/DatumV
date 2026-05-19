@@ -1,6 +1,6 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower.Model;
 
 /// <summary>

@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// S7a pins for <see cref="FunctionRegistry"/>'s qualified-name surface:
@@ -95,8 +95,8 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         // Two registrations of the same name under different schemas;
         // the search path decides which one resolves.
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LengthFunction>(schema: "system");
-        registry.RegisterScalar<DatumIngest.Functions.Scalar.Strings.LengthFunction>(schema: "public");
+        registry.RegisterScalar<Heliosoph.DatumV.Functions.Scalar.Strings.LengthFunction>(schema: "system");
+        registry.RegisterScalar<Heliosoph.DatumV.Functions.Scalar.Strings.LengthFunction>(schema: "public");
 
         IScalarFunction? systemFirst = registry.TryGetScalar(
             explicitSchema: null, "length", new[] { "system", "public" });
@@ -137,7 +137,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.my_udf",
-            new DatumIngest.Functions.Scalar.Strings.LengthFunction());
+            new Heliosoph.DatumV.Functions.Scalar.Strings.LengthFunction());
 
         Assert.NotNull(registry.TryGetScalar("udf.my_udf"));
         Assert.NotNull(registry.TryGetScalar(new QualifiedName("udf", "my_udf")));
@@ -165,7 +165,7 @@ public sealed class FunctionRegistryQualifiedTests
         FunctionRegistry registry = new();
         registry.RegisterScalarInstance(
             "udf.tmp",
-            new DatumIngest.Functions.Scalar.Strings.LengthFunction(),
+            new Heliosoph.DatumV.Functions.Scalar.Strings.LengthFunction(),
             descriptor: new FunctionDescriptor(
                 "tmp",
                 Array.Empty<string>(),

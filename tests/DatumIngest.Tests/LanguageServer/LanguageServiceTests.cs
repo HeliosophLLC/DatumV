@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
 using System.Text.Json;
-using DatumIngest.LanguageServer;
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Tests for <see cref="LanguageService"/> — the top-level facade coordinating

@@ -1,7 +1,7 @@
-using DatumIngest.Execution.Operators.Joins;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution.Operators.Joins;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="JoinSchema"/> to verify that unqualified column

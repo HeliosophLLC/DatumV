@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// One 80-byte FITS header card: an 8-character keyword, an optional value

@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Registries;
+namespace Heliosoph.DatumV.Catalog.Registries;
 
 /// <summary>
 /// A registered user-defined scalar function. Two body shapes are supported:

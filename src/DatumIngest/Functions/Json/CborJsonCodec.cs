@@ -2,9 +2,9 @@ using System.Formats.Cbor;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Json;
+namespace Heliosoph.DatumV.Functions.Json;
 
 /// <summary>
 /// JSON ↔ canonical-CBOR codec used by the <c>json_*</c> function family. JSON

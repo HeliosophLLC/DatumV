@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Computes approximate percentiles (P1, P5, P25, P50, P75, P95, P99) for numeric columns

@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("DatumIngest.Web.Tests")]
+[assembly: InternalsVisibleTo("Heliosoph.DatumV.Web.Tests")]

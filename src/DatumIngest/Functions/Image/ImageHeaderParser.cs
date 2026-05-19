@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions.Image;
+namespace Heliosoph.DatumV.Functions.Image;
 
 /// <summary>
 /// Parses JPEG, PNG, and WebP image headers to extract dimensions and channel count

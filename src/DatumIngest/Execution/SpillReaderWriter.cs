@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Spill-to-disk helper that owns one or more partition files plus a single consolidated

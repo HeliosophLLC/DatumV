@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Resolves a parsed list of <see cref="ColumnDefinition"/>s into a
@@ -31,7 +31,7 @@ internal static class ColumnDefinitionResolver
         TableCatalog catalog,
         IReadOnlyList<ColumnDefinition> definitions,
         IReadOnlyList<string>? primaryKeyColumnNames,
-        DatumIngest.Execution.ExecutionContext context)
+        Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         ColumnInfo[] columns = new ColumnInfo[definitions.Count];
         int identityColumnIndex = -1;

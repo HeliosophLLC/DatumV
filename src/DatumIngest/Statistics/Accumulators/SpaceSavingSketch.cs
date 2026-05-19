@@ -1,7 +1,7 @@
 using System.IO.Hashing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
 /// <summary>
 /// Bounded-memory frequency sketch used by <see cref="SpaceSavingAccumulator"/>.

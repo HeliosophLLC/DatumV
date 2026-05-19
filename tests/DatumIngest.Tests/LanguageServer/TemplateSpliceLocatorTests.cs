@@ -1,6 +1,6 @@
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
-using DatumIngest.LanguageServer;
+using Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Unit tests for <see cref="TemplateSpliceLocator"/>. The locator is the

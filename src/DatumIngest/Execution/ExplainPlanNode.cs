@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Represents one node in an EXPLAIN plan tree, carrying both static

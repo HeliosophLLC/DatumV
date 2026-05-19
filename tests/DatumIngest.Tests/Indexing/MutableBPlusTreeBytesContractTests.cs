@@ -1,9 +1,9 @@
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.Mutable;
-using DatumIngest.Indexing.BTree.MutableBytes;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Runs the shared <see cref="BPlusTreeContractTests"/> suite against

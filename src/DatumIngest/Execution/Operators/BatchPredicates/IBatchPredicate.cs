@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.BatchPredicates;
+namespace Heliosoph.DatumV.Execution.Operators.BatchPredicates;
 
 /// <summary>
 /// A predicate that can evaluate a whole <see cref="RowBatch"/> in one call,
@@ -28,7 +28,7 @@ internal interface IBatchPredicate
 
 /// <summary>
 /// Comparison operators supported by the v1 batch predicate compiler. Mirrors
-/// the subset of <see cref="DatumIngest.Parsing.Ast.BinaryOperator"/> that
+/// the subset of <see cref="Heliosoph.DatumV.Parsing.Ast.BinaryOperator"/> that
 /// reduces to a pure scalar comparison — no LIKE/REGEXP, no IS NULL (that
 /// gets its own predicate shape).
 /// </summary>

@@ -1,9 +1,9 @@
-using DatumIngest.DatumFile.V2;
-using DatumIngest.DatumFile.V2.Decoding;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.DatumFile.V2;
+namespace Heliosoph.DatumV.Tests.DatumFile.V2;
 
 /// <summary>
 /// End-to-end round-trip tests for the v2 columnar format. Each test
@@ -429,7 +429,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         // *before* opening the read side, ensuring the file is fully
         // flushed.
         ulong fingerprint;
-        DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath);
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath);
         try
         {
             fingerprint = sidecar.Fingerprint;
@@ -447,7 +447,7 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         }
 
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
-        using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
+        using Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
         Arena readArena = CreateArena();
 
         var decoder = reader.OpenPageDecoder(
@@ -639,13 +639,13 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         string fileName,
         ColumnDescriptorV2 column,
         RowBatch batch,
-        Action<IPageDecoderV2, Arena, DatumIngest.DatumFile.Sidecar.SidecarRegistry> assertions)
+        Action<IPageDecoderV2, Arena, Heliosoph.DatumV.DatumFile.Sidecar.SidecarRegistry> assertions)
     {
         string datumPath = Path.Combine(_tempDir, fileName);
         string sidecarPath = datumPath + "-blob";
 
         ulong fingerprint;
-        using (DatumIngest.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
+        using (Heliosoph.DatumV.DatumFile.Sidecar.SidecarWriteStore sidecar = new(sidecarPath))
         {
             fingerprint = sidecar.Fingerprint;
             using FileStream fs = new(datumPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
@@ -656,8 +656,8 @@ public sealed class DatumFileV2RoundTripTests : ServiceTestBase, IAsyncLifetime
         }
 
         using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
-        using DatumIngest.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
-        DatumIngest.DatumFile.Sidecar.SidecarRegistry registry = new();
+        using Heliosoph.DatumV.DatumFile.Sidecar.SidecarReadStore sidecarSource = new(sidecarPath, fingerprint);
+        Heliosoph.DatumV.DatumFile.Sidecar.SidecarRegistry registry = new();
         // Register returns the assigned storeId; first registration gets 0,
         // matching the sidecarStoreId we pass to OpenPageDecoder below.
         registry.Register(sidecarSource);

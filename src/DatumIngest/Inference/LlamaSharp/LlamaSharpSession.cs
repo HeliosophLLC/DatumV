@@ -1,7 +1,7 @@
 using LLama;
 using LLama.Common;
 
-namespace DatumIngest.Inference.LlamaSharp;
+namespace Heliosoph.DatumV.Inference.LlamaSharp;
 
 /// <summary>
 /// <see cref="IModelSession"/> implementation wrapping a LlamaSharp

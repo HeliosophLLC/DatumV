@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Assertion;
+namespace Heliosoph.DatumV.Functions.Scalar.Assertion;
 
 /// <summary>
 /// Returns the string input verbatim when it ends with the supplied suffix

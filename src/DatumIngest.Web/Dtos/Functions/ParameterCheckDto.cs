@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace DatumIngest.Web.Dtos.Functions;
+namespace Heliosoph.DatumV.Web.Dtos.Functions;
 
 /// <summary>
 /// Wire-format constraint shape for a function/model parameter. One concrete

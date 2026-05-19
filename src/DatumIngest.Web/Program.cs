@@ -1,16 +1,16 @@
-using DatumIngest.Web.Hosting;
+using Heliosoph.DatumV.Web.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace DatumIngest.Web;
+namespace Heliosoph.DatumV.Web;
 
 public static class Program
 {
     // Headless backend only — the Electron shell spawns this process as a
     // child and loads its renderer from Kestrel (prod) or Vite (dev with
-    // proxy to Kestrel). See src/DatumIngest.Web/electron/main.ts.
+    // proxy to Kestrel). See src/Heliosoph.DatumV.Web/electron/main.ts.
     public static void Main(string[] args)
     {
         var url = Environment.GetEnvironmentVariable("DATUM_WEB_URL") ?? "http://127.0.0.1:5000";
@@ -21,7 +21,7 @@ public static class Program
 
         var host = WebHost.Start(bootstrap);
         // Electron's main process greps stdout for this line to detect ready.
-        Console.WriteLine($"DatumIngest listening at {host.Url}");
+        Console.WriteLine($"Heliosoph.DatumV listening at {host.Url}");
 
         var lifetime = host.App.Services.GetRequiredService<IHostApplicationLifetime>();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; lifetime.StopApplication(); };
@@ -45,7 +45,7 @@ public static class Program
     {
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddDatumIngestWeb(new WebHostOptions { ManageLocalCatalog = false });
+            services.AddDatumVWeb(new WebHostOptions { ManageLocalCatalog = false });
         }
 
         public void Configure(IApplicationBuilder app)
@@ -60,7 +60,7 @@ public static class Program
         var path = Environment.GetEnvironmentVariable("DATUM_CATALOG_PATH")
             ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DatumIngest");
+                "Heliosoph.DatumV");
         Directory.CreateDirectory(path);
         return path;
     }

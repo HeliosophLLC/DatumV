@@ -1,6 +1,6 @@
 # `DataValue` Byte Layout
 
-`DataValue` is a 32-byte struct ([`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs)) with explicit `[StructLayout(LayoutKind.Explicit)]`. Two values fit in a 64-byte cache line. No managed reference fields, so a `DataValue[]` is invisible to the garbage collector.
+`DataValue` is a 32-byte struct ([`src/DatumV/Model/DataValue.cs`](../../src/DatumV/Model/DataValue.cs)) with explicit `[StructLayout(LayoutKind.Explicit)]`. Two values fit in a 64-byte cache line. No managed reference fields, so a `DataValue[]` is invisible to the garbage collector.
 
 This page is the byte-level reference: which fields live at which offsets, how the storage flags discriminate inline / arena / sidecar, where each kind keeps its inline metadata, and how the type registry's TypeId rides on every struct value.
 
@@ -88,7 +88,7 @@ _p5 bytes 1–3        reserved (format / colorspace / bit_depth slots, unwired 
 _p6                  reserved
 ```
 
-Populated end-to-end at every Image production path (`ZipDeserializer` ingest → `ImageHeaderParser`; all image-producing scalar functions + model outputs via [`ImageDataValueFactory`](../../src/DatumIngest/Functions/Image/ImageDataValueFactory.cs) at the `ValueRef → DataValue` materialization boundary; INSERT / literals / in-memory tables; `.datum` decode via 4 KB header peek in [`VariableSlotPageDecoderV2.DecodeImageWithInlineDimensions`](../../src/DatumIngest/DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs); `DataValueRetention.Stabilize` forwarding). Accessors: `ImageWidth`, `ImageHeight`, `ImageChannels`. SQL: `image_width()`, `image_height()` short-circuit on inline metadata before calling `SKBitmap.Decode`.
+Populated end-to-end at every Image production path (`ZipDeserializer` ingest → `ImageHeaderParser`; all image-producing scalar functions + model outputs via [`ImageDataValueFactory`](../../src/DatumV/Functions/Image/ImageDataValueFactory.cs) at the `ValueRef → DataValue` materialization boundary; INSERT / literals / in-memory tables; `.datum` decode via 4 KB header peek in [`VariableSlotPageDecoderV2.DecodeImageWithInlineDimensions`](../../src/DatumV/DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs); `DataValueRetention.Stabilize` forwarding). Accessors: `ImageWidth`, `ImageHeight`, `ImageChannels`. SQL: `image_width()`, `image_height()` short-circuit on inline metadata before calling `SKBitmap.Decode`.
 
 #### `Audio`
 
@@ -100,7 +100,7 @@ _p5 bytes 2–3             reserved
 _p6         (bytes 24–27) frame_count (uint32, samples per channel)
 ```
 
-Populated via [`AudioDataValueFactory`](../../src/DatumIngest/Functions/Audio/AudioDataValueFactory.cs) using [`AudioHeaderParser`](../../src/DatumIngest/Functions/Audio/AudioHeaderParser.cs). WAV is supported today; MP3 / FLAC / OGG fall through to zero-sentinel metadata until parsers are added. Accessors: `AudioSampleRate`, `AudioChannels`, `AudioBitDepth`, `AudioFrameCount`. SQL: `audio_sample_rate()` (companions to be added as needed).
+Populated via [`AudioDataValueFactory`](../../src/DatumV/Functions/Audio/AudioDataValueFactory.cs) using [`AudioHeaderParser`](../../src/DatumV/Functions/Audio/AudioHeaderParser.cs). WAV is supported today; MP3 / FLAC / OGG fall through to zero-sentinel metadata until parsers are added. Accessors: `AudioSampleRate`, `AudioChannels`, `AudioBitDepth`, `AudioFrameCount`. SQL: `audio_sample_rate()` (companions to be added as needed).
 
 #### `Video`
 
@@ -113,7 +113,7 @@ _p5 byte 3           reserved
 _p6                  frame_count (uint32)
 ```
 
-Populated via [`VideoDataValueFactory`](../../src/DatumIngest/Functions/Video/VideoDataValueFactory.cs) using [`VideoHeaderParser`](../../src/DatumIngest/Functions/Video/VideoHeaderParser.cs) (Sdcb.FFmpeg-based — reads `Codecpar` without spinning up a decoder). Codec discriminator: 0=unknown, 1=H264, 2=H265, 3=AV1, 4=VP9, 5=VP8, 6=MPEG4, 7=MPEG2, 8=Theora. Accessors: `VideoWidth`, `VideoHeight`, `VideoFpsX256`, `VideoCodec`, `VideoFrameCount`. SQL: `video_width()`, `video_height()` (return real values for any container FFmpeg can demux; NULL when FFmpeg fails to open the bytes).
+Populated via [`VideoDataValueFactory`](../../src/DatumV/Functions/Video/VideoDataValueFactory.cs) using [`VideoHeaderParser`](../../src/DatumV/Functions/Video/VideoHeaderParser.cs) (Sdcb.FFmpeg-based — reads `Codecpar` without spinning up a decoder). Codec discriminator: 0=unknown, 1=H264, 2=H265, 3=AV1, 4=VP9, 5=VP8, 6=MPEG4, 7=MPEG2, 8=Theora. Accessors: `VideoWidth`, `VideoHeight`, `VideoFpsX256`, `VideoCodec`, `VideoFrameCount`. SQL: `video_width()`, `video_height()` (return real values for any container FFmpeg can demux; NULL when FFmpeg fails to open the bytes).
 
 #### `PointCloud`
 
@@ -251,14 +251,14 @@ The hot path (filter, projection, join) uses positional access. The registry is 
 
 | What | Where |
 |---|---|
-| `DataValue` struct, factories, accessors | [`src/DatumIngest/Model/DataValue.cs`](../../src/DatumIngest/Model/DataValue.cs) |
+| `DataValue` struct, factories, accessors | [`src/DatumV/Model/DataValue.cs`](../../src/DatumV/Model/DataValue.cs) |
 | Size constant, layout assertions | same file, `DataValue.SizeBytes`, `DataValue.MaxInlineUtf8Bytes` |
 | `DataValueFlags` discriminator | same file, search `DataValueFlags` |
-| Sentinel `ArenaOffset` / `ArenaLength` | [`src/DatumIngest/Model/ArenaCoordinates.cs`](../../src/DatumIngest/Model/ArenaCoordinates.cs) |
-| Per-kind metadata factories | [`Functions/Image/ImageDataValueFactory.cs`](../../src/DatumIngest/Functions/Image/ImageDataValueFactory.cs), [`Functions/Audio/AudioDataValueFactory.cs`](../../src/DatumIngest/Functions/Audio/AudioDataValueFactory.cs), [`Functions/Video/VideoDataValueFactory.cs`](../../src/DatumIngest/Functions/Video/VideoDataValueFactory.cs) |
-| Audio header parser (WAV) | [`Functions/Audio/AudioHeaderParser.cs`](../../src/DatumIngest/Functions/Audio/AudioHeaderParser.cs) |
-| Image header parser | [`Functions/Image/ImageHeaderParser.cs`](../../src/DatumIngest/Functions/Image/ImageHeaderParser.cs) |
-| `TypeRegistry` / `TypeDescriptor` | [`src/DatumIngest/Model/TypeRegistry.cs`](../../src/DatumIngest/Model/TypeRegistry.cs), [`TypeDescriptor.cs`](../../src/DatumIngest/Model/TypeDescriptor.cs) |
-| `TypeIdTranslationTable` | [`src/DatumIngest/Model/TypeIdTranslationTable.cs`](../../src/DatumIngest/Model/TypeIdTranslationTable.cs) |
-| Sidecar slot layout, encoder, decoder | [`src/DatumIngest/DatumFile/V2/Encoding/VariableSlotPageEncoderV2.cs`](../../src/DatumIngest/DatumFile/V2/Encoding/VariableSlotPageEncoderV2.cs), [`Decoding/VariableSlotPageDecoderV2.cs`](../../src/DatumIngest/DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs) |
-| Footer type-table persistence | [`src/DatumIngest/DatumFile/V2/FooterV2.cs`](../../src/DatumIngest/DatumFile/V2/FooterV2.cs), [`TypeDescriptorSerializer.cs`](../../src/DatumIngest/DatumFile/V2/TypeDescriptorSerializer.cs) |
+| Sentinel `ArenaOffset` / `ArenaLength` | [`src/DatumV/Model/ArenaCoordinates.cs`](../../src/DatumV/Model/ArenaCoordinates.cs) |
+| Per-kind metadata factories | [`Functions/Image/ImageDataValueFactory.cs`](../../src/DatumV/Functions/Image/ImageDataValueFactory.cs), [`Functions/Audio/AudioDataValueFactory.cs`](../../src/DatumV/Functions/Audio/AudioDataValueFactory.cs), [`Functions/Video/VideoDataValueFactory.cs`](../../src/DatumV/Functions/Video/VideoDataValueFactory.cs) |
+| Audio header parser (WAV) | [`Functions/Audio/AudioHeaderParser.cs`](../../src/DatumV/Functions/Audio/AudioHeaderParser.cs) |
+| Image header parser | [`Functions/Image/ImageHeaderParser.cs`](../../src/DatumV/Functions/Image/ImageHeaderParser.cs) |
+| `TypeRegistry` / `TypeDescriptor` | [`src/DatumV/Model/TypeRegistry.cs`](../../src/DatumV/Model/TypeRegistry.cs), [`TypeDescriptor.cs`](../../src/DatumV/Model/TypeDescriptor.cs) |
+| `TypeIdTranslationTable` | [`src/DatumV/Model/TypeIdTranslationTable.cs`](../../src/DatumV/Model/TypeIdTranslationTable.cs) |
+| Sidecar slot layout, encoder, decoder | [`src/DatumV/DatumFile/V2/Encoding/VariableSlotPageEncoderV2.cs`](../../src/DatumV/DatumFile/V2/Encoding/VariableSlotPageEncoderV2.cs), [`Decoding/VariableSlotPageDecoderV2.cs`](../../src/DatumV/DatumFile/V2/Decoding/VariableSlotPageDecoderV2.cs) |
+| Footer type-table persistence | [`src/DatumV/DatumFile/V2/FooterV2.cs`](../../src/DatumV/DatumFile/V2/FooterV2.cs), [`TypeDescriptorSerializer.cs`](../../src/DatumV/DatumFile/V2/TypeDescriptorSerializer.cs) |

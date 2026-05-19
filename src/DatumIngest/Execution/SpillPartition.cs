@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// A single hash partition in a Grace hash join that can hold rows in memory

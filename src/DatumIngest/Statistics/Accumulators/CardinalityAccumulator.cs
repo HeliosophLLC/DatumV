@@ -1,7 +1,7 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
 using System.IO.Hashing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using CardinalityEstimation;
 
 /// <summary>

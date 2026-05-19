@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.DatumFile.V2;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.V2;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Receives <c>PRINT</c> diagnostic output rendered as text.
@@ -363,7 +363,7 @@ public sealed class ExecutionContext : IDisposable
     /// Builds an <see cref="EvaluationFrame"/> against this context's ambient
     /// state without wiring a lambda dispatcher. Use this for call sites that
     /// only need a frame for value stabilisation or accessor-style reads
-    /// (e.g. <see cref="ExpressionEvaluator.ToValueRef(DatumIngest.Model.DataValue, EvaluationFrame)"/>);
+    /// (e.g. <see cref="ExpressionEvaluator.ToValueRef(Heliosoph.DatumV.Model.DataValue, EvaluationFrame)"/>);
     /// callers that need lambda dispatch should use
     /// <c>ExpressionEvaluator.CreateFrame</c> instead so the
     /// <see cref="EvaluationFrame.LambdaInvoker"/> slot is populated.
@@ -612,8 +612,8 @@ public sealed class ExecutionContext : IDisposable
     public SidecarRegistry SidecarRegistry => Catalog.SidecarRegistry;
 
     /// <summary>
-    /// Server-wide model catalog. Holds <see cref="DatumIngest.Models.ModelCatalogEntry"/>
-    /// records for every registered model and the <see cref="DatumIngest.Models.IModel"/>
+    /// Server-wide model catalog. Holds <see cref="Heliosoph.DatumV.Models.ModelCatalogEntry"/>
+    /// records for every registered model and the <see cref="Heliosoph.DatumV.Models.IModel"/>
     /// instances they have been resolved into. Lives on <see cref="ExecutionContext"/>
     /// for plumbing convenience but is itself process-scoped — model residency is
     /// amortised across queries, sessions, and tenants.
@@ -624,12 +624,12 @@ public sealed class ExecutionContext : IDisposable
     /// every <see cref="ExecutionContext"/> construction. Tests that need to override
     /// (e.g. inject a mock catalog) can set it explicitly via init.
     /// </remarks>
-    public DatumIngest.Models.ModelCatalog? Models
+    public Heliosoph.DatumV.Models.ModelCatalog? Models
     {
         get => _modelsOverride ?? Catalog.Models;
         init => _modelsOverride = value;
     }
-    private readonly DatumIngest.Models.ModelCatalog? _modelsOverride;
+    private readonly Heliosoph.DatumV.Models.ModelCatalog? _modelsOverride;
 
     /// <summary>
     /// Releases context-owned resources. Idempotent. Disposes the accountant

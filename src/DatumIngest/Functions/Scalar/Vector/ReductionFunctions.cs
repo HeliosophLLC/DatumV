@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Activation;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Activation;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Vector;
+namespace Heliosoph.DatumV.Functions.Scalar.Vector;
 
 /// <summary>
 /// <c>argmax(values FLOAT32[]) → INT32</c>. Returns the 1-based index of

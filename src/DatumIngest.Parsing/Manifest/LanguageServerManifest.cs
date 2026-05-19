@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// A pre-built manifest that provides everything a language server needs for
@@ -15,7 +15,7 @@ public sealed class LanguageServerManifest
     /// <summary>Function signatures for all registered scalar and table-valued functions.</summary>
     public required IReadOnlyList<FunctionSignature> Functions { get; init; }
 
-    /// <summary>SQL keywords recognized by the DatumIngest SQL dialect.</summary>
+    /// <summary>SQL keywords recognized by the Heliosoph.DatumV SQL dialect.</summary>
     public required IReadOnlyList<string> Keywords { get; init; }
 
     /// <summary>

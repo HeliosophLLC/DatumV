@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators;
 
-namespace DatumIngest.Execution.Planner;
+namespace Heliosoph.DatumV.Execution.Planner;
 
 /// <summary>
 /// Rewrites <c>Limit(Project(x))</c> → <c>Project(Limit(x))</c> at the root

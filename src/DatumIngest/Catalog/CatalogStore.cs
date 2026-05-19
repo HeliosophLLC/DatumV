@@ -1,12 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Loads and saves the persistent on-disk representation of a
@@ -862,7 +862,7 @@ public sealed class CatalogStore
         if (File.Exists(gitignorePath)) return;
 
         const string contents =
-            "# DatumIngest catalog — auto-seeded. Edit freely.\n" +
+            "# Heliosoph.DatumV catalog — auto-seeded. Edit freely.\n" +
             "# Rebuildable artefacts:\n" +
             "*.tmp\n" +
             "*.datum-cindex-*\n" +

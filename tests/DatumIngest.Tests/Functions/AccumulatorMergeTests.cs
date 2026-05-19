@@ -1,8 +1,8 @@
-﻿using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Tests for <see cref="IAggregateAccumulator.Merge"/> on all built-in
@@ -452,7 +452,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         IAggregateAccumulator leftInner = function.CreateAccumulator();
         IAggregateAccumulator rightInner = function.CreateAccumulator();
 
-        DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext();
         DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame, ctx);
         DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame, ctx);
 
@@ -479,7 +479,7 @@ public class AccumulatorMergeTests : ServiceTestBase
         IAggregateAccumulator leftInner = function.CreateAccumulator();
         IAggregateAccumulator rightInner = function.CreateAccumulator();
 
-        DatumIngest.Execution.ExecutionContext ctx = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext ctx = CreateExecutionContext();
         DistinctAccumulatorDecorator left = new(leftInner, argumentCount: 1, in _testFrame, ctx);
         DistinctAccumulatorDecorator right = new(rightInner, argumentCount: 1, in _testFrame, ctx);
 

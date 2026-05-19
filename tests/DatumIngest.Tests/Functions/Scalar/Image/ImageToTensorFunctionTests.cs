@@ -1,12 +1,12 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Covers <c>image_to_tensor_chw(img, target_size [, mean, std])</c> and the four
@@ -213,7 +213,7 @@ public sealed class ImageToTensorChwFunctionTests : ServiceTestBase
     public void Metadata_ExposesNameCategoryAndDescription()
     {
         Assert.Equal("image_to_tensor_chw", ImageToTensorChwFunction.Name);
-        Assert.Equal(DatumIngest.Manifest.FunctionCategory.Image, ImageToTensorChwFunction.Category);
+        Assert.Equal(Heliosoph.DatumV.Manifest.FunctionCategory.Image, ImageToTensorChwFunction.Category);
         Assert.False(string.IsNullOrWhiteSpace(ImageToTensorChwFunction.Description));
     }
 }

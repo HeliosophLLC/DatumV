@@ -1,11 +1,11 @@
 using System.Buffers.Binary;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Audio;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Audio;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_envelope(audio, bins)</c>: folds decoded PCM into a

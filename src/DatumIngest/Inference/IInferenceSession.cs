@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// One loaded model bound to one device, ready to accept tensor-graph

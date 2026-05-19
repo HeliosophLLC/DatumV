@@ -1,15 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using DatumIngest.Diagnostics;
+using Heliosoph.DatumV.Diagnostics;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// File-backed persistence for <see cref="CalibrationRegistry"/>. The
 /// calibration cache lives in a per-host directory
-/// (<c>%LOCALAPPDATA%/DatumIngest/calibration.json</c> on Windows;
-/// <c>~/.cache/DatumIngest/calibration.json</c> elsewhere) so it follows
+/// (<c>%LOCALAPPDATA%/Heliosoph.DatumV/calibration.json</c> on Windows;
+/// <c>~/.cache/Heliosoph.DatumV/calibration.json</c> elsewhere) so it follows
 /// the machine, not the catalog. Two engine processes on the same host
 /// share the file; last-writer-wins is acceptable for advisory data.
 /// </summary>
@@ -33,13 +33,13 @@ namespace DatumIngest.Models.Calibration;
 public sealed class CalibrationStore
 {
     /// <summary>
-    /// Default file location. <c>%LOCALAPPDATA%/DatumIngest/calibration.json</c>
-    /// on Windows; <c>~/.local/share/DatumIngest/calibration.json</c> on
+    /// Default file location. <c>%LOCALAPPDATA%/Heliosoph.DatumV/calibration.json</c>
+    /// on Windows; <c>~/.local/share/Heliosoph.DatumV/calibration.json</c> on
     /// Linux/macOS via <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
     /// </summary>
     public static string DefaultFilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DatumIngest",
+        "Heliosoph.DatumV",
         "calibration.json");
 
     private readonly string _filePath;

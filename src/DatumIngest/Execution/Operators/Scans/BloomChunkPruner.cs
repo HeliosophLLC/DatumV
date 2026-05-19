@@ -1,9 +1,9 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Scans;
+namespace Heliosoph.DatumV.Execution.Operators.Scans;
 
 /// <summary>
 /// Bloom-filter chunk pruner: skips a chunk when none of the supplied

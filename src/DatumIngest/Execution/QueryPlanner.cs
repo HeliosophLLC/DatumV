@@ -1,17 +1,17 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Execution.Planner;
-using DatumIngest.Functions;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Execution.Planner;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Transforms a parsed <see cref="SelectStatement"/> AST into an executable
@@ -243,7 +243,7 @@ public sealed class QueryPlanner
     /// </list>
     /// <remarks>
     /// <see cref="LiteralHoister"/> is intentionally <em>not</em> here — it's a per-plan-
-    /// instance optimisation that lives in <see cref="DatumIngest.Catalog.Plans.SelectPlan"/>
+    /// instance optimisation that lives in <see cref="Heliosoph.DatumV.Catalog.Plans.SelectPlan"/>
     /// because the hoist arena's lifetime is tied to that instance, not to the planner.
     /// </remarks>
     private QueryOperator Finalize(QueryOperator op)

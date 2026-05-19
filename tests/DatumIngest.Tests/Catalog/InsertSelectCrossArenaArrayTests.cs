@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Cross-arena <c>INSERT … SELECT</c> of typed-array columns. Until this
@@ -134,7 +134,7 @@ public sealed class InsertSelectCrossArenaArrayTests : ServiceTestBase, IAsyncLi
 
     // Array<Audio>, Array<Video>, Array<Json>, Array<PointCloud> cross-arena
     // copy is unit-tested at the DataValue.From*Array / As*Array round-trip
-    // level in tests/DatumIngest.Tests/Model/ReferenceArrayBlobKindsTests.cs —
+    // level in tests/Heliosoph.DatumV.Tests/Model/ReferenceArrayBlobKindsTests.cs —
     // those kinds don't have SQL literal syntax, so we can't drive the
     // catalog-level cross-arena path from a SQL test. Unit tests cover the
     // factory pair correctness; the InsertExecutor dispatch arm just routes

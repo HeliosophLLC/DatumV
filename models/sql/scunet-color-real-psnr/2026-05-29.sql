@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_color_real_psnr.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Blind real-world color denoiser — handles unknown noise patterns
 -- (sensor + JPEG + downsampling artifacts) without a noise-level prior.

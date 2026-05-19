@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Conversation;
+namespace Heliosoph.DatumV.Web.Conversation;
 
 // Reactive loop: user input → model → response. Per project_proactive_not_reactive
 // this is one of two loops; IProactiveAgent (event → maybe-message) is the other,

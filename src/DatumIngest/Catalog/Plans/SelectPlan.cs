@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// <see cref="StatementPlan"/> for SELECT and CALL (which the catalog
@@ -51,7 +51,7 @@ internal sealed class SelectPlan : StatementPlan
         // via the well-known ExecutionContext.Store handle. Everything else
         // (types, accountant, variable substrate, video registry, model
         // tracer) is borrowed from the caller's context.
-        using DatumIngest.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
+        using Heliosoph.DatumV.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
 
         await foreach (RowBatch batch in instrumented.ExecuteAsync(planContext).WithCancellation(cancellationToken))
         {
@@ -65,7 +65,7 @@ internal sealed class SelectPlan : StatementPlan
 
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        DatumIngest.Execution.ExecutionContext context)
+        Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         // Override Store with the hoist store so operators can resolve
         // hoisted-literal DataValue payloads (offsets reference _hoistStore)
@@ -74,7 +74,7 @@ internal sealed class SelectPlan : StatementPlan
         // tracer) is borrowed from the caller's context — the caller owns
         // both lifecycles and is responsible for starting profiling on the
         // accountant before any plan runs.
-        using DatumIngest.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
+        using Heliosoph.DatumV.Execution.ExecutionContext planContext = context.Derive(store: _hoistStore);
 
         // Auto-return the previous batch when the consumer asks for the next one.
         // Consumers must finish using the current batch before iterating; in practice

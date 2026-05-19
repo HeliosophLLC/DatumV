@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
-using DatumIngest.Functions.Json;
-using DatumIngest.Ingestion.Sampling;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Ingestion.Sampling;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Tests for <see cref="SamplePreviewCollector"/>, covering reservoir sampling,

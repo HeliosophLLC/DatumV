@@ -1,13 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Incrementally builds a <see cref="SourceIndex"/> as rows stream through an
-/// <see cref="DatumIngest.Ingestion.Indexer"/> or equivalent producer. Created by
+/// <see cref="Heliosoph.DatumV.Ingestion.Indexer"/> or equivalent producer. Created by
 /// <see cref="SourceIndexBuilder.CreateIncrementalBuilder"/>.
 /// </summary>
 /// <remarks>
@@ -15,7 +15,7 @@ namespace DatumIngest.Indexing;
 /// <c>.datum-bptree-{col}</c> page-COW files. This builder produces only
 /// the unified-sidecar payload — fingerprint, schema, chunk directory +
 /// zone maps, bloom filters, bitmap indexes. Columns eligible for B+Tree
-/// indexing are written separately by <see cref="DatumIngest.Ingestion.Indexer"/>
+/// indexing are written separately by <see cref="Heliosoph.DatumV.Ingestion.Indexer"/>
 /// driving <c>MutableBPlusTree</c> directly.
 /// </remarks>
 public sealed class IncrementalIndexBuilder : IDisposable

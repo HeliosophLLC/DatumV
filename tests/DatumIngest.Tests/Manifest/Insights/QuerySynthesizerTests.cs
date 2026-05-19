@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.Manifest.Insights;
+namespace Heliosoph.DatumV.Tests.Manifest.Insights;
 
-using DatumIngest.Manifest;
-using DatumIngest.Manifest.Insights;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Manifest.Insights;
 
 /// <summary>
 /// Tests for <see cref="QuerySynthesizer"/> — query generation, bundle atomicity,

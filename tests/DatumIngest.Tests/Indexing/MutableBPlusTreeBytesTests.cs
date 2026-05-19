@@ -1,6 +1,6 @@
-using DatumIngest.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Bytes-keyed tree behavior tests covering what the typed tree can't do —

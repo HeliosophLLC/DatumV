@@ -1,6 +1,6 @@
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 internal static class TestTableDescriptor
 {

@@ -1,8 +1,8 @@
-using DatumIngest.Functions;
-using DatumIngest.Inference;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Inference;
+namespace Heliosoph.DatumV.Tests.Inference;
 
 /// <summary>
 /// Unit tests for <see cref="InferFunction.ResolveShape"/> — derives the

@@ -1,6 +1,6 @@
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Smoke tests for the <see cref="CatalogEvents"/> bus. Verifies that each

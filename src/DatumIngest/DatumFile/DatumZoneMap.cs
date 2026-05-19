@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile;
+namespace Heliosoph.DatumV.DatumFile;
 
 /// <summary>
 /// Per-column, per-row-group zone map: the minimum value, maximum value,

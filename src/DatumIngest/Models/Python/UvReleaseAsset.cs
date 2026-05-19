@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Resolves which GitHub release asset to download for the running

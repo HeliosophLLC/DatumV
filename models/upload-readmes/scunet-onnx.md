@@ -17,7 +17,7 @@ ONNX exports of [SCUNet](https://github.com/cszn/SCUNet) (Swin-Conv-UNet) — Ka
 
 Re-exported from upstream PyTorch weights. Provenance trail: Zhang et al. → cszn/SCUNet `model_zoo/*.pth` → `torch.onnx.export` (one pass per checkpoint) → these files.
 
-Toolchain: `torch 2.4.x` (CUDA 12.4), `timm` latest, `einops` latest, `thop` latest, `onnx` latest, `onnxruntime>=1.17`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-kair.ps1`](https://github.com/HeliosophLLC/DatumIngest/blob/main/scripts/export-kair.ps1) in the DatumIngest repo (runs once per `.pth` checkpoint via `-Model scunet-color` or `-Model scunet-gray`).
+Toolchain: `torch 2.4.x` (CUDA 12.4), `timm` latest, `einops` latest, `thop` latest, `onnx` latest, `onnxruntime>=1.17`, opset 17, `do_constant_folding=True`. Full conversion script: [`scripts/export-kair.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-kair.ps1) in the Heliosoph repo (runs once per `.pth` checkpoint via `-Model scunet-color` or `-Model scunet-gray`).
 
 Credit: Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao, Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte, Luc Van Gool. Paper: *"Practical Blind Image Denoising via Swin-Conv-UNet and Data Synthesis"*, 2022.
 

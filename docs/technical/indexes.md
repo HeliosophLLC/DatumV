@@ -1,6 +1,6 @@
 # Source Indexes
 
-DatumIngest builds `.datum-index` sidecar files that accelerate queries by enabling chunk-level pruning without reading source data. Any provider and format can benefit — unlike Parquet's built-in row group statistics, source indexes are format-independent and support bloom filters, B+Tree indexes, bitmap indexes, and cached schema inference.
+DatumV builds `.datum-index` sidecar files that accelerate queries by enabling chunk-level pruning without reading source data. Any provider and format can benefit — unlike Parquet's built-in row group statistics, source indexes are format-independent and support bloom filters, B+Tree indexes, bitmap indexes, and cached schema inference.
 
 A separate `.datum-pkindex` sidecar holds a maintained mutable B+Tree backing a table's `PRIMARY KEY` constraint. See [Mutable B+Tree (PRIMARY KEY index)](#mutable-btree-primary-key-index) at the end of this page.
 
@@ -81,7 +81,7 @@ The source is logically divided into fixed-size row chunks (default: 10,000 rows
 | RowCount | int64 | Number of rows in this chunk |
 | ColumnStatistics | dictionary | Per-column minimum, maximum, null count, row count, and HyperLogLog cardinality estimate |
 
-Per-chunk statistics are encoded as a fixed-width zone map in the `ChunkDirectory` section, enabling random-access lookup by chunk index without decoding earlier entries. See [`MappedChunkDirectory`](../../src/DatumIngest/Indexing/MappedChunkDirectory.cs) for the on-disk layout.
+Per-chunk statistics are encoded as a fixed-width zone map in the `ChunkDirectory` section, enabling random-access lookup by chunk index without decoding earlier entries. See [`MappedChunkDirectory`](../../src/DatumV/Indexing/MappedChunkDirectory.cs) for the on-disk layout.
 
 ## Bloom filters
 
@@ -126,7 +126,7 @@ datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,times
 
 ### Automatic column selection
 
-When no explicit `--index-columns` are provided, the indexing pipeline automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not. The eligibility rule is in [`SourceIndexBuilder.IsAutoIndexableKind`](../../src/DatumIngest/Indexing/SourceIndexBuilder.cs):
+When no explicit `--index-columns` are provided, the indexing pipeline automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not. The eligibility rule is in [`SourceIndexBuilder.IsAutoIndexableKind`](../../src/DatumV/Indexing/SourceIndexBuilder.cs):
 
 | Eligible (auto-indexed) | Skipped |
 |------------------------|---------|
@@ -545,7 +545,7 @@ Reading is handled internally by the table provider chain — there is no public
 
 ## Temp Table Auto-Indexing
 
-When a session-owned temp table is populated via `CREATE TEMP TABLE AS SELECT` or `INSERT INTO`, DatumIngest automatically builds a source index using `IncrementalIndexBuilder` with disk-based spill (via `SortedIndexSpillWriter`). The index is written as a `.datum-index` sidecar alongside the `.datum` file and registered on the catalog — no manual `index` command required.
+When a session-owned temp table is populated via `CREATE TEMP TABLE AS SELECT` or `INSERT INTO`, DatumV automatically builds a source index using `IncrementalIndexBuilder` with disk-based spill (via `SortedIndexSpillWriter`). The index is written as a `.datum-index` sidecar alongside the `.datum` file and registered on the catalog — no manual `index` command required.
 
 Auto-indexing uses `autoIndexColumns: true`, which selects columns for sorted indexes based on compact type heuristics (the same logic used by the CLI `--with-index` flag). Bloom filters are not enabled by default for temp tables to minimize I/O overhead.
 
@@ -570,11 +570,11 @@ In addition to the bulk-loaded immutable B+Tree sections inside `.datum-index`, 
 
 ### Why two implementations instead of one
 
-The typed tree ([`MutableBPlusTree`](../../src/DatumIngest/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
+The typed tree ([`MutableBPlusTree`](../../src/DatumV/Indexing/BTree/Mutable/MutableBPlusTree.cs)) stores keys as fixed-width `DataValue` slots — the same 16-byte struct used everywhere else in the engine. That keeps page codecs trivial and lets the column index hand `IColumnIndex` consumers (`ScanOperator`, the planner's range-predicate pruner, `IndexScanOperator`'s ORDER BY elimination) the same `DataValue` shape the rest of the query pipeline already speaks.
 
 The trade-off is the inline-payload budget. A `DataValue` inlines up to 16 bytes of string or byte-array content; longer values would have to be stored out-of-line in an `IValueStore`, which doesn't survive across process restarts the way the tree file does. That makes the typed tree a non-starter for long-string primary keys — a 25-character COCO filename like `test2017/000000290551.jpg` overflows the inline budget, and so does any composite tuple encoded as a single key.
 
-The bytes-keyed tree ([`MutableBPlusTreeBytes`](../../src/DatumIngest/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. [`CompositeKeyEncoder`](../../src/DatumIngest/Indexing/CompositeKeyEncoder.cs) produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column keys are just the degenerate "tuple of one" case. The PK index and user-defined composite indexes share the same tree implementation; they differ only in lifecycle, duplicate-allowance, and integration point.
+The bytes-keyed tree ([`MutableBPlusTreeBytes`](../../src/DatumV/Indexing/BTree/MutableBytes/MutableBPlusTreeBytes.cs)) sidesteps that by storing keys as raw variable-length `byte[]` and comparing with `SequenceCompareTo`. [`CompositeKeyEncoder`](../../src/DatumV/Indexing/CompositeKeyEncoder.cs) produces order-preserving byte encodings per `DataKind` (sign-flipped big-endian integers, IEEE-to-sortable floats, `\x00\x00`-terminated escaped strings/byte arrays), so a tuple of any supported kinds round-trips to a single comparable byte sequence. Single-column keys are just the degenerate "tuple of one" case. The PK index and user-defined composite indexes share the same tree implementation; they differ only in lifecycle, duplicate-allowance, and integration point.
 
 The bytes-keyed tree's read surface — `FindAll`, `FindRange`, `FindPrefix`, `TraverseForward/Backward`, `Delete` — is at parity with the typed tree's. Retiring the typed implementation is a planned future cleanup; what holds it now is that `IColumnIndex` consumers natively speak `DataValue`, and the bytes tree would force a per-call encode + decode that the typed tree skips.
 

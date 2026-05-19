@@ -1,17 +1,17 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Model.Spatial;
 
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
-/// Serializes a <see cref="DatumIngest.Model.DataKind.Mesh"/> blob to the
+/// Serializes a <see cref="Heliosoph.DatumV.Model.DataKind.Mesh"/> blob to the
 /// binary glTF 2.0 (.glb) wire format using the SharpGLTF library. Always
 /// emits in glTF's right-handed +Y-up, −Z-forward convention regardless of
 /// the source mesh's <c>CoordinateFrame</c> — converts from

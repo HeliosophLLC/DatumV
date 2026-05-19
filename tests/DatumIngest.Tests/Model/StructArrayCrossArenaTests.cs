@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Model;
+namespace Heliosoph.DatumV.Tests.Model;
 
 /// <summary>
 /// Cross-arena copy of <c>Array&lt;Struct&gt;</c> at the DataValue level —
@@ -145,7 +145,7 @@ public sealed class StructArrayCrossArenaTests : ServiceTestBase
     private static DataValue CopyStructArrayAcrossArenas(
         DataValue source, Arena sourceArena, Arena targetArena)
     {
-        return DatumIngest.Catalog.Executors.InsertExecutor
+        return Heliosoph.DatumV.Catalog.Executors.InsertExecutor
             .CopyStructArrayToTargetArenaForTests(source, sourceArena, registry: null, targetArena);
     }
 }

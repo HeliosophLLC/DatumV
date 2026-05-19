@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Path conventions for ingestion: deriving SQL-safe table names from data file

@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Phase 2 of the evaluator ValueRef arc: predicate-context expressions
@@ -17,7 +17,7 @@ namespace DatumIngest.Tests.Execution;
 /// arena migration. The point isn't to prove arena bytes are zero
 /// (that needs a counter we don't have yet); it's to prove the new
 /// dispatch path produces the same boolean results as the old one
-/// across the predicate operators that matter — comparisons, AND/OR/NOT,
+/// across the predicate operators that matter ï¿½ comparisons, AND/OR/NOT,
 /// LIKE/ILIKE/REGEXP, IS NULL, arithmetic-in-predicate.
 /// </para>
 /// </remarks>
@@ -28,7 +28,7 @@ public sealed class PredicateValueRefPathTests : ServiceTestBase
 
     public PredicateValueRefPathTests()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         _evaluator = context.CreateEvaluator();
         _frame = _evaluator.CreateFrame(Row.Empty);
     }

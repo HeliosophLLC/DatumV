@@ -2,7 +2,7 @@
 /* eslint-disable */
 /* tslint:disable */
 
-/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampStartedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampStartedEvent */
 export type CalibrationRampStartedEvent = {
     /** Transpiled from string */
     modelName: string;
@@ -10,7 +10,7 @@ export type CalibrationRampStartedEvent = {
     fingerprint: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampStepEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampStepEvent */
 export type CalibrationRampStepEvent = {
     /** Transpiled from string */
     modelName: string;
@@ -22,24 +22,24 @@ export type CalibrationRampStepEvent = {
     dispatchMs: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CalibrationHaltReason */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationHaltReason */
 export enum CalibrationHaltReason {
     LookAheadProjection = 0,
     DurationSpill = 1,
     DispatchError = 2,
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampHaltedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampHaltedEvent */
 export type CalibrationRampHaltedEvent = {
     /** Transpiled from string */
     modelName: string;
     /** Transpiled from int */
     lastBatchSize: number;
-    /** Transpiled from DatumIngest.Web.Hubs.CalibrationHaltReason */
+    /** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationHaltReason */
     reason: CalibrationHaltReason;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CalibrationRampCompletedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampCompletedEvent */
 export type CalibrationRampCompletedEvent = {
     /** Transpiled from string */
     modelName: string;
@@ -47,7 +47,7 @@ export type CalibrationRampCompletedEvent = {
     entryCount: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CatalogChangeKind */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CatalogChangeKind */
 export enum CatalogChangeKind {
     SchemaCreated = 0,
     SchemaDropped = 1,
@@ -70,9 +70,9 @@ export enum CatalogChangeKind {
     ViewDropped = 18,
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.CatalogChangedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CatalogChangedEvent */
 export type CatalogChangedEvent = {
-    /** Transpiled from DatumIngest.Web.Hubs.CatalogChangeKind */
+    /** Transpiled from Heliosoph.DatumV.Web.Hubs.CatalogChangeKind */
     kind: CatalogChangeKind;
     /** Transpiled from string? */
     schema?: string;
@@ -82,7 +82,7 @@ export type CatalogChangedEvent = {
     childName?: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadStartedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadStartedDto */
 export type DatasetDownloadStartedDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -92,7 +92,7 @@ export type DatasetDownloadStartedDto = {
     totalBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadProgressDto */
 export type DatasetDownloadProgressDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -112,13 +112,13 @@ export type DatasetDownloadProgressDto = {
     bytesTotalAcrossDataset: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadCompleteDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadCompleteDto */
 export type DatasetDownloadCompleteDto = {
     /** Transpiled from string */
     datasetId: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetIngestingDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetIngestingDto */
 export type DatasetIngestingDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -130,7 +130,7 @@ export type DatasetIngestingDto = {
     jobCount: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetIngestProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetIngestProgressDto */
 export type DatasetIngestProgressDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -140,7 +140,7 @@ export type DatasetIngestProgressDto = {
     rowsWrittenSoFar: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetTableIngestedDto */
 export type DatasetTableIngestedDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -152,13 +152,13 @@ export type DatasetTableIngestedDto = {
     bytesWritten: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetInstalledDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetInstalledDto */
 export type DatasetInstalledDto = {
     /** Transpiled from string */
     datasetId: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.DatasetDownloadFailedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadFailedDto */
 export type DatasetDownloadFailedDto = {
     /** Transpiled from string */
     datasetId: string;
@@ -166,7 +166,7 @@ export type DatasetDownloadFailedDto = {
     error: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadStartedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadStartedDto */
 export type ModelDownloadStartedDto = {
     /** Transpiled from string */
     modelId: string;
@@ -176,7 +176,7 @@ export type ModelDownloadStartedDto = {
     totalBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadProgressDto */
 export type ModelDownloadProgressDto = {
     /** Transpiled from string */
     modelId: string;
@@ -196,25 +196,25 @@ export type ModelDownloadProgressDto = {
     bytesTotalAcrossModel: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadCompleteDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadCompleteDto */
 export type ModelDownloadCompleteDto = {
     /** Transpiled from string */
     modelId: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelInstallingDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelInstallingDto */
 export type ModelInstallingDto = {
     /** Transpiled from string */
     modelId: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelInstalledDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelInstalledDto */
 export type ModelInstalledDto = {
     /** Transpiled from string */
     modelId: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadFailedDto */
 export type ModelDownloadFailedDto = {
     /** Transpiled from string */
     modelId: string;
@@ -222,7 +222,7 @@ export type ModelDownloadFailedDto = {
     error: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.UvDownloadStartedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadStartedDto */
 export type UvDownloadStartedDto = {
     /** Transpiled from string */
     version: string;
@@ -230,7 +230,7 @@ export type UvDownloadStartedDto = {
     totalBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.UvDownloadProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadProgressDto */
 export type UvDownloadProgressDto = {
     /** Transpiled from long */
     bytesDownloaded: number;
@@ -238,17 +238,17 @@ export type UvDownloadProgressDto = {
     totalBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.UvDownloadCompleteDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadCompleteDto */
 export type UvDownloadCompleteDto = {
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.PythonInstallStartedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallStartedDto */
 export type PythonInstallStartedDto = {
     /** Transpiled from string */
     version: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.PythonInstallProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallProgressDto */
 export type PythonInstallProgressDto = {
     /** Transpiled from string */
     stage: string;
@@ -258,13 +258,13 @@ export type PythonInstallProgressDto = {
     totalBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.PythonInstallCompleteDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallCompleteDto */
 export type PythonInstallCompleteDto = {
     /** Transpiled from string */
     version: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.VenvInstallStartedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallStartedDto */
 export type VenvInstallStartedDto = {
     /** Transpiled from string */
     venvName: string;
@@ -272,7 +272,7 @@ export type VenvInstallStartedDto = {
     requirements: string[];
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.VenvInstallProgressDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallProgressDto */
 export type VenvInstallProgressDto = {
     /** Transpiled from string */
     venvName: string;
@@ -282,13 +282,13 @@ export type VenvInstallProgressDto = {
     detail: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.VenvInstallCompleteDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallCompleteDto */
 export type VenvInstallCompleteDto = {
     /** Transpiled from string */
     venvName: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.PythonEnvironmentFailedDto */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.PythonEnvironmentFailedDto */
 export type PythonEnvironmentFailedDto = {
     /** Transpiled from string */
     stage: string;
@@ -298,7 +298,7 @@ export type PythonEnvironmentFailedDto = {
     error: string;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelLoadedEvent */
 export type ModelLoadedEvent = {
     /** Transpiled from string */
     modelName: string;
@@ -308,7 +308,7 @@ export type ModelLoadedEvent = {
     vramUsedBytes: number;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelEvictionReason */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelEvictionReason */
 export enum ModelEvictionReason {
     Explicit = 0,
     UserRequested = 1,
@@ -316,17 +316,17 @@ export enum ModelEvictionReason {
     Calibration = 3,
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelEvictedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelEvictedEvent */
 export type ModelEvictedEvent = {
     /** Transpiled from string */
     modelName: string;
     /** Transpiled from long */
     bytes: number;
-    /** Transpiled from DatumIngest.Web.Hubs.ModelEvictionReason */
+    /** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelEvictionReason */
     reason: ModelEvictionReason;
 }
 
-/** Transpiled from DatumIngest.Web.Hubs.ModelActiveChangedEvent */
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelActiveChangedEvent */
 export type ModelActiveChangedEvent = {
     /** Transpiled from string */
     modelName: string;

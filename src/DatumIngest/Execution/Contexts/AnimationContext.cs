@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution.Contexts;
+namespace Heliosoph.DatumV.Execution.Contexts;
 
 /// <summary>
 /// <see cref="IFunctionContext"/> for lambda bodies that produce a

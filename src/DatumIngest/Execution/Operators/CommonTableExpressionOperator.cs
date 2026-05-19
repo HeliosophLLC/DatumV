@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Operator that provides the result set of a Common Table Expression (CTE).

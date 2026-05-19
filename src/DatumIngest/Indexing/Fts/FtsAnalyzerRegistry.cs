@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
 
-namespace DatumIngest.Indexing.Fts;
+namespace Heliosoph.DatumV.Indexing.Fts;
 
 /// <summary>
 /// Resolves an <see cref="IFullTextAnalyzer"/> by name. Backs the manifest's

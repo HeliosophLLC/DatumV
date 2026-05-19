@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.TableValued;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.TableValued;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Functions;
+namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
 /// Tests for <see cref="VideoUnnestFramesFunction"/>. The emission path is

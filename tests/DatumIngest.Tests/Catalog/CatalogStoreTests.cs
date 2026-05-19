@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Execution;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="CatalogStore"/> + <see cref="TableCatalog"/>'s
@@ -117,7 +117,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
 
         // The reloaded default expression should round-trip into the same
         // formatted text — confirms the JSON path captured an evaluable form.
-        string formatted = DatumIngest.Execution.QueryExplainer.FormatExpression(
+        string formatted = Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(
             udf.Parameters[1].Default!);
         Assert.Equal("5", formatted);
     }
@@ -147,7 +147,7 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         TableCatalog second = OpenCatalog();
 
         Assert.True(second.Udfs.TryGet("shout", out UdfDescriptor? udf));
-        string body = DatumIngest.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
+        string body = Heliosoph.DatumV.Execution.QueryExplainer.FormatExpression(udf!.ExpressionBody!);
         Assert.Contains("lower", body, StringComparison.OrdinalIgnoreCase);
     }
 

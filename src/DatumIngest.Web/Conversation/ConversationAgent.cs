@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
-using DatumIngest.Models.Llama;
-using DatumIngest.Web.Hosting;
-using DatumIngest.Web.Llm;
-using DatumIngest.Web.Messages;
+using Heliosoph.DatumV.Models.Llama;
+using Heliosoph.DatumV.Web.Hosting;
+using Heliosoph.DatumV.Web.Llm;
+using Heliosoph.DatumV.Web.Messages;
 
-namespace DatumIngest.Web.Conversation;
+namespace Heliosoph.DatumV.Web.Conversation;
 
 // Per-conversation chat loop. One Session per conversation owns its own
 // in-memory accumulator + active-send CTS; the agent is a singleton that
@@ -28,7 +28,7 @@ namespace DatumIngest.Web.Conversation;
 internal sealed class ConversationAgent : IConversationAgent
 {
     private const string BuiltInSystemPrompt =
-        "You are an assistant inside DatumIngest, a local data tool, but you can " +
+        "You are an assistant inside Heliosoph.DatumV, a local data tool, but you can " +
         "help with anything the user asks — coding, writing, general questions, " +
         "not just data. " +
         "Default to short answers: one or two sentences for simple questions, a " +

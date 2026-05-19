@@ -1,8 +1,8 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// PR10c tests for SQL <c>INSERT INTO … VALUES (…)</c>. Cover:
@@ -132,7 +132,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (s VARCHAR(3))");
 
-        DatumIngest.Execution.ColumnValueConstraintException ex = Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Heliosoph.DatumV.Execution.ColumnValueConstraintException ex = Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
             catalog.Plan("INSERT INTO t VALUES ('abcd')"));
         Assert.Contains("'s'", ex.Message);
         Assert.Contains("3", ex.Message);
@@ -169,7 +169,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog();
         catalog.Plan("CREATE TEMP TABLE t (s CHAR(3))");
 
-        Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
             catalog.Plan("INSERT INTO t VALUES ('toolong')"));
     }
 
@@ -628,8 +628,8 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
 
-        DatumIngest.Execution.ColumnValueConstraintException ex =
-            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Heliosoph.DatumV.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
                 catalog.Plan("INSERT INTO t (id, scores) VALUES (1, [10, 20])"));
         Assert.Contains("'scores'", ex.Message);
         Assert.Contains("3", ex.Message);
@@ -642,7 +642,7 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (id Int32, scores Int32[3])");
 
-        Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
             catalog.Plan("INSERT INTO t (id, scores) VALUES (1, [10, 20, 30, 40])"));
     }
 
@@ -666,8 +666,8 @@ public sealed class InsertValuesTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE TABLE t (id Int32, m Array<Int32>(3, 3))");
 
-        DatumIngest.Execution.ColumnValueConstraintException ex =
-            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Heliosoph.DatumV.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
                 catalog.Plan("INSERT INTO t (id, m) VALUES (1, [1, 2, 3, 4, 5])"));
         Assert.Contains("9", ex.Message); // expected element count = 3*3
     }

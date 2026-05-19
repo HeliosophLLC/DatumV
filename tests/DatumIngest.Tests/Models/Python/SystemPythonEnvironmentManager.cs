@@ -1,6 +1,6 @@
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.Models.Python;
 
-namespace DatumIngest.Tests.Models.Python;
+namespace Heliosoph.DatumV.Tests.Models.Python;
 
 /// <summary>
 /// Test-only <see cref="IPythonEnvironmentManager"/> that returns whatever

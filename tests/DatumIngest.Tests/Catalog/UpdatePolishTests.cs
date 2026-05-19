@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// UPDATE-path polish: no-op detection (skip rewrite when SET produces
@@ -50,8 +50,8 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TABLE t (fixed Int32[3], var Int32[])");
         catalog.Plan("INSERT INTO t VALUES ([1, 2, 3], [9, 9])");
 
-        DatumIngest.Execution.ColumnValueConstraintException ex =
-            Assert.Throws<DatumIngest.Execution.ColumnValueConstraintException>(() =>
+        Heliosoph.DatumV.Execution.ColumnValueConstraintException ex =
+            Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
                 catalog.Plan("UPDATE t SET fixed = var"));
         Assert.Contains("'fixed'", ex.Message);
         Assert.Contains("3", ex.Message);
@@ -264,7 +264,7 @@ public sealed class UpdatePolishTests : ServiceTestBase, IAsyncLifetime
 
     private static ulong ReadGeneration(string datumPath)
     {
-        using var reader = DatumIngest.DatumFile.V2.DatumFileReaderV2.Open(datumPath);
+        using var reader = Heliosoph.DatumV.DatumFile.V2.DatumFileReaderV2.Open(datumPath);
         return reader.Footer.Prologue.Generation;
     }
 

@@ -1,9 +1,9 @@
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Encoding;
+namespace Heliosoph.DatumV.Functions.Scalar.Encoding;
 
 /// <summary>
 /// PostgreSQL-compatible <c>encode(bytes, format)</c>. Renders a byte array

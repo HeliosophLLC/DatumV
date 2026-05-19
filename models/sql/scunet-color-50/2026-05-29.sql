@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_color_50.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Color Gaussian-noise specialist trained at σ=50 (heavy noise — extreme
 -- low-light, old digital cameras). Aggressive enough to flatten heavy

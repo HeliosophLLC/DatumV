@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using Microsoft.ML.Tokenizers;
 
-namespace DatumIngest.Functions.Tokenization;
+namespace Heliosoph.DatumV.Functions.Tokenization;
 
 /// <summary>
 /// <c>tokenizer.encode_clip(text, vocab_path, merges_path) → Int64[77]</c>.

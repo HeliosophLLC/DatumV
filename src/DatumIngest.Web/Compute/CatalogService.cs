@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Compute;
+namespace Heliosoph.DatumV.Web.Compute;
 
 // The boundary every catalog operation crosses. Today's only implementation
 // is in-process; tomorrow's gRPC adapter implements the same contract for

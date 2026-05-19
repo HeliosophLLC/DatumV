@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Result of header detection: column names, inferred types, and whether a header row exists.

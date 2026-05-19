@@ -1,11 +1,11 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
-using DatumIngest.Indexing;
-using DatumIngest.Manifest.Insights;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
-using DatumIngest.Statistics.Accumulators;
-using DatumIngest.Statistics.Interactions;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Manifest.Insights;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
+using Heliosoph.DatumV.Statistics.Accumulators;
+using Heliosoph.DatumV.Statistics.Interactions;
 
 /// <summary>
 /// Builds a <see cref="QueryResultsManifest"/> from collected column statistics,

@@ -4,7 +4,7 @@ title: Examples
 
 # Examples
 
-A growing collection of interesting things you can do in DatumIngest. Each example is a single self-contained query — paste it into the CLI or the web shell and it runs.
+A growing collection of interesting things you can do in DatumV. Each example is a single self-contained query — paste it into the CLI or the web shell and it runs.
 
 ## Procedural graphics
 

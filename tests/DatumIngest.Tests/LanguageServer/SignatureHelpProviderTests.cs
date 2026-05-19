@@ -1,7 +1,7 @@
-using DatumIngest.LanguageServer;
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
 /// <summary>
 /// Tests for <see cref="SignatureHelpProvider"/>: walks back from the cursor

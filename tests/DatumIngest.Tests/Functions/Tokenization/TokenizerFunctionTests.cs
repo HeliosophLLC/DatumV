@@ -1,10 +1,10 @@
 ﻿using System.Text;
 using System.Text.Json;
 
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Tokenization;
+namespace Heliosoph.DatumV.Tests.Functions.Tokenization;
 
 /// <summary>
 /// Round-trip + dispatch tests for the four tokenizer functions:

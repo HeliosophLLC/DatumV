@@ -1,14 +1,14 @@
-﻿namespace DatumIngest.Tests.Execution;
+﻿namespace Heliosoph.DatumV.Tests.Execution;
 
 using System.Runtime.CompilerServices;
 using System.Text;
 
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Pooling;
 
 /// <summary>
 /// Tests for the model streaming surface — <see cref="IModel.InferStreamingAsync"/>

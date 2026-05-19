@@ -1,4 +1,4 @@
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 /// <summary>
 /// Outcome of <see cref="TableCatalog.RehydrateModelsAsync"/>. Hosts log

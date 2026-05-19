@@ -1,4 +1,4 @@
-namespace DatumIngest.Execution.Contexts;
+namespace Heliosoph.DatumV.Execution.Contexts;
 
 /// <summary>
 /// Per-engine registry of <see cref="IFunctionContext"/>s by name. Populated
@@ -19,7 +19,7 @@ namespace DatumIngest.Execution.Contexts;
 /// <para>
 /// Registration is idempotent: registering a context type twice replaces
 /// the previous descriptor under the same name, which matches the behaviour
-/// of <see cref="DatumIngest.Functions.FunctionRegistry.RegisterScalar"/> and
+/// of <see cref="Heliosoph.DatumV.Functions.FunctionRegistry.RegisterScalar"/> and
 /// keeps engine-bootstrap order forgiving.
 /// </para>
 /// </remarks>

@@ -1,6 +1,6 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Tests for <see cref="StructTypeAnnotation"/> — the canonical

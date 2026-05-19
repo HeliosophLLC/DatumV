@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Runs once per HTTP request, before controllers, to populate the scoped
 // CurrentContext. Hub method invocations need an equivalent — left for the

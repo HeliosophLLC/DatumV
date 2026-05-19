@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
 public sealed class ManifestBuilderTests : ServiceTestBase
 {
@@ -449,7 +449,7 @@ public sealed class ManifestBuilderTests : ServiceTestBase
     {
         // Encode JSON text to canonical CBOR (the wire form for DataKind.Json),
         // then store via DataValue.FromJson.
-        byte[] cbor = DatumIngest.Functions.Json.CborJsonCodec.EncodeFromJsonText(json);
+        byte[] cbor = Heliosoph.DatumV.Functions.Json.CborJsonCodec.EncodeFromJsonText(json);
         return DataValue.FromJson(cbor, _arena);
     }
 

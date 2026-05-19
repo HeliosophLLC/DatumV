@@ -1,6 +1,6 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Computes the effective function whitelist for a lambda body scoped to a

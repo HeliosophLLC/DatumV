@@ -2,15 +2,15 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Spatial;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Spatial;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Spatial;
 
 /// <summary>
 /// Tests for <see cref="MeshToStlFunction"/>. Verifies metadata, null
@@ -58,7 +58,7 @@ public sealed class MeshToStlFunctionTests : ServiceTestBase
     {
         // Some slicers refuse to parse binary STL whose 80-byte header
         // starts with "solid" — that's the ASCII-STL magic. Our exporter
-        // embeds a "DatumIngest STL ..." prefix to avoid the ambiguity.
+        // embeds a "Heliosoph.DatumV STL ..." prefix to avoid the ambiguity.
         ValueRef mesh = BuildSampleQuadMesh();
 
         ValueRef result = await new MeshToStlFunction().ExecuteAsync(

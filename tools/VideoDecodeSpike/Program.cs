@@ -22,12 +22,12 @@ string videoPath = args.Length > 0
     : Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
         "..", "..", "..", "..", "..",
-        "tests", "DatumIngest.Tests", "Fixtures", "spike.mp4"));
+        "tests", "Heliosoph.DatumV.Tests", "Fixtures", "spike.mp4"));
 
 if (!File.Exists(videoPath))
 {
     Console.Error.WriteLine($"Video not found: {videoPath}");
-    Console.Error.WriteLine("Pass a path argument or commit a fixture at tests/DatumIngest.Tests/Fixtures/spike.mp4");
+    Console.Error.WriteLine("Pass a path argument or commit a fixture at tests/Heliosoph.DatumV.Tests/Fixtures/spike.mp4");
     return 1;
 }
 

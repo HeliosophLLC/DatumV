@@ -1,4 +1,4 @@
-namespace DatumIngest.Statistics;
+namespace Heliosoph.DatumV.Statistics;
 
 /// <summary>
 /// Aggregated statistics for a single column, containing results from all applicable accumulators.

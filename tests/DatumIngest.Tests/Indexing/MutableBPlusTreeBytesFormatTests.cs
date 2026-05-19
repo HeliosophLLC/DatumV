@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
-using DatumIngest.Indexing.BTree.Mutable;
-using DatumIngest.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// File-format-specific tests for the bytes-keyed
@@ -45,7 +45,7 @@ public sealed class MutableBPlusTreeBytesFormatTests : IDisposable
         // A typed-tree file (PKBT magic) must not open as a bytes tree.
         // Distinct magic is the firewall against format mix-ups.
         string typedPath = Path.Combine(_tempDir, "typed.datum-pkindex");
-        using (MutableBPlusTree typedTree = MutableBPlusTree.Create(typedPath, DatumIngest.Model.DataKind.Int32))
+        using (MutableBPlusTree typedTree = MutableBPlusTree.Create(typedPath, Heliosoph.DatumV.Model.DataKind.Int32))
         {
             // Just create empty.
         }

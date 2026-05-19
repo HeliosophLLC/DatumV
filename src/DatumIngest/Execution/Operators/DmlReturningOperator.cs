@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Executors;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Executors;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Adapts an INSERT / UPDATE / DELETE … RETURNING into an

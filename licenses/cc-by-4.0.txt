@@ -35,6 +35,6 @@ Notices:
 This is a human-readable summary of (and not a substitute for) the license.
 Full legal code: https://creativecommons.org/licenses/by/4.0/legalcode
 
-DatumIngest catalog note: CC BY 4.0 applies to deepset/roberta-base-squad2 and
+Heliosoph.DatumV catalog note: CC BY 4.0 applies to deepset/roberta-base-squad2 and
 similar question-answering checkpoints. Attribution to the upstream copyright
 holder (e.g., deepset) is required when redistributing.

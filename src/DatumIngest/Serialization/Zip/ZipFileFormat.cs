@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Catalog;
-using DatumIngest.Serialization.MediaBag;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Serialization.MediaBag;
 
-namespace DatumIngest.Serialization.Zip;
+namespace Heliosoph.DatumV.Serialization.Zip;
 
 /// <summary>
 /// Format handler for ZIP archive files. Matches <c>.zip</c> extension and the

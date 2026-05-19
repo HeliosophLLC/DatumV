@@ -3,7 +3,7 @@
 One-off measurement tool: sequential / downscaled / random-seek decode timings
 against an FFMediaToolkit-wrapped libav decoder. The numbers informed the
 `VideoFrame` + `VideoRegistry` design; production code lives in
-`src/DatumIngest/Model/VideoRegistry.cs` and uses `Sdcb.FFmpeg` instead,
+`src/DatumV/Model/VideoRegistry.cs` and uses `Sdcb.FFmpeg` instead,
 which bundles its own FFmpeg binaries — no setup needed there.
 
 ## FFmpeg version
@@ -34,5 +34,5 @@ locations) and the spike will find it without the env var.
 
 ## Sample
 
-Defaults to `tests/DatumIngest.Tests/Fixtures/spike.mp4`. Pass any other
+Defaults to `tests/DatumV.Tests/Fixtures/spike.mp4`. Pass any other
 H.264 path as `args[0]` to measure that instead.

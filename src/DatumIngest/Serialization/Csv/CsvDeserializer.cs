@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Deserializes CSV files into <see cref="RowBatch"/> streams with authoritative

@@ -1,8 +1,8 @@
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 public class SqlTokenizerTests : ServiceTestBase
 {

@@ -70,7 +70,7 @@ This sits alongside the existing per-column acceleration files
 ```
 
 `ITextSearchIndex` is **not** `IColumnIndex`. The unified column index
-interface in [IColumnIndex.cs](../src/DatumIngest/Indexing/IColumnIndex.cs) is
+interface in [IColumnIndex.cs](../src/DatumV/Indexing/IColumnIndex.cs) is
 value-keyed (`FindExact(DataValue)`, range scans, etc.); FTS is term-keyed and
 returns documents, not value matches. Forcing it through `IColumnIndex` would
 mean either lying about the contract (`FindExact("error")` returns rows
@@ -81,7 +81,7 @@ down. New interface is the right call. The provider gets a parallel accessor:
 bool TryGetTextSearchIndex(string columnName, out ITextSearchIndex index);
 ```
 
-added to [ITableProvider.cs](../src/DatumIngest/Catalog/ITableProvider.cs).
+added to [ITableProvider.cs](../src/DatumV/Catalog/ITableProvider.cs).
 
 ### Storage shape — Shape A (resolved)
 
@@ -154,7 +154,7 @@ internal readonly record struct Token(string Term, int Position);
 ```
 
 Both `IFullTextAnalyzer` and `FtsAnalyzerRegistry` are `internal`. New
-analyzers ship as PRs against DatumIngest. The manifest carries the
+analyzers ship as PRs against DatumV. The manifest carries the
 analyzer name string; opening an index whose analyzer name is no longer
 registered is a hard error with a clear message ("REINDEX with a registered
 analyzer or downgrade to a build that includes 'foo'").
@@ -269,7 +269,7 @@ the operator can produce scored rows in score order natively, so this is free.
 ## File / code layout
 
 ```
-src/DatumIngest/Indexing/Fts/
+src/DatumV/Indexing/Fts/
   IFullTextAnalyzer.cs
   SimpleEnglishAnalyzer.cs
   FtsAnalyzerRegistry.cs
@@ -283,30 +283,30 @@ src/DatumIngest/Indexing/Fts/
     WebSearchTsqueryParser.cs
     Bm25Scorer.cs
 
-src/DatumIngest/Execution/Operators/
+src/DatumV/Execution/Operators/
   FullTextSearchOperator.cs
 
-src/DatumIngest/Catalog/
+src/DatumV/Catalog/
   ITableProvider.cs                    // + TryGetTextSearchIndex
   Providers/DatumFileTableProviderV2.cs // + open .datum-fts-{col} sidecars
   TableCatalog.cs                      // + CREATE INDEX USING FTS path
 
-src/DatumIngest/Sql/
+src/DatumV/Sql/
   Parser/*                             // USING FTS keyword + tsquery functions
   Ast/*                                // CreateIndexStatement gains an Fts variant
   Planner/*                            // FTS predicate detection + op injection
 
-tests/DatumIngest.Tests/Indexing/Fts/
+tests/DatumV.Tests/Indexing/Fts/
   SimpleEnglishAnalyzerTests.cs
   FtsPostingKeyEncoderTests.cs
   FullTextSearchIndexTests.cs
   Bm25ScorerTests.cs
   WebSearchTsqueryParserTests.cs
-tests/DatumIngest.Tests/Execution/Operators/
+tests/DatumV.Tests/Execution/Operators/
   FullTextSearchOperatorTests.cs
-tests/DatumIngest.Tests/Catalog/
+tests/DatumV.Tests/Catalog/
   FtsIndexLifecycleTests.cs            // CREATE / INSERT / DELETE / REINDEX / DROP
-tests/DatumIngest.Tests/Sql/
+tests/DatumV.Tests/Sql/
   FullTextSearchQueryTests.cs          // end-to-end @@ queries
 ```
 
@@ -330,8 +330,8 @@ Total to ship: ~1900 LOC, ~5–7 working days at typical PR cadence.
 1. **Storage shape:** Shape A (single dup-key B+Tree over `MutableBPlusTreeBytes`).
    Shape B filed as PR-FTS-D, deferred until a workload measures pain.
 2. **Analyzer extensibility:** Sealed internal list — `IFullTextAnalyzer`
-   and `FtsAnalyzerRegistry` stay `internal` to DatumIngest. New analyzers
-   ship as PRs against DatumIngest. Manifest's `analyzer` field is a
+   and `FtsAnalyzerRegistry` stay `internal` to DatumV. New analyzers
+   ship as PRs against DatumV. Manifest's `analyzer` field is a
    constrained name string. Promotion to a public registry (rung 2) or a
    SQL `CREATE TEXT ANALYZER` (rung 3) is non-breaking on existing index
    files — defer until there's a real ask.

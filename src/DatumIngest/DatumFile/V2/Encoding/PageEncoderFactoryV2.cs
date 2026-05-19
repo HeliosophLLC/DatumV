@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
 /// Picks the right <see cref="IPageEncoderV2"/> for a column based on its

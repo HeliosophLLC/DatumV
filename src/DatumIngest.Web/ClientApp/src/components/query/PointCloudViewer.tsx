@@ -584,7 +584,7 @@ function MeshRenderer({ decoded }: { decoded: DecodedCloud }) {
  * header, and unpacks positions + colors into typed arrays sized for
  * Three.js BufferAttributes.
  *
- * Format (matches DatumIngest.Model.Spatial.PointCloudHeader, little-endian):
+ * Format (matches Heliosoph.DatumV.Model.Spatial.PointCloudHeader, little-endian):
  *   header (40 bytes):
  *     byte  0    : version (= 1)
  *     byte  1    : flags (bit 0 = HasColor, 1 = HasNormals, 2 = HasIntensity)

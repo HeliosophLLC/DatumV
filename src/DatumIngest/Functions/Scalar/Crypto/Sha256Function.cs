@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Crypto;
+namespace Heliosoph.DatumV.Functions.Scalar.Crypto;
 
 /// <summary>
 /// SHA-256 hash. Accepts a string (UTF-8) or a byte array; returns a 32-byte

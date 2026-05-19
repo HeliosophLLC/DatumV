@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../DatumIngest.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -49,7 +49,7 @@ export type ICatalogHubClient = {
     */
     onPong(message: string): Promise<void>;
     /**
-    * @param change Transpiled from DatumIngest.Web.Hubs.CatalogChangedEvent
+    * @param change Transpiled from Heliosoph.DatumV.Web.Hubs.CatalogChangedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCatalogChanged(change: CatalogChangedEvent): Promise<void>;
@@ -65,37 +65,37 @@ export type ICatalogHubClient = {
     */
     onFilesChanged(): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelLoadedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.ModelLoadedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelLoaded(ev: ModelLoadedEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelEvictedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.ModelEvictedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelEvicted(ev: ModelEvictedEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.ModelActiveChangedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.ModelActiveChangedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelActiveChanged(ev: ModelActiveChangedEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampStartedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampStartedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCalibrationRampStarted(ev: CalibrationRampStartedEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampStepEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampStepEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCalibrationRampStep(ev: CalibrationRampStepEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampHaltedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampHaltedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCalibrationRampHalted(ev: CalibrationRampHaltedEvent): Promise<void>;
     /**
-    * @param ev Transpiled from DatumIngest.Web.Hubs.CalibrationRampCompletedEvent
+    * @param ev Transpiled from Heliosoph.DatumV.Web.Hubs.CalibrationRampCompletedEvent
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onCalibrationRampCompleted(ev: CalibrationRampCompletedEvent): Promise<void>;
@@ -122,122 +122,122 @@ export type IStreamHubClient = {
     */
     onError(message: string): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.Hubs.ModelDownloadStartedDto
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadStarted(started: ModelDownloadStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.ModelDownloadProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadProgress(progress: ModelDownloadProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.Hubs.ModelDownloadCompleteDto
+    * @param complete Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadComplete(complete: ModelDownloadCompleteDto): Promise<void>;
     /**
-    * @param installing Transpiled from DatumIngest.Web.Hubs.ModelInstallingDto
+    * @param installing Transpiled from Heliosoph.DatumV.Web.Hubs.ModelInstallingDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelInstalling(installing: ModelInstallingDto): Promise<void>;
     /**
-    * @param installed Transpiled from DatumIngest.Web.Hubs.ModelInstalledDto
+    * @param installed Transpiled from Heliosoph.DatumV.Web.Hubs.ModelInstalledDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelInstalled(installed: ModelInstalledDto): Promise<void>;
     /**
-    * @param failed Transpiled from DatumIngest.Web.Hubs.ModelDownloadFailedDto
+    * @param failed Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadFailedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onModelDownloadFailed(failed: ModelDownloadFailedDto): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.Hubs.UvDownloadStartedDto
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onUvDownloadStarted(started: UvDownloadStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.UvDownloadProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onUvDownloadProgress(progress: UvDownloadProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.Hubs.UvDownloadCompleteDto
+    * @param complete Transpiled from Heliosoph.DatumV.Web.Hubs.UvDownloadCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onUvDownloadComplete(complete: UvDownloadCompleteDto): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.Hubs.PythonInstallStartedDto
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPythonInstallStarted(started: PythonInstallStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.PythonInstallProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPythonInstallProgress(progress: PythonInstallProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.Hubs.PythonInstallCompleteDto
+    * @param complete Transpiled from Heliosoph.DatumV.Web.Hubs.PythonInstallCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPythonInstallComplete(complete: PythonInstallCompleteDto): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.Hubs.VenvInstallStartedDto
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onVenvInstallStarted(started: VenvInstallStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.VenvInstallProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onVenvInstallProgress(progress: VenvInstallProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.Hubs.VenvInstallCompleteDto
+    * @param complete Transpiled from Heliosoph.DatumV.Web.Hubs.VenvInstallCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onVenvInstallComplete(complete: VenvInstallCompleteDto): Promise<void>;
     /**
-    * @param failed Transpiled from DatumIngest.Web.Hubs.PythonEnvironmentFailedDto
+    * @param failed Transpiled from Heliosoph.DatumV.Web.Hubs.PythonEnvironmentFailedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onPythonEnvironmentFailed(failed: PythonEnvironmentFailedDto): Promise<void>;
     /**
-    * @param started Transpiled from DatumIngest.Web.Hubs.DatasetDownloadStartedDto
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadStartedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetDownloadStarted(started: DatasetDownloadStartedDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.DatasetDownloadProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetDownloadProgress(progress: DatasetDownloadProgressDto): Promise<void>;
     /**
-    * @param complete Transpiled from DatumIngest.Web.Hubs.DatasetDownloadCompleteDto
+    * @param complete Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadCompleteDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetDownloadComplete(complete: DatasetDownloadCompleteDto): Promise<void>;
     /**
-    * @param ingesting Transpiled from DatumIngest.Web.Hubs.DatasetIngestingDto
+    * @param ingesting Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetIngestingDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetIngesting(ingesting: DatasetIngestingDto): Promise<void>;
     /**
-    * @param progress Transpiled from DatumIngest.Web.Hubs.DatasetIngestProgressDto
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetIngestProgressDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetIngestProgress(progress: DatasetIngestProgressDto): Promise<void>;
     /**
-    * @param ingested Transpiled from DatumIngest.Web.Hubs.DatasetTableIngestedDto
+    * @param ingested Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetTableIngestedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetTableIngested(ingested: DatasetTableIngestedDto): Promise<void>;
     /**
-    * @param installed Transpiled from DatumIngest.Web.Hubs.DatasetInstalledDto
+    * @param installed Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetInstalledDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetInstalled(installed: DatasetInstalledDto): Promise<void>;
     /**
-    * @param failed Transpiled from DatumIngest.Web.Hubs.DatasetDownloadFailedDto
+    * @param failed Transpiled from Heliosoph.DatumV.Web.Hubs.DatasetDownloadFailedDto
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetDownloadFailed(failed: DatasetDownloadFailedDto): Promise<void>;

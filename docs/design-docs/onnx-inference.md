@@ -2,9 +2,9 @@
 
 ## Overview
 
-DatumIngest exposes ONNX (and, in time, OpenVINO and other) inference through two layered surfaces:
+DatumV exposes ONNX (and, in time, OpenVINO and other) inference through two layered surfaces:
 
-1. A **backend-agnostic inference abstraction** (`src/DatumIngest/Inference/`) that decouples the engine from any one runtime. Sessions, tensor bags, and dispatchers are runtime-neutral; ORT is the first concrete backend.
+1. A **backend-agnostic inference abstraction** (`src/DatumV/Inference/`) that decouples the engine from any one runtime. Sessions, tensor bags, and dispatchers are runtime-neutral; ORT is the first concrete backend.
 2. A **SQL-driven model surface** (`CREATE MODEL ... USING '...' AS BEGIN ... END`, the `infer()` scalar) that lets users define and call models without writing C#. SQL-defined models live alongside engine-baked built-ins in the `models.X` namespace.
 
 This doc covers the inference layer's architecture, the CREATE MODEL DDL pipeline, the scalar-dispatch path, the `infer()` runtime bridge, the body-scope mechanism, and the introspection surface. It is contributor-facing — design rationale, file references, gotchas — not a user tutorial.
@@ -15,7 +15,7 @@ For built-in model integrations (MobileNetV2, YOLOX, Florence-2, the LLM family,
 
 ## Layer 1: the inference abstraction
 
-**Location**: `src/DatumIngest/Inference/`
+**Location**: `src/DatumV/Inference/`
 
 The abstraction is shaped around three interfaces:
 
@@ -36,7 +36,7 @@ Supporting types:
 
 The legacy factory still exists; every existing built-in `OnnxModel` subclass (Moondream2, Florence2, MobileNetV2, etc.) loads through it. The factory and the new backend coexist intentionally — every consumer migrates one at a time. Both contain the same CUDA-probe logic; keep them in sync until the factory retires.
 
-### ORT backend (`src/DatumIngest/Inference/OnnxRuntime/`)
+### ORT backend (`src/DatumV/Inference/OnnxRuntime/`)
 
 - **`OnnxRuntimeBackend`** — lazy probe of CPU / CUDA / DirectML / CoreML EPs via `CudaRuntimeProbe.EnsureOnPath()`. OS-gated probes (DML only Windows, CoreML only macOS). `ResolveResidentBytes` enforces a "≥ file size on disk" floor so an obviously-misconfigured `DeclaredResidentBytes` is rejected.
 - **`OnnxRuntimeSession`** — wraps `Microsoft.ML.OnnxRuntime.InferenceSession`. Sync `Run` is wrapped in `Task.Run` because ORT's async path requires pre-allocated outputs, which is impractical for the dynamic-shape cases the engine wants to support.
@@ -44,7 +44,7 @@ The legacy factory still exists; every existing built-in `OnnxModel` subclass (M
 - **`OnnxRuntimeTensorBag`** — backed by `OrtAllocator.DefaultInstance + CreateAllocatedTensorValue`; copies via `GetTensorMutableRawData`.
 - **`OnnxElementTypes`** — bidirectional `DataKind ↔ TensorElementType` map. The contract is "ORT supports it ↔ a `DataKind` value exists for it."
 
-### Dispatcher (`src/DatumIngest/Inference/InferenceDispatcher.cs`)
+### Dispatcher (`src/DatumV/Inference/InferenceDispatcher.cs`)
 
 - Single (backend, device) target per bundle. Multi-session bundles (Florence-2 with four ONNX files; SD with text-encoder + UNet + VAE) run all sessions on the same backend + device — mixing devices within a bundle would force constant host↔device transfers on every cross-session call.
 - Backend selection: `ForcedBackend → BundleManifest.PreferredBackends → registered order`.
@@ -68,7 +68,7 @@ CREATE [OR REPLACE] MODEL [IF NOT EXISTS] name(arg TYPE [, ...])
 
 The body is always procedural — the only legal use of a model body is to call `infer()`, which requires a procedural context to bind to. There's no expression-body form.
 
-### Parser (`src/DatumIngest.Parsing/SqlParser.cs`)
+### Parser (`src/DatumV.Parsing/SqlParser.cs`)
 
 - `CreateModelStatement` and `DropModelStatement` AST nodes (in `Ast/AstNodes.cs`).
 - `CreateModelParser` and `DropModelParser` combinators, registered in `SingleStatementParser`'s `.Or()` chain.
@@ -76,13 +76,13 @@ The body is always procedural — the only legal use of a model body is to call 
 - `USING` is also a contextual identifier (same pattern; same precedent — `CREATE INDEX … USING`).
 - Body validation reuses `ValidateProceduralBody` — the same rules as procedural UDFs.
 
-### Storage (`src/DatumIngest/Catalog/ModelRegistry.cs`)
+### Storage (`src/DatumV/Catalog/ModelRegistry.cs`)
 
 - **`ModelDescriptor`** record mirrors `UdfDescriptor` plus two additions: `UsingPath` (raw, unresolved) and `BoundSessions: IReadOnlyDictionary<string, IInferenceSession>`. `ReturnTypeName` is non-null (required for models). `QualifiedName` is always `(models, name)`.
 - **`ModelRegistry`** parallels `UdfRegistry`. `Register` returns the displaced descriptor for disposal; `Unregister` returns the removed descriptor likewise. Process-scoped, not persisted (sessions hold native handles; rehydrate cost deferred).
 - **`TableCatalog.DeclaredModels`** exposes the registry; **`TableCatalog.InferenceDispatcher`** is the nullable, lazy-set dispatcher property.
 
-### Registrar (`src/DatumIngest/Catalog/RoutineRegistrar.cs`, `ApplyCreateModelAsync`)
+### Registrar (`src/DatumV/Catalog/RoutineRegistrar.cs`, `ApplyCreateModelAsync`)
 
 Steps, in order:
 
@@ -106,7 +106,7 @@ SQL-defined models are **not** persisted across process restarts in v1. Bound `I
 
 ## Layer 3: scalar adapter
 
-**Location**: `src/DatumIngest/Functions/ProceduralModelFunction.cs`
+**Location**: `src/DatumV/Functions/ProceduralModelFunction.cs`
 
 Once a `ModelDescriptor` is in `DeclaredModels`, queries need to be able to *call* it. The adapter is an `IScalarFunction` registered in `FunctionRegistry` under the model's qualified name (always `models.X`):
 
@@ -119,7 +119,7 @@ Once a `ModelDescriptor` is in `DeclaredModels`, queries need to be able to *cal
 
 ## Layer 4: the hoister — two-way dispatch
 
-**Location**: `src/DatumIngest/Execution/ModelInvocationHoister.cs`, `src/DatumIngest/Models/ProceduralModelAdapter.cs`
+**Location**: `src/DatumV/Execution/ModelInvocationHoister.cs`, `src/DatumV/Models/ProceduralModelAdapter.cs`
 
 The planner lifts every `models.X(...)` call out of expressions into a dedicated `ModelInvocationOperator` (MIO) node — model dispatch, residency leases, output-struct shape stamping. Both built-in `IModel` classes and SQL-defined `CREATE MODEL` bodies route through MIO; the only difference is which `IModel` MIO ultimately dispatches to:
 
@@ -134,7 +134,7 @@ The third residual path (scalar `ProceduralModelFunction` with no MIO at all) su
 
 MIO consults `ModelCatalog.BatchSizePolicy` for each dispatch. The engine default is `CurvePolicy`: for each model with a calibrated curve in `ModelCatalog.CalibrationRegistry`, it picks the largest batch size whose **activation cost** (`total_vram_bytes - weight_cost_bytes`) fits in the current free-VRAM budget (NVML reading minus a safety margin). Models without a curve dispatch at `batch=1` until the calibration coordinator records one.
 
-Calibration is built up by `CalibrationCoordinator.EnsureCalibratedAsync`: a per-model ramp pass (1, 2, 4, 8, 16, 32) measured in isolation, gated by a single global semaphore so two models never calibrate concurrently. Between ramp steps the coordinator evicts the target model itself so the next dispatch forces a fresh load — without that, ORT's CUDA arena from the previous batch absorbs the new batch's allocations and NVML reads zero growth. Each step records the **absolute peak VRAM** observed during the dispatch (weights + activations combined); duration-jump spill detection halts the ramp if any step exceeds 2× the best observed per-row time. The resulting curve persists across process restarts via `CalibrationStore` at `%LOCALAPPDATA%/DatumIngest/calibration.json`, keyed by host fingerprint (GPU UUID + VRAM total + driver version + ORT version) so calibrations only apply to the hardware they were measured on.
+Calibration is built up by `CalibrationCoordinator.EnsureCalibratedAsync`: a per-model ramp pass (1, 2, 4, 8, 16, 32) measured in isolation, gated by a single global semaphore so two models never calibrate concurrently. Between ramp steps the coordinator evicts the target model itself so the next dispatch forces a fresh load — without that, ORT's CUDA arena from the previous batch absorbs the new batch's allocations and NVML reads zero growth. Each step records the **absolute peak VRAM** observed during the dispatch (weights + activations combined); duration-jump spill detection halts the ramp if any step exceeds 2× the best observed per-row time. The resulting curve persists across process restarts via `CalibrationStore` at `%LOCALAPPDATA%/DatumV/calibration.json`, keyed by host fingerprint (GPU UUID + VRAM total + driver version + ORT version) so calibrations only apply to the hardware they were measured on.
 
 Multi-model queries are coordinated at the plan layer by a multi-invocation `ModelInvocationOperator` (one model resident-and-dispatching at a time per upstream batch, lease released between invocations), so the policy itself only worries about single-model headroom checks. The curve is updated only by recalibration — an online dispatch's snapshot delta can't produce a usable absolute total since ORT's arena is already sized — but `RecordDispatch` still watches per-row duration: a sudden jump triggers `RecordSpill`, which drops the offending entry and everything larger and demotes the calibration to `Stale`, triggering recalibration on next acquire.
 
@@ -154,7 +154,7 @@ Cross-row batching for genuinely batchable shapes was preserved by moving the pa
 
 ## Layer 5: `infer()` — the runtime bridge
 
-**Location**: `src/DatumIngest/Functions/InferFunction.cs`
+**Location**: `src/DatumV/Functions/InferFunction.cs`
 
 Once the body is executing, the user's `RETURN infer(x)` needs to actually dispatch to the bound session. `infer()` is the bridge:
 
@@ -217,7 +217,7 @@ Three pieces:
 
 ### Plan-time gate
 
-[`PlanTimeFunctionGate`](../../src/DatumIngest/Execution/PlanTimeFunctionGate.cs) — a dedicated AST walker invoked at the top of `QueryPlanner.Plan(QueryExpression)`. Walks every reachable `FunctionCallExpression` (SELECT / WHERE / Having / Qualify / OrderBy / GroupBy / LET / Joins / From / SubqueryExpression / Insert subqueries) and throws on the first body-scoped call (it also rejects unknown function names so a typo can't survive into the operator tree).
+[`PlanTimeFunctionGate`](../../src/DatumV/Execution/PlanTimeFunctionGate.cs) — a dedicated AST walker invoked at the top of `QueryPlanner.Plan(QueryExpression)`. Walks every reachable `FunctionCallExpression` (SELECT / WHERE / Having / Qualify / OrderBy / GroupBy / LET / Joins / From / SubqueryExpression / Insert subqueries) and throws on the first body-scoped call (it also rejects unknown function names so a typo can't survive into the operator tree).
 
 The gate is **unconditional** — no "am I in a model body?" context flag — because the planner is only ever entered for top-level queries. Model bodies are interpreted by `ProceduralModelFunction` directly and never reach `QueryPlanner`. So a positive match for `BodyScopeRequirement.ModelBody` here is always wrong, and the error message is unconditional.
 
@@ -243,7 +243,7 @@ Two virtual tables surface the model + function surface for users:
 
 ### `system.models`
 
-[`ModelsTableProvider`](../../src/DatumIngest/Catalog/Providers/ModelsTableProvider.cs) merges built-ins (`ModelCatalog`) and SQL-defined models (`TableCatalog.DeclaredModels`) into one name-sorted view. 14 columns; the schema-stable origin discriminator is **`kind`** with values `builtin` / `declared`.
+[`ModelsTableProvider`](../../src/DatumV/Catalog/Providers/ModelsTableProvider.cs) merges built-ins (`ModelCatalog`) and SQL-defined models (`TableCatalog.DeclaredModels`) into one name-sorted view. 14 columns; the schema-stable origin discriminator is **`kind`** with values `builtin` / `declared`.
 
 Mirrors the codebase's internal naming (`Models` vs `DeclaredModels`) and Postgres's `pg_proc.prokind`. Column placement is at position 13 (after `status`) so existing positional consumers keep working.
 
@@ -251,7 +251,7 @@ For declared rows, most metadata columns (license, modalities, source_url, etc.)
 
 ### `datum_catalog.functions`
 
-[`DatumCatalogFunctionsProvider`](../../src/DatumIngest/Catalog/Providers/DatumCatalogProviders.cs) already existed for the general function catalog. Phase 3c added a **`body_scope`** column (NOT NULL, `none` / `modelbody`). **Annotate-not-hide**: body-scoped functions still appear in this view so users can discover them via `WHERE body_scope = 'modelbody'`; the plan-time gate refuses out-of-context call sites separately.
+[`DatumCatalogFunctionsProvider`](../../src/DatumV/Catalog/Providers/DatumCatalogProviders.cs) already existed for the general function catalog. Phase 3c added a **`body_scope`** column (NOT NULL, `none` / `modelbody`). **Annotate-not-hide**: body-scoped functions still appear in this view so users can discover them via `WHERE body_scope = 'modelbody'`; the plan-time gate refuses out-of-context call sites separately.
 
 The future `system.functions` (when `datum_catalog.*` consolidates) inherits the column for free.
 

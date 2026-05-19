@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Cross-platform reserve / commit / release of process virtual memory.

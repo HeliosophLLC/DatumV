@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Static-abstract metadata interface for registered functions. Carries the
@@ -41,13 +41,13 @@ public interface IFunction
     /// Defaults to <see cref="BodyScopeRequirement.None"/> (callable
     /// anywhere); body-scoped functions like <c>infer()</c> override to
     /// <see cref="BodyScopeRequirement.ModelBody"/> so
-    /// <see cref="DatumIngest.Execution.PlanTimeFunctionGate"/> can refuse
+    /// <see cref="Heliosoph.DatumV.Execution.PlanTimeFunctionGate"/> can refuse
     /// out-of-context call sites at plan time.
     /// </summary>
     static virtual BodyScopeRequirement BodyScope => BodyScopeRequirement.None;
 
     /// <summary>
-    /// Names of the <see cref="DatumIngest.Execution.Contexts.IFunctionContext"/>s
+    /// Names of the <see cref="Heliosoph.DatumV.Execution.Contexts.IFunctionContext"/>s
     /// this function is visible inside. The default <c>[]</c> means
     /// "globally visible" — the function resolves in every name-resolution
     /// scope, the same posture every function has had before this
@@ -65,7 +65,7 @@ public interface IFunction
     /// </para>
     /// <para>
     /// The complementary mechanism is
-    /// <see cref="DatumIngest.Execution.Contexts.IFunctionContext.Borrows"/>:
+    /// <see cref="Heliosoph.DatumV.Execution.Contexts.IFunctionContext.Borrows"/>:
     /// when a globally-visible function is also intentionally useful
     /// inside a context, the context can borrow it without the function
     /// declaring membership. The two halves together cover both

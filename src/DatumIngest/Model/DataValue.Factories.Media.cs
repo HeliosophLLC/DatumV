@@ -1,8 +1,8 @@
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 public readonly partial struct DataValue
 {
@@ -55,7 +55,7 @@ public readonly partial struct DataValue
     /// Creates a value from a fully formed PointCloud blob (40-byte header
     /// followed by interleaved per-point payload) using an explicit
     /// <see cref="IValueStore"/>. Callers are responsible for building the blob;
-    /// see <c>DatumIngest.Model.Spatial.PointCloudHeader</c> for the layout.
+    /// see <c>Heliosoph.DatumV.Model.Spatial.PointCloudHeader</c> for the layout.
     /// </summary>
     public static DataValue FromPointCloud(byte[] blob, IValueStore store)
     {
@@ -82,7 +82,7 @@ public readonly partial struct DataValue
     /// by interleaved per-vertex payload, triangle indices, and optional
     /// embedded texture) using an explicit <see cref="IValueStore"/>. Callers
     /// are responsible for building the blob; see
-    /// <c>DatumIngest.Model.Spatial.MeshHeader</c> for the layout.
+    /// <c>Heliosoph.DatumV.Model.Spatial.MeshHeader</c> for the layout.
     /// </summary>
     public static DataValue FromMesh(byte[] blob, IValueStore store)
     {

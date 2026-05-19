@@ -1,12 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Exercises <see cref="PreFlightWalker"/> against a hand-rolled catalog

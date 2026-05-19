@@ -1,12 +1,12 @@
 using System.Collections;
 using System.Diagnostics;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution.Operators.Joins;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution.Operators.Joins;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Executes a Grace hash join that partitions both build and probe sides by hash key,

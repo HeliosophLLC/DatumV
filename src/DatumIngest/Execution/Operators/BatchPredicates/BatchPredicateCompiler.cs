@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators.BatchPredicates;
+namespace Heliosoph.DatumV.Execution.Operators.BatchPredicates;
 
 /// <summary>
 /// Compiles a predicate AST into an <see cref="IBatchPredicate"/> when the

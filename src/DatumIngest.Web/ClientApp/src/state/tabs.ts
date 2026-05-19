@@ -113,7 +113,7 @@ interface PanesState {
   focusedLeafId: string;
 }
 
-const STORAGE_KEY = 'datumingest:panes';
+const STORAGE_KEY = 'datumv:panes';
 const SAVE_DEBOUNCE_MS = 500;
 
 // No layout cap. The per-axis rule we tried earlier turned out to be a

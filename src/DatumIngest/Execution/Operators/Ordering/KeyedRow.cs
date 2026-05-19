@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Ordering;
+namespace Heliosoph.DatumV.Execution.Operators.Ordering;
 
 /// <summary>
 /// A buffered row paired with its pre-evaluated ORDER BY sort keys. The keys

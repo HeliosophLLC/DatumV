@@ -1,7 +1,7 @@
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
-using DatumIngest.LanguageServer;
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.LanguageServer;
+using Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Tests for <see cref="DiagnosticsProvider"/> — SQL parse error detection.

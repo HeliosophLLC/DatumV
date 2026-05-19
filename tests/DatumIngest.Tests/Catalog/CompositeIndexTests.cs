@@ -1,10 +1,10 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.MutableBytes;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Tests for user-defined composite secondary indexes

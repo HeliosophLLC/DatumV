@@ -1,14 +1,14 @@
 using System.Text;
 using System.Text.Json;
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
-using DatumIngest.Web.Execution;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Web.Execution;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
-namespace DatumIngest.Web.Tests;
+namespace Heliosoph.DatumV.Web.Tests;
 
 /// <summary>
 /// End-to-end coverage of the binary-parameter path through
@@ -33,7 +33,7 @@ public sealed class BinaryParameterE2ETests : IDisposable
     public BinaryParameterE2ETests()
     {
         ServiceCollection services = new();
-        services.AddDatumIngest();
+        services.AddDatumV();
         _services = services.BuildServiceProvider();
         Pool pool = _services.GetRequiredService<Pool>();
         TableCatalog catalog = new(pool);

@@ -2,7 +2,7 @@
 title: DDL / DML
 ---
 
-DatumIngest supports both persistent and session-scoped tables with DDL/DML routed through `TableCatalog`. Persistent tables materialise as `.datum` files alongside the catalog's `.datum-catalog.json`; temp tables live in-memory and die with the catalog.
+DatumV supports both persistent and session-scoped tables with DDL/DML routed through `TableCatalog`. Persistent tables materialise as `.datum` files alongside the catalog's `.datum-catalog.json`; temp tables live in-memory and die with the catalog.
 
 ### Table mutability
 
@@ -486,7 +486,7 @@ ALTER TABLE features ADD COLUMN risk_tier String NULL
 ALTER TABLE features ADD [COLUMN] risk_tier String   -- COLUMN keyword optional
 ```
 
-The column kind is **required** between the column name and any modifier clause (`AS`, `DEFAULT`, `IDENTITY`, `GENERATED`). DatumIngest does not infer the column kind from a `GENERATED AS (expr)` body — match PostgreSQL by specifying the kind explicitly:
+The column kind is **required** between the column name and any modifier clause (`AS`, `DEFAULT`, `IDENTITY`, `GENERATED`). DatumV does not infer the column kind from a `GENERATED AS (expr)` body — match PostgreSQL by specifying the kind explicitly:
 
 ```sql
 -- ❌ Rejected: missing column kind.

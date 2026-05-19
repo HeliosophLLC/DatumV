@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Thrown by the parse-time pre-flight pass when a top-level query
@@ -118,7 +118,7 @@ public sealed record PreFlightModelRequirement(
     // License ids the user must accept before the catalog entry can be
     // installed. Empty for entries with no licenseIds or whose licenses
     // all carry <c>requiresAcceptance=false</c>. Mirrors
-    // <see cref="DatumIngest.ModelLibrary.CatalogModel.LicenseIds"/>;
+    // <see cref="Heliosoph.DatumV.ModelLibrary.CatalogModel.LicenseIds"/>;
     // pre-flight surfaces them so the install modal can prompt acceptance
     // up front instead of letting the install-time 412 path open separate
     // dialogs after the user clicked Install.
@@ -216,7 +216,7 @@ public enum PreFlightReason
 
     /// <summary>
     /// <c>models.X@&lt;version&gt;</c> where the pin maps to a known
-    /// catalog version (some entry declared a <see cref="DatumIngest.ModelLibrary.CatalogVersionModel.PinnedAs"/>
+    /// catalog version (some entry declared a <see cref="Heliosoph.DatumV.ModelLibrary.CatalogVersionModel.PinnedAs"/>
     /// matching the typed suffix) but the version's folder is not on
     /// disk. Recovery is "install that specific version alongside
     /// whatever's active" via the pinned-install path.

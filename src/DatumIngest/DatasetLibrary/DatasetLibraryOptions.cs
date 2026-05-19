@@ -2,7 +2,7 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 /// <summary>
 /// Filesystem paths the dataset library needs at runtime. Provided by the
@@ -20,7 +20,7 @@ namespace DatumIngest.DatasetLibrary;
 /// from <see cref="CatalogRootPath"/> because the contents are expendable
 /// — the user's <c>keepRawDownloads</c> setting decides whether files
 /// here survive a successful ingest. Defaults to
-/// <c>%LOCALAPPDATA%/DatumIngest/datasets-cache</c> when neither the
+/// <c>%LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache</c> when neither the
 /// host config nor <c>$DATUM_DATASETS</c> is set.
 /// </param>
 public sealed record DatasetLibraryOptions(

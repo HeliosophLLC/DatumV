@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // What Program.Main hands to WebHost.Start. The URL is whatever the
 // Electron shell passes via DATUM_WEB_URL — pinned to 5050 in dev so

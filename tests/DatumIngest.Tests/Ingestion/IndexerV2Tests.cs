@@ -1,10 +1,10 @@
-using DatumIngest.Indexing;
-using DatumIngest.Ingestion;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
 
-namespace DatumIngest.Tests.Ingestion;
+namespace Heliosoph.DatumV.Tests.Ingestion;
 
 /// <summary>
 /// Verifies the <see cref="Indexer"/> works end-to-end against v2
@@ -107,17 +107,17 @@ public sealed class IndexerV2Tests : ServiceTestBase, IAsyncLifetime
 
         string datumPath = await IngestCsvAsync(csv, "indexed.datum");
         OutputDescriptor indexDest = new(Path.ChangeExtension(datumPath, ".datum-index"));
-        DatumIngest.Serialization.DatumFileDescriptor source = new(datumPath);
+        Heliosoph.DatumV.Serialization.DatumFileDescriptor source = new(datumPath);
         Indexer indexer = new(new Pool(new PoolBacking()));
         await indexer.IndexAsync(source, indexDest);
 
         // Open via catalog → v2 provider should auto-discover the
         // .datum-index alongside.
-        using DatumIngest.Catalog.TableCatalog catalog = CreateCatalog();
-        DatumIngest.Catalog.ITableProvider provider = catalog.Add(
-            new DatumIngest.Catalog.TableDescriptor("indexed", datumPath));
+        using Heliosoph.DatumV.Catalog.TableCatalog catalog = CreateCatalog();
+        Heliosoph.DatumV.Catalog.ITableProvider provider = catalog.Add(
+            new Heliosoph.DatumV.Catalog.TableDescriptor("indexed", datumPath));
         Assert.NotNull(provider.GetSourceIndex());
-        DatumIngest.Indexing.SourceIndex sourceIndex = provider.GetSourceIndex()!;
+        Heliosoph.DatumV.Indexing.SourceIndex sourceIndex = provider.GetSourceIndex()!;
         Assert.True(sourceIndex.Chunks.Count > 0);
         // Every column should appear in bloom (auto-bloom default).
         Assert.NotNull(sourceIndex.BloomFilters);

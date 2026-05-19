@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
 
-namespace DatumIngest.Functions.Audio;
+namespace Heliosoph.DatumV.Functions.Audio;
 
 /// <summary>
 /// Lightweight audio container header parser. Inspects the first few bytes of an
 /// encoded audio blob and returns sample rate / channels / bit depth / frame count
 /// when the format is recognised. Used at ingest time to stamp inline metadata onto
-/// <see cref="DatumIngest.Model.DataValue"/>s of kind <c>Audio</c> so that
+/// <see cref="Heliosoph.DatumV.Model.DataValue"/>s of kind <c>Audio</c> so that
 /// <c>audio_sample_rate()</c> and friends can skip a full decode.
 /// </summary>
 /// <remarks>

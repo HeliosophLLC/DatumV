@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// <see cref="TensorBag"/> implementation backed by a list of

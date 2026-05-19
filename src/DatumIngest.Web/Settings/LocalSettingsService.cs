@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Web.Dtos.Settings;
-using DatumIngest.Web.Hosting;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Web.Dtos.Settings;
+using Heliosoph.DatumV.Web.Hosting;
 
-namespace DatumIngest.Web.Settings;
+namespace Heliosoph.DatumV.Web.Settings;
 
 // JSON-file impl of ISettingsService. Reads on demand (low frequency
 // today; can add caching when patterns require). Atomic writes via

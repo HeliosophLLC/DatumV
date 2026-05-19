@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing.Bitmap;
+namespace Heliosoph.DatumV.Indexing.Bitmap;
 
 /// <summary>
 /// Provides chunk-level and row-level bitmap access for a single column's bitmap index.

@@ -1,13 +1,13 @@
-using DatumIngest.Catalog;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
-using DatumIngest.Web.Hubs;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
+using Heliosoph.DatumV.Web.Hubs;
 
 using Microsoft.AspNetCore.Mvc;
 
 using Tapper;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// REST surface for runtime model state — currently-resident models,

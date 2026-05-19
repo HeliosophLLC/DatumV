@@ -1,5 +1,5 @@
 """
-Bark Small TTS worker for DatumIngest's Python bridge.
+Bark Small TTS worker for Heliosoph.DatumV's Python bridge.
 
 Wraps HuggingFace `transformers`' BarkModel — a 4-stage TTS pipeline
 (text encoder → semantic → coarse → fine → audio decoder) that produces

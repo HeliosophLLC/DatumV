@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 
-using DatumIngest.Diagnostics;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Process-scoped registry of <see cref="ModelCatalogEntry"/> records and the
@@ -37,8 +37,8 @@ public sealed class ModelCatalog : IDisposable
     /// <list type="number">
     ///   <item><description>The <c>DATUM_MODELS</c> environment variable, if set.</description></item>
     ///   <item><description>A portable per-user fallback —
-    ///     <c>%LOCALAPPDATA%/DatumIngest/models</c> on Windows,
-    ///     <c>~/.local/share/DatumIngest/models</c> on Linux/macOS — via
+    ///     <c>%LOCALAPPDATA%/Heliosoph.DatumV/models</c> on Windows,
+    ///     <c>~/.local/share/Heliosoph.DatumV/models</c> on Linux/macOS — via
     ///     <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
     ///   </description></item>
     /// </list>
@@ -50,7 +50,7 @@ public sealed class ModelCatalog : IDisposable
         Environment.GetEnvironmentVariable("DATUM_MODELS")
         ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DatumIngest",
+            "Heliosoph.DatumV",
             "models");
 
     private readonly ConcurrentDictionary<string, ModelCatalogEntry> _entries =
@@ -92,7 +92,7 @@ public sealed class ModelCatalog : IDisposable
 
     /// <summary>
     /// Engine-wide batch-size policy consulted by
-    /// <see cref="DatumIngest.Execution.Operators.ModelInvocationOperator"/>
+    /// <see cref="Heliosoph.DatumV.Execution.Operators.ModelInvocationOperator"/>
     /// at each dispatch. Defaults to <see cref="CurvePolicy"/>: uses
     /// per-model calibration curves when available, falls back to
     /// <c>batch=1</c> for uncalibrated models. When the operator
@@ -242,12 +242,12 @@ public sealed class ModelCatalog : IDisposable
         CalibrationStore? calibrationStore,
         HostFingerprint? hostFingerprint,
         IModelPathResolver? pathResolver = null,
-        DatumIngest.ModelLibrary.ICatalogActiveVersionLookup? activeVersionLookup = null)
+        Heliosoph.DatumV.ModelLibrary.ICatalogActiveVersionLookup? activeVersionLookup = null)
     {
         ModelDirectory = modelDirectory ?? DefaultModelDirectory;
         PathResolver = pathResolver ?? new VersionedModelPathResolver(
             ModelDirectory,
-            activeVersionLookup ?? DatumIngest.ModelLibrary.NullCatalogActiveVersionLookup.Instance);
+            activeVersionLookup ?? Heliosoph.DatumV.ModelLibrary.NullCatalogActiveVersionLookup.Instance);
         ResidencyManager = new ModelResidencyManager(vramBudgetBytes, admissionTimeout, CalibrationRegistry);
         ResidencyManager.Catalog = this;
         _calibrationStore = calibrationStore;

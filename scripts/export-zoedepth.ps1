@@ -194,7 +194,7 @@ if ($exportExit -ne 0) {
 }
 
 # 5. Optional fp16 sibling. keep_io_types=True leaves pixel_values /
-#    predicted_depth as fp32 at the wire boundary, so the DatumIngest
+#    predicted_depth as fp32 at the wire boundary, so the Heliosoph.DatumV
 #    inference layer doesn't need to know about half precision — only
 #    the internal DPT-Large weights + metric-bin head activations run
 #    in fp16. Same pattern as export-trocr-base-printed-fp16.ps1.

@@ -1,6 +1,6 @@
 using System.Security.Claims;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 // Shortcuts onto ClaimsPrincipal for the claims we read everywhere. Each
 // returns string.Empty rather than null so consumers don't need ?? "" at

@@ -53,7 +53,7 @@ once per family, not 21 hand-coded scalar functions.
 
 ## Prerequisite refactor — `LlamaChatTemplate` becomes data
 
-Today [LlamaChatTemplate.cs](../src/DatumIngest/Models/Llama/LlamaChatTemplate.cs)
+Today [LlamaChatTemplate.cs](../src/DatumV/Models/Llama/LlamaChatTemplate.cs)
 exposes only `Format: Func<string, string>` — a single function that wraps a
 user message and *bakes in* the assistant-turn trigger. That shape can't
 serve per-role templating. Restructure it as data:
@@ -101,7 +101,7 @@ already-templated text without double-wrapping (see Phase 4).
 
 - Add an `OptionalArg` `templated BOOLEAN` (default `false`). When `true`,
   skip the `_template.Format(promptText)` call at
-  [LlamaModel.cs:355](../src/DatumIngest/Models/Llama/LlamaModel.cs#L355) and
+  [LlamaModel.cs:355](../src/DatumV/Models/Llama/LlamaModel.cs#L355) and
   pass the prompt directly to the executor.
 - This is preferred over registering an `llama_3_2_raw` sibling model entry
   because it avoids doubling every catalog row and keeps residency accounting
@@ -113,7 +113,7 @@ already-templated text without double-wrapping (see Phase 4).
 ### PR3 — `templates.X` scalar functions (~0.5d)
 
 - One C# class (`ChatTemplateFunctions` or similar under
-  `src/DatumIngest/Functions/Templates/`) parameterized over a
+  `src/DatumV/Functions/Templates/`) parameterized over a
   `LlamaChatTemplate` instance, exposing three `IScalarFunction`
   implementations. Registered once per family at catalog boot.
 - `_open` and `_assistant_turn` are zero-arg, return `TEXT`, deterministic.
@@ -183,5 +183,5 @@ assistant is ~2 days of engine work plus the front-end panel.
 
 5. **Per-row override for `templated`.** Already covered by the existing
    `OptionalArgKinds` mechanism in `LlamaModel` (cf. `temperature`,
-   `max_tokens` at [LlamaModel.cs:347-352](../src/DatumIngest/Models/Llama/LlamaModel.cs#L347-L352)).
+   `max_tokens` at [LlamaModel.cs:347-352](../src/DatumV/Models/Llama/LlamaModel.cs#L347-L352)).
    Reuse the same pattern.

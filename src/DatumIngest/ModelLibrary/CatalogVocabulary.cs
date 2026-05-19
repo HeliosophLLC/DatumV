@@ -1,9 +1,9 @@
 // TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-using DatumIngest.Catalog.Registries;
+using Heliosoph.DatumV.Catalog.Registries;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // Reverse identifier→catalog index built at catalog-load time from each
 // version's declared `models[]` arrays. The same source of truth that

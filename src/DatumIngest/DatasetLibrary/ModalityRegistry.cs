@@ -1,7 +1,7 @@
 // TODO: fold proper XML doc comments + a JsonSerializerContext into a follow-up PR.
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 // Canonical modality vocabulary for dataset entries. Modeled on
 // HuggingFace's dataset facet — modality is intrinsic to the data

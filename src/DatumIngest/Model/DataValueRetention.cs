@@ -1,4 +1,4 @@
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Helpers for safely retaining <see cref="DataValue"/> instances beyond the lifetime

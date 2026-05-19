@@ -1,4 +1,4 @@
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Identifies the host's GPU + driver + runtime configuration. Used as the
@@ -52,7 +52,7 @@ public sealed record HostFingerprint(
     /// The loaded ONNX Runtime assembly's informational version, computed
     /// by the caller via a hard <c>typeof(InferenceSession).Assembly</c>
     /// reference rather than reflective <c>Assembly.Load</c>. This layer
-    /// (<see cref="DatumIngest.Diagnostics"/>) deliberately doesn't
+    /// (<see cref="Heliosoph.DatumV.Diagnostics"/>) deliberately doesn't
     /// reference Microsoft.ML.OnnxRuntime so non-inference call paths
     /// don't drag the dependency in; the inference layer's
     /// <c>OnnxRuntimeVersion.Value</c> helper supplies the string. Pass

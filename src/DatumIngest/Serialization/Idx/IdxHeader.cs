@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Idx;
+namespace Heliosoph.DatumV.Serialization.Idx;
 
 /// <summary>
 /// Parsed IDX file header containing the data type, dimension count,

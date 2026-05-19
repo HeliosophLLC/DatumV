@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Rewrites <see cref="InSubqueryExpression"/> and <see cref="ExistsExpression"/>

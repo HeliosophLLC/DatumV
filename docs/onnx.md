@@ -9,7 +9,7 @@ SQL." It assumes no prior ONNX experience.
 
 For the engine internals that power this surface, see
 [`design-docs/onnx-inference.md`](design-docs/onnx-inference.md). For
-the built-in models DatumIngest ships with, see [`models.md`](models.md).
+the built-in models DatumV ships with, see [`models.md`](models.md).
 The full SQL reference for the `CREATE MODEL` DDL lives at
 [`sql/create-model.md`](sql/create-model.md).
 
@@ -22,11 +22,11 @@ inference graphs. A `.onnx` file contains:
 - The *weights* — the numeric values the operations multiply / add against.
 - A *signature* — the names, types, and shapes of the inputs and outputs.
 
-DatumIngest loads the file via [ONNX Runtime (ORT)](https://onnxruntime.ai)
+DatumV loads the file via [ONNX Runtime (ORT)](https://onnxruntime.ai)
 and exposes it to SQL as a function under the `models` schema. The
 runtime handles the math; your job is to:
 
-1. Tell DatumIngest where the file is.
+1. Tell DatumV where the file is.
 2. Describe what arguments the SQL function should take.
 3. Write the body that transforms those SQL arguments into the tensors
    ORT wants, calls `infer()`, and (optionally) post-processes the
@@ -37,12 +37,12 @@ walks you through the steps with diagnostic SQL between each.
 
 ## Prerequisites
 
-- DatumIngest is installed and `datum-shell` is on your PATH.
-- A *models directory* is configured. By default DatumIngest looks at:
+- DatumV is installed and `datum-shell` is on your PATH.
+- A *models directory* is configured. By default DatumV looks at:
   1. The `--models <path>` flag on `datum-shell`.
   2. The `DATUM_MODELS` environment variable.
-  3. `%LOCALAPPDATA%\DatumIngest\models` (Windows) or
-     `~/.local/share/DatumIngest/models` (Linux/macOS).
+  3. `%LOCALAPPDATA%\DatumV\models` (Windows) or
+     `~/.local/share/DatumV/models` (Linux/macOS).
 
   Pick a location with a few GB free and (recommended) set the env var:
 
@@ -185,14 +185,14 @@ GPU EPs require the matching driver / runtime.
   and `$DATUM_MODELS = E:\models`, that's the right form. Try with the
   full path prefixed by `file:///` to bypass the relative resolution.
 - *"`is_dynamic = true` for the batch dim, what do I do?"* — Nothing;
-  this is normal. DatumIngest handles dynamic batch dims at the
+  this is normal. DatumV handles dynamic batch dims at the
   `infer()` boundary; you don't need to pad / pin them.
 - *"`opset_required` is -1"* — Malformed file (no opset declared).
   Re-export the model.
 
 ## Step 3 — Generate a `CREATE MODEL` skeleton
 
-Now that you know the model's signature, ask DatumIngest to draft a
+Now that you know the model's signature, ask DatumV to draft a
 starter `CREATE MODEL` body for you:
 
 ```sql

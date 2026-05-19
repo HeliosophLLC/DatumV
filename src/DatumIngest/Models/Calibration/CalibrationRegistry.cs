@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Process-wide map of model name → <see cref="ModelCalibration"/>. Lives

@@ -1,13 +1,13 @@
 using System.Diagnostics;
 using System.IO.Compression;
 
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Concrete <see cref="IPythonEnvironmentManager"/> backed by
 /// <c>uv</c>. Stores managed Python interpreters under
-/// <c>%LOCALAPPDATA%/DatumIngest/python/</c> and venvs under
-/// <c>%LOCALAPPDATA%/DatumIngest/venvs/&lt;name&gt;/</c>; uv's shared
+/// <c>%LOCALAPPDATA%/Heliosoph.DatumV/python/</c> and venvs under
+/// <c>%LOCALAPPDATA%/Heliosoph.DatumV/venvs/&lt;name&gt;/</c>; uv's shared
 /// wheel cache lives at uv's default location (<c>%LOCALAPPDATA%/uv/cache/</c>
 /// on Windows, <c>~/.cache/uv/</c> on Linux/macOS) so disparate venvs
 /// share their torch / transformers installs via hardlinks.
@@ -27,7 +27,7 @@ namespace DatumIngest.Models.Python;
 /// <see cref="IPythonEnvironmentManager"/> seam lets tests substitute
 /// a fake that "installs" without spawning real subprocesses, and
 /// lets the existing
-/// <see cref="DatumIngest.Models.Python.PythonBackedModel"/> in PR 6
+/// <see cref="Heliosoph.DatumV.Models.Python.PythonBackedModel"/> in PR 6
 /// depend on the abstraction rather than concrete file paths.
 /// </para>
 /// </remarks>
@@ -41,7 +41,7 @@ public sealed class PythonEnvironmentManager : IPythonEnvironmentManager
     /// </summary>
     public static string DefaultRootDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DatumIngest");
+        "Heliosoph.DatumV");
 
     /// <summary>
     /// uv release identifier to fetch when the cached binary is

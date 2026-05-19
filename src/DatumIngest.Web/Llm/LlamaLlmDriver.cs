@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Functions;
-using DatumIngest.Models;
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Llama;
 
-namespace DatumIngest.Web.Llm;
+namespace Heliosoph.DatumV.Web.Llm;
 
 // Wraps a ModelLease + IModel pair. The lease is held for the driver's
 // lifetime — no per-request acquire/release. Disposing the driver releases

@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Arrays;
 
 /// <summary>
 /// End-to-end SQL tests for <c>array_min</c> / <c>array_max</c>. Exercises a

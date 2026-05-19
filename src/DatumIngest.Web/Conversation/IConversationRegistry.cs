@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Conversation;
+namespace Heliosoph.DatumV.Web.Conversation;
 
 // Read/write surface for the `conversations` table. Keeps the agent ignorant
 // of how rows are stored — it asks for an id, the registry hands one back.

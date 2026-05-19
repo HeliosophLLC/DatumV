@@ -1,7 +1,7 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower.Model;
 
 /// <summary>
@@ -15,7 +15,7 @@ using Superpower.Model;
 /// <remarks>
 /// <para>
 /// <strong>Token-based, not AST-based.</strong> The AST nodes carry only
-/// the arrow's <see cref="DatumIngest.Parsing.Ast.SourceSpan"/> — not the
+/// the arrow's <see cref="Heliosoph.DatumV.Parsing.Ast.SourceSpan"/> — not the
 /// body's full extent — so deriving "cursor is inside this lambda's
 /// body" from the AST would need a recursive span union that doesn't
 /// generalise to multi-line lambdas. Tracking parenthesis depth across

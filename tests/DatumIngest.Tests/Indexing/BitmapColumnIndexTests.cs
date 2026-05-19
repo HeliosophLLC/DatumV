@@ -1,7 +1,7 @@
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="BitmapColumnIndex"/> — multi-value, multi-chunk bitmap index

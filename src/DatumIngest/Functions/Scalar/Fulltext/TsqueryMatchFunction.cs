@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Fulltext;
+namespace Heliosoph.DatumV.Functions.Scalar.Fulltext;
 
 /// <summary>
 /// Backs the <c>@@</c> operator: <c>haystack @@ needle</c> returns

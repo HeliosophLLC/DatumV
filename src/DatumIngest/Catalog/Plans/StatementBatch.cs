@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// A sequence of unrelated top-level SQL statements held for later

@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Functions.Scalar.Drawing;
 
 /// <summary>
 /// Phase E animation curves: pure functions of the animation lambda's

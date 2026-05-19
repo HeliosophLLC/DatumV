@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace DatumIngest.Models.Llama;
+namespace Heliosoph.DatumV.Models.Llama;
 
 /// <summary>
 /// Locates the CUDA 12 Runtime DLLs (<c>cudart64_12.dll</c>, <c>cublas64_12.dll</c>,

@@ -1,9 +1,9 @@
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Executors;
+namespace Heliosoph.DatumV.Catalog.Executors;
 
 /// <summary>
 /// Owns the index-DDL pipeline for <see cref="TableCatalog.PlanAsync(Statement)"/>.

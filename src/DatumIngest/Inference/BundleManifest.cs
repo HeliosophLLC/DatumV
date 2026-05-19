@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// Minimal metadata a backend needs to make a load decision about a bundle:
@@ -18,7 +18,7 @@ namespace DatumIngest.Inference;
 /// </para>
 /// </remarks>
 /// <param name="BundleId">
-/// Stable identifier for the bundle (e.g. <c>"Heliosoph/bge-small-en-v1.5-onnx"</c>).
+/// Stable identifier for the bundle (e.g. <c>"Heliosoph.DatumV/bge-small-en-v1.5-onnx"</c>).
 /// Used for caching and diagnostics.
 /// </param>
 /// <param name="Sessions">

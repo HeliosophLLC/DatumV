@@ -1,8 +1,8 @@
-using DatumIngest.Execution.Operators.Pivot;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators.Pivot;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Streaming operator that rotates a set of source columns into <c>(name, value)</c> pairs.

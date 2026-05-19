@@ -59,7 +59,7 @@ A scan against an unchanged file: dictionary lookup, no IO. A scan after the fil
 
 ## Implementation sketch
 
-1. **`BundleHasher`** — new type in `src/DatumIngest/Inference/`. Single-method API: `Task<string?> ComputeAsync(string path, CancellationToken ct)`. Internal cache + persistence.
+1. **`BundleHasher`** — new type in `src/DatumV/Inference/`. Single-method API: `Task<string?> ComputeAsync(string path, CancellationToken ct)`. Internal cache + persistence.
 2. **`ModelCatalogEntry.ExpectedSha256`** (nullable) — built-in entries declare what they were built against. Engine bakes hashes during model-zoo curation; updating a built-in's bundle bumps the hash too.
 3. **`CreateModelStatement.OptionsClause`** — parser surface for `WITH (sha256 = '...')`. Generic `WITH (...)` shape so future options (timeout, version pin, etc.) don't need re-grammar work.
 4. **`ApplyCreateModelAsync`** — after file-existence check, compute hash and compare to declared expectation. Mismatch throws before `LoadBundleAsync`; success stores both expected + actual on the descriptor.

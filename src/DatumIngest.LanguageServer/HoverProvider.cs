@@ -1,9 +1,9 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower.Model;
 
 /// <summary>
@@ -1828,7 +1828,7 @@ public sealed class HoverProvider
     /// <summary>
     /// Appends a documentation excerpt and "See more" link to existing hover markdown.
     /// The link uses the <c>command:</c> URI scheme so Monaco renders it as a clickable
-    /// action when the host registers a <c>datumingest.openDoc</c> command and marks
+    /// action when the host registers a <c>datumv.openDoc</c> command and marks
     /// the hover markdown as trusted (<c>isTrusted: true</c>).
     /// </summary>
     private static string AppendDocLink(string markdown, string? sectionKey)
@@ -1850,9 +1850,9 @@ public sealed class HoverProvider
         }
 
         // Use command: URI scheme — Monaco supports this natively in trusted markdown.
-        // The host registers a 'datumingest.openDoc' command to handle navigation.
+        // The host registers a 'datumv.openDoc' command to handle navigation.
         string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
-        markdown += $"\n\n[See more](command:datumingest.openDoc?{encodedKey})";
+        markdown += $"\n\n[See more](command:datumv.openDoc?{encodedKey})";
         return markdown;
     }
 
@@ -1986,7 +1986,7 @@ public sealed class HoverProvider
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["information_schema"] = "PostgreSQL-compatible metadata schema exposing tables, columns, and schemata.",
-            ["datum_catalog"] = "DatumIngest-specific metadata schema exposing providers, functions, statistics, indexes, and interactions.",
+            ["datum_catalog"] = "Heliosoph.DatumV-specific metadata schema exposing providers, functions, statistics, indexes, and interactions.",
         };
 
     private static readonly Dictionary<string, Dictionary<string, string>> VirtualTableDescriptions =

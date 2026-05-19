@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing.Fts;
+namespace Heliosoph.DatumV.Indexing.Fts;
 
 /// <summary>
 /// Tokenizes a string into a sequence of <see cref="Token"/>s suitable for

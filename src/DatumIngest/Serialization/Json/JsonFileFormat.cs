@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace DatumIngest.Serialization.Json;
+namespace Heliosoph.DatumV.Serialization.Json;
 
 /// <summary>
 /// Format handler for JSON files. Matches <c>.json</c> on

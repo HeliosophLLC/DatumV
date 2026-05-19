@@ -171,7 +171,7 @@ export type ExecutionStatus =
   | 'error'
   | 'cancelled';
 
-// Mirrors DatumIngest.Execution.PreFlightReason (camelCased for JSON wire).
+// Mirrors Heliosoph.DatumV.Execution.PreFlightReason (camelCased for JSON wire).
 export type PreFlightReason =
   | 'modelNotInstalled'
   | 'pinnedVersionNotInstalled'
@@ -586,7 +586,7 @@ export function installPreFlightModels(tabId: string): void {
 
 // ────────── NDJSON event types ──────────
 
-// Mirror DatumIngest.Web.Execution event records (camelCase via the JSON
+// Mirror Heliosoph.DatumV.Web.Execution event records (camelCase via the JSON
 // serializer). The discriminated union gives exhaustive switch checking
 // in the run() loop below.
 type StreamEvent =
@@ -678,7 +678,7 @@ type StreamEvent =
  * Wire shape for a single `$name` binding in the multipart envelope.
  * Mirrors the server's `ParameterJson` DTO: inline scalars use `value`,
  * binary kinds use `ref` to name a sibling multipart part. See
- * `DatumIngest.Web.Dtos.Execution.ParameterJson` for the canonical
+ * `Heliosoph.DatumV.Web.Dtos.Execution.ParameterJson` for the canonical
  * definition.
  */
 export interface ParameterBinding {

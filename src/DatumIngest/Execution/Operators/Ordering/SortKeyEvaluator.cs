@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Ordering;
+namespace Heliosoph.DatumV.Execution.Operators.Ordering;
 
 /// <summary>
 /// Pre-evaluates an ORDER BY's <see cref="OrderByItem.Expression"/> list against

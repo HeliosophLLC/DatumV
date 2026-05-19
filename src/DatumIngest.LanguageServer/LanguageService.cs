@@ -1,9 +1,9 @@
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
 /// <summary>
-/// The top-level facade for DatumIngest SQL language intelligence.
+/// The top-level facade for Heliosoph.DatumV SQL language intelligence.
 /// Transport-agnostic: can be called directly from WASM interop or wrapped
 /// in an LSP server for VS Code integration.
 /// </summary>

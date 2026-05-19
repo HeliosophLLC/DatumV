@@ -1,12 +1,12 @@
-using DatumIngest.Catalog.Plans;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Executors;
+namespace Heliosoph.DatumV.Catalog.Executors;
 
 /// <summary>
 /// Owns the <c>UPDATE</c>-statement pipeline for
@@ -279,7 +279,7 @@ internal static class UpdateExecutor
         TableCatalog catalog,
         ITableProvider provider,
         UpdateStatement update,
-        DatumIngest.Execution.ExecutionContext context)
+        Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         bool captureRows = update.Returning is not null;
         // Source table resolution. PR11d MVP only handles a single

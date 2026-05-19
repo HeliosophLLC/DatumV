@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Fixed-size V2 file header. Sits at byte 0 of every <c>.datum</c> file

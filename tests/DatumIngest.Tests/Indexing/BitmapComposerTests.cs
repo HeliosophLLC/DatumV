@@ -1,6 +1,6 @@
-using DatumIngest.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bitmap;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="BitmapComposer"/> — SIMD-accelerated bitwise AND, OR, NOT,

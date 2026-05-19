@@ -1,8 +1,8 @@
-using DatumIngest.Manifest;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower.Model;
 
-namespace DatumIngest.LanguageServer;
+namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Resolves the function call enclosing a cursor position and produces a

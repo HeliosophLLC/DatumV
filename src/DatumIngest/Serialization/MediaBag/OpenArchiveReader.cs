@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Serialization.Tar;
-using DatumIngest.Serialization.Zip;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Serialization.Tar;
+using Heliosoph.DatumV.Serialization.Zip;
 
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// Static dispatch factory that opens an archive file as an

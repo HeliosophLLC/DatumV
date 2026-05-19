@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatumFile;
-using DatumIngest.Ingestion;
-using DatumIngest.Serialization;
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Serialization.Idx;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatumFile;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Csv;
+using Heliosoph.DatumV.Serialization.Idx;
 using ICSharpCode.SharpZipLib.BZip2;
 
-namespace DatumIngest.Tests.Serialization;
+namespace Heliosoph.DatumV.Tests.Serialization;
 
 /// <summary>
 /// Mirrors <see cref="GzipSupportTests"/> for bzip2. Covers compression detection,
@@ -59,7 +59,7 @@ public sealed class Bzip2SupportTests : ServiceTestBase
     {
         const string csvContent = "id,name\n1,alice\n2,bob\n";
         string bz2Path = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.bz2");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.bz2");
 
         WriteBz2File(bz2Path, csvContent);
 
@@ -86,7 +86,7 @@ public sealed class Bzip2SupportTests : ServiceTestBase
     {
         const string csvContent = "a\n1\n";
         string bz2Path = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.bz2");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.bz2");
 
         WriteBz2File(bz2Path, csvContent);
 
@@ -116,7 +116,7 @@ public sealed class Bzip2SupportTests : ServiceTestBase
         // 1 KiB to force the decompressed-size guard to trip.
         byte[] payload = new byte[4096];
         string bz2Path = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.bin.bz2");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.bin.bz2");
 
         WriteBz2File(bz2Path, payload);
 
@@ -147,9 +147,9 @@ public sealed class Bzip2SupportTests : ServiceTestBase
             "2,2.7,bob\n";
 
         string bz2Path = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.csv.bz2");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.csv.bz2");
         string datumPath = Path.Combine(
-            Path.GetTempPath(), $"datumingest-test-{Guid.NewGuid():N}.datum");
+            Path.GetTempPath(), $"datumv-test-{Guid.NewGuid():N}.datum");
 
         WriteBz2File(bz2Path, csv);
 

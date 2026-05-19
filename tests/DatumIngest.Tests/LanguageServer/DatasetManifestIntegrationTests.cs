@@ -1,17 +1,17 @@
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Functions;
-using DatumIngest.Manifest;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-// Both DatumIngest.DatasetLibrary and DatumIngest.Manifest export a
+// Both Heliosoph.DatumV.DatasetLibrary and Heliosoph.DatumV.Manifest export a
 // DatasetEntry type; this file builds both, so disambiguate per-use
 // at the call site rather than aliasing the import.
 
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
 /// <summary>
 /// Verifies the end-to-end manifest path: a real
@@ -58,7 +58,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         catalog.MountSchemaBackend("datasets", datasetCatalog);
 
         // Synthetic provider mimicking a mounted dataset table.
-        DatumIngest.Catalog.Providers.InMemoryTableProvider provider = new(
+        Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider provider = new(
             CreatePool(),
             "datasets.coco_test2017",
             rows: []);
@@ -101,7 +101,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         IReadOnlyDictionary<string, DatasetInstallState> installed,
         DatasetSchemaCatalog datasetCatalog)
     {
-        DatumIngest.DatasetLibrary.DatasetEntry entry = new(
+        Heliosoph.DatumV.DatasetLibrary.DatasetEntry entry = new(
             Name: "COCO 2017",
             Summary: "fixture",
             Description: "fixture",
@@ -140,7 +140,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
             logger: NullLogger<DatasetSchemaBinder>.Instance);
     }
 
-    private sealed class StubManifestStore : DatumIngest.DatasetLibrary.IManifestStore
+    private sealed class StubManifestStore : Heliosoph.DatumV.DatasetLibrary.IManifestStore
     {
         public StubManifestStore(DatasetCatalogManifest manifest) { Manifest = manifest; }
         public DatasetCatalogManifest Manifest { get; }
@@ -148,7 +148,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         public string? GetEntryCardMarkdown(string entryName) => null;
         public string? ResolveEntryAssetPath(string entryName, string relativePath) => null;
         public string? ResolveHeroImagePath(string entryName) => null;
-        public (DatumIngest.DatasetLibrary.DatasetEntry Entry, DatasetVariant Variant)? FindVariant(string variantId) => null;
+        public (Heliosoph.DatumV.DatasetLibrary.DatasetEntry Entry, DatasetVariant Variant)? FindVariant(string variantId) => null;
     }
 
     private sealed class StubDownloadService : IDatasetDownloadService

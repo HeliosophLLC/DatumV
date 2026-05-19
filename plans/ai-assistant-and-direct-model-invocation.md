@@ -7,7 +7,7 @@ Two use cases sharing one architecture:
 1. **Web dev-loop**: front-end invokes any model in the catalog directly
    (image → depth map, prompt → LLM response, image → caption, etc.) and
    hosts a docked AI assistant panel.
-2. **Production inference orchestration service**: containerized DatumIngest
+2. **Production inference orchestration service**: containerized DatumV
    with UDFs + models loaded at boot, exposed as an HTTP API where each
    request stages input data, runs SQL that chains UDFs / LLMs / vision
    models, and returns the result.

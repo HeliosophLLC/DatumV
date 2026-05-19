@@ -6,7 +6,7 @@
 -- ONNX file:   swinir_realsr_x4.onnx
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/JingyunLiang/SwinIR
---              (Heliosoph ONNX export — SwinIR-L config, 240-dim embeds)
+--              (Heliosoph.DatumV ONNX export — SwinIR-L config, 240-dim embeds)
 --
 -- Swin Transformer for Image Restoration, real-world SR variant. Upscales
 -- by 4× while cleaning compression artifacts, sensor noise, and mild

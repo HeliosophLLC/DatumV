@@ -1,7 +1,7 @@
-namespace DatumIngest.Statistics.Accumulators;
+namespace Heliosoph.DatumV.Statistics.Accumulators;
 
-using DatumIngest.Functions.Image;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Accumulates image dimension and channel statistics by parsing JPEG, PNG, and WebP headers.
@@ -70,7 +70,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
         }
 
         // Sidecar-backed values would require an IBlobSource to materialise their
-        // bytes, which the stats path doesn't carry. The DatumIngest pipeline emits
+        // bytes, which the stats path doesn't carry. The Heliosoph.DatumV pipeline emits
         // derived dimension columns (file_width / file_height / file_channels /
         // file_byte_length / file_orientation) at ingest time, so all the summaries
         // this accumulator produces are available from the regular numeric stats on

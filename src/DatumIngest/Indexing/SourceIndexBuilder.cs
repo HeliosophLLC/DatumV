@@ -1,15 +1,15 @@
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Builds a <see cref="SourceIndex"/> in a single pass over all rows from a table provider.
 /// Produces the unified-sidecar payload — fingerprint, schema, chunk directory + zone maps,
 /// bloom filters, bitmap indexes. Per-column B+Tree acceleration lives outside this builder
 /// in companion <c>.datum-bptree-{col}</c> files written directly by
-/// <see cref="DatumIngest.Ingestion.Indexer"/>.
+/// <see cref="Heliosoph.DatumV.Ingestion.Indexer"/>.
 /// </summary>
 public sealed class SourceIndexBuilder
 {
@@ -87,7 +87,7 @@ public sealed class SourceIndexBuilder
     /// are included tentatively. Wide types are excluded.
     /// </summary>
     /// <remarks>
-    /// Used by <see cref="DatumIngest.Ingestion.Indexer"/> to decide which columns get a
+    /// Used by <see cref="Heliosoph.DatumV.Ingestion.Indexer"/> to decide which columns get a
     /// per-column <c>.datum-bptree-{col}</c> companion file. Bitmap-eligible columns
     /// (cardinality up to 256) are a subset of this set; the bitmap accumulator decides
     /// dynamically whether to keep or abandon based on observed cardinality.

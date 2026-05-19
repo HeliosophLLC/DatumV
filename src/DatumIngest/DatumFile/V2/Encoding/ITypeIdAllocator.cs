@@ -1,7 +1,7 @@
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
-/// Translates a runtime <see cref="DatumIngest.Model.TypeRegistry"/> id to a
+/// Translates a runtime <see cref="Heliosoph.DatumV.Model.TypeRegistry"/> id to a
 /// stable per-file on-disk id during encode, allocating new on-disk ids on
 /// first sight. Owned by <see cref="DatumFileWriterV2"/>; consumed by the
 /// <see cref="VariableSlotPageEncoderV2"/> when stamping per-element

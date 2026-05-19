@@ -1,6 +1,6 @@
-using DatumIngest.Models;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Web.Llm;
+namespace Heliosoph.DatumV.Web.Llm;
 
 // Picks an LLM from the ModelCatalog that fits the residency manager's VRAM
 // budget. v1 strategy: filter to LLMs whose files are present on disk, pick
@@ -113,7 +113,7 @@ internal static class ModelSelector
     private static bool IsLlm(ModelCatalogEntry entry)
         => string.Equals(entry.Category, "llm", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsFilePresent(ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver paths)
+    private static bool IsFilePresent(ModelCatalogEntry entry, Heliosoph.DatumV.ModelLibrary.IModelPathResolver paths)
     {
         // RelativePath / Files are id-prefixed under the catalog substrate
         // (e.g. "llama-3.1-8b-instruct-gguf/...gguf"); route through the
@@ -130,7 +130,7 @@ internal static class ModelSelector
         return File.Exists(paths.ResolveIdPrefixedPath(entry.RelativePath));
     }
 
-    private static long EstimateFromFile(ModelCatalogEntry entry, DatumIngest.ModelLibrary.IModelPathResolver paths)
+    private static long EstimateFromFile(ModelCatalogEntry entry, Heliosoph.DatumV.ModelLibrary.IModelPathResolver paths)
     {
         long total = 0;
         if (entry.Files is { Count: > 0 })

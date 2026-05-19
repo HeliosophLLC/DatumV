@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// S3 tests for <c>GENERATED ALWAYS AS</c> (STORED) computed columns —
@@ -65,7 +65,7 @@ public sealed class ComputedColumnsTests : ServiceTestBase, IAsyncLifetime
         // "generated slot" (the parser folds GENERATED, legacy bare AS,
         // and legacy bare IDENTITY together so duplicates are caught at
         // parse time with a position pointing at the offending token).
-        DatumIngest.Parsing.ParseException ex = Assert.Throws<DatumIngest.Parsing.ParseException>(() =>
+        Heliosoph.DatumV.Parsing.ParseException ex = Assert.Throws<Heliosoph.DatumV.Parsing.ParseException>(() =>
             catalog.Plan("CREATE TEMP TABLE t (a Int32, b Int64 AS (a + 1) IDENTITY)"));
         Assert.Contains("duplicate", ex.Message);
     }

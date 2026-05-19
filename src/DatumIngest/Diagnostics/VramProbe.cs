@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Cheap, periodic VRAM-usage probe wrapping NVIDIA's NVML library

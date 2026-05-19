@@ -1,13 +1,13 @@
 using System.Numerics;
 
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Image;
-using DatumIngest.Functions.Video;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Functions.Video;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 using SkiaSharp;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Function-internal value type. Replaces store-aware <see cref="DataValue"/>
@@ -444,7 +444,7 @@ public readonly struct ValueRef
 
     /// <summary>
     /// PointCloud value carried as a raw byte blob (40-byte header + interleaved
-    /// per-point payload — see <see cref="DatumIngest.Model.Spatial.PointCloudHeader"/>).
+    /// per-point payload — see <see cref="Heliosoph.DatumV.Model.Spatial.PointCloudHeader"/>).
     /// Producers build the full blob in managed memory; arena copy happens once at
     /// <see cref="ToDataValue"/>. No decoded form — PointCloud has no SKBitmap-equivalent
     /// because its on-wire layout is already the renderable form.
@@ -455,7 +455,7 @@ public readonly struct ValueRef
     /// <summary>
     /// Mesh value carried as a raw byte blob (48-byte header + interleaved per-vertex
     /// payload + triangle indices + optional embedded texture — see
-    /// <see cref="DatumIngest.Model.Spatial.MeshHeader"/>). Producers build the full
+    /// <see cref="Heliosoph.DatumV.Model.Spatial.MeshHeader"/>). Producers build the full
     /// blob in managed memory; arena copy happens once at <see cref="ToDataValue"/>.
     /// </summary>
     public static ValueRef FromMesh(byte[] blob) =>
@@ -770,7 +770,7 @@ public readonly struct ValueRef
     /// <summary>
     /// Returns the raw PointCloud blob (40-byte header + interleaved per-point
     /// payload). Asserts <see cref="Kind"/> is <see cref="DataKind.PointCloud"/>.
-    /// Callers parse the header via <see cref="DatumIngest.Model.Spatial.PointCloudHeader.Read"/>.
+    /// Callers parse the header via <see cref="Heliosoph.DatumV.Model.Spatial.PointCloudHeader.Read"/>.
     /// </summary>
     public byte[] AsPointCloud()
     {
@@ -792,7 +792,7 @@ public readonly struct ValueRef
     /// Returns the raw Mesh blob (48-byte header + interleaved per-vertex
     /// payload + triangle indices + optional embedded texture). Asserts
     /// <see cref="Kind"/> is <see cref="DataKind.Mesh"/>. Callers parse the
-    /// header via <see cref="DatumIngest.Model.Spatial.MeshHeader.Read"/>.
+    /// header via <see cref="Heliosoph.DatumV.Model.Spatial.MeshHeader.Read"/>.
     /// </summary>
     public byte[] AsMesh()
     {
@@ -1460,9 +1460,9 @@ public readonly struct ValueRef
     /// </remarks>
     /// <summary>
     /// Returns the approximate size in bytes of the GC-resident payload behind
-    /// this <see cref="ValueRef"/>. Used by <see cref="DatumIngest.Execution.VariableScope"/>
+    /// this <see cref="ValueRef"/>. Used by <see cref="Heliosoph.DatumV.Execution.VariableScope"/>
     /// (and other holders of long-lived ValueRefs) to report bytes into the
-    /// shared <see cref="DatumIngest.Execution.MemoryAccountant"/> on bind/release.
+    /// shared <see cref="Heliosoph.DatumV.Execution.MemoryAccountant"/> on bind/release.
     /// </summary>
     /// <remarks>
     /// <para>

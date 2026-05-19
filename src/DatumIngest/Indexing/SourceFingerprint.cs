@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Immutable fingerprint of a source file for staleness detection.

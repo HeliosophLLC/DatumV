@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-namespace DatumIngest.Model.Spatial;
+namespace Heliosoph.DatumV.Model.Spatial;
 
 /// <summary>
 /// Per-point feature flags stored in <see cref="PointCloudHeader.Flags"/>.

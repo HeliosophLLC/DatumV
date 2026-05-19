@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile;
+namespace Heliosoph.DatumV.DatumFile;
 
 /// <summary>
 /// A compact bit-vector marking which rows within a column page are null.

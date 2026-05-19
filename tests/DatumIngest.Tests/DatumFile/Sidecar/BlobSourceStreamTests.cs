@@ -1,6 +1,6 @@
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Tests.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.Tests.DatumFile.Sidecar;
 
 /// <summary>
 /// Tests for <see cref="BlobSourceStream"/> — the seekable <see cref="Stream"/>

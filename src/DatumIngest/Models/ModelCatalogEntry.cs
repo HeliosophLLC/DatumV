@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Catalog row for a single registered model. Combines metadata (name, backend,

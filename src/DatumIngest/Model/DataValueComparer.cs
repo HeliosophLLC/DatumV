@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.DatumFile.Sidecar;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 
-namespace DatumIngest.Model;
+namespace Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Single canonical comparison implementation for <see cref="DataValue"/> pairs.

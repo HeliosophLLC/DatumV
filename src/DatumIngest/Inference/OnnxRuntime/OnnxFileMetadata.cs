@@ -1,4 +1,4 @@
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// Top-level metadata fields read directly from the ONNX protobuf file —

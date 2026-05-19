@@ -1,14 +1,14 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests that aggregate function calls (e.g. <c>COUNT(*)</c>, <c>SUM(x)</c>)
 /// appearing in <c>ORDER BY</c> clauses are correctly lifted into the
-/// <see cref="DatumIngest.Execution.Operators.GroupByOperator"/>'s aggregate
+/// <see cref="Heliosoph.DatumV.Execution.Operators.GroupByOperator"/>'s aggregate
 /// columns by the planner and rewritten as column references — so the
-/// downstream <see cref="DatumIngest.Execution.Operators.OrderByOperator"/>
+/// downstream <see cref="Heliosoph.DatumV.Execution.Operators.OrderByOperator"/>
 /// can sort by the precomputed group value rather than (incorrectly)
 /// attempting to evaluate the aggregate per row.
 /// </summary>

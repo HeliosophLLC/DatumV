@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
+using Heliosoph.DatumV.Execution;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Marker interface implemented by scalar functions whose body is a single
-/// inline-metadata read from <see cref="DatumIngest.Model.DataValue"/>'s
+/// inline-metadata read from <see cref="Heliosoph.DatumV.Model.DataValue"/>'s
 /// per-kind payload bytes (e.g. <c>image_width</c>, <c>video_height</c>,
 /// <c>point_cloud_count</c>). Implementing this signals to the planner-time
 /// elider that the call site can be rewritten as
@@ -30,7 +30,7 @@ public interface IInlineMetadataAccessor : IScalarFunction
 {
     /// <summary>
     /// Identifies which inline-metadata field this function reads from
-    /// the argument's <see cref="DatumIngest.Model.DataValue"/> payload.
+    /// the argument's <see cref="Heliosoph.DatumV.Model.DataValue"/> payload.
     /// The elider uses this to construct the
     /// <see cref="InlineAccessorExpression"/> replacement node.
     /// </summary>

@@ -6,7 +6,7 @@
 -- ONNX file:   model_fp16.onnx
 -- License:     MIT
 -- Upstream:    https://github.com/isl-org/ZoeDepth
---              (Heliosoph onnxconverter-common fp16 conversion from
+--              (Heliosoph.DatumV onnxconverter-common fp16 conversion from
 --              Intel/zoedepth-nyu-kitti PyTorch weights)
 --
 -- Half-precision sibling of `zoedepth_nyu_kitti`. ~660 MB on disk vs

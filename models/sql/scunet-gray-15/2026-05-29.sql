@@ -6,7 +6,7 @@
 -- ONNX file:   scunet_gray_15.onnx (+ .onnx.data weights sidecar)
 -- License:     Apache-2.0
 -- Upstream:    https://github.com/cszn/SCUNet
---              (Heliosoph ONNX export)
+--              (Heliosoph.DatumV ONNX export)
 --
 -- Single-channel Gaussian denoising at σ=15 (light noise). ~3× faster
 -- than running the color variant on a channel-replicated tensor since

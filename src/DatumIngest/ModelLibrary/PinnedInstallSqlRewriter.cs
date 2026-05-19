@@ -1,10 +1,10 @@
 using System.Text;
 
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Tokens;
 
 using Superpower.Model;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 /// <summary>
 /// Source-level rewrite that takes a catalog installSql blob and

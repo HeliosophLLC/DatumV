@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Describes an output target for format serialization. Provides the file path,

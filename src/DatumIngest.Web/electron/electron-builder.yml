@@ -1,5 +1,5 @@
 appId: com.datumingest.app
-productName: DatumIngest
+productName: Heliosoph.DatumV
 copyright: Copyright © 2026
 
 directories:
@@ -21,9 +21,9 @@ files:
   - "!**/{tsconfig.json,electron-builder.yml,.gitignore}"
 
 # Self-contained .NET publish output. Lives at
-# `<app>/resources/backend/DatumIngest.Web.exe` post-install, which is
+# `<app>/resources/backend/Heliosoph.DatumV.Web.exe` post-install, which is
 # what main.ts looks for via `path.join(process.resourcesPath, 'backend',
-# 'DatumIngest.Web.exe')`.
+# 'Heliosoph.DatumV.Web.exe')`.
 extraResources:
   - from: build/backend
     to: backend

@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Execution;
+namespace Heliosoph.DatumV.Web.Execution;
 
 // NDJSON event payloads emitted by the query-stream endpoint. Each event
 // is JSON-serialised + a trailing newline; the client parses a line at a
@@ -130,7 +130,7 @@ internal sealed record TraceCompleteEvent(
 /// <summary>
 /// Trace-scope toggle passed into <see cref="QueryStreamService"/>. Empty
 /// (both flags false) disables tracing entirely — no
-/// <see cref="DatumIngest.Diagnostics.RecentActivityLog"/> is attached,
+/// <see cref="Heliosoph.DatumV.Diagnostics.RecentActivityLog"/> is attached,
 /// the engine takes its zero-listener fast path, and no trace events
 /// emit. Operators-only is the recommended default for the UI's chip;
 /// scalars is opt-in because per-row scalar dispatches generate orders

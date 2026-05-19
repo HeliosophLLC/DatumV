@@ -1,9 +1,9 @@
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// Extension methods for collecting query results in tests. Rows are deep-copied

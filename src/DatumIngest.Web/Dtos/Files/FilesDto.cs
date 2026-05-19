@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Files;
+namespace Heliosoph.DatumV.Web.Dtos.Files;
 
 // Response payload for GET /api/files: every file under the catalog root,
 // classified by kind and joined against the manifest so orphans are flagged.

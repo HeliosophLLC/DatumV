@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Inference;
+namespace Heliosoph.DatumV.Inference;
 
 /// <summary>
 /// Default <see cref="IInferenceDispatcher"/> implementation. Takes a list

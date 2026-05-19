@@ -3,7 +3,7 @@
 // BrowserWindow with `parent + modal: true`, awaits a resolve message
 // from that window's renderer, and returns the result directly to the
 // originator's invoke promise. X-close without prior resolve synthesises
-// `null`. See src/DatumIngest.Web/electron/main.ts.
+// `null`. See src/Heliosoph.DatumV.Web/electron/main.ts.
 //
 // Caller ergonomics:
 //

@@ -1,7 +1,7 @@
-using DatumIngest.Model;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators.Windows;
+namespace Heliosoph.DatumV.Execution.Operators.Windows;
 
 /// <summary>
 /// Drains an input operator's batches into a long-lived <see cref="List{Row}"/>

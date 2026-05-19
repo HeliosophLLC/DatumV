@@ -1,6 +1,6 @@
 using TypedSignalR.Client;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 // Methods clients invoke on the server. Today the catalog hub is a
 // one-way push channel — server announces DDL commits, clients listen.

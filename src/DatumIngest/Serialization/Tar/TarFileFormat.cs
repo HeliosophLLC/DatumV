@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Serialization.MediaBag;
+using Heliosoph.DatumV.Serialization.MediaBag;
 
-namespace DatumIngest.Serialization.Tar;
+namespace Heliosoph.DatumV.Serialization.Tar;
 
 /// <summary>
 /// Format handler for TAR archive files, including the common <c>.tar.gz</c>

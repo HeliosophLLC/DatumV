@@ -1,14 +1,14 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests for the ASSERT clause — a post-projection row validator that can abort,
@@ -488,7 +488,7 @@ public sealed class AssertClauseTests : ServiceTestBase
     /// code relies on an outer finally instead. This test exercises the path with
     /// enough rows preceding the failing one that outputBatch has definitely
     /// accumulated entries when the exception unwinds, then issues a follow-up query
-    /// against the same DI-resolved <see cref="DatumIngest.Pooling.Pool"/> — a
+    /// against the same DI-resolved <see cref="Heliosoph.DatumV.Pooling.Pool"/> — a
     /// double-return would corrupt the pool's per-length DataValue[] queues and the
     /// follow-up would either throw <see cref="ObjectDisposedException"/> or yield
     /// stale data.

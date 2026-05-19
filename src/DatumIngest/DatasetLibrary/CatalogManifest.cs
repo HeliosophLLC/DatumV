@@ -5,9 +5,9 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 // POCOs for datasets/catalog.json.
 //
@@ -21,7 +21,7 @@ namespace DatumIngest.DatasetLibrary;
 // orchestrator's wire surface doesn't change.
 //
 // CatalogLicense + CatalogSource (HuggingFaceSource / GithubReleaseSource /
-// HttpsSource) are imported verbatim from DatumIngest.ModelLibrary — those
+// HttpsSource) are imported verbatim from Heliosoph.DatumV.ModelLibrary — those
 // types are agnostic to whether the consumer is fetching weights or data.
 
 public sealed record DatasetCatalogManifest(
@@ -53,7 +53,7 @@ public sealed record DatasetEntry(
     // contributors. Surfaced on the detail card.
     IReadOnlyList<string> Attributions,
     // Optional "suitable for" hint — engine task contracts (referencing
-    // <see cref="DatumIngest.Catalog.Registries.TaskTypeRegistry"/>)
+    // <see cref="Heliosoph.DatumV.Catalog.Registries.TaskTypeRegistry"/>)
     // this dataset commonly feeds. Renders as a chip strip on the
     // detail card so users searching "what can I train with this?"
     // see the bridge from data to model. Not exhaustive on purpose —

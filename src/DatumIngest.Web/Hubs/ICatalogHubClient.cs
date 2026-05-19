@@ -1,6 +1,6 @@
 using TypedSignalR.Client;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 // Methods the server invokes on connected clients. Single fan-out method
 // carrying a discriminated CatalogChangedEvent — see the DTO file for the

@@ -4,7 +4,7 @@ title: Spatial Types
 
 # Spatial Types
 
-DatumIngest carries four first-class spatial kinds:
+DatumV carries four first-class spatial kinds:
 
 | Kind | What it is | When to reach for it |
 |------|-----------|----------------------|

@@ -1,10 +1,10 @@
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Audio;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Audio;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_path(envelope, width, height, fill)</c>: builds a

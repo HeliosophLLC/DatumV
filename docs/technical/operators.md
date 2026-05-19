@@ -1,6 +1,6 @@
 # Operators
 
-Quick reference for the execution operators in DatumIngest. The query planner turns SQL (and programmatic query trees) into a DAG of these operators; runtime execution is a pure pull-based iteration through the DAG.
+Quick reference for the execution operators in DatumV. The query planner turns SQL (and programmatic query trees) into a DAG of these operators; runtime execution is a pure pull-based iteration through the DAG.
 
 ## Execution model
 
@@ -140,7 +140,7 @@ Window function evaluation (`OVER (PARTITION BY ... ORDER BY ...)`). **Blocking*
 
 ### `FoldScanOperator`
 
-`SCAN` expression (DatumIngest extension — prefix-scan / fold over ordered partitions). Each row's output feeds back as the accumulator for the next row: `output[i] = f(output[i-1], input[i])`. **Blocking within a partition** — materializes the partition first because the fold is sequential.
+`SCAN` expression (DatumV extension — prefix-scan / fold over ordered partitions). Each row's output feeds back as the accumulator for the next row: `output[i] = f(output[i-1], input[i])`. **Blocking within a partition** — materializes the partition first because the fold is sequential.
 
 ---
 
@@ -293,4 +293,4 @@ Uniform Bernoulli filter at a given percentage. Each row is independently includ
 
 ## See also
 
-- [special-functions.md](special-functions.md) — scalar/aggregate functions and DatumIngest-specific syntax extensions.
+- [special-functions.md](special-functions.md) — scalar/aggregate functions and DatumV-specific syntax extensions.

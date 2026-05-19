@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Video;
+namespace Heliosoph.DatumV.Functions.Video;
 
 /// <summary>
 /// Helpers for constructing <see cref="DataValue"/>s of <see cref="DataKind.Video"/>

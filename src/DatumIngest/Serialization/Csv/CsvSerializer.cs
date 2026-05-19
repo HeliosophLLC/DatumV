@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Text;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// Serializes a stream of <see cref="RowBatch"/> instances into CSV format.

@@ -1,8 +1,8 @@
-using DatumIngest.DatasetLibrary;
-using DatumIngest.Web.Hosting;
-using DatumIngest.Web.Settings;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Web.Hosting;
+using Heliosoph.DatumV.Web.Settings;
 
-namespace DatumIngest.Web.DatasetLibrary;
+namespace Heliosoph.DatumV.Web.DatasetLibrary;
 
 // IKeepRawDownloadsPolicy that reads the user's setting from settings.json
 // at the catalog root on each call. Each dataset install re-reads the

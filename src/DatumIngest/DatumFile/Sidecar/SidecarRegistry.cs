@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Per-query map from <c>storeId</c> byte to <see cref="IBlobSource"/>. Each

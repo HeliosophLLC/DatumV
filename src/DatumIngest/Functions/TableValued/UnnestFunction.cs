@@ -1,11 +1,11 @@
 using System.Formats.Cbor;
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Functions.TableValued;
+namespace Heliosoph.DatumV.Functions.TableValued;
 
 /// <summary>
 /// <c>unnest(array) → table</c>. Expands an <c>Array&lt;T&gt;</c> argument

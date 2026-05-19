@@ -1,6 +1,6 @@
-using DatumIngest.Manifest;
+using Heliosoph.DatumV.Manifest;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Catalog-side metadata for a registered function. Built once at
@@ -31,12 +31,12 @@ namespace DatumIngest.Functions;
 /// </param>
 /// <param name="Contexts">
 /// Names of the lambda-body
-/// <see cref="DatumIngest.Execution.Contexts.IFunctionContext"/>s this
+/// <see cref="Heliosoph.DatumV.Execution.Contexts.IFunctionContext"/>s this
 /// function is visible inside. Empty (default) means globally visible —
 /// the function resolves in every scope, matching the legacy behaviour.
 /// A non-empty list scopes the function to lambdas whose parameter slot
 /// declared one of those contexts (or any descendant context, via
-/// <see cref="DatumIngest.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>).
+/// <see cref="Heliosoph.DatumV.Execution.Contexts.FunctionContextRegistry.WalkAncestors"/>).
 /// </param>
 public sealed record FunctionDescriptor(
     string PrimaryName,

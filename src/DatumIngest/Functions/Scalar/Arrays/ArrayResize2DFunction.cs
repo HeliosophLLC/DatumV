@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Functions.Scalar.Arrays;
 
 /// <summary>
 /// <c>array_resize_2d(arr Array&lt;Float32&gt;, dst_h Int32, dst_w Int32)

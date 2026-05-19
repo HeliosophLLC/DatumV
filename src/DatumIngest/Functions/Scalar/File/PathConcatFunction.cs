@@ -1,9 +1,9 @@
 using System.Text;
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// Joins two or more path segments using <c>/</c> as the separator. Trailing

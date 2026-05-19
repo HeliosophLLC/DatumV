@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
+using Heliosoph.DatumV.Functions;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
-/// Invokes a first-class <see cref="DatumIngest.Model.DataKind.Lambda"/>
+/// Invokes a first-class <see cref="Heliosoph.DatumV.Model.DataKind.Lambda"/>
 /// value with a set of arguments and returns its result. Implemented by
 /// <see cref="ExpressionEvaluator"/>; exposed as an interface on
 /// <see cref="EvaluationFrame.LambdaInvoker"/> so consumer functions
@@ -33,7 +33,7 @@ public interface ILambdaInvoker
     /// <summary>
     /// Invokes <paramref name="lambda"/> with the supplied argument values.
     /// </summary>
-    /// <param name="lambda">A <see cref="ValueRef"/> of <see cref="DatumIngest.Model.DataKind.Lambda"/>.</param>
+    /// <param name="lambda">A <see cref="ValueRef"/> of <see cref="Heliosoph.DatumV.Model.DataKind.Lambda"/>.</param>
     /// <param name="arguments">Per-parameter values. Length must equal the lambda's declared parameter count; mismatch throws.</param>
     /// <param name="frame">The caller's evaluation frame — supplies arenas, sidecar registry, type registry, etc. The lambda's closure captures replace the frame's <see cref="EvaluationFrame.Row"/> internally so the body's free-variable references resolve against the row in scope when the lambda was created.</param>
     /// <param name="cancellationToken">Cooperative cancellation.</param>

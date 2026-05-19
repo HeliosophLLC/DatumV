@@ -1,7 +1,7 @@
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.Bloom;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.Bloom;
+using Heliosoph.DatumV.Model;
 
 // index-inspect <index-path>
 //   Structural summary of a .datum-index file.

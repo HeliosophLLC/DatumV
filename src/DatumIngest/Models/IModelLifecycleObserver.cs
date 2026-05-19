@@ -1,4 +1,4 @@
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Observer interface for <see cref="ModelResidencyManager"/> lifecycle
@@ -11,7 +11,7 @@ namespace DatumIngest.Models;
 /// <strong>Calling convention.</strong> Methods are invoked synchronously
 /// from inside the residency manager's lock, so implementations MUST
 /// return quickly and MUST NOT block on I/O or grab locks of their own.
-/// The SignalR-backed implementation in <c>DatumIngest.Web</c> queues
+/// The SignalR-backed implementation in <c>Heliosoph.DatumV.Web</c> queues
 /// the dispatch on the thread pool — that's the canonical shape.
 /// </para>
 /// <para>

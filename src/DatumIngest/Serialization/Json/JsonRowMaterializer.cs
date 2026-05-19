@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
-using DatumIngest.Functions.Json;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Json;
+namespace Heliosoph.DatumV.Serialization.Json;
 
 /// <summary>
 /// Shared row-materialization logic for the JSON-family deserializers. Reads

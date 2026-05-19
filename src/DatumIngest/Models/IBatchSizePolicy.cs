@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 
-using DatumIngest.Diagnostics;
+using Heliosoph.DatumV.Diagnostics;
 
-namespace DatumIngest.Models;
+namespace Heliosoph.DatumV.Models;
 
 /// <summary>
 /// Test seam over <see cref="VramProbe"/>. Production uses
@@ -35,7 +35,7 @@ public sealed class NvmlVramProbe : IVramProbe
 
 /// <summary>
 /// Per-dispatch policy that picks the sub-batch size for
-/// <see cref="DatumIngest.Execution.Operators.ModelInvocationOperator"/>'s
+/// <see cref="Heliosoph.DatumV.Execution.Operators.ModelInvocationOperator"/>'s
 /// chunked dispatch loop. Replaces the previous static
 /// <c>model.PreferredBatchSize ?? rowsThisBatch</c> read. Stateful per
 /// model name so a policy can ramp up (or down) batch sizes over a
@@ -139,7 +139,7 @@ public sealed class BatchOnePolicy : IBatchSizePolicy
 /// <para>
 /// <strong>Two-state design.</strong> Either we have curve data and use
 /// it, or we don't and dispatch at 1. There's no "in between" ramp —
-/// the explicit <see cref="DatumIngest.Models.Calibration.CalibrationCoordinator"/>
+/// the explicit <see cref="Heliosoph.DatumV.Models.Calibration.CalibrationCoordinator"/>
 /// runs ramp passes in a controlled, single-model-at-a-time environment
 /// where measurements are trustworthy. Trying to ramp inside the
 /// dispatch policy (the old <see cref="DoublingBatchSizePolicy"/> shape)
@@ -157,7 +157,7 @@ public sealed class BatchOnePolicy : IBatchSizePolicy
 /// </para>
 /// <para>
 /// <strong>Spill detection.</strong> Per-row duration jumping >2× the
-/// best observation triggers <see cref="DatumIngest.Models.Calibration.ModelCalibration.RecordSpill"/>,
+/// best observation triggers <see cref="Heliosoph.DatumV.Models.Calibration.ModelCalibration.RecordSpill"/>,
 /// which drops the offending entry and everything larger and demotes the
 /// calibration to <c>Stale</c>. Next acquire forces recalibration via the
 /// coordinator.

@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Audio;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Audio;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform(audio, width, height, options)</c>: end-to-end sugar
@@ -48,7 +48,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     [Fact]
     public async Task NullOptions_ReturnsNullImage()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSineWave(16000, 1600, 440f), frame);
 
@@ -67,7 +67,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     [Fact]
     public async Task ZeroWidth_Throws()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSineWave(16000, 1600, 440f), frame);
         ValueRef options = MakeOptions(context, fg: new SKColor(255, 0, 0), bg: new SKColor(0, 0, 0));
@@ -84,7 +84,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     [Fact]
     public async Task ValidAudio_RendersImageWithRequestedDimensions()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSineWave(16000, 1600, 440f), frame);
         ValueRef options = MakeOptions(context, fg: new SKColor(255, 255, 255), bg: new SKColor(0, 0, 0));
@@ -102,7 +102,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     public async Task BackgroundColor_AppearsAtCornerPixels()
     {
         // Quiet (silent) audio: no waveform drawn, every pixel should be bg.
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSilence(16000, 1600), frame);
         ValueRef options = MakeOptions(context,
@@ -131,7 +131,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
         // A loud sine spans the full amplitude range; in every column the
         // bin's (min, max) span crosses the centreline, so the vertical
         // stroke must paint at least one foreground pixel at y = height/2.
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSineWave(16000, 16000, 440f), frame);
         ValueRef options = MakeOptions(context,
@@ -164,7 +164,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     [Fact]
     public async Task OptionsStructMissingFields_Throws()
     {
-        DatumIngest.Execution.ExecutionContext context = CreateExecutionContext();
+        Heliosoph.DatumV.Execution.ExecutionContext context = CreateExecutionContext();
         EvaluationFrame frame = CreateEvaluationFrame(context);
         ValueRef audio = await DecodeAudioAsync(BuildMonoSineWave(16000, 1600, 440f), frame);
 
@@ -189,7 +189,7 @@ public sealed class AudioWaveformFunctionTests : ServiceTestBase
     // ───────────────────────── Helpers ─────────────────────────
 
     private static ValueRef MakeOptions(
-        DatumIngest.Execution.ExecutionContext context, SKColor fg, SKColor bg)
+        Heliosoph.DatumV.Execution.ExecutionContext context, SKColor fg, SKColor bg)
     {
         StructFieldDescriptor[] fields =
         [

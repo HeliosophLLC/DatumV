@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// Deserializes FITS files into <see cref="RowBatch"/> streams for the

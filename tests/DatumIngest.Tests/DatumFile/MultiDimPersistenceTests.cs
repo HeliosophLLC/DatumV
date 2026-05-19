@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.DatumFile;
+namespace Heliosoph.DatumV.Tests.DatumFile;
 
 /// <summary>
 /// PR3: round-trip persistence tests for multi-dim arrays. Verifies that an

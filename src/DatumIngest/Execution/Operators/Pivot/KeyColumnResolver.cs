@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Execution.Operators.Pivot;
+namespace Heliosoph.DatumV.Execution.Operators.Pivot;
 
 /// <summary>
 /// Resolves the "key" columns of a shape-rotation operator (PIVOT, UNPIVOT) from

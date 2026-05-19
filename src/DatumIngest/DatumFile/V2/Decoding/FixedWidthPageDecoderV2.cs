@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Decoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Decoding;
 
 /// <summary>
 /// V2 fixed-width page decoder. Random-access reader over a page laid out

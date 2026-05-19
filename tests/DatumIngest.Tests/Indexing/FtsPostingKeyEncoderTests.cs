@@ -1,7 +1,7 @@
 using System.Text;
-using DatumIngest.Indexing.Fts;
+using Heliosoph.DatumV.Indexing.Fts;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Tests for <see cref="FtsPostingKeyEncoder"/>: terminator-based prefix

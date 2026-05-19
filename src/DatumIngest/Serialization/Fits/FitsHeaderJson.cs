@@ -1,7 +1,7 @@
 using System.Text;
-using DatumIngest.Functions.Json;
+using Heliosoph.DatumV.Functions.Json;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// Canonical-CBOR serializer for a FITS HDU's card list, shared by the

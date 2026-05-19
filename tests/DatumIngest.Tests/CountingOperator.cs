@@ -1,8 +1,8 @@
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests;
+namespace Heliosoph.DatumV.Tests;
 
 /// <summary>
 /// A mock data-source operator that invokes a callback for each row yielded.
@@ -27,7 +27,7 @@ public sealed class CountingOperator : QueryOperator
 
     protected override OperatorPlanDescription DescribeForExplainImpl() => new("Counting Mock");
 
-    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(DatumIngest.Execution.ExecutionContext context)
+    protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         await foreach (RowBatch batch in _provider.ScanAsync(
             requiredColumns: null, filterHint: null, context.Store, context.CancellationToken))

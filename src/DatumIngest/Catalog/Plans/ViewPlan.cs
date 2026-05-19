@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Catalog.Plans;
+namespace Heliosoph.DatumV.Catalog.Plans;
 
 /// <summary>
 /// <see cref="StatementPlan"/> for the view-DDL family:
@@ -80,7 +80,7 @@ internal sealed class ViewPlan : StatementPlan
 #pragma warning disable CS1998 // Async method lacks 'await' — leaf yields no rows.
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        DatumIngest.Execution.ExecutionContext context)
+        Heliosoph.DatumV.Execution.ExecutionContext context)
     {
         if (Interlocked.Exchange(ref _executed, 1) != 0)
         {

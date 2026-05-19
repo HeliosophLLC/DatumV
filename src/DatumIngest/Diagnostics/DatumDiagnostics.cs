@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace DatumIngest.Diagnostics;
+namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Process-wide diagnostic counters. Every recording method is decorated with

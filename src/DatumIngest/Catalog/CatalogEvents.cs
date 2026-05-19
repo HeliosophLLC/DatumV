@@ -1,7 +1,7 @@
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Catalog;
+namespace Heliosoph.DatumV.Catalog;
 
 // Catalog-change event types. Each DDL statement that mutates the catalog
 // fires exactly one event from this surface, raised on the DDL thread

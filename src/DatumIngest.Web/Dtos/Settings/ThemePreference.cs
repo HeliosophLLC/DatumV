@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Settings;
+namespace Heliosoph.DatumV.Web.Dtos.Settings;
 
 // Serialized as the camelCase string (System → "system" etc.) via the
 // global JsonStringEnumConverter configured in WebHostExtensions. NSwag

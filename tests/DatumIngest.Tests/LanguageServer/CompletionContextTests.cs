@@ -1,6 +1,6 @@
-namespace DatumIngest.Tests.LanguageServer;
+namespace Heliosoph.DatumV.Tests.LanguageServer;
 
-using DatumIngest.LanguageServer;
+using Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
 /// Tests for <see cref="CompletionContext"/> — cursor position classification

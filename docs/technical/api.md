@@ -1,14 +1,14 @@
 # Programmatic API
 
-DatumIngest exposes a C# API for embedding ingestion, query execution, schema resolution, and manifest generation into .NET applications.
+DatumV exposes a C# API for embedding ingestion, query execution, schema resolution, and manifest generation into .NET applications.
 
 ## Executing SQL
 
-The primary surface for running SQL against a `TableCatalog` is the ADO.NET-style trio in `DatumIngest.Data` — `InProcessDatumDbConnection`, `InProcessDatumDbCommand`, `InProcessDatumDbReader`. The connection is a thin handle over a catalog; the command holds SQL text plus a parameter collection; the reader streams rows.
+The primary surface for running SQL against a `TableCatalog` is the ADO.NET-style trio in `DatumV.Data` — `InProcessDatumDbConnection`, `InProcessDatumDbCommand`, `InProcessDatumDbReader`. The connection is a thin handle over a catalog; the command holds SQL text plus a parameter collection; the reader streams rows.
 
 ```csharp
-using DatumIngest.Catalog;
-using DatumIngest.Data;
+using DatumV.Catalog;
+using DatumV.Data;
 
 using InProcessDatumDbConnection connection = new(catalog);
 using InProcessDatumDbCommand command = connection.CreateCommand(

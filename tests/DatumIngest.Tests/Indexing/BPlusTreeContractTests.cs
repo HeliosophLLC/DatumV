@@ -1,8 +1,8 @@
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.BTree.Mutable;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.BTree.Mutable;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Shared correctness contract for any mutable B+Tree implementation:

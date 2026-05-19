@@ -29,7 +29,7 @@ export type DatasetEntrySnapshot = Snapshot<DatasetEntry>;
 export type DatasetVariantSnapshot = Snapshot<DatasetVariant>;
 
 // Canonical modality vocabulary, mirroring
-// DatumIngest.DatasetLibrary.ModalityRegistry on the backend. Display
+// Heliosoph.DatumV.DatasetLibrary.ModalityRegistry on the backend. Display
 // order matches HuggingFace's dataset facet — the sidebar renders
 // modalities in this order so authors familiar with HF land without
 // re-learning the layout. The actual label per modality lives in

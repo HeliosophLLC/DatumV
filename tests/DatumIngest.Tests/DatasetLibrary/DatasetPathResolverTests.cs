@@ -1,6 +1,6 @@
-using DatumIngest.DatasetLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
 
-namespace DatumIngest.Tests.DatasetLibrary;
+namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 
 /// <summary>
 /// Tests <see cref="VersionedDatasetPathResolver"/>: the split-root path
@@ -16,7 +16,7 @@ public sealed class DatasetPathResolverTests : IDisposable
     public DatasetPathResolverTests()
     {
         string scratch = Path.Combine(Path.GetTempPath(),
-            "DatumIngest.DatasetPathResolverTests", Guid.NewGuid().ToString("N"));
+            "Heliosoph.DatumV.DatasetPathResolverTests", Guid.NewGuid().ToString("N"));
         _cacheRoot = Path.Combine(scratch, "cache");
         _catalogRoot = Path.Combine(scratch, "catalog");
         Directory.CreateDirectory(_cacheRoot);

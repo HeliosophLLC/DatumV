@@ -5,17 +5,17 @@
 using System.Collections.Concurrent;
 using System.Text;
 
-using DatumIngest.Execution;
-using DatumIngest.Ingestion;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Pooling;
-using DatumIngest.Serialization;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Serialization;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.DatasetLibrary;
+namespace Heliosoph.DatumV.DatasetLibrary;
 
 internal sealed class DatasetDownloadService : IDatasetDownloadService
 {

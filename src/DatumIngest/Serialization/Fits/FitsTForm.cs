@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Fits;
+namespace Heliosoph.DatumV.Serialization.Fits;
 
 /// <summary>
 /// Parsed FITS <c>TFORMn</c> card describing one binary-table column's

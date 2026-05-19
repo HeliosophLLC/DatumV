@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.Sidecar;
+namespace Heliosoph.DatumV.DatumFile.Sidecar;
 
 /// <summary>
 /// Append-only sink for Large Binary Objects (images, byte arrays, future video, etc.)

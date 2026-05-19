@@ -1,6 +1,6 @@
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile;
+namespace Heliosoph.DatumV.DatumFile;
 
 /// <summary>
 /// Wire-format serialization for zone map min/max values. Zone maps hold

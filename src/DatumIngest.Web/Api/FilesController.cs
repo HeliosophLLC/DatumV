@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Web.Dtos.Files;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Web.Dtos.Files;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// Read-only endpoint backing the Project Explorer side panel. Returns one
@@ -23,7 +23,7 @@ namespace DatumIngest.Web.Api;
 /// query operators finalise batches correctly.
 /// </para>
 /// <para>
-/// Live updates reuse <see cref="DatumIngest.Web.Hubs.CatalogHub"/>: the
+/// Live updates reuse <see cref="Heliosoph.DatumV.Web.Hubs.CatalogHub"/>: the
 /// client refetches on Function/Procedure/Model/Table/Index events plus
 /// any <c>OnFilesChanged</c> push from the directory watcher.
 /// </para>

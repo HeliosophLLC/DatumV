@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Idx;
+namespace Heliosoph.DatumV.Serialization.Idx;
 
 /// <summary>
 /// Deserializes IDX binary files (MNIST, Fashion-MNIST, etc.) into

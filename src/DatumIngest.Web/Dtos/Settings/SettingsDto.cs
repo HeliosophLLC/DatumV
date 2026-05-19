@@ -1,6 +1,6 @@
-using DatumIngest.DatasetLibrary;
+using Heliosoph.DatumV.DatasetLibrary;
 
-namespace DatumIngest.Web.Dtos.Settings;
+namespace Heliosoph.DatumV.Web.Dtos.Settings;
 
 // Full settings document — what GET /api/settings returns. All fields
 // non-nullable; defaults are applied server-side when the file is missing or
@@ -10,13 +10,13 @@ public sealed record SettingsDto(
     ChromeStyle ChromeStyle,
     string Locale,
     // User-configured models directory. Empty string = use the resolution
-    // cascade ($DATUM_MODELS env var → %LOCALAPPDATA%/DatumIngest/models).
+    // cascade ($DATUM_MODELS env var → %LOCALAPPDATA%/Heliosoph.DatumV/models).
     // When non-empty, takes precedence over both. Read once at startup by
     // StartupSettingsLoader; runtime changes require a restart to apply.
     string ModelsDirectory,
     // User-configured raw datasets cache directory. Empty string = use
     // the resolution cascade ($DATUM_DATASETS env var →
-    // %LOCALAPPDATA%/DatumIngest/datasets-cache). When non-empty, takes
+    // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache). When non-empty, takes
     // precedence over both. Read once at startup by StartupSettingsLoader;
     // runtime changes require a restart to apply.
     string DatasetsDirectory,

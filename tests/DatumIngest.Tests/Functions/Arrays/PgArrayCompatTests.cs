@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Arrays;
 
 /// <summary>
 /// PostgreSQL-compatibility tests for the array introspection trio:

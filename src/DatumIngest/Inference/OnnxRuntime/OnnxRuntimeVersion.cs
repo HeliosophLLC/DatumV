@@ -2,18 +2,18 @@ using System.Reflection;
 
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// Statically-anchored helper that exposes the loaded
 /// <c>Microsoft.ML.OnnxRuntime</c> assembly's informational version.
-/// Used by <see cref="DatumIngest.Diagnostics.HostFingerprint"/> as one
+/// Used by <see cref="Heliosoph.DatumV.Diagnostics.HostFingerprint"/> as one
 /// of the four host-identity fields that key the calibration cache.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <strong>Why this exists separately from
-/// <see cref="DatumIngest.Diagnostics.HostFingerprint"/>.</strong> The
+/// <see cref="Heliosoph.DatumV.Diagnostics.HostFingerprint"/>.</strong> The
 /// Diagnostics project layer deliberately does NOT reference ONNX
 /// Runtime — it's a leaf used by code paths that don't need inference.
 /// Earlier versions of <c>HostFingerprint</c> looked up ORT

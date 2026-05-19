@@ -1,8 +1,8 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// End-to-end tests for <c>CREATE VIEW</c>: registration, planning-time
@@ -385,10 +385,10 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32, b String)");
         catalog.Plan("CREATE VIEW v AS SELECT a, b FROM t");
 
-        DatumIngest.Manifest.LanguageServerManifest manifest =
+        Heliosoph.DatumV.Manifest.LanguageServerManifest manifest =
             CatalogManifestBuilder.Build(catalog, catalog.Functions);
 
-        DatumIngest.Manifest.TableSchemaEntry? viewEntry =
+        Heliosoph.DatumV.Manifest.TableSchemaEntry? viewEntry =
             manifest.Tables.FirstOrDefault(t => t.Name == "public.v");
         Assert.NotNull(viewEntry);
         Assert.Equal(2, viewEntry!.Columns.Count);
@@ -416,8 +416,8 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32, b Int32)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
-        DatumIngest.Execution.QueryPlanException ex = await Assert
-            .ThrowsAsync<DatumIngest.Execution.QueryPlanException>(
+        Heliosoph.DatumV.Execution.QueryPlanException ex = await Assert
+            .ThrowsAsync<Heliosoph.DatumV.Execution.QueryPlanException>(
                 () => RunAsync(catalog, "UPDATE v SET a = 1"));
         Assert.Contains("is a view", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("UPDATE", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -452,12 +452,12 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE t (a Int32)");
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
 
-        DatumIngest.Manifest.LanguageServerManifest manifest =
+        Heliosoph.DatumV.Manifest.LanguageServerManifest manifest =
             CatalogManifestBuilder.Build(catalog, catalog.Functions);
 
-        DatumIngest.Manifest.TableSchemaEntry? viewEntry =
+        Heliosoph.DatumV.Manifest.TableSchemaEntry? viewEntry =
             manifest.Tables.FirstOrDefault(t => t.Name == "public.v");
-        DatumIngest.Manifest.TableSchemaEntry? tableEntry =
+        Heliosoph.DatumV.Manifest.TableSchemaEntry? tableEntry =
             manifest.Tables.FirstOrDefault(t => t.Name == "public.t");
 
         Assert.NotNull(viewEntry);
@@ -478,10 +478,10 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE TABLE wide (a Int32, b Int32, c String, d Float32, e Boolean)");
         catalog.Plan("CREATE VIEW narrow AS SELECT a, c FROM wide WHERE b > 0");
 
-        DatumIngest.Manifest.LanguageServerManifest manifest =
+        Heliosoph.DatumV.Manifest.LanguageServerManifest manifest =
             CatalogManifestBuilder.Build(catalog, catalog.Functions);
 
-        DatumIngest.Manifest.TableSchemaEntry? viewEntry =
+        Heliosoph.DatumV.Manifest.TableSchemaEntry? viewEntry =
             manifest.Tables.FirstOrDefault(t => t.Name == "public.narrow");
         Assert.NotNull(viewEntry);
         Assert.Equal(["a", "c"], viewEntry!.Columns.Select(c => c.Name));
@@ -497,10 +497,10 @@ public sealed class CreateViewTests : ServiceTestBase, IDisposable
         catalog.Plan("CREATE VIEW v AS SELECT a FROM t");
         catalog.Plan("DROP TABLE t");
 
-        DatumIngest.Manifest.LanguageServerManifest manifest =
+        Heliosoph.DatumV.Manifest.LanguageServerManifest manifest =
             CatalogManifestBuilder.Build(catalog, catalog.Functions);
 
-        DatumIngest.Manifest.TableSchemaEntry? viewEntry =
+        Heliosoph.DatumV.Manifest.TableSchemaEntry? viewEntry =
             manifest.Tables.FirstOrDefault(t => t.Name == "public.v");
         Assert.NotNull(viewEntry);
         Assert.Empty(viewEntry!.Columns);

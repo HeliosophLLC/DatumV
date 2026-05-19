@@ -1,11 +1,11 @@
 using System.Text.Json;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.File;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.File;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.File;
 
 /// <summary>
 /// Covers <c>read_string_list(path String) → Array&lt;String&gt;</c>: the

@@ -1,12 +1,12 @@
 using System.Text;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Indexing.BTree;
-using DatumIngest.Model;
-using DatumIngest.Indexing.Sorted;
-using DatumIngest.Indexing.Bloom;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Indexing.BTree;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Indexing.Sorted;
+using Heliosoph.DatumV.Indexing.Bloom;
 
-namespace DatumIngest.Tests.Indexing;
+namespace Heliosoph.DatumV.Tests.Indexing;
 
 /// <summary>
 /// Round-trip tests for the v5 unified index format. Writes a <see cref="SourceIndexSet"/>

@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing.Fts;
+namespace Heliosoph.DatumV.Indexing.Fts;
 
 /// <summary>
 /// Per-column inverted index for full-text search. Maps tokenized terms to

@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Tests.Models;
+namespace Heliosoph.DatumV.Tests.Models;
 
 /// <summary>
 /// Unit tests for <see cref="CurvePolicy"/>. Each test wires a fresh

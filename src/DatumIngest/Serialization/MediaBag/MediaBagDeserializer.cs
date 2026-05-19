@@ -1,9 +1,9 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.MediaBag;
+namespace Heliosoph.DatumV.Serialization.MediaBag;
 
 /// <summary>
 /// Container-agnostic deserializer for archives that are conceptually a
@@ -77,7 +77,7 @@ public sealed class MediaBagDeserializer : IFormatDeserializer
             {
                 throw new InvalidDataException(
                     $"Archive '{_reader.Source}' entry '{entry.FullName}' has an invalid " +
-                    $"uncompressed length ({byteLength}). DatumIngest expects well-formed media archives.");
+                    $"uncompressed length ({byteLength}). Heliosoph.DatumV expects well-formed media archives.");
             }
             int length = (int)byteLength;
 
@@ -194,14 +194,14 @@ public sealed class MediaBagDeserializer : IFormatDeserializer
         if (handler.MatchesMagic(bytes)) return;
         throw new InvalidDataException(
             $"Archive entry '{fullName}' is not a recognised {handler.Kind} payload. " +
-            $"DatumIngest treats archive sources as homogeneous media bags — every entry " +
+            $"Heliosoph.DatumV treats archive sources as homogeneous media bags — every entry " +
             $"must match the kind detected from the first entry ({handler.Kind}). Remove " +
             $"the off-kind file from the archive or split it into one archive per media kind.");
     }
 
     private static string BuildUnknownMediaError(string archive, string entryName) =>
         $"Archive '{archive}' first entry '{entryName}' does not match any supported media " +
-        $"magic (image: JPEG / PNG / WebP / GIF; audio: FLAC / WAV / OGG / MP3). DatumIngest " +
+        $"magic (image: JPEG / PNG / WebP / GIF; audio: FLAC / WAV / OGG / MP3). Heliosoph.DatumV " +
         $"treats archive sources as homogeneous media bags; mixed-content archives are not " +
         $"supported. Remove non-media files or ingest via a different source format.";
 }

@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions.Window;
+namespace Heliosoph.DatumV.Functions.Window;
 
 /// <summary>
 /// Implements <c>DENSE_RANK() OVER (...)</c>, which assigns a rank to each row

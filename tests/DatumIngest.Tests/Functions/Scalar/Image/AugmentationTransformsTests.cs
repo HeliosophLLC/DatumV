@@ -1,9 +1,9 @@
-using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar.Image;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Scalar.Image;
 
 using SkiaSharp;
 
-namespace DatumIngest.Tests.Functions.Scalar.Image;
+namespace Heliosoph.DatumV.Tests.Functions.Scalar.Image;
 
 /// <summary>
 /// Augmentation transforms: noise, resize_and_crop,

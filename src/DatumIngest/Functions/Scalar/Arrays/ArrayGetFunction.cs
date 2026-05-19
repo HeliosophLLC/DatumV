@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Arrays;
+namespace Heliosoph.DatumV.Functions.Scalar.Arrays;
 
 /// <summary>
 /// Reads a single element from a typed array by positional indices. The

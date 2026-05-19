@@ -1,13 +1,13 @@
 using System.Collections.Immutable;
 
-using DatumIngest.Execution;
-using DatumIngest.Functions.Scalar.Drawing;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Scalar.Drawing;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Audio;
+namespace Heliosoph.DatumV.Functions.Scalar.Audio;
 
 /// <summary>
 /// <c>audio_waveform_path(envelope Array&lt;Float32&gt;(bins, 2), width Int32, height Int32, fill Color) → Drawing</c>.

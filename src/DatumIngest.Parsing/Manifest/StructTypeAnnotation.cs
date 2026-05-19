@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Parser / inspector for the canonical <c>Struct&lt;name: Kind, …&gt;</c>

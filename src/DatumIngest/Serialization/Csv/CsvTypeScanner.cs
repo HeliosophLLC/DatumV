@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Serialization.Csv;
+namespace Heliosoph.DatumV.Serialization.Csv;
 
 /// <summary>
 /// First pass of the two-pass CSV ingestion pipeline. Reads every row of the file

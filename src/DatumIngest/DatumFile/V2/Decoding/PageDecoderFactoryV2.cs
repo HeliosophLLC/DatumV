@@ -1,7 +1,7 @@
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Decoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Decoding;
 
 /// <summary>
 /// Picks the right <see cref="IPageDecoderV2"/> for a column based on its

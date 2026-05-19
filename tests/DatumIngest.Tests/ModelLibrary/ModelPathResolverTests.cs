@@ -1,7 +1,7 @@
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Tests.ModelLibrary;
+namespace Heliosoph.DatumV.Tests.ModelLibrary;
 
 /// <summary>
 /// Tests the path-resolver substrate: <see cref="VersionedModelPathResolver"/>
@@ -16,7 +16,7 @@ public sealed class ModelPathResolverTests : IDisposable
 
     public ModelPathResolverTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "DatumIngest.PathResolverTests", Guid.NewGuid().ToString("N"));
+        _root = Path.Combine(Path.GetTempPath(), "Heliosoph.DatumV.PathResolverTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
     }
 

@@ -1,14 +1,14 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.DatasetLibrary;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Pooling;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Catalog.Providers;
+namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
 /// Verifies <see cref="DatasetsTableProvider"/>'s `system.datasets`
@@ -238,7 +238,7 @@ public sealed class DatasetsTableProviderTests : ServiceTestBase, IDisposable
             logger: NullLogger<DatasetSchemaBinder>.Instance);
     }
 
-    private sealed class StubManifestStore : DatumIngest.DatasetLibrary.IManifestStore
+    private sealed class StubManifestStore : Heliosoph.DatumV.DatasetLibrary.IManifestStore
     {
         public StubManifestStore(DatasetCatalogManifest manifest) { Manifest = manifest; }
         public DatasetCatalogManifest Manifest { get; }

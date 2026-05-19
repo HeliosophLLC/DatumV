@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Diffusion;
+namespace Heliosoph.DatumV.Functions.Scalar.Diffusion;
 
 /// <summary>
 /// <c>sample_normal(count Int32) → Float32[]</c>. Draws <c>count</c> independent

@@ -1,13 +1,13 @@
 using System.Text.Json;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Functions.Json;
-using DatumIngest.Functions.TableValued;
-using DatumIngest.Model;
-using DatumIngest.Tests.Serialization.Fits;
-using ExecutionContext = DatumIngest.Execution.ExecutionContext;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Json;
+using Heliosoph.DatumV.Functions.TableValued;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Tests.Serialization.Fits;
+using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
-namespace DatumIngest.Tests.Functions.TableValued;
+namespace Heliosoph.DatumV.Tests.Functions.TableValued;
 
 /// <summary>
 /// <c>open_fits_hdus(path)</c> table-valued function: opens a FITS file and

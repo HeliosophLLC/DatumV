@@ -1,8 +1,8 @@
-using DatumIngest.Pooling;
-using DatumIngest.Ingestion;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Ingestion;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Ingestion;
+namespace Heliosoph.DatumV.Tests.Ingestion;
 
 public sealed class SchemaDetectorTests : ServiceTestBase
 {

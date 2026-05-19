@@ -1,7 +1,7 @@
-namespace DatumIngest.Statistics;
+namespace Heliosoph.DatumV.Statistics;
 
-using DatumIngest.Model;
-using DatumIngest.Statistics.Accumulators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics.Accumulators;
 
 /// <summary>
 /// Manages per-column statistic accumulators and collects statistics from rows.

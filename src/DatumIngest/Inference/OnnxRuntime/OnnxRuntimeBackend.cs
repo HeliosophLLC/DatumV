@@ -1,7 +1,7 @@
-using DatumIngest.Models.Llama;
+using Heliosoph.DatumV.Models.Llama;
 using Microsoft.ML.OnnxRuntime;
 
-namespace DatumIngest.Inference.OnnxRuntime;
+namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 
 /// <summary>
 /// <see cref="IInferenceBackend"/> implementation backed by Microsoft's

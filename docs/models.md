@@ -4,7 +4,7 @@ title: Models
 
 # Model Zoo Reference
 
-DatumIngest invokes machine-learning models through SQL functions in the
+DatumV invokes machine-learning models through SQL functions in the
 `models.X` namespace — `models.llama31_8b(prompt)`,
 `models.yolox_s(image)`, `models.florence2_caption(image)`. This page
 documents what's registered out of the box, where each weights file
@@ -42,13 +42,13 @@ ORDER BY category, name;
 
 ### Models directory
 
-DatumIngest reads model files from a directory configured in this
+DatumV reads model files from a directory configured in this
 order:
 
 1. `--models <path>` flag on `datum-shell`
 2. `DATUM_MODELS` environment variable
-3. Per-user fallback (`%LOCALAPPDATA%\DatumIngest\models` on Windows,
-   `~/.local/share/DatumIngest/models` on Linux/macOS)
+3. Per-user fallback (`%LOCALAPPDATA%\DatumV\models` on Windows,
+   `~/.local/share/DatumV/models` on Linux/macOS)
 
 The recommended setup is to pick a directory with sufficient free
 space and set the env var once:
@@ -108,12 +108,12 @@ the following, in order, surfacing each step inline on the model
 card:
 
 1. **Download `uv`** from `github.com/astral-sh/uv/releases` into
-   `%LOCALAPPDATA%\DatumIngest\uv\`. One-time, ~15 MB.
+   `%LOCALAPPDATA%\DatumV\uv\`. One-time, ~15 MB.
 2. **Install the requested CPython** (e.g. 3.11) via
-   `uv python install` into `%LOCALAPPDATA%\DatumIngest\python\`.
+   `uv python install` into `%LOCALAPPDATA%\DatumV\python\`.
    One-time per major.minor version, ~30-60 MB.
 3. **Create a per-model venv** at
-   `%LOCALAPPDATA%\DatumIngest\venvs\<catalog-id>\` and `uv pip install`
+   `%LOCALAPPDATA%\DatumV\venvs\<catalog-id>\` and `uv pip install`
    the model's declared requirements (`torch`, `transformers`, etc.).
    uv hardlinks wheels from its global cache across venvs, so the
    second Python model installs in seconds.
@@ -124,7 +124,7 @@ card:
    indirection.
 
 The engine never modifies your `PATH`, never touches your system
-Python, and writes only to `%LOCALAPPDATA%\DatumIngest\` and
+Python, and writes only to `%LOCALAPPDATA%\DatumV\` and
 `$DATUM_MODELS\`. Uninstall is a directory delete.
 
 To see current state from SQL:
@@ -154,7 +154,7 @@ models/
     creativeml-openrail-m.md
     creativeml-openrail-pp-m.md
     llama-3.1-community.md
-  upload-plan.json          ← uploads from local exports to huggingface.co/Heliosoph
+  upload-plan.json          ← uploads from local exports to huggingface.co/DatumV
   upload-readmes/           ← model-card templates for each upload
 ```
 
@@ -202,7 +202,7 @@ acceptance works offline.
   "hardware": { "minRamMb": 2048, "minVramMb": 4096, "preferred": "gpu" },
   "source": {
     "type": "huggingface",
-    "repo": "Heliosoph/absolute-reality-hyper-onnx",
+    "repo": "DatumV/absolute-reality-hyper-onnx",
     "revision": "57298a3ec4a333002f9b5fc127e0cc57fbe4d338",
     "include": ["**/*"]
   },
@@ -328,7 +328,7 @@ Error codes on `install`:
 ### Module layout
 
 The C# implementation lives under
-[`DatumIngest.Web/ModelLibrary/`](../src/DatumIngest.Web/ModelLibrary/):
+[`DatumV.Web/ModelLibrary/`](../src/DatumV.Web/ModelLibrary/):
 
 | File | Role |
 |------|------|
@@ -344,9 +344,9 @@ The C# implementation lives under
 | `ModelDownloadEvents.cs` | Records broadcast over the hub. |
 
 The controller lives at
-[`DatumIngest.Web/Api/ModelCatalogController.cs`](../src/DatumIngest.Web/Api/ModelCatalogController.cs).
+[`DatumV.Web/Api/ModelCatalogController.cs`](../src/DatumV.Web/Api/ModelCatalogController.cs).
 Hub events are declared on
-[`IStreamHubClient`](../src/DatumIngest.Web/Hubs/IStreamHubClient.cs).
+[`IStreamHubClient`](../src/DatumV.Web/Hubs/IStreamHubClient.cs).
 
 Manifest path resolution looks for `models/catalog.json` first under
 `AppContext.BaseDirectory` (ship layout) and then walks up parent
@@ -354,9 +354,9 @@ directories (dev layout, where the working dir is the project folder).
 
 ### Re-hosting workflow
 
-Models that DatumIngest converts itself (the SD Hyper variants, the
+Models that DatumV converts itself (the SD Hyper variants, the
 Florence quantizations, ViT-GPT2, YOLOX bundle, Kokoro voices) live
-under `huggingface.co/Heliosoph/*`. The upload plan and per-model
+under `huggingface.co/DatumV/*`. The upload plan and per-model
 README templates are tracked in
 [`models/upload-plan.json`](../models/upload-plan.json) and
 [`models/upload-readmes/`](../models/upload-readmes/).
@@ -368,7 +368,7 @@ For each upload:
 2. Drop the upstream `LICENSE` files into the same folder (sources are
    listed in the upload plan's `licenseFiles` array).
 3. `huggingface-cli login` (one-time).
-4. `huggingface-cli upload Heliosoph/<repo-suffix> <localFolder> --repo-type model`.
+4. `huggingface-cli upload DatumV/<repo-suffix> <localFolder> --repo-type model`.
 5. Copy the resulting commit sha into the model's `source.revision` in
    `catalog.json` and remove its `"placeholder": true` flag.
 
@@ -379,7 +379,7 @@ For each upload:
    the canonical license text under `models/licenses/<id>.{txt,md}`.
 3. Add a model entry under `models`. Reference the license by ID in
    `licenseIds`. Fill in `hardware` based on the upstream model card.
-4. If the source repo doesn't exist yet (Heliosoph upload pending),
+4. If the source repo doesn't exist yet (DatumV upload pending),
    mark the entry `"placeholder": true`. The installer will refuse to
    download it until the flag is removed.
 The manifest is loaded once at app startup. Restart the host process
@@ -394,7 +394,7 @@ after editing `catalog.json`.
   `IMPLEMENTS LabeledImageClassifier`.
 - **License**: Apache-2.0 (Google AI Research / ONNX Model Zoo)
 - **Source**: [github.com/onnx/models](https://github.com/onnx/models/tree/main/validated/vision/classification/mobilenet)
-  — re-hosted on HuggingFace at `Heliosoph/mobilenetv2-onnx` with the
+  — re-hosted on HuggingFace at `DatumV/mobilenetv2-onnx` with the
   ImageNet-1k label JSON alongside the ONNX file.
 - **Install**: catalog id `mobilenetv2`. Installs through the Model
   Manager — the downloader fetches `mobilenetv2-12.onnx` +
@@ -416,7 +416,7 @@ declare `IMPLEMENTS LabeledObjectDetector RETURNS Array<LabeledDetection>`
 
 - **License**: Apache-2.0 (Megvii)
 - **Source**: [github.com/Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
-  — re-hosted on HuggingFace at `Heliosoph/yolox-onnx` with
+  — re-hosted on HuggingFace at `DatumV/yolox-onnx` with
   `coco-classes.json` bundled alongside the ONNX files.
 - **Install**: catalog ids `yolox-nano`, `yolox-tiny`, `yolox-s`,
   `yolox-m`, `yolox-l`, `yolox-x`, `yolox-darknet`. Each catalog entry
@@ -464,7 +464,7 @@ two-stage OCR pipeline.
   original-image pixel coordinates. `IMPLEMENTS TextDetector`.
 - **License**: Apache-2.0 (PaddlePaddle)
 - **Source**: [github.com/PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
-  — re-hosted on HuggingFace at `Heliosoph/paddleocr-v4-det-onnx`.
+  — re-hosted on HuggingFace at `DatumV/paddleocr-v4-det-onnx`.
 - **Install**: catalog id `paddleocr-v4-det`. The catalog entry's
   `installSql` points at
   [`models/sql/paddleocr-v4-det.sql`](../models/sql/paddleocr-v4-det.sql);
@@ -597,7 +597,7 @@ declare `IMPLEMENTS BackgroundRemover RETURNS Image`.
   uses the mask as an alpha channel.
 - **License**: Apache-2.0 (Xuebin Qin et al.)
 - **Source**: [github.com/xuebinqin/U-2-Net](https://github.com/xuebinqin/U-2-Net)
-  — re-hosted on HuggingFace at `Heliosoph/u2net-onnx` (both variants
+  — re-hosted on HuggingFace at `DatumV/u2net-onnx` (both variants
   live in the same repo, differentiated by file include).
 - **Install**: catalog ids `u2net` and `u2netp`. Each entry's `installSql`
   points at [`models/sql/u2net.sql`](../models/sql/u2net.sql) /
@@ -775,8 +775,8 @@ resolution, channel order, and normalisation stats. Both declare
   internal working size (256 / 384) doesn't leak through.
 - **License**: MIT (Intel ISL)
 - **Source**: [github.com/isl-org/MiDaS](https://github.com/isl-org/MiDaS)
-  — re-hosted on HuggingFace at `Heliosoph/midas-small-onnx` and
-  `Heliosoph/dpt-large-onnx`.
+  — re-hosted on HuggingFace at `DatumV/midas-small-onnx` and
+  `DatumV/dpt-large-onnx`.
 - **Install**: catalog ids `midas-small` and `dpt-large`. Each entry's
   `installSql` points at
   [`models/sql/midas-small.sql`](../models/sql/midas-small.sql) /
@@ -1006,7 +1006,7 @@ one folder and one tokenizer:
     via ONNX external-data because total exceeds the 2 GB ONNX limit)
   - `vae_decoder/model.onnx` (~200 MB) — latent → RGB
   - `vae_encoder/model.onnx` (~140 MB) — only used by img2img; not used by
-    DatumIngest's text-to-image path
+    DatumV's text-to-image path
   - `tokenizer/{vocab.json, merges.txt, special_tokens_map.json, tokenizer_config.json}`
   - `scheduler/scheduler_config.json`
   - `model_index.json`
@@ -1329,7 +1329,7 @@ returns the transcription as `String`.
 Some models are difficult or impractical to convert from PyTorch to
 ONNX — multi-stage pipelines with autoregressive Python control flow
 (Bark), or research-grade libraries that don't ship export tooling
-(XTTS-v2, StyleTTS2). DatumIngest runs these through a long-lived
+(XTTS-v2, StyleTTS2). DatumV runs these through a long-lived
 Python subprocess: the C# side hands inputs over via NDJSON on
 stdio, the Python worker uses the upstream library directly, and the
 results come back as bytes.
@@ -1353,7 +1353,7 @@ there's no separate cache to manage.
   `BarkModel`.
 - **Files (catalog tracks)**: HuggingFace repo `suno/bark-small`
   downloaded into `$DATUM_MODELS\bark-small\`. Venv lives separately
-  at `%LOCALAPPDATA%\DatumIngest\venvs\bark-small\`.
+  at `%LOCALAPPDATA%\DatumV\venvs\bark-small\`.
 - **Setup**: click Install on the model card. The engine auto-provisions
   the venv (`torch`, `transformers`, `scipy`, `numpy`) and downloads
   weights (~1.1 GB) the same way it does for ONNX models. CUDA torch
@@ -1554,19 +1554,19 @@ bridge models.
 1. Pick a backend:
    - **ONNX** — Inherits from `OnnxModel`.
    - **Python bridge** — Inherits from `PythonBackedModel`, ships a
-     worker `.py` in `src/DatumIngest/Models/Python/scripts/`, gets a
+     worker `.py` in `src/DatumV/Models/Python/scripts/`, gets a
      `setup-X-venv.ps1` script under `scripts/`, and reports
      `status=bridge` in `system_models`.
-2. Add a model class to `src/DatumIngest/Models/Onnx/` (or `Python/`).
+2. Add a model class to `src/DatumV/Models/Onnx/` (or `Python/`).
    For multi-session pipelines (ViT-GPT2 historically) override
    `InferBatchAsync` directly.
 3. Add a register helper to
-   [BuiltinModels.cs](../src/DatumIngest/Models/BuiltinModels.cs).
+   [BuiltinModels.cs](../src/DatumV/Models/BuiltinModels.cs).
    Populate the full metadata: `DisplayName`, `Parameters`, `License`,
    `LicenseHolder`, `SourceUrl`, `Category`, `Modalities`, `Files`.
 4. Wire into `AttachStandardModels` so it ships with the default
    catalog.
-5. Add a smoke test under `tests/DatumIngest.Tests/Models/`. Self-skip
+5. Add a smoke test under `tests/DatumV.Tests/Models/`. Self-skip
    when the file isn't available so CI machines don't fail.
 6. Add a setup script if Python-backed: `scripts/setup-X-venv.ps1`
    following the Bark / Kokoro template.

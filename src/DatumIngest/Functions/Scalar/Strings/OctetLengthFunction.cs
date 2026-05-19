@@ -1,8 +1,8 @@
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Strings;
+namespace Heliosoph.DatumV.Functions.Scalar.Strings;
 
 /// <summary>
 /// PostgreSQL <c>octet_length(text) → Int32</c>: number of UTF-8 bytes in

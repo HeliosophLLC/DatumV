@@ -2,10 +2,10 @@ using System.Collections.Immutable;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Drawing;
+namespace Heliosoph.DatumV.Functions.Scalar.Drawing;
 
 /// <summary>
-/// Discriminated payload tree for a <see cref="DatumIngest.Model.DataKind.Drawing"/>
+/// Discriminated payload tree for a <see cref="Heliosoph.DatumV.Model.DataKind.Drawing"/>
 /// value. The base type is abstract; concrete variants
 /// (<see cref="ShapeDrawing"/>, <see cref="TextDrawing"/>,
 /// <see cref="ImageStampDrawing"/>, <see cref="GroupDrawing"/>,

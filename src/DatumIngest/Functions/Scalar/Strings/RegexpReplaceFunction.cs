@@ -2,11 +2,11 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Strings;
+namespace Heliosoph.DatumV.Functions.Scalar.Strings;
 
 /// <summary>
 /// PostgreSQL <c>regexp_replace</c>. Two overload shapes:

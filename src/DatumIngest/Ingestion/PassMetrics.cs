@@ -1,4 +1,4 @@
-namespace DatumIngest.Ingestion;
+namespace Heliosoph.DatumV.Ingestion;
 
 /// <summary>
 /// Deterministic per-pass metrics captured for both the optional type-scan pass

@@ -1,10 +1,10 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Models.Calibration;
+namespace Heliosoph.DatumV.Models.Calibration;
 
 /// <summary>
 /// Bridge between query operators and <see cref="CalibrationCoordinator"/>.
@@ -62,7 +62,7 @@ public static class CalibrationTrigger
     /// <param name="evaluator">Configured <see cref="ExpressionEvaluator"/> for input evaluation.</param>
     /// <param name="cancellationToken">Caller's cancellation token. Only affects this caller's wait — the coordinator's internal ramp runs to completion regardless.</param>
     public static async Task EnsureCalibratedAsync(
-        DatumIngest.Execution.ExecutionContext context,
+        Heliosoph.DatumV.Execution.ExecutionContext context,
         string modelName,
         IReadOnlyList<Expression> inputExpressions,
         IReadOnlyList<Expression> optionalExpressions,

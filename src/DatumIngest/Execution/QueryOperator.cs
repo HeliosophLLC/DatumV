@@ -1,10 +1,10 @@
 using System.Diagnostics;
 
-using DatumIngest.Diagnostics;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// A node in the query execution plan tree. Each operator produces

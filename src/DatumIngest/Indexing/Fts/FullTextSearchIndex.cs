@@ -1,6 +1,6 @@
-using DatumIngest.Indexing.BTree.MutableBytes;
+using Heliosoph.DatumV.Indexing.BTree.MutableBytes;
 
-namespace DatumIngest.Indexing.Fts;
+namespace Heliosoph.DatumV.Indexing.Fts;
 
 /// <summary>
 /// Shape-A FTS index: a thin <see cref="ITextSearchIndex"/> facade over a

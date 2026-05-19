@@ -2,8 +2,8 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models.Python;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.DependencyInjection;

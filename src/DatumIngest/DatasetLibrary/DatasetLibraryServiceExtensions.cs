@@ -2,8 +2,8 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
-using DatumIngest.Catalog;
-using DatumIngest.DatasetLibrary;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.DatasetLibrary;
 
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -12,9 +12,9 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>
 /// DI registration for the dataset library: catalog manifest reader, path
 /// resolver, and the download + install pipeline. Reuses the model-side
-/// <see cref="DatumIngest.ModelLibrary.IModelSourceClient"/> family (those
+/// <see cref="Heliosoph.DatumV.ModelLibrary.IModelSourceClient"/> family (those
 /// clients are caller-agnostic — they download files, period) and the
-/// model-side <see cref="DatumIngest.ModelLibrary.ILicenseAcceptanceService"/>
+/// model-side <see cref="Heliosoph.DatumV.ModelLibrary.ILicenseAcceptanceService"/>
 /// so license acceptance transfers across surfaces.
 /// </summary>
 public static class DatasetLibraryServiceExtensions
@@ -55,7 +55,7 @@ public static class DatasetLibraryServiceExtensions
         // Catalog substrate: one DatasetSchemaCatalog instance owns every
         // schema the manifest declares; the binder swaps the per-table
         // snapshot atomically on boot and after every install/uninstall.
-        // The hosting layer (e.g. DatumIngest.Web's
+        // The hosting layer (e.g. Heliosoph.DatumV.Web's
         // DatasetCatalogInitializationService) mounts the catalog into
         // TableCatalog.Backends once both have constructed.
         services.AddSingleton(sp =>
@@ -68,8 +68,8 @@ public static class DatasetLibraryServiceExtensions
             }
             // Reuse the hosting TableCatalog's SidecarRegistry so dataset reads
             // share the storeId space with every other catalog backend.
-            DatumIngest.Catalog.TableCatalog catalog =
-                sp.GetRequiredService<DatumIngest.Catalog.TableCatalog>();
+            Heliosoph.DatumV.Catalog.TableCatalog catalog =
+                sp.GetRequiredService<Heliosoph.DatumV.Catalog.TableCatalog>();
             return new DatasetSchemaCatalog(schemas, catalog.SidecarRegistry);
         });
         services.AddSingleton<DatasetSchemaBinder>();

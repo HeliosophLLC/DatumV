@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Model;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.DatumFile.V2.Encoding;
+namespace Heliosoph.DatumV.DatumFile.V2.Encoding;
 
 /// <summary>
 /// V2 variable-length encoder. Each row gets a 16-byte slot whose

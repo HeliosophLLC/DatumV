@@ -1,8 +1,8 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Execution;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end tests for PG-style named function-call arguments.
@@ -115,7 +115,7 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
 
     /// <summary>
     /// Procedural UDFs reach the runtime via the synthetic descriptor
-    /// registered by <see cref="DatumIngest.Catalog.RoutineRegistrar"/>;
+    /// registered by <see cref="Heliosoph.DatumV.Catalog.RoutineRegistrar"/>;
     /// the permuter must recognise that descriptor and reorder named
     /// args accordingly.
     /// </summary>

@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Benchmarks;
+namespace Heliosoph.DatumV.Benchmarks;
 
 /// <summary>
 /// Generates synthetic datasets of configurable size for benchmarking.

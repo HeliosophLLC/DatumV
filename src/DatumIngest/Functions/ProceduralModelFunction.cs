@@ -1,13 +1,13 @@
 using System.Diagnostics;
 
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Runtime adapter that lets a SQL-defined model (a <c>CREATE MODEL …
@@ -640,7 +640,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
             {
                 scope.Declare(kv.Key, kv.Value[row]);
             }
-            using DatumIngest.Execution.ExecutionContext rowContext = frame.Context!.Derive(
+            using Heliosoph.DatumV.Execution.ExecutionContext rowContext = frame.Context!.Derive(
                 store: store,
                 variableScope: scope,
                 variableStore: store);
@@ -676,7 +676,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
 
         await BindParametersAsync(arguments, frame, variableStore, scope, cancellationToken).ConfigureAwait(false);
 
-        using DatumIngest.Execution.ExecutionContext bodyContext = frame.Context!.Derive(
+        using Heliosoph.DatumV.Execution.ExecutionContext bodyContext = frame.Context!.Derive(
             store: variableStore,
             variableScope: scope,
             variableStore: variableStore);
@@ -774,7 +774,7 @@ public sealed class ProceduralModelFunction : IScalarFunction
         // Child context for parameter binding — same Store / VariableScope /
         // VariableStore as the body's bodyContext, built once here so the
         // optional check + param evaluators below share it.
-        using DatumIngest.Execution.ExecutionContext paramContext = frame.Context!.Derive(
+        using Heliosoph.DatumV.Execution.ExecutionContext paramContext = frame.Context!.Derive(
             store: variableStore,
             variableScope: scope,
             variableStore: variableStore);

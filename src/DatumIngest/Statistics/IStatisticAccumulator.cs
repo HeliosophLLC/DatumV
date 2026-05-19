@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics;
+namespace Heliosoph.DatumV.Statistics;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Interface for pluggable statistic accumulators that process data values incrementally.

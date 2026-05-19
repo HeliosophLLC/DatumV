@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Thrown when a format deserializer encounters malformed or unexpected data.

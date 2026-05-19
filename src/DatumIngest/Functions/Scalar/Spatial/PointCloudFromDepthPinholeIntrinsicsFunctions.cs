@@ -1,14 +1,14 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Execution;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
 using SkiaSharp;
 
-namespace DatumIngest.Functions.Scalar.Spatial;
+namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 
 /// <summary>
 /// <c>point_cloud_from_depth_pinhole_intrinsics(color Image, depth Image|Float32[], intrinsics Float32[]) → PointCloud</c>.

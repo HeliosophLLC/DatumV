@@ -1,12 +1,12 @@
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.Web.ModelLibrary;
+namespace Heliosoph.DatumV.Web.ModelLibrary;
 
 // Web-host implementation of IModelInstaller. Reads the .sql file named
 // by CatalogVersion.InstallSql (resolved against the manifest directory)

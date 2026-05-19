@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Inference;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Exercises the v6 catalog file's two model-row shapes:

@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Backward scanner for the last valid <c>FMTD</c> tail in a torn

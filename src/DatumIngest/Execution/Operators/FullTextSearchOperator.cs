@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Fts;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Fts;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Streams rows whose indexed text column matches every token of a query
@@ -19,7 +19,7 @@ namespace DatumIngest.Execution.Operators;
 /// tokenization through the index's analyzer. No scoring, no top-k —
 /// matching rows stream out in source-row order. An empty query (all
 /// stop words, or only short tokens) yields zero rows; the
-/// <see cref="DatumIngest.Functions.Scalar.Fulltext.TsqueryMatchFunction"/>
+/// <see cref="Heliosoph.DatumV.Functions.Scalar.Fulltext.TsqueryMatchFunction"/>
 /// equivalent returns true for any haystack, so the planner is
 /// responsible for not injecting this operator for an empty-token
 /// query.</para>

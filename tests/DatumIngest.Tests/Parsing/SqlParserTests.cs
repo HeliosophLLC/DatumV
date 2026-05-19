@@ -1,8 +1,8 @@
-﻿using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+﻿using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Parsing;
+namespace Heliosoph.DatumV.Tests.Parsing;
 
 public class SqlParserTests : ServiceTestBase
 {
@@ -2284,7 +2284,7 @@ public class SqlParserTests : ServiceTestBase
     /// with the WITHIN GROUP order-by items kept on
     /// <see cref="FunctionCallExpression.WithinGroupOrderBy"/>; the argument
     /// list stays empty (the planner reads
-    /// <see cref="DatumIngest.Functions.WithinGroupSemantics"/> on
+    /// <see cref="Heliosoph.DatumV.Functions.WithinGroupSemantics"/> on
     /// <c>MODE</c> and prepends the data column at planning time).
     /// </summary>
     [Fact]
@@ -2345,7 +2345,7 @@ public class SqlParserTests : ServiceTestBase
     /// <c>PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY col)</c> keeps the
     /// fraction in the argument list and the ORDER BY column on
     /// <see cref="FunctionCallExpression.WithinGroupOrderBy"/>. The planner
-    /// inspects <see cref="DatumIngest.Functions.WithinGroupSemantics.OrderedSet"/>
+    /// inspects <see cref="Heliosoph.DatumV.Functions.WithinGroupSemantics.OrderedSet"/>
     /// on PERCENTILE_DISC and prepends the data column to args before
     /// dispatch, producing the two-arg contract <c>(expression, fraction)</c>
     /// the accumulator expects.

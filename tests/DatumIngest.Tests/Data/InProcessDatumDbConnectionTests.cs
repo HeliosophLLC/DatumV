@@ -1,9 +1,9 @@
-using DatumIngest.Catalog;
-using DatumIngest.Data;
-using DatumIngest.Model;
-using DatumIngest.Tests.Data;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Tests.Data;
 
-namespace DatumIngest.Tests.Data;
+namespace Heliosoph.DatumV.Tests.Data;
 
 /// <summary>
 /// End-to-end tests for the ADO.NET-style in-process surface

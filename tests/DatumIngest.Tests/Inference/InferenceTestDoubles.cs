@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
 
-using DatumIngest.Inference;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Inference;
+namespace Heliosoph.DatumV.Tests.Inference;
 
 /// <summary>
 /// Heap-backed <see cref="TensorBag"/> for unit-testing inference helpers

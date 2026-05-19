@@ -2,15 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyName>DatumIngest.Parsing</AssemblyName>
-    <RootNamespace>DatumIngest.Parsing</RootNamespace>
+    <PackageId>Heliosoph.DatumV.Parsing</PackageId>
+    <RootNamespace>Heliosoph.DatumV.Parsing</RootNamespace>
+    <AssemblyName>Heliosoph.DatumV.Parsing</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>true</IsTrimmable>
     <IsPackable>true</IsPackable>
-    <PackageId>DatumIngest.Parsing</PackageId>
-    <Description>SQL parser, tokenizer, and AST types for the DatumIngest query dialect. Lightweight — no data-provider dependencies.</Description>
+    <Description>SQL parser, tokenizer, and AST types for the DatumV query dialect. Lightweight — no data-provider dependencies.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
@@ -21,7 +21,7 @@
   </ItemGroup>
   
   <ItemGroup>
-    <InternalsVisibleTo Include="DatumIngest.Tests" />
+    <InternalsVisibleTo Include="Heliosoph.DatumV.Tests" />
   </ItemGroup>
 
   <ItemGroup>

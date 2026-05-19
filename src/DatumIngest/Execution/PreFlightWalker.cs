@@ -1,11 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 
-using DatumIngest.Functions;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Parse-time pre-flight pass. Walks every <see cref="FunctionCallExpression"/>

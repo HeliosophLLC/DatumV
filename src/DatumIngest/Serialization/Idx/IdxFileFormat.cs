@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using DatumIngest.Catalog;
+using Heliosoph.DatumV.Catalog;
 
-namespace DatumIngest.Serialization.Idx;
+namespace Heliosoph.DatumV.Serialization.Idx;
 
 /// <summary>
 /// Format handler for MNIST-style IDX binary files. Matches <c>.idx</c> extension,

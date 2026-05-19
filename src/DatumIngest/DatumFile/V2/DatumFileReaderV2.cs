@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using DatumIngest.DatumFile.V2.Decoding;
+using Heliosoph.DatumV.DatumFile.V2.Decoding;
 
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// V2 <c>.datum</c> reader. Opens a v2 file, validates the header/tail
@@ -366,8 +366,8 @@ public sealed class DatumFileReaderV2 : IDisposable
         int columnIndex,
         int pageIndex,
         byte sidecarStoreId = 0,
-        DatumIngest.DatumFile.Sidecar.IBlobSource? sidecarSource = null,
-        DatumIngest.Model.IValueStore? eagerStore = null,
+        Heliosoph.DatumV.DatumFile.Sidecar.IBlobSource? sidecarSource = null,
+        Heliosoph.DatumV.Model.IValueStore? eagerStore = null,
         ushort columnRuntimeStructTypeId = 0)
     {
         ColumnFooterV2 column = Footer.Columns[columnIndex];

@@ -1,8 +1,8 @@
-namespace DatumIngest.Tests.Manifest.Insights;
+namespace Heliosoph.DatumV.Tests.Manifest.Insights;
 
-using DatumIngest.Manifest;
-using DatumIngest.Manifest.Insights;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Manifest.Insights;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Tests that <see cref="DatasetInsight"/> and related types survive JSON round-trip

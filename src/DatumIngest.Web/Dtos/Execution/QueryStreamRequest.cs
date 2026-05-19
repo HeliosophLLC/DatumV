@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace DatumIngest.Web.Dtos.Execution;
+namespace Heliosoph.DatumV.Web.Dtos.Execution;
 
 /// <summary>
 /// Request payload for <c>POST /api/query/stream</c>. The endpoint returns
@@ -28,7 +28,7 @@ public sealed record QueryStreamRequest(
 
 /// <summary>
 /// Trace-scope JSON envelope. Mirror of the server-side
-/// <see cref="DatumIngest.Web.Execution.TraceOptions"/>.
+/// <see cref="Heliosoph.DatumV.Web.Execution.TraceOptions"/>.
 /// </summary>
 /// <param name="Operators">When true, captures operator-pull spans.</param>
 /// <param name="Scalars">When true, additionally captures per-scalar-call dispatches.</param>

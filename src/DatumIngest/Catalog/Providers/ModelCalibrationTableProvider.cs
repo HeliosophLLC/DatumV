@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
 
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Virtual table that exposes per-batch calibration curve entries from

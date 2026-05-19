@@ -1,10 +1,10 @@
 using Tapper;
 
-namespace DatumIngest.Web.Hubs;
+namespace Heliosoph.DatumV.Web.Hubs;
 
 /// <summary>
 /// SignalR push payloads for
-/// <see cref="DatumIngest.Models.Calibration.ICalibrationObserver"/>
+/// <see cref="Heliosoph.DatumV.Models.Calibration.ICalibrationObserver"/>
 /// ramp lifecycle events. Modelled as four separate records (started,
 /// step, halted, completed) so the client can pattern-match on the
 /// receiver method name, mirroring the engine's interface shape and
@@ -23,7 +23,7 @@ public sealed record CalibrationRampStepEvent(
     double DispatchMs);
 
 /// <summary>
-/// Mirror of <see cref="DatumIngest.Models.Calibration.HaltReason"/> in
+/// Mirror of <see cref="Heliosoph.DatumV.Models.Calibration.HaltReason"/> in
 /// the web DTO layer.
 /// </summary>
 [TranspilationSource]

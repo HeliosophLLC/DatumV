@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// End-to-end SQL tests pinning the Type Registry contract at the query boundary.
@@ -88,8 +88,8 @@ public sealed class TypeRegistryIntegrationTests : ServiceTestBase
 
         // Build a context so we can inspect its registry afterward. Copy the
         // ExecuteQueryAsync flow to retain access to the context.
-        var query = DatumIngest.Parsing.SqlParser.Parse("SELECT typeof({a: 'test'}) AS t FROM data");
-        var planner = new DatumIngest.Execution.QueryPlanner(catalog, DatumIngest.Functions.FunctionRegistry.CreateDefault());
+        var query = Heliosoph.DatumV.Parsing.SqlParser.Parse("SELECT typeof({a: 'test'}) AS t FROM data");
+        var planner = new Heliosoph.DatumV.Execution.QueryPlanner(catalog, Heliosoph.DatumV.Functions.FunctionRegistry.CreateDefault());
         var context = CreateExecutionContext(catalog: catalog);
         var plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
         List<Row> rows = await plan.CollectRowsAsync(context);

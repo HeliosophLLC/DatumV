@@ -5,7 +5,7 @@
 using System.Text.Json;
 
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 internal sealed class LicenseAcceptanceService : ILicenseAcceptanceService
 {

@@ -1,8 +1,8 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 using System.Text.Json.Serialization;
-using DatumIngest.Model;
-using DatumIngest.Statistics.Accumulators;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics.Accumulators;
 
 /// <summary>
 /// A frequency entry pairing a value string with its occurrence count.
@@ -452,7 +452,7 @@ public sealed class UuidFeatureManifest : FeatureManifest
 
 /// <summary>
 /// Feature manifest for <see cref="DataKind.Json"/> columns. JSON payloads
-/// in DatumIngest are stored as canonical CBOR (RFC 7049 §3.9); this manifest
+/// in Heliosoph.DatumV are stored as canonical CBOR (RFC 7049 §3.9); this manifest
 /// exposes a shallow shape summary derived from a single CBOR pass per value.
 /// </summary>
 /// <remarks>

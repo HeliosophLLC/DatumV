@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile;
+namespace Heliosoph.DatumV.DatumFile;
 
 /// <summary>
 /// Compression algorithms available for index pages and other internal

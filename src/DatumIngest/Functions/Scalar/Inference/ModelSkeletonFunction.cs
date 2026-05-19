@@ -1,13 +1,13 @@
 using System.Text;
 
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Models;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 
-namespace DatumIngest.Functions.Scalar.Inference;
+namespace Heliosoph.DatumV.Functions.Scalar.Inference;
 
 /// <summary>
 /// <c>inference.model_skeleton(path) → STRING</c>. Returns a starter

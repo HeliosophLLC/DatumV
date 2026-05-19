@@ -1,11 +1,11 @@
-namespace DatumIngest.Tests.Models.Llama;
+namespace Heliosoph.DatumV.Tests.Models.Llama;
 
 using System.Text;
 
-using DatumIngest.Model;
-using DatumIngest.Models;
-using DatumIngest.Models.Llama;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Llama;
+using Heliosoph.DatumV.Pooling;
 
 /// <summary>
 /// Phase B end-to-end tests for the LlamaSharp-backed LLM.
@@ -91,17 +91,17 @@ public sealed class LlamaModelTests : ServiceTestBase
         {
             using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 32);
 
-            DatumIngest.Functions.ValueRef[][] inputs =
+            Heliosoph.DatumV.Functions.ValueRef[][] inputs =
             [
-                [DatumIngest.Functions.ValueRef.FromString("What is 2 + 2? Reply with just the number.")],
+                [Heliosoph.DatumV.Functions.ValueRef.FromString("What is 2 + 2? Reply with just the number.")],
             ];
 
-            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
+            IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
                 cancellationToken: CancellationToken.None);
 
-            DatumIngest.Functions.ValueRef response = Assert.Single(outputs);
+            Heliosoph.DatumV.Functions.ValueRef response = Assert.Single(outputs);
             Assert.False(response.IsNull);
             string text = response.AsString();
             Assert.False(string.IsNullOrWhiteSpace(text), "LLM returned empty response");
@@ -136,14 +136,14 @@ public sealed class LlamaModelTests : ServiceTestBase
         {
             using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 24);
 
-            DatumIngest.Functions.ValueRef[][] inputs =
+            Heliosoph.DatumV.Functions.ValueRef[][] inputs =
             [
-                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'apple'.")],
-                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'banana'.")],
-                [DatumIngest.Functions.ValueRef.FromString("Reply with only the word 'cherry'.")],
+                [Heliosoph.DatumV.Functions.ValueRef.FromString("Reply with only the word 'apple'.")],
+                [Heliosoph.DatumV.Functions.ValueRef.FromString("Reply with only the word 'banana'.")],
+                [Heliosoph.DatumV.Functions.ValueRef.FromString("Reply with only the word 'cherry'.")],
             ];
 
-            IReadOnlyList<DatumIngest.Functions.ValueRef> outputs = await model.InferBatchAsync(
+            IReadOnlyList<Heliosoph.DatumV.Functions.ValueRef> outputs = await model.InferBatchAsync(
                 inputs,
                 overrides: [],
                 cancellationToken: CancellationToken.None);
@@ -151,7 +151,7 @@ public sealed class LlamaModelTests : ServiceTestBase
             Assert.Equal(3, outputs.Count);
             for (int i = 0; i < outputs.Count; i++)
             {
-                DatumIngest.Functions.ValueRef response = outputs[i];
+                Heliosoph.DatumV.Functions.ValueRef response = outputs[i];
                 Assert.False(response.IsNull, $"row {i} returned a null response");
                 string text = response.AsString();
                 Assert.False(string.IsNullOrWhiteSpace(text), $"row {i} returned empty");
@@ -183,14 +183,14 @@ public sealed class LlamaModelTests : ServiceTestBase
 
         using LlamaModel model = new(name: "llama31_8b", modelFilePath: ModelPath, maxTokens: 64);
 
-        DatumIngest.Functions.ValueRef[] rowInputs =
+        Heliosoph.DatumV.Functions.ValueRef[] rowInputs =
         [
-            DatumIngest.Functions.ValueRef.FromString("Count from 1 to 5, one number per line."),
+            Heliosoph.DatumV.Functions.ValueRef.FromString("Count from 1 to 5, one number per line."),
         ];
 
         StringBuilder concatenated = new();
         int chunkCount = 0;
-        await foreach (DatumIngest.Functions.ValueRef chunk in model.InferStreamingAsync(
+        await foreach (Heliosoph.DatumV.Functions.ValueRef chunk in model.InferStreamingAsync(
             rowInputs, rowOverrides: [], CancellationToken.None))
         {
             Assert.False(chunk.IsNull, $"chunk {chunkCount} was null");

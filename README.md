@@ -1,4 +1,4 @@
-# DatumIngest™
+# DatumV™
 
 A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, JSONL, ZIP, HDF5, Parquet, and IDX files into ML-ready output formats with optional sharding.
 
@@ -8,7 +8,7 @@ Preparing datasets for machine learning means writing custom scripts to parse fi
 
 ## What It Does
 
-DatumIngest™ replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet, IDX — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
+DatumV™ replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet, IDX — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
 
 ## Mental Model
 
@@ -63,7 +63,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 
 ## Why Not DuckDB / Pandas?
 
-DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-built for the ML dataset preparation gap they don't cover:
+DuckDB and Pandas are excellent general-purpose tools. DatumV is purpose-built for the ML dataset preparation gap they don't cover:
 
 - **Image transforms in SQL** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more, with automatic decode/encode fusion across chained transforms. DuckDB and Pandas have no image pipeline.
 - **ZIP archives as tables** — `FROM images` where `images` is a ZIP file. Each entry becomes a row with lazy decompression. No extract step.
@@ -72,7 +72,7 @@ DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-bu
 - **SCAN fold expressions** — `SCAN acc = f(acc, row) INIT seed OVER (ORDER BY ...)` computes sequential state (exponential moving averages, sessionization, streak detection, state machines) directly in SQL. No recursive CTEs, no UDFs, no post-processing scripts.
 - **Sharded output with checkpointing** — write to sharded CSV/Parquet/HDF5 and resume from the last completed shard after a crash.
 
-If you need billion-row analytics, use DuckDB. If you need to join a ZIP of images with a JSON annotation file, resize everything to 224×224, and write sharded HDF5 — that's DatumIngest.
+If you need billion-row analytics, use DuckDB. If you need to join a ZIP of images with a JSON annotation file, resize everything to 224×224, and write sharded HDF5 — that's DatumV.
 
 ## Quick Start
 
@@ -219,13 +219,13 @@ datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/m
 ### As a .NET library
 
 ```bash
-dotnet add package DatumIngest
+dotnet add package DatumV
 ```
 
 ### As a gRPC compute service
 
 ```bash
-dotnet add package DatumIngest.Compute
+dotnet add package DatumV.Compute
 ```
 
 See [docs/compute.md](docs/compute.md) for embedding in an ASP.NET host.
@@ -233,7 +233,7 @@ See [docs/compute.md](docs/compute.md) for embedding in an ASP.NET host.
 ### As a gRPC client
 
 ```bash
-dotnet add package DatumIngest.Compute.Client
+dotnet add package DatumV.Compute.Client
 ```
 
 See [docs/compute.md](docs/compute.md#net-client-package) for connecting to a running compute backend.
@@ -241,14 +241,14 @@ See [docs/compute.md](docs/compute.md#net-client-package) for connecting to a ru
 ### As a CLI tool
 
 ```bash
-dotnet tool install --global DatumIngest.Cli
+dotnet tool install --global DatumV.Cli
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/your-org/DatumIngest.git
-cd DatumIngest
+git clone https://github.com/your-org/DatumV.git
+cd DatumV
 dotnet build
 dotnet test
 ```
@@ -256,9 +256,9 @@ dotnet test
 #### Publish a self-contained single-file binary
 
 ```bash
-dotnet publish src/DatumIngest.Cli -c Release -r win-x64
-dotnet publish src/DatumIngest.Cli -c Release -r linux-x64
-dotnet publish src/DatumIngest.Cli -c Release -r osx-arm64
+dotnet publish src/DatumV.Cli -c Release -r win-x64
+dotnet publish src/DatumV.Cli -c Release -r linux-x64
+dotnet publish src/DatumV.Cli -c Release -r osx-arm64
 ```
 
 ## Benchmarks
@@ -266,7 +266,7 @@ dotnet publish src/DatumIngest.Cli -c Release -r osx-arm64
 Run benchmarks with:
 
 ```bash
-dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumV.Benchmarks -- --filter "*"
 ```
 
 Available benchmark suites:
@@ -284,7 +284,7 @@ Available benchmark suites:
 Run a specific suite:
 
 ```bash
-dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*Parsing*"
+dotnet run -c Release --project benchmarks/DatumV.Benchmarks -- --filter "*Parsing*"
 ```
 
 ### Results
@@ -419,7 +419,7 @@ dotnet build
 dotnet test
 
 # Run benchmarks
-dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumV.Benchmarks -- --filter "*"
 ```
 
 ## License
@@ -428,4 +428,4 @@ MIT
 
 ---
 
-DatumIngest™ is a trademark of Heliosoph LLC.
+DatumV™ is a trademark of DatumV LLC.

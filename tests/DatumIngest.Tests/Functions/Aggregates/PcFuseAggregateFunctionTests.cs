@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Functions;
-using DatumIngest.Functions.Aggregates;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Functions.Aggregates;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Tests.Functions.Aggregates;
+namespace Heliosoph.DatumV.Tests.Functions.Aggregates;
 
 /// <summary>
 /// Tests for <see cref="PcFuseAggregateFunction"/> — aggregate-shape PointCloud

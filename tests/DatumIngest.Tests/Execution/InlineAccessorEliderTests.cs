@@ -1,14 +1,14 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
-using DatumIngest.Execution;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Functions;
-using DatumIngest.Model;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Providers;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// Tests the planner-time elision pass that rewrites
@@ -30,7 +30,7 @@ public sealed class InlineAccessorEliderTests : ServiceTestBase
     /// <summary>
     /// Builds a single-row catalog with an Image column carrying the supplied
     /// raw bytes. The <see cref="InMemoryTableProvider"/> materialises the
-    /// <c>byte[]</c> through <see cref="DatumIngest.Functions.Image.ImageDataValueFactory.FromEncodedBytes"/>,
+    /// <c>byte[]</c> through <see cref="Heliosoph.DatumV.Functions.Image.ImageDataValueFactory.FromEncodedBytes"/>,
     /// so PNG/JPEG/WebP/BMP signatures get inline (width, height, channels)
     /// stamped on the resulting <see cref="DataValue"/> — exercising the
     /// elider's fast path. The unstamped fallback path is covered by the

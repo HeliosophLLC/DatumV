@@ -1,15 +1,15 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Catalog.Plans;
-using DatumIngest.Inference;
-using DatumIngest.Inference.OnnxRuntime;
-using DatumIngest.Model;
-using DatumIngest.ModelLibrary;
-using DatumIngest.Models;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Catalog.Plans;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Inference.OnnxRuntime;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Models;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace DatumIngest.Tests.Inference.Cpu;
+namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 
 /// <summary>
 /// End-to-end test for the SQL-defined all-MiniLM-L6-v2 embedding model.
@@ -133,7 +133,7 @@ public sealed class AllMiniLmL6V2SqlE2ETests : ServiceTestBase
 
         catalog.Plan(LoadCanonicalSql());
 
-        catalog.Add(new DatumIngest.Catalog.Providers.InMemoryTableProvider(
+        catalog.Add(new Heliosoph.DatumV.Catalog.Providers.InMemoryTableProvider(
             CreatePool(), "data", ["text"], [new object?[] { "hello world" }]));
 
         StatementPlan plan = catalog.Plan("SELECT models.all_minilm_l6_v2(text) FROM data");

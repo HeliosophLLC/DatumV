@@ -1,4 +1,4 @@
-namespace DatumIngest.Web.Dtos.Execution;
+namespace Heliosoph.DatumV.Web.Dtos.Execution;
 
 /// <summary>
 /// Request payload for <c>POST /api/query/explain</c>.

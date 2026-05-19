@@ -1,4 +1,4 @@
-namespace DatumIngest.Serialization;
+namespace Heliosoph.DatumV.Serialization;
 
 /// <summary>
 /// Registry of file format handlers. Iterates registered <see cref="IFileFormat"/>

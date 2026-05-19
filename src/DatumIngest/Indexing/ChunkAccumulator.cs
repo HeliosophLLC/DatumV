@@ -1,7 +1,7 @@
 using CardinalityEstimation;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Indexing;
+namespace Heliosoph.DatumV.Indexing;
 
 /// <summary>
 /// Per-chunk column accumulator. Tracks min, max, null count, and a

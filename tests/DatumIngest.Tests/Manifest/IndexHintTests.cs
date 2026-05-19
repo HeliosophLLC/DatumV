@@ -1,11 +1,11 @@
-namespace DatumIngest.Tests.Manifest;
+namespace Heliosoph.DatumV.Tests.Manifest;
 
-using DatumIngest.Indexing;
-using DatumIngest.Indexing.Bitmap;
-using DatumIngest.Manifest;
-using DatumIngest.Manifest.Insights;
-using DatumIngest.Model;
-using DatumIngest.Statistics;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Indexing.Bitmap;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Manifest.Insights;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Statistics;
 
 /// <summary>
 /// Tests for <see cref="ColumnIndexHint"/> generation in <see cref="ManifestBuilder"/>

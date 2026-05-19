@@ -1,4 +1,4 @@
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Observer surface for <see cref="IPythonEnvironmentManager"/> install

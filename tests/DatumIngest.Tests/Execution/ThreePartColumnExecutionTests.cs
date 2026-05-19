@@ -1,7 +1,7 @@
-﻿using DatumIngest.Catalog;
-using DatumIngest.Model;
+﻿using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Execution;
+namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
 /// S6: end-to-end execution of <c>schema.table.column</c> column

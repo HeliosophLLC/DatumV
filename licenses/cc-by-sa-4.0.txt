@@ -38,7 +38,7 @@ Notices:
 This is a human-readable summary of (and not a substitute for) the license.
 Full legal code: https://creativecommons.org/licenses/by-sa/4.0/legalcode
 
-DatumIngest catalog note: CC BY-SA 4.0 applies to Oxford-IIIT Pets, KMNIST, and
+Heliosoph.DatumV catalog note: CC BY-SA 4.0 applies to Oxford-IIIT Pets, KMNIST, and
 similar academic datasets. The ShareAlike clause means redistributed or modified
 copies of the dataset itself must carry the same license — but model weights
 trained on the dataset are generally not considered derivative works and are

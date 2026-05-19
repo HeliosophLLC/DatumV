@@ -1,7 +1,7 @@
-using DatumIngest.Catalog;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Tests.Functions.Arrays;
+namespace Heliosoph.DatumV.Tests.Functions.Arrays;
 
 /// <summary>
 /// End-to-end SQL tests for <c>array_resize_2d</c>. Covers the rank-2 and

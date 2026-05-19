@@ -1,4 +1,4 @@
-namespace DatumIngest.Manifest;
+namespace Heliosoph.DatumV.Manifest;
 
 /// <summary>
 /// Semantic role of a column, inferred from its <see cref="Model.DataKind"/> and

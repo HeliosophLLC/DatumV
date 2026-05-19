@@ -1,6 +1,6 @@
 using System.Linq;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Parsing.Tokens;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 using Superpower.Parsers;
@@ -8,7 +8,7 @@ using SP = Superpower.Parse;
 
 #pragma warning disable CS8603, CS8604, CS8620 // Superpower combinators lack consistent nullable reference type annotations
 
-namespace DatumIngest.Parsing;
+namespace Heliosoph.DatumV.Parsing;
 
 public static partial class SqlParser
 {
@@ -1049,7 +1049,7 @@ public static partial class SqlParser
     /// <summary>
     /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
     /// before ORDER BY, LIMIT, and OFFSET. INTO is still parsed here since it is
-    /// a DatumIngest-specific output clause that applies to individual SELECTs.
+    /// a Heliosoph.DatumV-specific output clause that applies to individual SELECTs.
     /// Used by <see cref="QueryPrimary"/> so that trailing ORDER BY/LIMIT/OFFSET
     /// bind to the compound level rather than to an individual SELECT branch
     /// in set operations.

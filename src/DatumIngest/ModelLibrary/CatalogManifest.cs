@@ -5,7 +5,7 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 // POCOs for models/catalog.json. Shape matches the JSON exactly so the
 // same types double as API DTOs (NSwag emits matching TypeScript). Keep
@@ -35,7 +35,7 @@ public sealed record CatalogModel(
     string Summary,
     string Description,
     // Task contracts this model implements, by name from
-    // <see cref="DatumIngest.Catalog.Registries.TaskTypeRegistry"/>.
+    // <see cref="Heliosoph.DatumV.Catalog.Registries.TaskTypeRegistry"/>.
     // Most models implement exactly one; multi-task models (Florence-2,
     // CLIP, SAM) declare every contract they cover so the model browser's
     // task filter matches the model for each. Validated at catalog-load
@@ -269,7 +269,7 @@ public sealed record CatalogHardware(
     //   default when no provider is clearly preferred.</item>
     // </list>
     // Validated at catalog-load time. Aligns with the runtime
-    // <see cref="DatumIngest.Inference.InferenceDevice"/> enum's EP names.
+    // <see cref="Heliosoph.DatumV.Inference.InferenceDevice"/> enum's EP names.
     string Preferred);
 
 // Discriminated union over source channels. JSON wire form carries a

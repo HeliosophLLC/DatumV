@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Executors;
-using DatumIngest.Execution;
-using DatumIngest.Parsing;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Executors;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Tests.Catalog;
+namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
 /// Verifies that the three DML executors (INSERT / UPDATE / DELETE) report
@@ -26,7 +26,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
             [3, "carol"]);
         UpdateStatement update = (UpdateStatement)SqlParser.ParseBatch("UPDATE t SET name = 'updated'")[0];
 
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
         long before = context.Accountant.CurrentResidentBytes;
 
         await UpdateExecutor.ApplyAsync(catalog, update, null, context);
@@ -49,7 +49,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
         InsertStatement insert = (InsertStatement)SqlParser.ParseBatch(
             "INSERT INTO t (id, name) VALUES (2, 'bob'), (3, 'carol'), (4, 'dave')")[0];
 
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
         long before = context.Accountant.CurrentResidentBytes;
 
         await InsertExecutor.ApplyAsync(catalog, insert, null, null, context);
@@ -70,7 +70,7 @@ public sealed class DmlAccountingTests : ServiceTestBase
             [3, "carol"]);
         DeleteStatement delete = (DeleteStatement)SqlParser.ParseBatch("DELETE FROM t")[0];
 
-        using DatumIngest.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
         long before = context.Accountant.CurrentResidentBytes;
 
         await DeleteExecutor.ApplyAsync(catalog, delete, null, context);

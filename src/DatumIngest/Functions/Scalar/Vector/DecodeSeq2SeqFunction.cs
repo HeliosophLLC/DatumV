@@ -1,10 +1,10 @@
-using DatumIngest.Diagnostics;
-using DatumIngest.Execution;
-using DatumIngest.Inference;
-using DatumIngest.Manifest;
-using DatumIngest.Model;
+using Heliosoph.DatumV.Diagnostics;
+using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
-namespace DatumIngest.Functions.Scalar.Vector;
+namespace Heliosoph.DatumV.Functions.Scalar.Vector;
 
 /// <summary>
 /// Greedy autoregressive decoding loop against a bound encoder-decoder

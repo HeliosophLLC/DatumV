@@ -5,11 +5,11 @@
 using System.Collections.Concurrent;
 using System.Text;
 
-using DatumIngest.Models.Python;
+using Heliosoph.DatumV.Models.Python;
 
 using Microsoft.Extensions.Logging;
 
-namespace DatumIngest.ModelLibrary;
+namespace Heliosoph.DatumV.ModelLibrary;
 
 internal sealed class ModelDownloadService : IModelDownloadService
 {
@@ -69,7 +69,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         CatalogModel model = ResolveModel(modelId);
 
         // Placeholders short-circuit before any I/O. Their primary source
-        // doesn't exist yet (Heliosoph/* not uploaded), so a list probe
+        // doesn't exist yet (Heliosoph.DatumV/* not uploaded), so a list probe
         // would 404 and waste a network call. A local directory with the
         // same name — empty leftover, prior failed download — doesn't
         // change the fact that there's nothing to compare against.

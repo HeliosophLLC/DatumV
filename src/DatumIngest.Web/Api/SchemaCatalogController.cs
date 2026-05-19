@@ -1,10 +1,10 @@
-using DatumIngest.Catalog;
-using DatumIngest.Catalog.Registries;
-using DatumIngest.Model;
-using DatumIngest.Web.Dtos.Schema;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Web.Dtos.Schema;
 using Microsoft.AspNetCore.Mvc;
 
-namespace DatumIngest.Web.Api;
+namespace Heliosoph.DatumV.Web.Api;
 
 /// <summary>
 /// Read-only schema catalog endpoint backing the Catalog Explorer side
@@ -13,7 +13,7 @@ namespace DatumIngest.Web.Api;
 /// trip is the natural shape.
 /// </summary>
 /// <remarks>
-/// Live updates flow through <see cref="DatumIngest.Web.Hubs.CatalogHub"/>:
+/// Live updates flow through <see cref="Heliosoph.DatumV.Web.Hubs.CatalogHub"/>:
 /// the client refetches on TableCreated / TableAltered / TableDropped /
 /// IndexCreated / IndexDropped / SchemaCreated / SchemaDropped /
 /// ViewCreated / ViewAltered / ViewDropped kinds.

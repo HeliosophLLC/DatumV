@@ -1,11 +1,11 @@
 using System.Linq;
-using DatumIngest.DatumFile.Sidecar;
-using DatumIngest.Execution.Operators.Windows;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Execution.Operators.Windows;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Execution.Operators;
+namespace Heliosoph.DatumV.Execution.Operators;
 
 /// <summary>
 /// Computes fold/prefix-scan results over ordered partitions. Each row's

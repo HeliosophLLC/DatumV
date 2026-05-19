@@ -1,4 +1,4 @@
-namespace DatumIngest.DatumFile.V2;
+namespace Heliosoph.DatumV.DatumFile.V2;
 
 /// <summary>
 /// Top-level file footer. Carries the v4 prologue (commit lineage,

@@ -1,13 +1,13 @@
-using DatumIngest.Execution.Contexts;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Contexts;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Functions;
+namespace Heliosoph.DatumV.Functions;
 
 /// <summary>
 /// Plan-time helper that checks a <see cref="LambdaExpression"/> argument
 /// against a <see cref="LambdaMatcher"/>'s declared signature
 /// expectations. The <see cref="DataKindMatcher"/> layer only validates
-/// kind compatibility (the value is of kind <see cref="DatumIngest.Model.DataKind.Lambda"/>);
+/// kind compatibility (the value is of kind <see cref="Heliosoph.DatumV.Model.DataKind.Lambda"/>);
 /// this validator handles the structural side — parameter count, the
 /// declared parameter names suggest-or-pin question, and the context's
 /// existence in the registry. Use <c>DataKindMatcher.Lambda(...)</c> on

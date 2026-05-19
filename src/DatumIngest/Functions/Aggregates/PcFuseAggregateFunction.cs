@@ -1,11 +1,11 @@
 using System.Buffers.Binary;
 using System.Numerics;
 
-using DatumIngest.Manifest;
-using DatumIngest.Model;
-using DatumIngest.Model.Spatial;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Model.Spatial;
 
-namespace DatumIngest.Functions.Aggregates;
+namespace Heliosoph.DatumV.Functions.Aggregates;
 
 /// <summary>
 /// <c>pc_fuse_agg(pc)</c> — aggregate variant of <c>pc_fuse</c>. Folds every

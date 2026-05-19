@@ -1,14 +1,14 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using DatumIngest.Functions.Audio;
-using DatumIngest.Functions.Image;
-using DatumIngest.Functions.Video;
-using DatumIngest.Indexing;
-using DatumIngest.Model;
-using DatumIngest.Parsing.Ast;
-using DatumIngest.Pooling;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
+using Heliosoph.DatumV.Functions.Video;
+using Heliosoph.DatumV.Indexing;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
-namespace DatumIngest.Catalog.Providers;
+namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// In-memory table provider for tests and small fixtures. Stores rows as raw

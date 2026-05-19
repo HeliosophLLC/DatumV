@@ -1,6 +1,6 @@
-namespace DatumIngest.Statistics.Interactions;
+namespace Heliosoph.DatumV.Statistics.Interactions;
 
-using DatumIngest.Model;
+using Heliosoph.DatumV.Model;
 
 /// <summary>
 /// Computes Cramér's V statistic for association between two categorical columns.

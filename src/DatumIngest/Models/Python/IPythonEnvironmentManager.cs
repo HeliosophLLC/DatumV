@@ -1,4 +1,4 @@
-namespace DatumIngest.Models.Python;
+namespace Heliosoph.DatumV.Models.Python;
 
 /// <summary>
 /// Engine-managed Python toolchain. Bootstraps <c>uv</c>, installs Python
@@ -16,7 +16,7 @@ namespace DatumIngest.Models.Python;
 /// the same way it does for downloading ONNX weights — every install
 /// action is prompt-and-authorise via the WebUI's existing dialog
 /// surface, and every file the engine creates lives under
-/// <c>%LOCALAPPDATA%/DatumIngest/</c> so uninstall is a single directory
+/// <c>%LOCALAPPDATA%/Heliosoph.DatumV/</c> so uninstall is a single directory
 /// delete.
 /// </para>
 /// <para>
@@ -41,7 +41,7 @@ public interface IPythonEnvironmentManager
 {
     /// <summary>
     /// Ensures the engine-managed <c>uv</c> binary is present at
-    /// <c>%LOCALAPPDATA%/DatumIngest/uv/uv.exe</c> (or platform
+    /// <c>%LOCALAPPDATA%/Heliosoph.DatumV/uv/uv.exe</c> (or platform
     /// equivalent). First call downloads from the configured release
     /// channel; subsequent calls verify the cached binary still runs
     /// and return. Idempotent.

@@ -1,4 +1,4 @@
-namespace DatumIngest.Functions.Scalar.File;
+namespace Heliosoph.DatumV.Functions.Scalar.File;
 
 /// <summary>
 /// Shared path-string helpers for the <c>File</c> function family. Treats

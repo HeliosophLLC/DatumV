@@ -1,4 +1,4 @@
-namespace DatumIngest.Indexing.BTree.Mutable;
+namespace Heliosoph.DatumV.Indexing.BTree.Mutable;
 
 /// <summary>
 /// Constants and page-type enum for the mutable B+Tree file format

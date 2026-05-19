@@ -1,9 +1,9 @@
 using System.Text;
-using DatumIngest.Execution.Operators;
-using DatumIngest.Manifest;
-using DatumIngest.Parsing.Ast;
+using Heliosoph.DatumV.Execution.Operators;
+using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing.Ast;
 
-namespace DatumIngest.Execution;
+namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
 /// Produces a static <see cref="ExplainPlanNode"/> tree from an operator tree,

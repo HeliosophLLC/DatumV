@@ -1,8 +1,8 @@
-using DatumIngest.Catalog;
-using DatumIngest.Models;
-using DatumIngest.Models.Calibration;
+using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Models;
+using Heliosoph.DatumV.Models.Calibration;
 
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 /// <summary>
 /// Hosted service that attaches the SignalR-backed lifecycle and

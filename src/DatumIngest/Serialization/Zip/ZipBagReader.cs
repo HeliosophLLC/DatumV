@@ -1,8 +1,8 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
-using DatumIngest.Serialization.MediaBag;
+using Heliosoph.DatumV.Serialization.MediaBag;
 
-namespace DatumIngest.Serialization.Zip;
+namespace Heliosoph.DatumV.Serialization.Zip;
 
 /// <summary>
 /// <see cref="IMediaBagReader"/> implementation over <see cref="ZipArchive"/>.

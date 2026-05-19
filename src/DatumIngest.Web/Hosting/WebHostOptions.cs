@@ -1,14 +1,14 @@
-namespace DatumIngest.Web.Hosting;
+namespace Heliosoph.DatumV.Web.Hosting;
 
 public sealed class WebHostOptions
 {
     // Root directory the per-principal catalog path is derived from.
-    // Desktop: %LOCALAPPDATA%/DatumIngest. Container: /var/lib/datum (or
+    // Desktop: %LOCALAPPDATA%/Heliosoph.DatumV. Container: /var/lib/datum (or
     // wherever the volume is mounted). The principal resolver carves a
     // subdirectory from this for each user/tenant.
     public string? CatalogRootPath { get; init; }
 
-    // When true (desktop default), AddDatumIngestWeb opens a singleton
+    // When true (desktop default), AddDatumVWeb opens a singleton
     // TableCatalog at CatalogRootPath and runs embedded SQL migrations on
     // startup. When false (SaaS), provisioning is someone else's job —
     // ICatalogService routes by principal to a remote node and the local
@@ -26,13 +26,13 @@ public sealed class WebHostOptions
     public bool RegisterBuiltinModels { get; init; } = true;
 
     // Override for the model files directory. When null, ModelCatalog uses
-    // the $DATUM_MODELS env var or %LOCALAPPDATA%/DatumIngest/models.
+    // the $DATUM_MODELS env var or %LOCALAPPDATA%/Heliosoph.DatumV/models.
     public string? ModelsDirectory { get; init; }
 
     // Override for the raw datasets cache directory — where downloaded
     // archives and their extracted trees land before ingest. When null,
     // the dataset library uses $DATUM_DATASETS or
-    // %LOCALAPPDATA%/DatumIngest/datasets-cache. Distinct from
+    // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache. Distinct from
     // CatalogRootPath because ingested .datum files live under the
     // catalog root (datasets/ subfolder) while raw archives are
     // expendable per the user's keepRawDownloads setting.
