@@ -421,14 +421,27 @@ The Drawing value flows through the same channels as any other value — functio
 
 `draw_text(text, at Point2D, size, fill Color)` → Drawing
 `draw_text(text, at Point2D, size, fill Color, font_family String)` → Drawing
+`draw_text(text, at Point2D, size, fill Color, h_align String, v_align String)` → Drawing
+`draw_text(text, at Point2D, size, fill Color, h_align String, v_align String, font_family String)` → Drawing
 
-Renders text at the supplied **baseline anchor**. The text ascends above the anchor and (for letters with descenders) drops below it — pin to a top-left coordinate by adding `size` to `y`. `size` must be positive.
+Renders text at the supplied anchor. The four- and five-argument forms anchor on the **baseline** — text ascends above the anchor and (for letters with descenders) drops below it. The six- and seven-argument forms accept explicit alignment:
 
-When `font_family` is omitted (or names an uninstalled family), Skia falls back to the platform default — animations stay portable across machines without raising errors.
+- `h_align` ∈ `left` · `center` · `right` (case-insensitive; `centre` accepted)
+- `v_align` ∈ `top` · `middle` · `baseline` · `bottom` (case-insensitive; `center`/`centre` accepted as a synonym for `middle`)
+
+Vertical offsets are computed from the font's ascent/descent metrics — `top` puts the top of the ascent on the anchor, `bottom` puts the descender bottom on it, `middle` centres the body, and `baseline` matches the original anchor semantics.
+
+`size` must be positive. When `font_family` is omitted (or names an uninstalled family), Skia falls back to the platform default — animations stay portable across machines without raising errors.
 
 ```sql
 draw_text('HELLO', point2d(8, 16 + 14), 14, color(255, 200, 50))
--- 14pt warm yellow text at top-left (8, 16)
+-- 14pt warm yellow text at top-left (8, 16) — baseline anchor
+
+draw_text('HELLO', point2d(64, 32), 14, color(255, 200, 50), 'center', 'middle')
+-- 14pt text visually centred on (64, 32)
+
+draw_text('HELLO', point2d(8, 8), 14, color(255, 200, 50), 'left', 'top')
+-- 14pt text with the top-left of the rendered glyphs at (8, 8)
 ```
 
 ### draw_image
