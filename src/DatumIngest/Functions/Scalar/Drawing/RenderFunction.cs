@@ -316,7 +316,29 @@ internal static class DrawingRenderer
             ? new SKFont { Size = text.FontSize }
             : new SKFont(SKTypeface.FromFamilyName(text.FontFamily), text.FontSize);
         using SKPaint paint = new() { Color = text.Color, IsAntialias = true };
-        canvas.DrawText(text.Text, text.Position.X, text.Position.Y, SKTextAlign.Left, font, paint);
+
+        // Skia's SKTextAlign handles horizontal alignment for us; vertical
+        // offset is computed from font metrics. Ascent is negative (above
+        // baseline), Descent is positive (below baseline).
+        SKTextAlign skAlign = text.HAlign switch
+        {
+            TextHAlign.Left   => SKTextAlign.Left,
+            TextHAlign.Center => SKTextAlign.Center,
+            TextHAlign.Right  => SKTextAlign.Right,
+            _                 => SKTextAlign.Left,
+        };
+
+        SKFontMetrics metrics = font.Metrics;
+        float baselineY = text.VAlign switch
+        {
+            TextVAlign.Baseline => text.Position.Y,
+            TextVAlign.Top      => text.Position.Y - metrics.Ascent,
+            TextVAlign.Bottom   => text.Position.Y - metrics.Descent,
+            TextVAlign.Middle   => text.Position.Y - (metrics.Ascent + metrics.Descent) / 2f,
+            _                   => text.Position.Y,
+        };
+
+        canvas.DrawText(text.Text, text.Position.X, baselineY, skAlign, font, paint);
     }
 
     private static void DrawImageStamp(SKCanvas canvas, ImageStampDrawing stamp)

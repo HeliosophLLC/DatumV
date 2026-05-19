@@ -87,16 +87,49 @@ public enum ShapeKind
 /// font for the GeoCities aesthetic without changing this carrier.
 /// </summary>
 /// <param name="Text">The string to render. May be empty (renders nothing).</param>
-/// <param name="Position">Baseline anchor — typically the left edge of the first character's baseline.</param>
+/// <param name="Position">Anchor position. The string's bounding box is positioned relative to this point according to <paramref name="HAlign"/> and <paramref name="VAlign"/>.</param>
 /// <param name="FontSize">Font size in pixels.</param>
 /// <param name="Color">Text color.</param>
+/// <param name="HAlign">Horizontal alignment of the text relative to <paramref name="Position"/>.</param>
+/// <param name="VAlign">Vertical alignment of the text relative to <paramref name="Position"/>. <see cref="TextVAlign.Baseline"/> matches the original anchor semantics — text ascends above the anchor and descenders drop below it.</param>
 /// <param name="FontFamily">Optional font family name. <see langword="null"/> = platform default.</param>
 public sealed record TextDrawing(
     string Text,
     SKPoint Position,
     float FontSize,
     SKColor Color,
+    TextHAlign HAlign = TextHAlign.Left,
+    TextVAlign VAlign = TextVAlign.Baseline,
     string? FontFamily = null) : DrawingPayload;
+
+/// <summary>Horizontal alignment selector for <see cref="TextDrawing"/>.</summary>
+public enum TextHAlign
+{
+    /// <summary>Anchor is at the left edge of the rendered text.</summary>
+    Left,
+
+    /// <summary>Anchor is centred horizontally on the rendered text.</summary>
+    Center,
+
+    /// <summary>Anchor is at the right edge of the rendered text.</summary>
+    Right,
+}
+
+/// <summary>Vertical alignment selector for <see cref="TextDrawing"/>.</summary>
+public enum TextVAlign
+{
+    /// <summary>Anchor sits at the top of the font's ascent — top of capital letters lies on the anchor line.</summary>
+    Top,
+
+    /// <summary>Anchor sits midway between the ascent and descent — visually centred on the text body.</summary>
+    Middle,
+
+    /// <summary>Anchor sits on the typographic baseline (default). Ascenders rise above; descenders fall below.</summary>
+    Baseline,
+
+    /// <summary>Anchor sits at the bottom of the font's descent — under descender tails.</summary>
+    Bottom,
+}
 
 /// <summary>
 /// Stamps an existing bitmap onto the canvas at a given position and

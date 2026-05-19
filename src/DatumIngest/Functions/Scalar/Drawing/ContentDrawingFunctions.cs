@@ -41,8 +41,21 @@ public sealed class DrawTextFunction : IFunction, IScalarFunction
     public static FunctionCategory Category => FunctionCategory.Drawing;
     /// <inheritdoc />
     public static string Description =>
-        "Renders text at a baseline anchor position. Optional font-family argument; "
-        + "falls back to platform default when the named family isn't installed.";
+        "Renders text at an anchor position. The 4-/5-argument forms anchor on the "
+        + "baseline; the 6-/7-argument forms additionally accept horizontal "
+        + "(left | center | right) and vertical (top | middle | baseline | bottom) "
+        + "alignment strings. Optional trailing font-family argument falls back to "
+        + "the platform default when the named family isn't installed.";
+
+    /// <summary>
+    /// Canonical horizontal alignment values surfaced as LS completions.
+    /// </summary>
+    private static readonly IReadOnlyList<string> HAlignNames = ["left", "center", "right"];
+
+    /// <summary>
+    /// Canonical vertical alignment values surfaced as LS completions.
+    /// </summary>
+    private static readonly IReadOnlyList<string> VAlignNames = ["top", "middle", "baseline", "bottom"];
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -68,6 +81,31 @@ public sealed class DrawTextFunction : IFunction, IScalarFunction
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("text",    DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("at",      DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("size",    DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("fill",    DataKindMatcher.Exact(DataKind.Color)),
+                new ParameterSpec("h_align", DataKindMatcher.StringEnum(HAlignNames)),
+                new ParameterSpec("v_align", DataKindMatcher.StringEnum(VAlignNames)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("text",        DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("at",          DataKindMatcher.Exact(DataKind.Point2D)),
+                new ParameterSpec("size",        DataKindMatcher.Family(DataKindFamily.NumericScalar)),
+                new ParameterSpec("fill",        DataKindMatcher.Exact(DataKind.Color)),
+                new ParameterSpec("h_align",     DataKindMatcher.StringEnum(HAlignNames)),
+                new ParameterSpec("v_align",     DataKindMatcher.StringEnum(VAlignNames)),
+                new ParameterSpec("font_family", DataKindMatcher.Exact(DataKind.String)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Drawing)),
     ];
 
     /// <inheritdoc />
@@ -87,7 +125,25 @@ public sealed class DrawTextFunction : IFunction, IScalarFunction
         Vector2 at = args[1].AsPoint2D();
         float size = args[2].ToFloat();
         SKColor color = DrawingHelpers.ToSKColor(args[3]);
-        string? family = args.Length >= 5 ? args[4].AsString() : null;
+
+        // Variants:
+        //   4 args:                                                    baseline + Left, no font_family
+        //   5 args (font_family):                                      baseline + Left, font_family
+        //   6 args (h_align, v_align):                                 aligned, no font_family
+        //   7 args (h_align, v_align, font_family):                    aligned, font_family
+        TextHAlign hAlign = TextHAlign.Left;
+        TextVAlign vAlign = TextVAlign.Baseline;
+        string? family = null;
+        if (args.Length == 5)
+        {
+            family = args[4].AsString();
+        }
+        else if (args.Length >= 6)
+        {
+            hAlign = ParseHAlign(args[4].AsString());
+            vAlign = ParseVAlign(args[5].AsString());
+            if (args.Length >= 7) family = args[6].AsString();
+        }
 
         if (size <= 0)
         {
@@ -96,8 +152,30 @@ public sealed class DrawTextFunction : IFunction, IScalarFunction
         }
 
         return new ValueTask<ValueRef>(ValueRef.FromDrawing(
-            new TextDrawing(text, new SKPoint(at.X, at.Y), size, color, family)));
+            new TextDrawing(text, new SKPoint(at.X, at.Y), size, color, hAlign, vAlign, family)));
     }
+
+    private static TextHAlign ParseHAlign(string raw) => raw.Trim().ToLowerInvariant() switch
+    {
+        "left"   => TextHAlign.Left,
+        "center" => TextHAlign.Center,
+        "centre" => TextHAlign.Center,
+        "right"  => TextHAlign.Right,
+        _ => throw new FunctionArgumentException(Name,
+            $"unknown horizontal alignment '{raw}'. Known values: left, center, right."),
+    };
+
+    private static TextVAlign ParseVAlign(string raw) => raw.Trim().ToLowerInvariant() switch
+    {
+        "top"      => TextVAlign.Top,
+        "middle"   => TextVAlign.Middle,
+        "center"   => TextVAlign.Middle,
+        "centre"   => TextVAlign.Middle,
+        "baseline" => TextVAlign.Baseline,
+        "bottom"   => TextVAlign.Bottom,
+        _ => throw new FunctionArgumentException(Name,
+            $"unknown vertical alignment '{raw}'. Known values: top, middle, baseline, bottom."),
+    };
 }
 
 // ---------- draw_image ----------

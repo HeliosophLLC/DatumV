@@ -42,6 +42,8 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         Assert.Equal(20, t.Position.Y);
         Assert.Equal(16f, t.FontSize);
         Assert.Equal(new SKColor(255, 0, 0, 255), t.Color);
+        Assert.Equal(TextHAlign.Left, t.HAlign);
+        Assert.Equal(TextVAlign.Baseline, t.VAlign);
         Assert.Null(t.FontFamily);
     }
 
@@ -56,6 +58,112 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
             ValueRef.FromString("Arial"));
         TextDrawing t = Assert.IsType<TextDrawing>(p);
         Assert.Equal("Arial", t.FontFamily);
+        Assert.Equal(TextHAlign.Left, t.HAlign);
+        Assert.Equal(TextVAlign.Baseline, t.VAlign);
+    }
+
+    [Fact]
+    public async Task DrawText_WithAlignment()
+    {
+        DrawingPayload p = await Exec(new DrawTextFunction(),
+            ValueRef.FromString("hi"),
+            ValueRef.FromPoint2D(50, 50),
+            ValueRef.FromFloat32(20f),
+            Color(0, 0, 0),
+            ValueRef.FromString("center"),
+            ValueRef.FromString("middle"));
+        TextDrawing t = Assert.IsType<TextDrawing>(p);
+        Assert.Equal(TextHAlign.Center, t.HAlign);
+        Assert.Equal(TextVAlign.Middle, t.VAlign);
+        Assert.Null(t.FontFamily);
+    }
+
+    [Fact]
+    public async Task DrawText_WithAlignmentAndFontFamily()
+    {
+        DrawingPayload p = await Exec(new DrawTextFunction(),
+            ValueRef.FromString("hi"),
+            ValueRef.FromPoint2D(0, 0),
+            ValueRef.FromFloat32(20f),
+            Color(0, 0, 0),
+            ValueRef.FromString("right"),
+            ValueRef.FromString("top"),
+            ValueRef.FromString("Arial"));
+        TextDrawing t = Assert.IsType<TextDrawing>(p);
+        Assert.Equal(TextHAlign.Right, t.HAlign);
+        Assert.Equal(TextVAlign.Top, t.VAlign);
+        Assert.Equal("Arial", t.FontFamily);
+    }
+
+    [Theory]
+    [InlineData("LEFT", TextHAlign.Left)]
+    [InlineData("Center", TextHAlign.Center)]
+    [InlineData("centre", TextHAlign.Center)]
+    [InlineData("right", TextHAlign.Right)]
+    public async Task DrawText_HAlign_Aliases(string raw, TextHAlign expected)
+    {
+        DrawingPayload p = await Exec(new DrawTextFunction(),
+            ValueRef.FromString("x"),
+            ValueRef.FromPoint2D(0, 0),
+            ValueRef.FromFloat32(10f),
+            Color(0, 0, 0),
+            ValueRef.FromString(raw),
+            ValueRef.FromString("baseline"));
+        Assert.Equal(expected, ((TextDrawing)p).HAlign);
+    }
+
+    [Theory]
+    [InlineData("top", TextVAlign.Top)]
+    [InlineData("MIDDLE", TextVAlign.Middle)]
+    [InlineData("center", TextVAlign.Middle)]
+    [InlineData("baseline", TextVAlign.Baseline)]
+    [InlineData("bottom", TextVAlign.Bottom)]
+    public async Task DrawText_VAlign_Aliases(string raw, TextVAlign expected)
+    {
+        DrawingPayload p = await Exec(new DrawTextFunction(),
+            ValueRef.FromString("x"),
+            ValueRef.FromPoint2D(0, 0),
+            ValueRef.FromFloat32(10f),
+            Color(0, 0, 0),
+            ValueRef.FromString("left"),
+            ValueRef.FromString(raw));
+        Assert.Equal(expected, ((TextDrawing)p).VAlign);
+    }
+
+    [Fact]
+    public async Task DrawText_UnknownHAlign_Throws()
+    {
+        FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
+            await new DrawTextFunction().ExecuteAsync(
+                new[]
+                {
+                    ValueRef.FromString("x"),
+                    ValueRef.FromPoint2D(0, 0),
+                    ValueRef.FromFloat32(10f),
+                    Color(0, 0, 0),
+                    ValueRef.FromString("sideways"),
+                    ValueRef.FromString("baseline"),
+                },
+                CreateEvaluationFrame(), default));
+        Assert.Contains("horizontal alignment", ex.Message);
+    }
+
+    [Fact]
+    public async Task DrawText_UnknownVAlign_Throws()
+    {
+        FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
+            await new DrawTextFunction().ExecuteAsync(
+                new[]
+                {
+                    ValueRef.FromString("x"),
+                    ValueRef.FromPoint2D(0, 0),
+                    ValueRef.FromFloat32(10f),
+                    Color(0, 0, 0),
+                    ValueRef.FromString("left"),
+                    ValueRef.FromString("inside-out"),
+                },
+                CreateEvaluationFrame(), default));
+        Assert.Contains("vertical alignment", ex.Message);
     }
 
     [Fact]
@@ -275,6 +383,116 @@ public sealed class ContentDrawingFunctionTests : ServiceTestBase
         Assert.Equal(255, inside.Green);
         Assert.True(inside.Blue < 50,
             $"additive blend should leave blue near 0, got {inside.Blue}.");
+    }
+
+    // ---------- end-to-end text rendering with alignment ----------
+
+    [Fact]
+    public void Render_TextAlignment_HorizontalAlignmentShiftsPixels()
+    {
+        // Render the same string at the same anchor with three horizontal
+        // alignments and verify the painted column ranges fall on opposite
+        // sides of the anchor x. The exact font is platform-dependent but
+        // Skia's SKTextAlign handling is deterministic.
+        const int Width = 200;
+        const int Height = 40;
+        const float AnchorX = 100f;
+        const float AnchorY = 25f;
+        SKColor textColor = new(0, 0, 0, 255);
+
+        (int firstLitX, int lastLitX) MeasureSpan(TextHAlign align)
+        {
+            DrawingPayload text = new TextDrawing(
+                "MMMM", new SKPoint(AnchorX, AnchorY), 24f, textColor, align, TextVAlign.Baseline);
+            SKBitmap bmp = new(new SKImageInfo(Width, Height, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+            using (SKCanvas canvas = new(bmp))
+            {
+                canvas.Clear(SKColors.Transparent);
+                DrawingRenderer.Render(canvas, text);
+            }
+            int first = -1, last = -1;
+            for (int x = 0; x < Width; x++)
+            {
+                for (int y = 0; y < Height; y++)
+                {
+                    if (bmp.GetPixel(x, y).Alpha > 0)
+                    {
+                        if (first < 0) first = x;
+                        last = x;
+                        break;
+                    }
+                }
+            }
+            bmp.Dispose();
+            return (first, last);
+        }
+
+        (int leftFirst, int leftLast) = MeasureSpan(TextHAlign.Left);
+        (int centerFirst, int centerLast) = MeasureSpan(TextHAlign.Center);
+        (int rightFirst, int rightLast) = MeasureSpan(TextHAlign.Right);
+
+        Assert.True(leftFirst >= AnchorX - 2,
+            $"left-aligned text should start at the anchor; got first lit pixel at x={leftFirst}.");
+        Assert.True(rightLast <= AnchorX + 2,
+            $"right-aligned text should end at the anchor; got last lit pixel at x={rightLast}.");
+        Assert.True(centerFirst < AnchorX && centerLast > AnchorX,
+            $"center-aligned text should span the anchor; got [{centerFirst}, {centerLast}].");
+    }
+
+    [Fact]
+    public void Render_TextAlignment_VerticalAlignmentShiftsPixels()
+    {
+        // Same idea for vertical alignment: top should paint below the
+        // anchor, bottom should paint above it, baseline is the original
+        // behaviour (most of the glyph above the anchor with descenders
+        // possibly below).
+        const int Width = 80;
+        const int Height = 200;
+        const float AnchorX = 10f;
+        const float AnchorY = 100f;
+        SKColor textColor = new(0, 0, 0, 255);
+
+        (int firstLitY, int lastLitY) MeasureSpan(TextVAlign align)
+        {
+            DrawingPayload text = new TextDrawing(
+                "Mg", new SKPoint(AnchorX, AnchorY), 32f, textColor, TextHAlign.Left, align);
+            SKBitmap bmp = new(new SKImageInfo(Width, Height, SKColorType.Rgba8888, SKAlphaType.Unpremul));
+            using (SKCanvas canvas = new(bmp))
+            {
+                canvas.Clear(SKColors.Transparent);
+                DrawingRenderer.Render(canvas, text);
+            }
+            int first = -1, last = -1;
+            for (int y = 0; y < Height; y++)
+            {
+                for (int x = 0; x < Width; x++)
+                {
+                    if (bmp.GetPixel(x, y).Alpha > 0)
+                    {
+                        if (first < 0) first = y;
+                        last = y;
+                        break;
+                    }
+                }
+            }
+            bmp.Dispose();
+            return (first, last);
+        }
+
+        (int topFirst, int topLast) = MeasureSpan(TextVAlign.Top);
+        (int midFirst, int midLast) = MeasureSpan(TextVAlign.Middle);
+        (int baseFirst, int baseLast) = MeasureSpan(TextVAlign.Baseline);
+        (int botFirst, int botLast) = MeasureSpan(TextVAlign.Bottom);
+
+        Assert.True(topFirst >= AnchorY - 2,
+            $"top-aligned text should start at the anchor; got first lit pixel at y={topFirst}.");
+        Assert.True(botLast <= AnchorY + 2,
+            $"bottom-aligned text should end at the anchor; got last lit pixel at y={botLast}.");
+        Assert.True(midFirst < AnchorY && midLast > AnchorY,
+            $"middle-aligned text should span the anchor; got [{midFirst}, {midLast}].");
+        // Baseline default: most glyphs end on or above the anchor (descenders may dip).
+        Assert.True(baseFirst < AnchorY,
+            $"baseline-aligned text should ascend above the anchor; got first lit pixel at y={baseFirst}.");
     }
 
     // ---------- spin_x / spin_y ----------
