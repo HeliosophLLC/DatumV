@@ -456,7 +456,7 @@ public interface ITableProvider : IDisposable
     /// <summary>
     /// Returns the current validity state of this table's
     /// <c>.datum-index</c> sidecar — surfaced to users via the
-    /// <c>is_valid</c> column on <c>datum_catalog.indexes</c> so they
+    /// <c>is_valid</c> column on <c>system.indexes</c> so they
     /// can see when an index needs rebuilding without poking at the
     /// file system.
     /// </summary>

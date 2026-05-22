@@ -120,7 +120,7 @@ public static class CatalogManifestBuilder
         // language-server manifest. They're only callable inside a CREATE
         // MODEL body — surfacing them in a regular query's completion
         // dropdown would mislead. Users discover them via
-        // `SELECT * FROM datum_catalog.functions WHERE body_scope = 'modelbody'`,
+        // `SELECT * FROM system.functions WHERE body_scope = 'modelbody'`,
         // and the plan-time gate refuses out-of-context call sites with a
         // CREATE-MODEL-pointing error if anyone types them by hand.
         // A future Tier 2 could re-include them when the editor zone is

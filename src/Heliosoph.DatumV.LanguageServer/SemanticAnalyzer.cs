@@ -1248,7 +1248,7 @@ internal sealed class SemanticAnalyzer
     }
 
     // Virtual-schema knowledge moved into the manifest in S5 — every
-    // registered provider (system / information_schema / datum_catalog)
+    // registered provider (system / information_schema / system)
     // surfaces in `_manifest.Tables` with its full qualified name, so
     // the analyzer's lookup against the manifest replaces what was once
     // a hardcoded list here.

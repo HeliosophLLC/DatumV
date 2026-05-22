@@ -18,7 +18,7 @@ namespace Heliosoph.DatumV.Tests.Catalog;
 /// to restore acceleration. The failure-mode contract: if the index
 /// refresh fails for any reason, the data commit stands and the
 /// index surfaces as <see cref="IndexValidity.Stale"/> via
-/// <c>datum_catalog.indexes.is_valid = false</c>.
+/// <c>system.indexes.is_valid = false</c>.
 /// </summary>
 public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
 {
@@ -94,7 +94,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
     public async Task IsValid_ColumnSurfaces_StaleSentinelRow()
     {
         // After a forced manual invalidation, the index appears in
-        // datum_catalog.indexes with is_valid = false so users can
+        // system.indexes with is_valid = false so users can
         // spot the table that needs REINDEX.
         string datumPath = await IngestAndIndex("stale_sentinel.datum");
 
@@ -123,10 +123,10 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(IndexValidity.Stale, reopenedProvider.GetIndexValidity());
         Assert.Null(reopenedProvider.GetSourceIndex());
 
-        // Query datum_catalog.indexes — table 't' should appear with
+        // Query system.indexes — table 't' should appear with
         // is_valid = false.
         bool sawStaleRow = false;
-        await foreach (RowBatch batch in reopened["datum_catalog.indexes"]
+        await foreach (RowBatch batch in reopened["system.indexes"]
             .ScanAsync(null, null, null, CancellationToken.None))
         {
             try
@@ -145,7 +145,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
             }
             finally { batch.Dispose(); }
         }
-        Assert.True(sawStaleRow, "stale table 't' should surface in datum_catalog.indexes with is_valid = false");
+        Assert.True(sawStaleRow, "stale table 't' should surface in system.indexes with is_valid = false");
     }
 
     [Fact]
@@ -164,10 +164,10 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
             MakeBatchesMatchingSchema(pool, schema, [[7, "rev"]]),
             CancellationToken.None);
 
-        // Find the row(s) in datum_catalog.indexes for table 't'. Every
+        // Find the row(s) in system.indexes for table 't'. Every
         // entry should have is_valid = true.
         int rowsForT = 0;
-        await foreach (RowBatch batch in catalog["datum_catalog.indexes"]
+        await foreach (RowBatch batch in catalog["system.indexes"]
             .ScanAsync(null, null, null, CancellationToken.None))
         {
             try
@@ -185,7 +185,7 @@ public sealed class IndexAutoExtensionTests : ServiceTestBase, IAsyncLifetime
             }
             finally { batch.Dispose(); }
         }
-        Assert.True(rowsForT > 0, "auto-refreshed table 't' should surface entries in datum_catalog.indexes");
+        Assert.True(rowsForT > 0, "auto-refreshed table 't' should surface entries in system.indexes");
     }
 
     [Fact]

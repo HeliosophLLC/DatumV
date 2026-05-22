@@ -89,7 +89,7 @@ internal static class TableExecutor
         // Persistent: ResolveForCreate picks the first DDL-capable schema
         // on the search_path when the user didn't supply an explicit
         // qualifier; explicit qualifiers are validated DDL-capable
-        // (system / information_schema / datum_catalog throw cleanly).
+        // (system / information_schema / system throw cleanly).
         SchemaResolver resolver = new(catalog, catalog.SearchPath);
         QualifiedName qn = resolver.ResolveForCreate(create.SchemaName, create.TableName);
 

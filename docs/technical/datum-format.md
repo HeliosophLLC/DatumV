@@ -572,7 +572,7 @@ provider.DeleteRows(rowIndices);                           // DELETE FROM … (l
 
 ### Capability flags + default-throw
 
-`ITableProvider` carries three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — defaulting to `false`. Each mutation method has a default interface implementation that throws `NotSupportedException`. Mutable providers (the .datum file provider, the in-memory provider) override the flags and the methods. System tables (information_schema, datum_catalog.*, models, udfs, …) leave the defaults alone, so the provider's default `NotSupportedException` surfaces a clear `"Table 'X' does not support <op> (Can<op> is false)"` error.
+`ITableProvider` carries three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — defaulting to `false`. Each mutation method has a default interface implementation that throws `NotSupportedException`. Mutable providers (the .datum file provider, the in-memory provider) override the flags and the methods. System tables (information_schema, system.*, models, udfs, …) leave the defaults alone, so the provider's default `NotSupportedException` surfaces a clear `"Table 'X' does not support <op> (Can<op> is false)"` error.
 
 Read-only semantics are derived: a table is read-only for an operation when its provider's corresponding `Can…` flag is `false`. There is no separate sub-interface — the four mutation methods + three flags all live on `ITableProvider`.
 

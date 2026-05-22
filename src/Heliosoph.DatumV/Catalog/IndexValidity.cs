@@ -3,7 +3,7 @@ namespace Heliosoph.DatumV.Catalog;
 /// <summary>
 /// Validity state of a table's <c>.datum-index</c> acceleration sidecar.
 /// Surfaced via <see cref="ITableProvider.GetIndexValidity"/> and through
-/// the <c>is_valid</c> column on <c>datum_catalog.indexes</c> so users
+/// the <c>is_valid</c> column on <c>system.indexes</c> so users
 /// can detect tables that need <c>REINDEX</c> without inspecting the
 /// file system.
 /// </summary>

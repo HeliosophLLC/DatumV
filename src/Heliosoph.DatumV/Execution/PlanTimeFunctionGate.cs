@@ -231,7 +231,7 @@ internal static class PlanTimeFunctionGate
                     $"{fn.CallName}() is only valid inside a CREATE [OR REPLACE] MODEL "
                     + "body. Move the call into a model body, or use the underlying "
                     + "scalar form for the computation. See `SELECT * FROM "
-                    + "datum_catalog.functions WHERE body_scope = 'modelbody'` for the "
+                    + "system.functions WHERE body_scope = 'modelbody'` for the "
                     + "full list of body-scoped functions.");
             }
             return;

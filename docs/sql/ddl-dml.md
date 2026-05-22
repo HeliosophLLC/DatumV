@@ -14,7 +14,7 @@ Every table registered in the catalog has a mutability level:
 | `SessionOwned` | Temp tables created within a session. DDL/DML permitted. |
 | `Writable` | Persistent `.datum` tables created via `CREATE TABLE`. DDL/DML permitted. |
 
-`ITableProvider` exposes three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — gating the corresponding mutation paths. System tables (information_schema, datum_catalog.\*, models, udfs, …) leave the defaults at `false`, so the catalog rejects mutations against them with a clear `"Table 'X' is read-only"` error.
+`ITableProvider` exposes three opt-in flags — `CanAlterColumns`, `CanAppendRows`, `CanDeleteRows` — gating the corresponding mutation paths. System tables (information_schema, system.\*, models, udfs, …) leave the defaults at `false`, so the catalog rejects mutations against them with a clear `"Table 'X' is read-only"` error.
 
 ### CREATE TABLE
 

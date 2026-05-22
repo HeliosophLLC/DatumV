@@ -11,7 +11,7 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 
 /// <summary>
 /// Virtual table listing all registered functions.
-/// Query with <c>SELECT * FROM datum_catalog.functions</c>.
+/// Query with <c>SELECT * FROM system.functions</c>.
 /// </summary>
 /// <remarks>
 /// Schema (8 columns): function_name, function_type, category, return_type,
@@ -27,7 +27,7 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.functions";
+    public const string TableName = "system.functions";
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -169,7 +169,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
 
 /// <summary>
 /// Virtual table listing function parameters for all scalar functions.
-/// Query with <c>SELECT * FROM datum_catalog.function_parameters</c>.
+/// Query with <c>SELECT * FROM system.function_parameters</c>.
 /// </summary>
 /// <remarks>
 /// Schema (5 columns): function_name, ordinal_position, parameter_name,
@@ -179,7 +179,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
 internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.function_parameters";
+    public const string TableName = "system.function_parameters";
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -279,7 +279,7 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
 
 /// <summary>
 /// Virtual table listing per-column statistics for all tables that have manifests.
-/// Query with <c>SELECT * FROM datum_catalog.statistics</c>.
+/// Query with <c>SELECT * FROM system.statistics</c>.
 /// </summary>
 /// <remarks>
 /// Rows are sourced from <see cref="ITableProvider.GetManifest"/>. Providers
@@ -288,7 +288,7 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
 internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.statistics";
+    public const string TableName = "system.statistics";
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -447,7 +447,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
 
 /// <summary>
 /// Virtual table listing per-column index metadata for all indexed tables.
-/// Query with <c>SELECT * FROM datum_catalog.indexes</c>.
+/// Query with <c>SELECT * FROM system.indexes</c>.
 /// </summary>
 /// <remarks>
 /// Rows are sourced from <see cref="ITableProvider.GetSourceIndex"/>. Providers
@@ -456,7 +456,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
 internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.indexes";
+    public const string TableName = "system.indexes";
 
     private static readonly Schema _schema = BuildSchema();
 
@@ -591,7 +591,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 /// <summary>
 /// Virtual table listing pairwise column interaction statistics for all tables
 /// that have computed them.
-/// Query with <c>SELECT * FROM datum_catalog.interactions</c>.
+/// Query with <c>SELECT * FROM system.interactions</c>.
 /// </summary>
 /// <remarks>
 /// Rows are sourced from <see cref="QueryResultsManifest.Interactions"/>.
@@ -600,7 +600,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
-    public const string TableName = "datum_catalog.interactions";
+    public const string TableName = "system.interactions";
 
     private static readonly Schema _schema = BuildSchema();
 

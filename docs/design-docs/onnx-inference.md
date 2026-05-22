@@ -249,11 +249,11 @@ Mirrors the codebase's internal naming (`Models` vs `DeclaredModels`) and Postgr
 
 For declared rows, most metadata columns (license, modalities, source_url, etc.) surface as `NULL` — declared models don't carry those. Populated fields are `name`, `backend = "sql"`, `file_name` (raw `USING` path), `file_size_bytes` (stat the resolved path), `status = "available"` (the session is bound; if the file vanished post-load, the in-memory session still works).
 
-### `datum_catalog.functions`
+### `system.functions`
 
 [`DatumCatalogFunctionsProvider`](../../src/DatumV/Catalog/Providers/DatumCatalogProviders.cs) already existed for the general function catalog. Phase 3c added a **`body_scope`** column (NOT NULL, `none` / `modelbody`). **Annotate-not-hide**: body-scoped functions still appear in this view so users can discover them via `WHERE body_scope = 'modelbody'`; the plan-time gate refuses out-of-context call sites separately.
 
-The future `system.functions` (when `datum_catalog.*` consolidates) inherits the column for free.
+The future `system.functions` (when `system.*` consolidates) inherits the column for free.
 
 ---
 

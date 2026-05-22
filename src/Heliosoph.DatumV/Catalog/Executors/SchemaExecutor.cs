@@ -15,7 +15,7 @@ internal static class SchemaExecutor
     /// Applies <c>CREATE SCHEMA [IF NOT EXISTS] name</c>. The new schema
     /// is mounted on the user-data backend (FlatFile); user tables
     /// created with <c>CREATE TABLE name.t</c> land under it. Built-in
-    /// schemas (public / system / information_schema / datum_catalog)
+    /// schemas (public / system / information_schema / system)
     /// cannot be re-created.
     /// </summary>
     public static void CreateSchema(TableCatalog catalog, CreateSchemaStatement create, string? sourceText = null)
@@ -56,7 +56,7 @@ internal static class SchemaExecutor
 
         // Protect built-in schemas. The public schema is special — it's
         // the default home for user tables and tests rely on it being
-        // present. system / information_schema / datum_catalog are also
+        // present. system / information_schema / system are also
         // engine-managed.
         if (TableCatalog.IsBuiltinSchema(drop.SchemaName))
         {

@@ -149,8 +149,8 @@ public sealed class SchemaCatalogController(TableCatalog catalog) : ControllerBa
     {
         if (string.Equals(name.Schema, "information_schema", StringComparison.OrdinalIgnoreCase))
             return ("information_schema", "VIEW");
-        if (string.Equals(name.Schema, "datum_catalog", StringComparison.OrdinalIgnoreCase))
-            return ("datum_catalog", "VIEW");
+        if (string.Equals(name.Schema, "system", StringComparison.OrdinalIgnoreCase))
+            return ("system", "VIEW");
         if (string.Equals(name.Schema, "system", StringComparison.OrdinalIgnoreCase))
             return ("system", "VIEW");
         return (name.Schema, "BASE TABLE");

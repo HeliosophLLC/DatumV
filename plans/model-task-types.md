@@ -193,8 +193,8 @@ and being filterable.
 | `precision` | `String` | Inferred at load time | yes |
 | `est_vram_mb` | `Int32` | Already exists | no (heuristic when not declared) |
 
-`datum_catalog.tasks` (new virtual view) exposes the registered task
-vocabulary so users can `SELECT * FROM datum_catalog.tasks` and see
+`system.tasks` (new virtual view) exposes the registered task
+vocabulary so users can `SELECT * FROM system.tasks` and see
 what `IMPLEMENTS` accepts:
 
 ```

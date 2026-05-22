@@ -188,7 +188,7 @@ public sealed partial class DatumFileTableProviderV2
             // v1 trades correctness + simplicity for the per-INSERT
             // cost we already pay. Best-effort: a failure here leaves
             // the data commit in place and the index Stale (visible
-            // via datum_catalog.indexes.is_valid = false).
+            // via system.indexes.is_valid = false).
             try
             {
                 await RebuildIndexNoLockAsync(existingForExtend: null).ConfigureAwait(false);

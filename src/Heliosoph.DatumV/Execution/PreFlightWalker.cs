@@ -394,7 +394,7 @@ internal static class PreFlightWalker
         private void EvaluateCall(FunctionCallExpression fn)
         {
             // models.X references — the only schema pre-flight cares about
-            // for residency. Everything else (system.*, datum_catalog.*,
+            // for residency. Everything else (system.*, system.*,
             // udf.*, public.*) is opaque to pre-flight.
             if (string.Equals(fn.SchemaName, ModelSchema, StringComparison.OrdinalIgnoreCase))
             {

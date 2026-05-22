@@ -9,7 +9,7 @@ namespace Heliosoph.DatumV.Web.Dtos.Schema;
 public sealed record SchemaCatalogDto(IReadOnlyList<TableEntryDto> Tables);
 
 // One queryable table or view. `Schema` is the SQL namespace (public,
-// information_schema, datum_catalog, system, models). `Kind` tells the UI
+// information_schema, system, system, models). `Kind` tells the UI
 // whether to label this as a base table or a system view so users don't
 // confuse the two.
 public sealed record TableEntryDto(

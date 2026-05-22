@@ -632,11 +632,11 @@ public sealed class CompletionProviderTests : ServiceTestBase
             Tables =
             [
                 // Table-only schema: should NOT surface in the CALL popup —
-                // datum_catalog hosts no callables (no procedures / UDFs /
+                // system hosts no callables (no procedures / UDFs /
                 // built-in functions), so suggesting it would be misleading.
                 new TableSchemaEntry
                 {
-                    Name = "datum_catalog.functions",
+                    Name = "system.functions",
                     Columns = [],
                 },
             ],
@@ -720,7 +720,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, i => i.Label == "public" && i.Kind == CompletionItemKind.Schema);
 
         // Table-only schemas don't surface — nothing scalar-callable.
-        Assert.DoesNotContain(items, i => i.Label == "datum_catalog" && i.Kind == CompletionItemKind.Schema);
+        Assert.DoesNotContain(items, i => i.Label == "system" && i.Kind == CompletionItemKind.Schema);
     }
 
     /// <summary>

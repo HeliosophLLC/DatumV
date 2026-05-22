@@ -6,7 +6,7 @@ using Heliosoph.DatumV.Model;
 namespace Heliosoph.DatumV.Tests.Catalog.Providers;
 
 /// <summary>
-/// Tests for the <c>body_scope</c> column on <c>datum_catalog.functions</c>.
+/// Tests for the <c>body_scope</c> column on <c>system.functions</c>.
 /// The column is annotate-not-hide: body-scoped functions like
 /// <c>infer()</c> still appear so users can discover them via
 /// <c>WHERE body_scope = 'modelbody'</c>; the plan-time gate (covered by
@@ -20,10 +20,10 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
     {
         TableCatalog catalog = CreateCatalog();
 
-        // SELECT body_scope, function_name FROM datum_catalog.functions
+        // SELECT body_scope, function_name FROM system.functions
         // WHERE function_name = 'infer'
         StatementPlan plan = catalog.Plan(
-            "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'infer'");
+            "SELECT body_scope FROM system.functions WHERE function_name = 'infer'");
 
         List<string> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))
@@ -46,7 +46,7 @@ public sealed class DatumCatalogFunctionsProviderTests : ServiceTestBase
         // upper() is a vanilla scalar — must report 'none' so users filtering
         // for callable-anywhere functions (the default expectation) get it.
         StatementPlan plan = catalog.Plan(
-            "SELECT body_scope FROM datum_catalog.functions WHERE function_name = 'upper'");
+            "SELECT body_scope FROM system.functions WHERE function_name = 'upper'");
 
         List<string> values = new();
         await foreach (RowBatch batch in ExecutePlanAsync(plan))

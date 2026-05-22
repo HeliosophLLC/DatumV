@@ -94,7 +94,7 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
         // infer() is body-scoped (only callable inside CREATE MODEL bodies).
         // It must NOT appear in the language-server manifest — surfacing it
         // in completion outside a model body would mislead. Discoverability
-        // stays via datum_catalog.functions.body_scope; the plan-time gate
+        // stays via system.functions.body_scope; the plan-time gate
         // refuses out-of-context call sites if anyone types it by hand.
         TableCatalog catalog = CreateCatalog();
         FunctionRegistry functions = new();

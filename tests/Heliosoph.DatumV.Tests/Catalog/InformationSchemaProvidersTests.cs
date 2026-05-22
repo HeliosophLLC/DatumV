@@ -400,7 +400,7 @@ public sealed class InformationSchemaProvidersTests : ServiceTestBase
         HashSet<string> names = rows.Select(r => r.SchemaName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("public",             names);
         Assert.Contains("information_schema", names);
-        Assert.Contains("datum_catalog",      names);
+        Assert.Contains("system",      names);
         // S9: `models` is a real built-in schema visible to discovery.
         Assert.Contains("models",             names);
     }

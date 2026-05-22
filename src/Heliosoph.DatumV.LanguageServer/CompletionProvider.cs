@@ -374,7 +374,7 @@ public sealed class CompletionProvider
                 // the rest. Aggregates / window functions / TVFs are
                 // excluded — they don't work standalone (need
                 // FROM / GROUP BY / OVER context). Table-only schemas
-                // (datum_catalog, information_schema) are also filtered
+                // (system, information_schema) are also filtered
                 // out — nothing scalar-CALLable lives there.
                 AddProcedures(items);
                 AddUdfs(items);
@@ -959,7 +959,7 @@ public sealed class CompletionProvider
         /// functions and UDFs (Heliosoph.DatumV lowers <c>CALL fn(args)</c>
         /// to <c>SELECT fn(args)</c>, so all scalar callables apply).
         /// Excludes tables — nothing is CALLable from a table-only
-        /// schema like datum_catalog or information_schema.
+        /// schema like system or information_schema.
         /// </summary>
         Call       = Procedures | Functions,
     }
@@ -1025,7 +1025,7 @@ public sealed class CompletionProvider
         if (include.HasFlag(SchemaSurfaces.Tables))
         {
             // Tables (schema-qualified entries surface their schema —
-            // <c>system.tables</c>, <c>datum_catalog.functions</c>, etc.).
+            // <c>system.tables</c>, <c>system.functions</c>, etc.).
             foreach (TableSchemaEntry table in _manifest.Tables)
             {
                 int dot = table.Name.IndexOf('.');

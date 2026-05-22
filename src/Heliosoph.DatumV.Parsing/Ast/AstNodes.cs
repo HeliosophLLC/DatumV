@@ -1244,7 +1244,7 @@ public sealed record DropTableStatement(
 /// schema in the catalog. Tables created with <c>CREATE TABLE
 /// name.table</c> land under that schema. Built-in schemas
 /// (<c>public</c>, <c>system</c>, <c>information_schema</c>,
-/// <c>datum_catalog</c>) are pre-mounted and can't be re-created.
+/// <c>system</c>) are pre-mounted and can't be re-created.
 /// </summary>
 /// <param name="SchemaName">The schema name to register.</param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the schema already exists.</param>

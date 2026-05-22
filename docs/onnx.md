@@ -544,7 +544,7 @@ declared input shape. Common causes:
 ## Looking up what's available
 
 - **All registered models on this host**: `SELECT * FROM system.models;`
-- **All preprocessing / postprocessing helpers**: `SELECT * FROM datum_catalog.functions WHERE category IN ('Image', 'Vector', 'Activation', 'Encoding');`
+- **All preprocessing / postprocessing helpers**: `SELECT * FROM system.functions WHERE category IN ('Image', 'Vector', 'Activation', 'Encoding');`
 - **Built-in models documentation**: [`models.md`](models.md).
 - **Full `CREATE MODEL` syntax reference**: [`sql/create-model.md`](sql/create-model.md).
 - **Engine internals**: [`design-docs/onnx-inference.md`](design-docs/onnx-inference.md).

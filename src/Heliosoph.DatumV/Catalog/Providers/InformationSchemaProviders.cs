@@ -13,7 +13,7 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 /// <remarks>
 /// Schema: <c>table_catalog</c>, <c>table_schema</c>, <c>table_name</c>, <c>table_type</c>.
 /// <c>table_catalog</c> is always <c>"datum"</c>. Schema assignment follows a name-prefix
-/// convention: <c>information_schema.*</c> and <c>datum_catalog.*</c> providers report their
+/// convention: <c>information_schema.*</c> and <c>system.*</c> providers report their
 /// owning schema; all other providers are reported under <c>"public"</c>.
 /// </remarks>
 internal sealed class InformationSchemaTablesProvider : NonSeekableTableProviderBase
@@ -97,8 +97,8 @@ internal sealed class InformationSchemaTablesProvider : NonSeekableTableProvider
     {
         if (string.Equals(name.Schema, "information_schema", StringComparison.OrdinalIgnoreCase))
             return ("information_schema", "VIEW");
-        if (string.Equals(name.Schema, "datum_catalog", StringComparison.OrdinalIgnoreCase))
-            return ("datum_catalog", "VIEW");
+        if (string.Equals(name.Schema, "system", StringComparison.OrdinalIgnoreCase))
+            return ("system", "VIEW");
         if (string.Equals(name.Schema, "system", StringComparison.OrdinalIgnoreCase))
             return ("system", "VIEW");
         return (name.Schema, "BASE TABLE");
@@ -612,7 +612,7 @@ internal sealed class InformationSchemaSchemataProvider : NonSeekableTableProvid
     // built-in scalars that users rarely qualify by hand (mirrors PG's
     // pg_catalog convention).
     private static readonly string[] SchemaNames =
-        ["public", "information_schema", "datum_catalog", "models"];
+        ["public", "information_schema", "system", "models"];
 
     /// <param name="pool">Buffer pool for renting row batches.</param>
     public InformationSchemaSchemataProvider(Pool pool) : base(pool, QualifiedName.Parse(TableName)) { }

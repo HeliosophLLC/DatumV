@@ -6,7 +6,7 @@ namespace Heliosoph.DatumV.Catalog;
 /// <summary>
 /// An <see cref="ITableCatalog"/> backend for schemas whose tables are
 /// engine projections — not user data. Hosts the <c>system.*</c>,
-/// <c>information_schema.*</c>, and <c>datum_catalog.*</c> providers
+/// <c>information_schema.*</c>, and <c>system.*</c> providers
 /// that surface UDFs, procedures, model metadata, schema introspection,
 /// and catalog statistics as queryable virtual tables.
 /// </summary>
@@ -25,13 +25,13 @@ namespace Heliosoph.DatumV.Catalog;
 /// </para>
 /// <list type="bullet">
 ///   <item><description>The system instance owns <c>system</c>.</description></item>
-///   <item><description>The virtual instance owns <c>information_schema</c> and <c>datum_catalog</c>.</description></item>
+///   <item><description>The virtual instance owns <c>information_schema</c> and <c>system</c>.</description></item>
 /// </list>
 /// <para>
 /// The split exists because the two instances are conceptually
 /// distinct, even though their implementation is identical. SQL-standard
 /// metadata views (<c>information_schema.*</c>) and engine-specific
-/// projections (<c>datum_catalog.*</c>) live together because they're
+/// projections (<c>system.*</c>) live together because they're
 /// equally read-only and projection-only; the <c>system</c> schema is
 /// host-attached state (UDFs, procedures, models).
 /// </para>

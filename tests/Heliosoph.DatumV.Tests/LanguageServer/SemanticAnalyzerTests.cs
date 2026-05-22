@@ -713,10 +713,10 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
         Table("information_schema.tables", "table_catalog", "table_schema", "table_name", "table_type"),
         Table("information_schema.columns", "table_schema", "table_name", "column_name", "ordinal_position", "data_type"),
         Table("information_schema.schemata", "schema_name"),
-        Table("datum_catalog.functions", "function_name", "category"),
-        Table("datum_catalog.function_parameters", "function_name", "parameter_name", "ordinal_position"),
-        Table("datum_catalog.indexes", "table_name", "column_name", "index_type", "entry_count"),
-        Table("datum_catalog.interactions", "left_column", "right_column", "pearson"),
+        Table("system.functions", "function_name", "category"),
+        Table("system.function_parameters", "function_name", "parameter_name", "ordinal_position"),
+        Table("system.indexes", "table_name", "column_name", "index_type", "entry_count"),
+        Table("system.interactions", "left_column", "right_column", "pearson"),
     });
 
     [Fact]
@@ -741,7 +741,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     public void Analyze_DatumCatalogFunctions_NoWarning()
     {
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT function_name FROM datum_catalog.functions", VirtualSchemaManifest());
+            "SELECT function_name FROM system.functions", VirtualSchemaManifest());
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
@@ -750,7 +750,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     public void Analyze_DatumCatalogFunctionParameters_NoWarning()
     {
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT parameter_name FROM datum_catalog.function_parameters", VirtualSchemaManifest());
+            "SELECT parameter_name FROM system.function_parameters", VirtualSchemaManifest());
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
@@ -759,7 +759,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     public void Analyze_DatumCatalogIndexes_NoWarning()
     {
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT index_type FROM datum_catalog.indexes", VirtualSchemaManifest());
+            "SELECT index_type FROM system.indexes", VirtualSchemaManifest());
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }
@@ -768,7 +768,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     public void Analyze_DatumCatalogInteractions_NoWarning()
     {
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT pearson FROM datum_catalog.interactions", VirtualSchemaManifest());
+            "SELECT pearson FROM system.interactions", VirtualSchemaManifest());
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Warning);
     }

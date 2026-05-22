@@ -25,7 +25,7 @@ namespace Heliosoph.DatumV.Catalog;
 /// <para>
 /// The catalog hosts more than persistent <c>.datum</c> tables — TEMP
 /// tables (in-memory), system projections (UDF / Procedure / Model
-/// virtual tables), and information_schema / datum_catalog views all
+/// virtual tables), and information_schema / system views all
 /// live in the same <see cref="_tables"/> registry today. Persistent
 /// tracking dicts (file paths, indexes, PK names) only carry entries
 /// for <c>.datum</c>-backed tables — the rest stay out by design, so

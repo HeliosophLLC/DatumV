@@ -301,12 +301,12 @@ SELECT infer(1.0) FROM dual;
 --        body. ...
 ```
 
-For discoverability, `datum_catalog.functions.body_scope` records which
+For discoverability, `system.functions.body_scope` records which
 functions have this constraint:
 
 ```sql
 SELECT function_name, body_scope
-FROM datum_catalog.functions
+FROM system.functions
 WHERE body_scope <> 'none';
 -- function_name | body_scope
 -- infer         | modelbody
@@ -740,5 +740,5 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
 - [User-Defined Functions](udf.md) — the closest sibling DDL surface; same body shape, no `infer()` and no schema lockdown.
 - [Procedural Functions and Procedures](procedural.md) — the broader procedural-body family this shares syntax with.
 - [Models](../models.md) — the engine's built-in model zoo (`kind = 'builtin'` rows in `system.models`).
-- [Schema Introspection](schema-introspection.md) — how `system.models` and `datum_catalog.functions` fit into the broader catalog surface.
+- [Schema Introspection](schema-introspection.md) — how `system.models` and `system.functions` fit into the broader catalog surface.
 - [`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md) — the design rationale for the inference layer, including the hoister Option A trade-off and why `infer()` is body-scoped.

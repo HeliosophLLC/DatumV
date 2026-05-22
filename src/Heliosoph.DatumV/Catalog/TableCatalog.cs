@@ -160,7 +160,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // views. They reject CREATE / DROP / CREATE INDEX but accept Add()
         // so the host can attach providers (e.g. ModelsTableProvider).
         this.SystemCatalog = new ReadOnlyTableCatalog(new[] { "system" });
-        this.VirtualCatalog = new ReadOnlyTableCatalog(new[] { "information_schema", "datum_catalog" });
+        this.VirtualCatalog = new ReadOnlyTableCatalog(new[] { "information_schema", "system" });
 
         // Models is a real, non-droppable schema mounted alongside the
         // other built-ins (S9). The schema is empty as a table namespace —
@@ -173,14 +173,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         this.ModelCatalog = new ReadOnlyTableCatalog(new[] { "models" });
 
         // Schema → backend map. Lookups, DDL, and Add() route through this.
-        // Public is the home for user data; system/info_schema/datum_catalog/
+        // Public is the home for user data; system/info_schema/system/
         // models are read-only projections.
         this.Backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
         {
             ["public"] = FlatFileCatalog,
             ["system"] = SystemCatalog,
             ["information_schema"] = VirtualCatalog,
-            ["datum_catalog"] = VirtualCatalog,
+            ["system"] = VirtualCatalog,
             ["models"] = ModelCatalog,
         };
 
@@ -277,7 +277,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// <summary>
     /// Virtual-projection backend: owns the SQL-standard
     /// <c>information_schema</c> and engine-introspection
-    /// <c>datum_catalog</c> schemas. Read-only for DDL; providers are
+    /// <c>system</c> schemas. Read-only for DDL; providers are
     /// constructed alongside the catalog at startup.
     /// </summary>
     private ReadOnlyTableCatalog VirtualCatalog { get; }
@@ -1361,7 +1361,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         => string.Equals(schema, "public", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "information_schema", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(schema, "datum_catalog", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(schema, "system", StringComparison.OrdinalIgnoreCase)
         || string.Equals(schema, "models", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>

@@ -172,7 +172,7 @@ public sealed class SchemaResolverTests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = OpenCatalog();
         // Path contains only read-only schemas.
-        SchemaResolver resolver = new(catalog, new[] { "system", "information_schema", "datum_catalog" });
+        SchemaResolver resolver = new(catalog, new[] { "system", "information_schema", "system" });
 
         SchemaResolutionException ex = Assert.Throws<SchemaResolutionException>(() =>
             resolver.ResolveForCreate(null, "newtbl"));

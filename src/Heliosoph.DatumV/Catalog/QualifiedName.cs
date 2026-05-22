@@ -11,7 +11,7 @@ namespace Heliosoph.DatumV.Catalog;
 /// Schema this table lives in. Conventional values: <c>public</c> for
 /// user tables, <c>system</c> for engine-projected views (udfs,
 /// procedures, models), <c>information_schema</c> and
-/// <c>datum_catalog</c> for the SQL standard / engine catalog views.
+/// <c>system</c> for the SQL standard / engine catalog views.
 /// </param>
 /// <param name="Name">Unqualified table name within the schema.</param>
 public readonly record struct QualifiedName(string Schema, string Name)

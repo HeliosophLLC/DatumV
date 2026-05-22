@@ -4,7 +4,7 @@ namespace Heliosoph.DatumV.Functions;
 /// Declares the procedural-context a scalar function requires to be
 /// callable. Read at plan time so call sites in the wrong context fail
 /// before any rows are scanned, and surfaced through
-/// <c>datum_catalog.functions.body_scope</c> so users can discover what's
+/// <c>system.functions.body_scope</c> so users can discover what's
 /// callable where via introspection.
 /// </summary>
 /// <remarks>

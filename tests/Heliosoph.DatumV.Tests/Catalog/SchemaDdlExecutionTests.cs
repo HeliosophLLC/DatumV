@@ -91,7 +91,7 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
     {
         using TableCatalog catalog = CreateCatalog(_catalogPath);
 
-        // system / information_schema / datum_catalog are all read-only;
+        // system / information_schema / system are all read-only;
         // CREATE TABLE there must reject. S4 routes the rejection through
         // SchemaResolver.ResolveForCreate (which derives from
         // InvalidOperationException).
@@ -165,7 +165,7 @@ public sealed class SchemaDdlExecutionTests : ServiceTestBase, IDisposable
         // Same for system, the virtual schemas, and (S9) models.
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA system"));
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA information_schema"));
-        Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA datum_catalog"));
+        Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA system"));
         Assert.Throws<InvalidOperationException>(() => catalog.Plan("DROP SCHEMA models"));
     }
 

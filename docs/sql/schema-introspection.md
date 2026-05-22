@@ -29,7 +29,7 @@ ORDER BY ordinal_position
 
 ```sql
 SELECT function_name, description
-FROM datum_catalog.functions
+FROM system.functions
 WHERE category = 'String'
 ORDER BY function_name
 ```
@@ -90,11 +90,11 @@ Supported table sources:
 - JOINs (INNER, LEFT, RIGHT, FULL OUTER, CROSS — outer joins mark the outer side nullable)
 - Subqueries (`FROM (SELECT ...) AS sub` — recursively infers output column types)
 - Table-valued functions (`RANGE`, `UNNEST` — via `ISchemaAwareTableFunction`)
-- Virtual schema tables (`information_schema.tables`, `datum_catalog.functions`, etc.)
+- Virtual schema tables (`information_schema.tables`, `system.functions`, etc.)
 
 ## Virtual Schemas
 
-DatumV supports **schema-qualified table references** using `schema_name.table_name` syntax. Two virtual schemas are built in: `information_schema` (PostgreSQL-compatible metadata) and `datum_catalog` (DatumV-specific catalog views). Virtual schemas are read-only — DDL/DML statements against them are rejected.
+DatumV supports **schema-qualified table references** using `schema_name.table_name` syntax. Two virtual schemas are built in: `information_schema` (PostgreSQL-compatible metadata) and `system` (DatumV-specific catalog views). Virtual schemas are read-only — DDL/DML statements against them are rejected.
 
 ### Schema-qualified syntax
 
@@ -236,27 +236,27 @@ A lightweight `system.views` (`schema`, `name`, `source_text`) is also exposed f
 | Column | Type | Description |
 |--------|------|-------------|
 | `catalog_name` | String | Always `'datum'` |
-| `schema_name` | String | `'public'`, `'information_schema'`, `'datum_catalog'`, or `'models'`. The `'system'` schema (built-in scalars and `system.udfs` / `system.procedures` / `system.views` virtual tables) follows the PG `pg_catalog` convention and is hidden from this listing. |
+| `schema_name` | String | `'public'`, `'information_schema'`, `'system'`, or `'models'`. The `'system'` schema (built-in scalars and `system.udfs` / `system.procedures` / `system.views` virtual tables) follows the PG `pg_catalog` convention and is hidden from this listing. |
 
 ```sql
 SELECT schema_name FROM information_schema.schemata
 ```
 
-### `datum_catalog`
+### `system`
 
 DatumV-specific metadata views exposing providers, functions, per-column statistics, indexes, and column interactions from manifests.
 
-#### `datum_catalog.providers`
+#### `system.providers`
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `provider_name` | String | Format provider name (e.g. `'csv'`, `'parquet'`, `'hdf5'`) |
 
 ```sql
-SELECT provider_name FROM datum_catalog.providers
+SELECT provider_name FROM system.providers
 ```
 
-#### `datum_catalog.functions`
+#### `system.functions`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -271,12 +271,12 @@ SELECT provider_name FROM datum_catalog.providers
 ```sql
 -- List all aggregate functions with their descriptions
 SELECT function_name, description, parameter_count
-FROM datum_catalog.functions
+FROM system.functions
 WHERE function_type = 'AGGREGATE'
 ORDER BY function_name
 ```
 
-#### `datum_catalog.function_parameters`
+#### `system.function_parameters`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -289,12 +289,12 @@ ORDER BY function_name
 ```sql
 -- Show parameters for the SUBSTR function
 SELECT ordinal_position, parameter_name, data_type, is_optional
-FROM datum_catalog.function_parameters
+FROM system.function_parameters
 WHERE function_name = 'SUBSTR'
 ORDER BY ordinal_position
 ```
 
-#### `datum_catalog.statistics`
+#### `system.statistics`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -331,12 +331,12 @@ Only tables with a `.datum-manifest` sidecar or session-generated statistics app
 ```sql
 -- Show distribution statistics for numeric columns
 SELECT column_name, mean, standard_deviation, skewness, p25, p50, p75
-FROM datum_catalog.statistics
+FROM system.statistics
 WHERE table_name = 'orders_csv' AND mean IS NOT NULL
 ORDER BY column_name
 ```
 
-#### `datum_catalog.indexes`
+#### `system.indexes`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -350,12 +350,12 @@ ORDER BY column_name
 ```sql
 -- Show all indexes for a table
 SELECT column_name, index_type, entry_count
-FROM datum_catalog.indexes
+FROM system.indexes
 WHERE table_name = 'orders_csv'
 ORDER BY column_name, index_type
 ```
 
-#### `datum_catalog.interactions`
+#### `system.interactions`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -376,7 +376,7 @@ Only tables with computed interactions in their manifest appear in this view.
 ```sql
 -- Find strongly correlated column pairs
 SELECT column_a, column_b, pearson, mutual_information
-FROM datum_catalog.interactions
+FROM system.interactions
 WHERE table_name = 'orders_csv' AND ABS(pearson) > 0.7
 ORDER BY ABS(pearson) DESC
 ```

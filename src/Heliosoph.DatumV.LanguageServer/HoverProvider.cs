@@ -374,7 +374,7 @@ public sealed class HoverProvider
         // or a schema-qualified table reference (schema.table). Resolve
         // against the live manifest first so any schema that holds a
         // matching table — public, system, information_schema,
-        // datum_catalog, or a user-created schema — produces hover; fall
+        // system, or a user-created schema — produces hover; fall
         // back to the column-on-aliased-table path when no table matches.
         if (currentIndex >= 2 &&
             tokens[currentIndex - 1].Kind == SqlToken.Dot &&
@@ -1986,7 +1986,7 @@ public sealed class HoverProvider
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["information_schema"] = "PostgreSQL-compatible metadata schema exposing tables, columns, and schemata.",
-            ["datum_catalog"] = "Heliosoph.DatumV-specific metadata schema exposing providers, functions, statistics, indexes, and interactions.",
+            ["system"] = "Heliosoph.DatumV-specific metadata schema exposing providers, functions, statistics, indexes, and interactions.",
         };
 
     private static readonly Dictionary<string, Dictionary<string, string>> VirtualTableDescriptions =
@@ -1996,9 +1996,9 @@ public sealed class HoverProvider
             {
                 ["tables"] = "Lists all tables (BASE TABLE, TEMPORARY TABLE) with their schema assignment.",
                 ["columns"] = "Lists all columns of all tables with ordinal position, data type, and nullability.",
-                ["schemata"] = "Lists the known schema namespaces (public, temp, information_schema, datum_catalog).",
+                ["schemata"] = "Lists the known schema namespaces (public, temp, information_schema, system).",
             },
-            ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
+            ["system"] = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["providers"] = "Lists all registered data providers.",
                 ["functions"] = "Lists all available functions with type, category, return type, description, parameter count, and query-unit cost.",
