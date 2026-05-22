@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <AssemblyName>video-decode-spike</AssemblyName>
-    <RootNamespace>DatumIngest.Tools.VideoDecodeSpike</RootNamespace>
+    <RootNamespace>Heliosoph.DatumV.Tools.VideoDecodeSpike</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

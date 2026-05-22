@@ -25,13 +25,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\docs\toc.yml" LogicalName="DatumIngest.LanguageServer.docs.toc.yml" />
-    <EmbeddedResource Include="..\..\docs\sql\*.md" LogicalName="DatumIngest.LanguageServer.docs.sql.%(Filename).md" />
-    <EmbeddedResource Include="..\..\docs\functions\*.md" LogicalName="DatumIngest.LanguageServer.docs.functions.%(Filename).md" />
+    <EmbeddedResource Include="..\..\docs\toc.yml" LogicalName="Heliosoph.DatumV.LanguageServer.docs.toc.yml" />
+    <EmbeddedResource Include="..\..\docs\sql\*.md" LogicalName="Heliosoph.DatumV.LanguageServer.docs.sql.%(Filename).md" />
+    <EmbeddedResource Include="..\..\docs\functions\*.md" LogicalName="Heliosoph.DatumV.LanguageServer.docs.functions.%(Filename).md" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
+    <ProjectReference Include="..\Heliosoph.DatumV.Parsing\Heliosoph.DatumV.Parsing.csproj" />
   </ItemGroup>
 
 </Project>

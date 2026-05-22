@@ -7,11 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <AssemblyName>read-csv</AssemblyName>
-    <RootNamespace>DatumIngest.Tools.ReadCsv</RootNamespace>
+    <RootNamespace>Heliosoph.DatumV.Tools.ReadCsv</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
   </ItemGroup>
 
 </Project>

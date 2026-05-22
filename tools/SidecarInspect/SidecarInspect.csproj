@@ -7,11 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <AssemblyName>sidecar-inspect</AssemblyName>
-    <RootNamespace>DatumIngest.Tools.SidecarInspect</RootNamespace>
+    <RootNamespace>Heliosoph.DatumV.Tools.SidecarInspect</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
   </ItemGroup>
 
 </Project>

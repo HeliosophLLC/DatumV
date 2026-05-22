@@ -1,16 +1,16 @@
 <Solution>
   <Folder Name="/benchmarks/">
-    <Project Path="benchmarks/DatumIngest.Benchmarks/DatumIngest.Benchmarks.csproj" />
+    <Project Path="benchmarks/Heliosoph.DatumV.Benchmarks/Heliosoph.DatumV.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/DatumIngest.LanguageServer/DatumIngest.LanguageServer.csproj" />
-    <Project Path="src/DatumIngest.Parsing/DatumIngest.Parsing.csproj" />
-    <Project Path="src/DatumIngest.Web/DatumIngest.Web.csproj" />
-    <Project Path="src/DatumIngest/DatumIngest.csproj" />
+    <Project Path="src/Heliosoph.DatumV.LanguageServer/Heliosoph.DatumV.LanguageServer.csproj" />
+    <Project Path="src/Heliosoph.DatumV.Parsing/Heliosoph.DatumV.Parsing.csproj" />
+    <Project Path="src/Heliosoph.DatumV.Web/Heliosoph.DatumV.Web.csproj" />
+    <Project Path="src/Heliosoph.DatumV/Heliosoph.DatumV.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/DatumIngest.Tests/DatumIngest.Tests.csproj" />
-    <Project Path="tests/DatumIngest.Web.Tests/DatumIngest.Web.Tests.csproj" />
+    <Project Path="tests/Heliosoph.DatumV.Tests/Heliosoph.DatumV.Tests.csproj" />
+    <Project Path="tests/Heliosoph.DatumV.Web.Tests/Heliosoph.DatumV.Web.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/ExecuteOnce/ExecuteOnce.csproj" />

@@ -5,12 +5,6 @@
 **/BenchmarkDotNet.Artifacts.bench/
 /Nuget.Config
 
-# Jekyll (docs-site)
-docs-site/_site/
-docs-site/.jekyll-cache/
-docs-site/.jekyll-metadata
-docs-site/.sass-cache/
-docs-site/docs/
 benchmark-output.log
 traces/
 # Profile traces produced by ProfileDriver + dotnet-trace.
@@ -18,8 +12,8 @@ traces/
 *.speedscope.json
 .claude/settings.local.json
 .venv/**
-tests/DatumIngest.Tests/TestResults/**
+tests/Heliosoph.DatumV.Tests/TestResults/**
 
-# DatumIngest.Web frontend build outputs (Vite owns wwwroot/)
-src/DatumIngest.Web/ClientApp/node_modules/
-src/DatumIngest.Web/wwwroot/
+# Heliosoph.DatumV.Web frontend build outputs (Vite owns wwwroot/)
+src/Heliosoph.DatumV.Web/ClientApp/node_modules/
+src/Heliosoph.DatumV.Web/wwwroot/

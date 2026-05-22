@@ -24,8 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
-    <ProjectReference Include="..\..\src\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV.LanguageServer\Heliosoph.DatumV.LanguageServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

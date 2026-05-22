@@ -108,7 +108,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
+    <ProjectReference Include="..\Heliosoph.DatumV.Parsing\Heliosoph.DatumV.Parsing.csproj" />
   </ItemGroup>
 
 </Project>

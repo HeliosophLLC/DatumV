@@ -1,5 +1,5 @@
 {
-  "name": "datumingest-electron",
+  "name": "heliosoph-datumv-electron",
   "private": true,
   "version": "0.0.0",
   "description": "Electron shell for Heliosoph.DatumV. Owns the main BrowserWindow, dialog windows, and the .NET subprocess lifecycle.",

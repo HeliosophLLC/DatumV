@@ -7,11 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <AssemblyName>probe</AssemblyName>
-    <RootNamespace>DatumIngest.Tools.Probe</RootNamespace>
+    <RootNamespace>Heliosoph.DatumV.Tools.Probe</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
   </ItemGroup>
 
 </Project>

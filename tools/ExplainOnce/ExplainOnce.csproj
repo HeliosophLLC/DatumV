@@ -7,12 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <AssemblyName>explain-once</AssemblyName>
-    <RootNamespace>DatumIngest.Tools.ExplainOnce</RootNamespace>
+    <RootNamespace>Heliosoph.DatumV.Tools.ExplainOnce</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
-    <ProjectReference Include="..\..\src\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
+    <ProjectReference Include="..\..\src\Heliosoph.DatumV.Parsing\Heliosoph.DatumV.Parsing.csproj" />
   </ItemGroup>
 
 </Project>

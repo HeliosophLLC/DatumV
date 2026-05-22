@@ -18,8 +18,8 @@
 
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
-    <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
+    <ProjectReference Include="..\Heliosoph.DatumV\Heliosoph.DatumV.csproj" />
+    <ProjectReference Include="..\Heliosoph.DatumV.LanguageServer\Heliosoph.DatumV.LanguageServer.csproj" />
   </ItemGroup>
 
   <!--
@@ -112,7 +112,7 @@
           DependsOnTargets="ToolRestore"
           Inputs="$(TargetPath)"
           Outputs="ClientApp/src/api/generated/hubs/TypedSignalR.Client/index.ts">
-    <Exec Command="dotnet tsrts --project DatumIngest.Web.csproj --output ClientApp/src/api/generated/hubs"
+    <Exec Command="dotnet tsrts --project Heliosoph.DatumV.Web.csproj --output ClientApp/src/api/generated/hubs"
           WorkingDirectory="$(MSBuildProjectDirectory)" />
   </Target>
 
