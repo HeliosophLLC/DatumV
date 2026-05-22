@@ -79,13 +79,13 @@ If you need billion-row analytics, use DuckDB. If you need to join a ZIP of imag
 ### 1. Query a CSV file
 
 ```bash
-datum-ingest explore "SELECT name, score FROM data WHERE score > 90" --source "data=./iris.csv"
+datumv explore "SELECT name, score FROM data WHERE score > 90" --source "data=./iris.csv"
 ```
 
 ### 2. Join ZIP + JSON, transform images, output to HDF5
 
 ```bash
-datum-ingest query "
+datumv query "
   SELECT resize_and_crop(load_image(img.file_bytes), 224, 224, 'center') AS image,
          cap.caption
   FROM images AS image_files
@@ -99,7 +99,7 @@ datum-ingest query "
 ### 3. ETL with sharded output
 
 ```bash
-datum-ingest query "
+datumv query "
   SELECT id, normalize(value) AS norm_value, category
   FROM data
   INTO 'output/result.csv' SHARD ON sample_count 10000
@@ -196,8 +196,8 @@ parquet:labels=./labels.parquet
 When `--source` is given a directory path, all supported files in that directory are auto-discovered and registered as tables. Table names are derived from filenames (e.g. `order_products__prior.csv.datum` becomes `order_products__prior.csv`). Sidecars (`.datum-index`, `.datum-manifest`, `.datum-schema`) are matched automatically.
 
 ```bash
-datum-ingest shell --source ./datasets/my-project
-datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/my-project
+datumv shell --source ./datasets/my-project
+datumv explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/my-project
 ```
 
 ## Documentation

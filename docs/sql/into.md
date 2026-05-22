@@ -30,11 +30,11 @@ Add `--checkpoint` to resume a sharded write from the last completed shard after
 
 ```bash
 # First run — crashes after writing shards 0–4
-datum-ingest query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+datumv query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
   --source csv:data=large.csv --checkpoint
 
 # Re-run the same command — resumes from shard 5
-datum-ingest query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+datumv query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
   --source csv:data=large.csv --checkpoint
 ```
 

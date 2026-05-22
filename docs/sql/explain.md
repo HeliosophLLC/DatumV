@@ -13,7 +13,7 @@ The `explain` command shows the query execution plan as a tree. Two modes are su
 Shows the operator tree structure, join strategies, filter predicates, and warnings — without executing the query:
 
 ```bash
-datum-ingest explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
+datumv explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
 ```
 
 ```
@@ -37,7 +37,7 @@ Filter (predicate: id > 1000)
 Add `--analyze` to actually execute the query and report runtime metrics — row counts, filter selectivity, self time, and total time per operator:
 
 ```bash
-datum-ingest explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
+datumv explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
 ```
 
 ```

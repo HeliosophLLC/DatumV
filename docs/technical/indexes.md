@@ -98,7 +98,7 @@ Filters are built per column per chunk. At query time, bloom filters enable **jo
 Specify columns at index build time:
 
 ```bash
-datum-ingest index --source "csv:data=./data.csv" --bloom-columns "id,category"
+datumv index --source "csv:data=./data.csv" --bloom-columns "id,category"
 ```
 
 ## Sorted value indexes (legacy)
@@ -121,7 +121,7 @@ At query time, sorted indexes enable **equality and range predicate pruning**: t
 Specify columns at index build time:
 
 ```bash
-datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,timestamp"
+datumv index --source "csv:data=./data.csv" --index-columns "user_id,timestamp"
 ```
 
 ### Automatic column selection
@@ -311,7 +311,7 @@ Within surviving chunks, the engine builds a combined bitmap mask by evaluating 
 Bitmap columns are auto-detected during index building for all auto-indexable kinds. To force specific columns:
 
 ```
-datum-ingest index --source data.csv --auto-index --bitmap-columns color,status
+datumv index --source data.csv --auto-index --bitmap-columns color,status
 ```
 
 ### Storage format
@@ -415,7 +415,7 @@ This optimization composes with LIMIT — an `ORDER BY col LIMIT N` query reads 
 ### Build a standalone index
 
 ```bash
-datum-ingest index --source "csv:data=./large_dataset.csv" \
+datumv index --source "csv:data=./large_dataset.csv" \
   --chunk-size 50000 \
   --bloom-columns "id,category" \
   --index-columns "id"
@@ -426,7 +426,7 @@ This creates `large_dataset.csv.datum-index` alongside the source file.
 ### Co-generate an index and manifest
 
 ```bash
-datum-ingest index-manifest --source "csv:data=./data.csv" \
+datumv index-manifest --source "csv:data=./data.csv" \
   --chunk-size 50000 \
   --bloom-columns "id,category" \
   --with-interactions
@@ -437,7 +437,7 @@ This creates both `data.csv.datum-index` and `data.csv.datum-manifest` in a sing
 ### Co-generate an index during query output
 
 ```bash
-datum-ingest query "
+datumv query "
   SELECT id, normalize(value) AS norm_value
   FROM data
   INTO 'output/result.csv' SHARD ON sample_count 10000
@@ -449,7 +449,7 @@ The `--with-index` flag builds an index for each source as rows flow through the
 ### Load a pre-built index at query time
 
 ```bash
-datum-ingest query "SELECT * FROM data WHERE category = 'train'" \
+datumv query "SELECT * FROM data WHERE category = 'train'" \
   --source "csv:data=./data.csv" \
   --index "./data.csv.datum-index"
 ```

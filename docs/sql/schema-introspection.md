@@ -40,7 +40,7 @@ The `schema` command resolves column metadata from all table sources in a query'
 
 ```bash
 # Single table
-datum-ingest schema "SELECT * FROM data" --source csv:data=measurements.csv
+datumv schema "SELECT * FROM data" --source csv:data=measurements.csv
 ```
 
 ```
@@ -55,7 +55,7 @@ score                          Float32      YES        data
 
 ```bash
 # JOIN — columns from both sides, with LEFT JOIN marking the right side nullable
-datum-ingest schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
+datumv schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
   --source "zip:images=./train2017.zip" \
   --source "json:captions=./captions.json"
 ```
@@ -73,7 +73,7 @@ caption                        String       YES        cap
 
 ```bash
 # Table-valued function
-datum-ingest schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
+datumv schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
 ```
 
 ```

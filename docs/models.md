@@ -1377,7 +1377,7 @@ there's no separate cache to manage.
 - **Demo**:
   ```sql
   SELECT models.bark_small(
-    'Hello there from Datum Ingest. [laughs] This is rather fun, actually.',
+    'Hello there from DatumV. [laughs] This is rather fun, actually.',
     'v2/en_speaker_9'
   );
   ```
@@ -1455,7 +1455,7 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
   tuple. Planner CSE folds duplicate call sites.
 - **Demo**:
   ```sql
-  SELECT models.kokoro_82m('hello there from datum ingest', 'af_bella');
+  SELECT models.kokoro_82m('hello there from datumv', 'af_bella');
   ```
 
 ## Quantization conventions

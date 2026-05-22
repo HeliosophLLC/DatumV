@@ -17,7 +17,7 @@ dotnet tool install --global DatumV.Cli
 Verify it works:
 
 ```bash
-datum-ingest --version
+datumv --version
 ```
 
 ## Your First Query
@@ -34,7 +34,7 @@ sepal_length,sepal_width,petal_length,petal_width,species
 To peek at the data:
 
 ```bash
-datum-ingest explore "SELECT * FROM iris LIMIT 5" --source "iris=./iris.csv"
+datumv explore "SELECT * FROM iris LIMIT 5" --source "iris=./iris.csv"
 ```
 
 The `--source` flag tells DatumV where the data lives. The format is `name=path` — the name becomes the table name you use in SQL.
@@ -83,7 +83,7 @@ ORDER BY avg_order_value DESC
 Write results to a file. The format is inferred from the extension:
 
 ```bash
-datum-ingest query "SELECT * FROM customers INTO 'output.parquet'" --source "customers=./customers.csv"
+datumv query "SELECT * FROM customers INTO 'output.parquet'" --source "customers=./customers.csv"
 ```
 
 Supported output formats:
@@ -106,7 +106,7 @@ SELECT * FROM data INTO 'output.parquet' SHARD ON sample_count 50000
 For exploration, use the interactive shell:
 
 ```bash
-datum-ingest shell --source "orders=./orders.csv" --source "products=./products.csv"
+datumv shell --source "orders=./orders.csv" --source "products=./products.csv"
 ```
 
 Inside the shell you can run queries, inspect tables, and iterate without restarting:
@@ -138,7 +138,7 @@ Let's walk through a realistic scenario. You have two CSV files — `orders.csv`
 ### 1. Explore the data
 
 ```bash
-datum-ingest shell --source "orders=./orders.csv" --source "customers=./customers.csv"
+datumv shell --source "orders=./orders.csv" --source "customers=./customers.csv"
 ```
 
 ```sql
@@ -205,7 +205,7 @@ FROM (
 ### 4. Export
 
 ```bash
-datum-ingest query "
+datumv query "
   SELECT ...  -- (the query above)
   INTO 'customer_features.parquet'
 " --source "orders=./orders.csv" --source "customers=./customers.csv"
@@ -218,7 +218,7 @@ Your Parquet file is ready for pandas, scikit-learn, or any ML framework.
 You have a ZIP of images and a JSON annotations file. You want to resize all images to 224x224, pair them with their labels, and export as HDF5 for PyTorch.
 
 ```bash
-datum-ingest query "
+datumv query "
   SELECT
     resize(img.file_bytes, 224, 224) AS image,
     cap.label

@@ -132,4 +132,4 @@ if (-not ($voicesOk -or $voicesDirOk)) {
 
 Write-Host ''
 Write-Host 'Try it:' -ForegroundColor Cyan
-Write-Host "  SELECT models.kokoro_82m('hello there from datum ingest', 'af_bella');"
+Write-Host "  SELECT models.kokoro_82m('hello there from datumv', 'af_bella');"

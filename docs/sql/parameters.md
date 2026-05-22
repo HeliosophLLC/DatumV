@@ -27,11 +27,11 @@ SELECT min_max_normalize(score, $min, $max) AS norm FROM data
 Pass values with repeatable `--param key=value` flags:
 
 ```bash
-datum-ingest query "SELECT * FROM data WHERE score > $threshold" \
+datumv query "SELECT * FROM data WHERE score > $threshold" \
   --source "data=./data.csv" \
   --param threshold=0.5
 
-datum-ingest explore "SELECT * FROM data WHERE category = $cat" \
+datumv explore "SELECT * FROM data WHERE category = $cat" \
   --source "data=./data.csv" \
   --param cat=electronics
 ```

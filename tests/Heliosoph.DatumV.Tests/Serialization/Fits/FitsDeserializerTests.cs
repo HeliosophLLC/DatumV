@@ -8,7 +8,7 @@ namespace Heliosoph.DatumV.Tests.Serialization.Fits;
 /// <summary>
 /// Integration tests for <see cref="FitsDeserializer"/>: the ingest-path
 /// counterpart of the <c>open_fits_hdus</c> TVF. Yields one row per HDU
-/// with the same 10-column metadata shape, so <c>datum ingest foo.fits</c>
+/// with the same 10-column metadata shape, so <c>datumv foo.fits</c>
 /// lands a queryable HDU manifest into a .datum file by default.
 /// </summary>
 public sealed class FitsDeserializerTests : ServiceTestBase

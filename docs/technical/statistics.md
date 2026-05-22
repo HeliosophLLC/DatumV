@@ -84,10 +84,10 @@ Interaction computation scales O(C²) with the number of columns due to pairwise
 
 ```bash
 # Interactions included (opt-in)
-datum-ingest index-manifest --source csv:data=data.csv --with-interactions
+datumv index-manifest --source csv:data=data.csv --with-interactions
 
 # Interactions excluded (default)
-datum-ingest index-manifest --source csv:data=data.csv
+datumv index-manifest --source csv:data=data.csv
 ```
 
 **Programmatic API:** Interaction collection is controlled by composition — instantiate `ColumnInteractionCollector` and pass the results to `ManifestBuilder.Build()`, or omit it entirely. No configuration flags are needed.
@@ -113,16 +113,16 @@ The `index-manifest` command generates both a `.datum-index` and a `.datum-manif
 
 ```bash
 # Generate both files (interactions excluded by default)
-datum-ingest index-manifest --source csv:data=measurements.csv
+datumv index-manifest --source csv:data=measurements.csv
 
 # With pairwise interaction analysis
-datum-ingest index-manifest --source csv:data=measurements.csv --with-interactions
+datumv index-manifest --source csv:data=measurements.csv --with-interactions
 
 # Override manifest output path
-datum-ingest index-manifest --source csv:data=measurements.csv --output custom-manifest.json
+datumv index-manifest --source csv:data=measurements.csv --output custom-manifest.json
 
 # All index flags are supported
-datum-ingest index-manifest --source csv:data=measurements.csv --chunk-size 5000 --bloom-columns category --index-columns id
+datumv index-manifest --source csv:data=measurements.csv --chunk-size 5000 --bloom-columns category --index-columns id
 ```
 
 No SQL query is required — the command scans raw source tables directly (equivalent to `SELECT *`). Output files default to `<source-file>.datum-index` and `<source-file>.datum-manifest`.
@@ -135,10 +135,10 @@ The `manifest` command generates a structured JSON manifest describing every col
 
 ```bash
 # Print to stdout
-datum-ingest manifest "SELECT * FROM data" --source csv:data=measurements.csv
+datumv manifest "SELECT * FROM data" --source csv:data=measurements.csv
 
 # Write to file
-datum-ingest manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
+datumv manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
 ```
 
 ### Feature types
