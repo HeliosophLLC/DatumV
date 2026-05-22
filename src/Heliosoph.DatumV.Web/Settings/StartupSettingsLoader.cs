@@ -31,7 +31,7 @@ internal static class StartupSettingsLoader
 
     // Reads {catalogRootPath}/settings.json and returns the user-configured
     // DatasetsDirectory if present and non-empty. Null means "no user
-    // override; use the host's default cascade ($DATUM_DATASETS env var →
+    // override; use the host's default cascade ($DATUMV_DATASETS env var →
     // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache)."
     public static string? LoadDatasetsDirectory(string catalogRootPath)
         => ReadStringField(catalogRootPath, "datasetsDirectory");

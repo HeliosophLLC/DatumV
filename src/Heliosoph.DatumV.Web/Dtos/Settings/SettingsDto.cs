@@ -10,12 +10,12 @@ public sealed record SettingsDto(
     ChromeStyle ChromeStyle,
     string Locale,
     // User-configured models directory. Empty string = use the resolution
-    // cascade ($DATUM_MODELS env var → %LOCALAPPDATA%/Heliosoph.DatumV/models).
+    // cascade ($DATUMV_MODELS env var → %LOCALAPPDATA%/Heliosoph.DatumV/models).
     // When non-empty, takes precedence over both. Read once at startup by
     // StartupSettingsLoader; runtime changes require a restart to apply.
     string ModelsDirectory,
     // User-configured raw datasets cache directory. Empty string = use
-    // the resolution cascade ($DATUM_DATASETS env var →
+    // the resolution cascade ($DATUMV_DATASETS env var →
     // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache). When non-empty, takes
     // precedence over both. Read once at startup by StartupSettingsLoader;
     // runtime changes require a restart to apply.

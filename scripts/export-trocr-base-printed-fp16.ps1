@@ -36,7 +36,7 @@
 #
 # Usage:
 #   ./scripts/export-trocr-base-printed-fp16.ps1
-#       — exports to $env:DATUM_MODELS\trocr-base-printed-fp16
+#       — exports to $env:DATUMV_MODELS\trocr-base-printed-fp16
 #   ./scripts/export-trocr-base-printed-fp16.ps1 -OutputDirectory C:\foo
 #       — exports to a specific directory
 
@@ -44,10 +44,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'trocr-base-printed-fp16'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'trocr-base-printed-fp16'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     )
 )

@@ -37,7 +37,7 @@ public sealed class LlamaModelTests : ServiceTestBase
     }
 
     // Catalog-substrate-aware path: SQL-installed weights live at
-    // <DATUM_MODELS>/<catalog-id>/<active-version>/<file>. The 2026-06-01
+    // <DATUMV_MODELS>/<catalog-id>/<active-version>/<file>. The 2026-06-01
     // version is the current cut of the llama-3.1-8b-instruct-gguf
     // catalog entry; update this constant when the entry is bumped.
     private static string ModelPath => Path.Combine(

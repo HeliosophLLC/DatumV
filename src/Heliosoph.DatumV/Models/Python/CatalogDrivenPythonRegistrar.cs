@@ -133,7 +133,7 @@ public static class CatalogDrivenPythonRegistrar
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
             Backend: "python",
-            // No file under $DATUM_MODELS to anchor on — the venv lives
+            // No file under $DATUMV_MODELS to anchor on — the venv lives
             // under the engine's managed Python directory (queryable
             // via system.python_environments). Files list left empty
             // for the same reason.

@@ -5,7 +5,7 @@ namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 /// <summary>
 /// Tests <see cref="VersionedDatasetPathResolver"/>: the split-root path
 /// resolver that separates the expendable raw-archive cache (under
-/// <c>$DATUM_DATASETS</c>) from the ingested-datasets root (under
+/// <c>$DATUMV_DATASETS</c>) from the ingested-datasets root (under
 /// <c>&lt;CatalogRootPath&gt;/datasets/</c>).
 /// </summary>
 public sealed class DatasetPathResolverTests : IDisposable

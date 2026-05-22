@@ -74,7 +74,7 @@ async function startDotnetBackend(): Promise<string> {
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    DATUM_WEB_URL: isDev ? DEV_KESTREL_URL : 'http://127.0.0.1:0',
+    DATUMV_WEB_URL: isDev ? DEV_KESTREL_URL : 'http://127.0.0.1:0',
   };
 
   console.log(`[dotnet] spawning: ${cmd} ${args.join(' ')}`);

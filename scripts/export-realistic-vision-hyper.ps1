@@ -35,7 +35,7 @@
 #
 # Usage:
 #   ./scripts/export-realistic-vision-hyper.ps1
-#       — exports to $env:DATUM_MODELS\realistic-vision-hyper-onnx (FP32)
+#       — exports to $env:DATUMV_MODELS\realistic-vision-hyper-onnx (FP32)
 #   ./scripts/export-realistic-vision-hyper.ps1 -Fp16
 #       — exports as FP16 (~half the disk + VRAM)
 #   ./scripts/export-realistic-vision-hyper.ps1 -OutputDirectory C:\foo
@@ -45,10 +45,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'realistic-vision-hyper-onnx'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'realistic-vision-hyper-onnx'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

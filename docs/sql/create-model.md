@@ -94,7 +94,7 @@ END;
   models directory.
 - **Relative path** — resolved against the host's models directory
   (`TableCatalog.Models.ModelDirectory`), which is configured via the
-  `--models <path>` flag on `datum-shell` or the `DATUM_MODELS`
+  `--models <path>` flag on `datum-shell` or the `DATUMV_MODELS`
   environment variable. See [Models › Setup](../models.md#setup) for
   the full resolution order.
 

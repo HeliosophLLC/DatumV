@@ -1,13 +1,13 @@
 # Sets up the Python venv for the Kokoro-82M Python-bridge TTS model.
 #
-# Creates {DATUM_MODELS}/.venv-kokoro and pip-installs:
+# Creates {DATUMV_MODELS}/.venv-kokoro and pip-installs:
 #   - kokoro-onnx  (handles phonemizer + ONNX inference)
 #   - numpy
 #
 # Optionally downloads the model files from the kokoro-onnx GitHub release
 # (-DownloadModel for the .onnx, -DownloadVoices for the bundled voices.bin).
 # By default it sets up the venv only; you provide the model files yourself
-# (e.g. you already have per-voice .bin files in {DATUM_MODELS}/kokoro-voices/).
+# (e.g. you already have per-voice .bin files in {DATUMV_MODELS}/kokoro-voices/).
 #
 # The Kokoro worker script ships with the engine in bin/<config>/net10.0/python/
 # and is auto-resolved by RegisterKokoro82M, so this script doesn't drop a
@@ -31,10 +31,10 @@
 param(
     [Parameter()]
     [string]$ModelsDirectory = $(
-        if ($env:DATUM_MODELS) {
-            $env:DATUM_MODELS
+        if ($env:DATUMV_MODELS) {
+            $env:DATUMV_MODELS
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -ModelsDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -ModelsDirectory <path>.'
         }
     ),
 

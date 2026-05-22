@@ -26,12 +26,12 @@ public sealed class WebHostOptions
     public bool RegisterBuiltinModels { get; init; } = true;
 
     // Override for the model files directory. When null, ModelCatalog uses
-    // the $DATUM_MODELS env var or %LOCALAPPDATA%/Heliosoph.DatumV/models.
+    // the $DATUMV_MODELS env var or %LOCALAPPDATA%/Heliosoph.DatumV/models.
     public string? ModelsDirectory { get; init; }
 
     // Override for the raw datasets cache directory — where downloaded
     // archives and their extracted trees land before ingest. When null,
-    // the dataset library uses $DATUM_DATASETS or
+    // the dataset library uses $DATUMV_DATASETS or
     // %LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache. Distinct from
     // CatalogRootPath because ingested .datum files live under the
     // catalog root (datasets/ subfolder) while raw archives are

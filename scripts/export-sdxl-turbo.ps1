@@ -25,7 +25,7 @@
 #
 # Usage:
 #   ./scripts/export-sdxl-turbo.ps1
-#       — exports to $env:DATUM_MODELS\sdxl-turbo-onnx (FP32)
+#       — exports to $env:DATUMV_MODELS\sdxl-turbo-onnx (FP32)
 #   ./scripts/export-sdxl-turbo.ps1 -Fp16
 #       — exports to FP16 (~half the disk + VRAM)
 #   ./scripts/export-sdxl-turbo.ps1 -OutputDirectory C:\foo
@@ -35,10 +35,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'sdxl-turbo-onnx'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'sdxl-turbo-onnx'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

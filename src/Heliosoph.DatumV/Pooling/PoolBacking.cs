@@ -83,7 +83,7 @@ public sealed class PoolBacking
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Arena, byte> _liveArenas = new();
 
     // Per-instance leak counters — Interlocked-incremented at every public Rent/Return call site.
-    // Always-on (Interlocked is cheap; not gated on DATUM_DIAGNOSTICS so leak tests work in any
+    // Always-on (Interlocked is cheap; not gated on DATUMV_DIAGNOSTICS so leak tests work in any
     // configuration). Per-instance avoids the cross-test race that the global DatumDiagnostics
     // counters would suffer when xUnit parallelises across collections.
     private long _dataValueArrayRentCount;

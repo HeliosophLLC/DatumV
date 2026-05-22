@@ -604,7 +604,7 @@ internal static class TokenizerPath
     /// <c>{ModelDirectory}/{catalog-id}/model.onnx</c> +
     /// <c>vocab.txt</c> sibling — relative resolution here turns the SQL
     /// body's <c>'vocab.txt'</c> into the absolute path without forcing
-    /// the body to hardcode <c>$DATUM_MODELS</c> or <c>file://</c>.
+    /// the body to hardcode <c>$DATUMV_MODELS</c> or <c>file://</c>.
     /// </summary>
     internal static string ResolveAbsoluteOrCatalogRelative(
         string path, string callerContext, EvaluationFrame frame)

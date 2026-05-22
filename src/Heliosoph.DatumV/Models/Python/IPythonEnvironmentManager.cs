@@ -6,7 +6,7 @@ namespace Heliosoph.DatumV.Models.Python;
 /// back the venv-scoped Python executable path that
 /// <see cref="PythonBackedModel"/> spawns. Replaces the v1 design where
 /// every Python-backed model resolved its own Python interpreter from
-/// <c>DATUM_PYTHON</c> / <c>PATH</c> / a hand-managed venv on disk.
+/// <c>DATUMV_PYTHON</c> / <c>PATH</c> / a hand-managed venv on disk.
 /// </summary>
 /// <remarks>
 /// <para>

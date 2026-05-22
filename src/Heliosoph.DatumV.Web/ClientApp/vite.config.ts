@@ -38,7 +38,7 @@ export default defineConfig({
       allow: [path.resolve(__dirname, '../../..')],
     },
     // Forward API + SignalR back to Kestrel (pinned to 5050 by
-    // electron/main.ts's DATUM_WEB_URL env). Same-origin from the SPA's
+    // electron/main.ts's DATUMV_WEB_URL env). Same-origin from the SPA's
     // POV so generated NSwag clients work with an empty baseUrl in both
     // dev and prod.
     proxy: {

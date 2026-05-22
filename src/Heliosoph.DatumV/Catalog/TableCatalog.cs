@@ -31,7 +31,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// bare-form row exists. Bare rows have <c>PinnedAs == null</c> —
     /// pinned-form rows coexist on the same catalog id but intentionally
     /// don't drive "active." Replaces the previous
-    /// <c>&lt;DATUM_MODELS&gt;/&lt;id&gt;/active</c> text-pointer file.
+    /// <c>&lt;DATUMV_MODELS&gt;/&lt;id&gt;/active</c> text-pointer file.
     /// </summary>
     public string? GetActiveVersion(string catalogId)
     {

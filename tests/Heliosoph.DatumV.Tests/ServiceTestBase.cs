@@ -67,16 +67,16 @@ public abstract class ServiceTestBase : IDisposable
     }
 
     /// <summary>
-    /// Resolved models directory: the <c>DATUM_MODELS</c> env var when set,
+    /// Resolved models directory: the <c>DATUMV_MODELS</c> env var when set,
     /// otherwise the per-user fallback under <c>%LOCALAPPDATA%/Heliosoph.DatumV/models</c>
     /// (Windows) or <c>~/.local/share/Heliosoph.DatumV/models</c> (Linux/macOS).
     /// Matches <see cref="Heliosoph.DatumV.Models.ModelCatalog.DefaultModelDirectory"/>
     /// so tests and production code see the same model files. Set
-    /// <c>DATUM_MODELS=E:\Path\To\Models</c> in your shell to keep large
+    /// <c>DATUMV_MODELS=E:\Path\To\Models</c> in your shell to keep large
     /// model files off the C: drive without changing test code.
     /// </summary>
     public static string ModelsDirectory =>
-        Environment.GetEnvironmentVariable("DATUM_MODELS")
+        Environment.GetEnvironmentVariable("DATUMV_MODELS")
         ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Heliosoph.DatumV",

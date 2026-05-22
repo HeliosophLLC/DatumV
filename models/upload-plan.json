@@ -24,7 +24,7 @@
   "uploads": [
     {
       "repoSuffix": "absolute-reality-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/absolute-reality-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/absolute-reality-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-absolute-reality-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -49,7 +49,7 @@
     },
     {
       "repoSuffix": "dreamshaper-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/dreamshaper-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/dreamshaper-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-dreamshaper-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -73,7 +73,7 @@
     },
     {
       "repoSuffix": "epicrealism-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/epicrealism-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/epicrealism-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-epicrealism-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -98,7 +98,7 @@
     },
     {
       "repoSuffix": "mo-di-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/mo-di-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/mo-di-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-mo-di-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -123,7 +123,7 @@
     },
     {
       "repoSuffix": "openjourney-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/openjourney-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/openjourney-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-openjourney-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -147,7 +147,7 @@
     },
     {
       "repoSuffix": "realistic-vision-hyper-onnx",
-      "sourceFolder": "${DATUM_MODELS}/realistic-vision-hyper-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/realistic-vision-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-realistic-vision-hyper.ps1",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -173,7 +173,7 @@
     },
     {
       "repoSuffix": "juggernaut-xl-lightning-onnx",
-      "sourceFolder": "${DATUM_MODELS}/juggernaut-xl-lightning-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/juggernaut-xl-lightning-onnx",
       "expectedSizeMb": 13312,
       "exportedBy": "scripts/export-batch-onnx.ps1 -Models juggernaut-xl-lightning",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "text_encoder_2/", "tokenizer/", "tokenizer_2/", "unet/", "vae_decoder/", "vae_encoder/"],
@@ -196,7 +196,7 @@
     },
     {
       "repoSuffix": "florence-2-base-ft-fp16-onnx",
-      "sourceFolder": "${DATUM_MODELS}/florence-2-base-ft-fp16",
+      "sourceFolder": "${DATUMV_MODELS}/florence-2-base-ft-fp16",
       "expectedSizeMb": 523,
       "exportedBy": "manual optimum-cli export (Florence-2 uses custom modeling code; not in export-batch-onnx.ps1)",
       "expectedContents": ["config.json", "decoder_model_fp16.onnx", "embed_tokens_fp16.onnx", "encoder_model_fp16.onnx", "vision_encoder_fp16.onnx", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json"],
@@ -218,7 +218,7 @@
     },
     {
       "repoSuffix": "florence-2-base-ft-quantized-onnx",
-      "sourceFolder": "${DATUM_MODELS}/florence-2-base-ft-quantized",
+      "sourceFolder": "${DATUMV_MODELS}/florence-2-base-ft-quantized",
       "expectedSizeMb": 266,
       "exportedBy": "manual optimum-cli export + onnxruntime.quantization.quantize_dynamic",
       "expectedContents": ["config.json", "decoder_model_quantized.onnx", "embed_tokens_quantized.onnx", "encoder_model_quantized.onnx", "vision_encoder_quantized.onnx", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json"],
@@ -240,7 +240,7 @@
     },
     {
       "repoSuffix": "vit-gpt2-image-captioning-onnx",
-      "sourceFolder": "${DATUM_MODELS}/vit-gpt2-image-captioning",
+      "sourceFolder": "${DATUMV_MODELS}/vit-gpt2-image-captioning",
       "expectedSizeMb": 1100,
       "exportedBy": "scripts/export-vit-gpt-image-captioning.ps1",
       "expectedContents": ["config.json", "decoder_model.onnx", "encoder_model.onnx", "generation_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json", "tokenizer_config.json"],
@@ -261,7 +261,7 @@
     },
     {
       "repoSuffix": "kokoro-v1.0-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 320,
       "exportedBy": "downloaded from upstream Kokoro release; not converted locally",
       "expectedContents": ["kokoro-v1.0.onnx", "kokoro-voices/*.bin"],
@@ -284,7 +284,7 @@
     },
     {
       "repoSuffix": "yolox-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 985,
       "exportedBy": "downloaded from Megvii's release; not converted locally",
       "expectedContents": ["yolox_nano.onnx", "yolox_tiny.onnx", "yolox_s.onnx", "yolox_m.onnx", "yolox_l.onnx", "yolox_x.onnx", "yolox_darknet.onnx"],
@@ -307,7 +307,7 @@
     },
     {
       "repoSuffix": "sam-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 60,
       "exportedBy": "downloaded — Meta SAM mask decoders + ChaoningZhang/MobileSAM image encoder",
       "expectedContents": ["sam_mask_decoder_single.onnx", "sam_mask_decoder_multi.onnx", "mobile_sam_image_encoder.onnx"],
@@ -330,7 +330,7 @@
     },
     {
       "repoSuffix": "u2net-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 175,
       "exportedBy": "downloaded — Qin et al. U²-Net ONNX weights via danielgatis/rembg release",
       "expectedContents": ["u2net.onnx", "u2netp.onnx"],
@@ -354,7 +354,7 @@
     },
     {
       "repoSuffix": "dpt-large-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 1300,
       "exportedBy": "downloaded — Intel ISL DPT-Large monocular depth estimator",
       "expectedContents": ["dpt_large_384.onnx"],
@@ -377,7 +377,7 @@
     },
     {
       "repoSuffix": "midas-small-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 80,
       "exportedBy": "downloaded — Intel ISL MiDaS v2.1 small (GitHub release v2_1)",
       "expectedContents": ["midas_v21_small_256.onnx"],
@@ -402,7 +402,7 @@
 
     {
       "repoSuffix": "paddleocr-v4-det-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 5,
       "exportedBy": "downloaded — PaddleOCR PP-OCRv4 text-region detector",
       "expectedContents": ["ch_PP-OCRv4_det.onnx"],
@@ -426,7 +426,7 @@
     },
     {
       "repoSuffix": "realesrgan-onnx",
-      "sourceFolder": "${DATUM_MODELS}",
+      "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 5,
       "exportedBy": "downloaded — xinntao Real-ESRGAN general 4× upscaler",
       "expectedContents": ["realesr-general-x4v3.onnx"],
@@ -450,7 +450,7 @@
     },
     {
       "repoSuffix": "mediapipe-face-onnx",
-      "sourceFolder": "${DATUM_MODELS}/mediapipe-face-staging",
+      "sourceFolder": "${DATUMV_MODELS}/mediapipe-face-staging",
       "expectedSizeMb": 6,
       "exportedBy": "downloaded — Qualcomm AI Hub release of MediaPipe Face (Apache-2.0 ONNX via zmurez/MediaPipePyTorch)",
       "expectedContents": [
@@ -481,7 +481,7 @@
     },
     {
       "repoSuffix": "mobilenetv2-onnx",
-      "sourceFolder": "${DATUM_MODELS}/mobilenetv2-staging",
+      "sourceFolder": "${DATUMV_MODELS}/mobilenetv2-staging",
       "expectedSizeMb": 14,
       "exportedBy": "downloaded — ONNX Model Zoo published checkpoint (opset 12) + curated ImageNet-1K class file",
       "expectedContents": ["mobilenetv2-12.onnx", "imagenet-classes.json"],
@@ -505,11 +505,11 @@
     },
     {
       "repoSuffix": "swinir-onnx",
-      "sourceFolder": "${DATUM_MODELS}/swinir-staging",
+      "sourceFolder": "${DATUMV_MODELS}/swinir-staging",
       "expectedSizeMb": 155,
       "exportedBy": "scripts/export-swinir.ps1",
       "expectedContents": ["swinir_realsr_x4.onnx", "swinir_denoising_color_25.onnx"],
-      "uploadStaging": "Run scripts/export-swinir.ps1. The script clones JingyunLiang/SwinIR, downloads the two pinned .pth checkpoints from the v0.0 GitHub release, builds the SwinIR PyTorch model with the matching configs, and writes the two .onnx files into $env:DATUM_MODELS/swinir-staging/. Drop README.md + LICENSE in the staging folder before upload.",
+      "uploadStaging": "Run scripts/export-swinir.ps1. The script clones JingyunLiang/SwinIR, downloads the two pinned .pth checkpoints from the v0.0 GitHub release, builds the SwinIR PyTorch model with the matching configs, and writes the two .onnx files into $env:DATUMV_MODELS/swinir-staging/. Drop README.md + LICENSE in the staging folder before upload.",
       "provenance": {
         "baseModel": "JingyunLiang/SwinIR — Apache-2.0 (Liang et al., ICCV 2021)",
         "exportToolchain": "torch.onnx.export from upstream PyTorch checkpoints (v0.0 GitHub release). Variants: 003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN.pth (real-world SR) + 005_colorDN_DFWB_s128w8_SwinIR-M_noise25.pth (color denoising σ=25).",
@@ -529,7 +529,7 @@
     },
     {
       "repoSuffix": "scunet-onnx",
-      "sourceFolder": "${DATUM_MODELS}/kair-staging",
+      "sourceFolder": "${DATUMV_MODELS}/kair-staging",
       "expectedSizeMb": 615,
       "exportedBy": "scripts/export-kair.ps1 -Model scunet-color|scunet-gray (looped per checkpoint)",
       "expectedContents": [
@@ -542,7 +542,7 @@
         "scunet_gray_25.onnx",         "scunet_gray_25.onnx.data",
         "scunet_gray_50.onnx",         "scunet_gray_50.onnx.data"
       ],
-      "uploadStaging": "Run scripts/export-kair.ps1 in a loop over all 8 .pth checkpoints in the local cszn/SCUNet repo's model_zoo/ folder (5 color variants with -Model scunet-color, 3 gray variants with -Model scunet-gray). The script writes each ONNX as an .onnx + .onnx.data sibling pair (torch externalizes weights at this opset/size). All 16 files land in $env:DATUM_MODELS/kair-staging/. Drop README.md + LICENSE in the staging folder before upload — both files for every variant MUST travel together (the .onnx references the .data by relative filename).",
+      "uploadStaging": "Run scripts/export-kair.ps1 in a loop over all 8 .pth checkpoints in the local cszn/SCUNet repo's model_zoo/ folder (5 color variants with -Model scunet-color, 3 gray variants with -Model scunet-gray). The script writes each ONNX as an .onnx + .onnx.data sibling pair (torch externalizes weights at this opset/size). All 16 files land in $env:DATUMV_MODELS/kair-staging/. Drop README.md + LICENSE in the staging folder before upload — both files for every variant MUST travel together (the .onnx references the .data by relative filename).",
       "provenance": {
         "baseModel": "cszn/SCUNet — Apache-2.0 (Zhang et al., 'Practical Blind Image Denoising via Swin-Conv-UNet and Data Synthesis', 2022)",
         "exportToolchain": "torch.onnx.export from the 8 upstream PyTorch checkpoints. Color variants: SCUNet(in_nc=3, config=[4]*7, dim=64). Gray variants: SCUNet(in_nc=1, config=[4]*7, dim=64).",
@@ -561,7 +561,7 @@
     },
     {
       "repoSuffix": "moondream2-onnx",
-      "sourceFolder": "${DATUM_MODELS}/moondream2-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/moondream2-onnx",
       "expectedSizeMb": 2000,
       "exportedBy": "Optimum ONNX export from vikhyatk/moondream2 PyTorch weights (manual / one-off; no reproducible script in the repo yet — flag for a future scripts/export-moondream2.ps1 if a clean re-export is ever needed)",
       "expectedContents": [
@@ -575,7 +575,7 @@
         "tokenizer_config.json",
         "special_tokens_map.json"
       ],
-      "uploadStaging": "Copy the existing local Optimum export at $env:DATUM_MODELS/moondream2-onnx/ into a staging folder. Verify the file list matches expectedContents above (Optimum's exact output filenames depend on the optimum / transformers version used at export time — adjust the list to match what's actually there). Drop README.md + LICENSE into the staging root. The export may produce additional `.onnx.data` sidecars for any component whose weights exceed the protobuf 2GB limit — include those too. Upload the staging folder via huggingface-cli.",
+      "uploadStaging": "Copy the existing local Optimum export at $env:DATUMV_MODELS/moondream2-onnx/ into a staging folder. Verify the file list matches expectedContents above (Optimum's exact output filenames depend on the optimum / transformers version used at export time — adjust the list to match what's actually there). Drop README.md + LICENSE into the staging root. The export may produce additional `.onnx.data` sidecars for any component whose weights exceed the protobuf 2GB limit — include those too. Upload the staging folder via huggingface-cli.",
       "provenance": {
         "baseModel": "vikhyatk/moondream2 — Apache-2.0 (Vikhyat Korrapati, 2024). 1.86B-param vision-language model: SigLIP vision encoder + Phi-1.5-based text decoder + cross-modal projection.",
         "exportToolchain": "Optimum ONNX exporter from upstream PyTorch weights. Multi-file export pattern: vision encoder, text decoder (with KV-cache merged), and embed_tokens as separate ONNX files. Original conversion was done locally; the exact toolchain version isn't recorded — re-derivation would need someone to re-run `optimum-cli export onnx --model vikhyatk/moondream2 --task image-to-text` against current Optimum + verify the output matches.",
@@ -595,7 +595,7 @@
     },
     {
       "repoSuffix": "zoedepth-nyu-kitti-onnx",
-      "sourceFolder": "${DATUM_MODELS}/zoedepth-staging",
+      "sourceFolder": "${DATUMV_MODELS}/zoedepth-staging",
       "expectedSizeMb": 2070,
       "exportedBy": "scripts/export-zoedepth.ps1 (default + -Fp16 for the fp16 sibling)",
       "expectedContents": [
@@ -604,7 +604,7 @@
         "config.json",
         "preprocessor_config.json"
       ],
-      "uploadStaging": "Run scripts/export-zoedepth.ps1 once for the fp32 model and once with -Fp16 for the fp16 sibling. Both runs write into $env:DATUM_MODELS/zoedepth-staging/ — the fp16 pass appends model_fp16.onnx alongside the fp32 model.onnx without overwriting. The script uses transformers' ZoeDepthForDepthEstimation class + a thin wrapper that unwraps the DepthEstimatorOutput dataclass into a single tensor so torch.onnx.export can trace cleanly (optimum-cli's onnx-export registry doesn't know about ZoeDepth in 1.24). Drop README.md + LICENSE in the staging root before upload.",
+      "uploadStaging": "Run scripts/export-zoedepth.ps1 once for the fp32 model and once with -Fp16 for the fp16 sibling. Both runs write into $env:DATUMV_MODELS/zoedepth-staging/ — the fp16 pass appends model_fp16.onnx alongside the fp32 model.onnx without overwriting. The script uses transformers' ZoeDepthForDepthEstimation class + a thin wrapper that unwraps the DepthEstimatorOutput dataclass into a single tensor so torch.onnx.export can trace cleanly (optimum-cli's onnx-export registry doesn't know about ZoeDepth in 1.24). Drop README.md + LICENSE in the staging root before upload.",
       "provenance": {
         "baseModel": "Intel/zoedepth-nyu-kitti — MIT (Bhat et al., 'ZoeDepth: Zero-shot Transfer by Combining Relative and Metric Depth', 2023). DPT-Large backbone + dual metric-bin heads (NYU indoor + KITTI outdoor calibration).",
         "exportToolchain": "transformers 4.45.2 + ZoeDepthForDepthEstimation + a one-line Wrapper module that returns .predicted_depth as a bare tensor; torch.onnx.export with opset 17 + do_constant_folding=True + dynamic axes for batch/height/width. fp16 sibling produced via onnxconverter-common.float16 from the fp32 trace.",
@@ -624,7 +624,7 @@
     },
     {
       "repoSuffix": "trocr-base-printed-onnx",
-      "sourceFolder": "${DATUM_MODELS}/trocr-base-printed-fp16",
+      "sourceFolder": "${DATUMV_MODELS}/trocr-base-printed-fp16",
       "expectedSizeMb": 2100,
       "exportedBy": "scripts/export-trocr-base-printed-fp16.ps1 (despite the -fp16 suffix on the script name, it now produces both fp32 + fp16 .onnx files in the same staging folder for the bundled Heliosoph.DatumV repo)",
       "expectedContents": [
@@ -661,7 +661,7 @@
     },
     {
       "repoSuffix": "triposr-onnx",
-      "sourceFolder": "${DATUM_MODELS}/triposr-staging",
+      "sourceFolder": "${DATUMV_MODELS}/triposr-staging",
       "expectedSizeMb": 3360,
       "exportedBy": "scripts/export-triposr.ps1",
       "expectedContents": [
@@ -694,7 +694,7 @@
     },
     {
       "repoSuffix": "sd-turbo-onnx",
-      "sourceFolder": "${DATUM_MODELS}/sd-turbo-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/sd-turbo-onnx",
       "expectedSizeMb": 2500,
       "exportedBy": "scripts/export-sd-turbo.ps1 (TBD — clone optimum's SD ONNX export pattern; same flow as the SD 1.5 Hyper variants minus the Hyper-SD LoRA fuse step)",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
@@ -718,7 +718,7 @@
     },
     {
       "repoSuffix": "sdxl-turbo-onnx",
-      "sourceFolder": "${DATUM_MODELS}/sdxl-turbo-onnx",
+      "sourceFolder": "${DATUMV_MODELS}/sdxl-turbo-onnx",
       "expectedSizeMb": 13312,
       "exportedBy": "scripts/export-sdxl-turbo.ps1 (TBD — clone optimum's SDXL ONNX export pattern; same flow as juggernaut-xl-lightning minus the Lightning LoRA fuse step)",
       "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "text_encoder_2/", "tokenizer/", "tokenizer_2/", "unet/", "vae_decoder/", "vae_encoder/"],

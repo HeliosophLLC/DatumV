@@ -13,7 +13,7 @@ public static class Program
     // proxy to Kestrel). See src/Heliosoph.DatumV.Web/electron/main.ts.
     public static void Main(string[] args)
     {
-        var url = Environment.GetEnvironmentVariable("DATUM_WEB_URL") ?? "http://127.0.0.1:5000";
+        var url = Environment.GetEnvironmentVariable("DATUMV_WEB_URL") ?? "http://127.0.0.1:5000";
         var bootstrap = new WebHostBootstrap(
             args,
             url,
@@ -57,7 +57,7 @@ public static class Program
 
     private static string ResolveCatalogRoot()
     {
-        var path = Environment.GetEnvironmentVariable("DATUM_CATALOG_PATH")
+        var path = Environment.GetEnvironmentVariable("DATUMV_CATALOG_PATH")
             ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV");

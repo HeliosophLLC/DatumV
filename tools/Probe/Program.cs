@@ -34,7 +34,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 //
 // Catalog resolution:
 //   --catalog-root <path>     defaults to %LOCALAPPDATA%\Heliosoph.DatumV
-//   --models-dir   <path>     defaults to $DATUM_MODELS, then
+//   --models-dir   <path>     defaults to $DATUMV_MODELS, then
 //                              %LOCALAPPDATA%\Heliosoph.DatumV\models
 //   --no-builtins             skip BuiltinModels.AttachStandardModels (faster
 //                             startup when you only need SQL-defined models)
@@ -118,7 +118,7 @@ string catalogRoot = opts.CatalogRoot
     ?? Path.Combine(Path.GetTempPath(), $"datum-probe-{Guid.NewGuid():N}");
 
 string modelsDir = opts.ModelsDir
-    ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
+    ?? Environment.GetEnvironmentVariable("DATUMV_MODELS")
     ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Heliosoph.DatumV", "models");

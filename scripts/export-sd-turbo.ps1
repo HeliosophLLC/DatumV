@@ -25,7 +25,7 @@
 #
 # Usage:
 #   ./scripts/export-sd-turbo.ps1
-#       — exports to $env:DATUM_MODELS\sd-turbo-onnx (FP32 default)
+#       — exports to $env:DATUMV_MODELS\sd-turbo-onnx (FP32 default)
 #   ./scripts/export-sd-turbo.ps1 -Fp16
 #       — exports as FP16 (~half the disk + VRAM, 2-4x faster compute on
 #         consumer NVIDIA cards; quality difference imperceptible at the
@@ -37,10 +37,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'sd-turbo-onnx'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'sd-turbo-onnx'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

@@ -75,16 +75,16 @@ parser.add_argument(
 ARGS = parser.parse_args()
 
 
-# Weights live in the per-model directory under DATUM_MODELS — set by
-# the engine via DATUM_MODEL_DIR when it spawns this worker. Loading
+# Weights live in the per-model directory under DATUMV_MODELS — set by
+# the engine via DATUMV_MODEL_DIR when it spawns this worker. Loading
 # from the local path avoids HuggingFace's default ~/.cache/huggingface
 # location, so the user sees the model under the disk location they
 # actually configured. The engine downloaded these files at install
 # time via ModelDownloadService (HuggingFaceSource in the catalog
 # entry) — first invocation reads from disk, no network calls.
-MODEL_DIR = os.environ.get("DATUM_MODEL_DIR")
+MODEL_DIR = os.environ.get("DATUMV_MODEL_DIR")
 if not MODEL_DIR:
-    print("[bark] DATUM_MODEL_DIR not set; the engine should always "
+    print("[bark] DATUMV_MODEL_DIR not set; the engine should always "
           "set this for catalog-driven Python models.", file=sys.stderr, flush=True)
     sys.exit(1)
 

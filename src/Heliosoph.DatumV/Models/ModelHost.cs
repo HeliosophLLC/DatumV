@@ -22,7 +22,7 @@ public static class ModelHost
     /// <summary>
     /// One-call setup for the model subsystem on a <see cref="TableCatalog"/>.
     /// Builds a fresh <see cref="ModelCatalog"/> rooted at
-    /// <paramref name="modelDirectory"/> (or the default — <c>DATUM_MODELS</c>
+    /// <paramref name="modelDirectory"/> (or the default — <c>DATUMV_MODELS</c>
     /// env var, then per-user fallback), loads the on-disk
     /// <c>models/catalog.json</c> manifest, registers any catalog-driven
     /// Python entries via <see cref="Python.CatalogDrivenPythonRegistrar"/>,

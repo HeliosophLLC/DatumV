@@ -31,7 +31,7 @@
 #
 # Usage:
 #   ./scripts/export-dreamshaper-hyper.ps1
-#       — exports to $env:DATUM_MODELS\dreamshaper-hyper-onnx (FP32)
+#       — exports to $env:DATUMV_MODELS\dreamshaper-hyper-onnx (FP32)
 #   ./scripts/export-dreamshaper-hyper.ps1 -Fp16
 #       — exports as FP16 (~half the disk + VRAM)
 #   ./scripts/export-dreamshaper-hyper.ps1 -OutputDirectory C:\foo
@@ -40,10 +40,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'dreamshaper-hyper-onnx'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'dreamshaper-hyper-onnx'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

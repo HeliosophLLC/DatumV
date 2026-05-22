@@ -32,10 +32,10 @@
 param(
     [Parameter()]
     [string]$OutputRoot = $(
-        if ($env:DATUM_MODELS) {
-            $env:DATUM_MODELS
+        if ($env:DATUMV_MODELS) {
+            $env:DATUMV_MODELS
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputRoot <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputRoot <path>.'
         }
     ),
 

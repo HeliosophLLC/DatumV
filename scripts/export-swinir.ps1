@@ -33,7 +33,7 @@
 #
 # Usage:
 #   ./scripts/export-swinir.ps1
-#       — exports both files to $env:DATUM_MODELS\swinir-staging\
+#       — exports both files to $env:DATUMV_MODELS\swinir-staging\
 #   ./scripts/export-swinir.ps1 -OutputDirectory C:\foo
 #       — exports to a specific directory
 
@@ -41,10 +41,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'swinir-staging'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'swinir-staging'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     )
 )

@@ -40,14 +40,14 @@ walks you through the steps with diagnostic SQL between each.
 - DatumV is installed and `datum-shell` is on your PATH.
 - A *models directory* is configured. By default DatumV looks at:
   1. The `--models <path>` flag on `datum-shell`.
-  2. The `DATUM_MODELS` environment variable.
+  2. The `DATUMV_MODELS` environment variable.
   3. `%LOCALAPPDATA%\DatumV\models` (Windows) or
      `~/.local/share/DatumV/models` (Linux/macOS).
 
   Pick a location with a few GB free and (recommended) set the env var:
 
   ```powershell
-  [Environment]::SetEnvironmentVariable('DATUM_MODELS', 'E:\models', 'User')
+  [Environment]::SetEnvironmentVariable('DATUMV_MODELS', 'E:\models', 'User')
   ```
 
   Restart your shell after setting it.
@@ -66,7 +66,7 @@ Place the `.onnx` file under your models directory. For this guide we'll
 assume:
 
 ```
-$DATUM_MODELS/
+$DATUMV_MODELS/
 └── my-model/
     └── model.onnx
 ```
@@ -180,9 +180,9 @@ GPU EPs require the matching driver / runtime.
 
 - *"`File not found`"* — `inference.onnx_inspect` resolves the path the
   same way `CREATE MODEL USING` does: `file://` prefix → absolute,
-  otherwise relative to `$DATUM_MODELS`. If you typed
+  otherwise relative to `$DATUMV_MODELS`. If you typed
   `'my-model/model.onnx'` and the file is at `E:\models\my-model\model.onnx`
-  and `$DATUM_MODELS = E:\models`, that's the right form. Try with the
+  and `$DATUMV_MODELS = E:\models`, that's the right form. Try with the
   full path prefixed by `file:///` to bypass the relative resolution.
 - *"`is_dynamic = true` for the batch dim, what do I do?"* — Nothing;
   this is normal. DatumV handles dynamic batch dims at the
@@ -443,8 +443,8 @@ SELECT name, kind, backend, status FROM system.models WHERE name = 'classify_ima
 Path resolution issue. Confirm:
 
 - The file actually exists at the path you typed.
-- `$DATUM_MODELS` is set and matches what you think.
-- Relative paths (`'my-model/model.onnx'`) resolve against `$DATUM_MODELS`. Absolute paths need the `file://` prefix.
+- `$DATUMV_MODELS` is set and matches what you think.
+- Relative paths (`'my-model/model.onnx'`) resolve against `$DATUMV_MODELS`. Absolute paths need the `file://` prefix.
 
 Cross-check with `inference.onnx_inspect` on the same path — if that
 works, `CREATE MODEL` will too.

@@ -5,7 +5,7 @@ namespace Heliosoph.DatumV.ModelLibrary;
 /// <summary>
 /// Single source of truth for "where does this model's files live on disk?"
 /// Every callsite that previously constructed a path of the form
-/// <c>&lt;DATUM_MODELS&gt;/&lt;catalog-id&gt;/...</c> by hand routes through this
+/// <c>&lt;DATUMV_MODELS&gt;/&lt;catalog-id&gt;/...</c> by hand routes through this
 /// resolver so the catalog substrate's per-version layout
 /// (<c>&lt;id&gt;/&lt;version&gt;/...</c>) is owned in one place.
 /// </summary>
@@ -39,7 +39,7 @@ public interface IModelPathResolver
 {
     /// <summary>
     /// Absolute path to the top-level models directory
-    /// (<c>$DATUM_MODELS</c> or the per-user default). Stable for the
+    /// (<c>$DATUMV_MODELS</c> or the per-user default). Stable for the
     /// lifetime of the resolver — version flips happen <i>below</i>
     /// this root.
     /// </summary>

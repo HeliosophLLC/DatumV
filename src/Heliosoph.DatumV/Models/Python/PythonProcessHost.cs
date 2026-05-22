@@ -123,16 +123,16 @@ internal sealed class PythonProcessHost : IDisposable
             psi.Environment["PYTHONPATH"] = string.Join(Path.PathSeparator, parts);
         }
 
-        // DATUM_MODEL_DIR points the worker at the per-model directory
+        // DATUMV_MODEL_DIR points the worker at the per-model directory
         // that ModelDownloadService populated. Workers use this to load
-        // weights via `from_pretrained(os.environ['DATUM_MODEL_DIR'])`
+        // weights via `from_pretrained(os.environ['DATUMV_MODEL_DIR'])`
         // — so the model files live where the user expects (under their
-        // configured DATUM_MODELS), not in HuggingFace's default cache
+        // configured DATUMV_MODELS), not in HuggingFace's default cache
         // under ~/.cache/huggingface/. Mirrors how ONNX workers resolve
         // their .onnx paths relative to the model directory.
         if (!string.IsNullOrEmpty(modelDirectory))
         {
-            psi.Environment["DATUM_MODEL_DIR"] = modelDirectory;
+            psi.Environment["DATUMV_MODEL_DIR"] = modelDirectory;
         }
 
         Process process;
@@ -141,13 +141,13 @@ internal sealed class PythonProcessHost : IDisposable
             process = Process.Start(psi)
                 ?? throw new PythonProcessException(
                     $"Process.Start returned null for '{pythonExecutable} {scriptPath}'. "
-                    + "Confirm Python is installed and on PATH, or set DATUM_PYTHON to its absolute path.");
+                    + "Confirm Python is installed and on PATH, or set DATUMV_PYTHON to its absolute path.");
         }
         catch (Exception ex) when (ex is not PythonProcessException)
         {
             throw new PythonProcessException(
                 $"Failed to spawn '{pythonExecutable} {scriptPath}': {ex.Message}. "
-                + "Confirm Python is installed and on PATH, or set DATUM_PYTHON to its absolute path.",
+                + "Confirm Python is installed and on PATH, or set DATUMV_PYTHON to its absolute path.",
                 ex);
         }
 

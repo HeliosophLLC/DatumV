@@ -39,7 +39,7 @@ public sealed class PythonBackedModelTests : ServiceTestBase
             using System.Diagnostics.Process? p = System.Diagnostics.Process.Start(
                 new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = Environment.GetEnvironmentVariable("DATUM_PYTHON") ?? "python",
+                    FileName = Environment.GetEnvironmentVariable("DATUMV_PYTHON") ?? "python",
                     Arguments = "--version",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,

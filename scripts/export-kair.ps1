@@ -29,7 +29,7 @@
 #   # Download-by-URL alternative to -CheckpointPath
 #   ./scripts/export-kair.ps1 -Model dncnn -CheckpointUrl https://example.com/dncnn.pth
 #
-# Output: $env:DATUM_MODELS/kair-staging/<basename>.onnx (where basename
+# Output: $env:DATUMV_MODELS/kair-staging/<basename>.onnx (where basename
 # is the .pth filename minus extension). Override with -OutputFilename.
 
 [CmdletBinding(DefaultParameterSetName = 'BuiltIn')]
@@ -54,13 +54,13 @@ param(
     [Parameter()]
     [string]$CheckpointUrl,
 
-    # Output directory. Defaults to $env:DATUM_MODELS/kair-staging.
+    # Output directory. Defaults to $env:DATUMV_MODELS/kair-staging.
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'kair-staging'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'kair-staging'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

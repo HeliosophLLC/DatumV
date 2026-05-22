@@ -30,7 +30,7 @@ namespace Heliosoph.DatumV.Tests.Inference.Cpu;
 /// catalog entry's HuggingFace source. Lands at
 /// <c>&lt;ModelsDirectory&gt;/paddleocr-v4-det/ch_PP-OCRv4_det.onnx</c>;
 /// <c>ModelsDirectory</c> defaults to the per-user fallback or
-/// <c>DATUM_MODELS</c> env-var override. Skipped when offline / the
+/// <c>DATUMV_MODELS</c> env-var override. Skipped when offline / the
 /// download fails so CI without internet stays green.
 /// </para>
 /// <para>

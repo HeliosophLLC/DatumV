@@ -21,7 +21,7 @@ namespace Heliosoph.DatumV.DatasetLibrary;
 /// — the user's <c>keepRawDownloads</c> setting decides whether files
 /// here survive a successful ingest. Defaults to
 /// <c>%LOCALAPPDATA%/Heliosoph.DatumV/datasets-cache</c> when neither the
-/// host config nor <c>$DATUM_DATASETS</c> is set.
+/// host config nor <c>$DATUMV_DATASETS</c> is set.
 /// </param>
 public sealed record DatasetLibraryOptions(
     string CatalogRootPath,

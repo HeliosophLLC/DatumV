@@ -25,7 +25,7 @@
 #
 # Usage:
 #   ./scripts/export-zoedepth.ps1
-#       — exports to $env:DATUM_MODELS\zoedepth-staging\
+#       — exports to $env:DATUMV_MODELS\zoedepth-staging\
 #   ./scripts/export-zoedepth.ps1 -OutputDirectory C:\foo
 #       — exports to a specific directory
 
@@ -33,10 +33,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'zoedepth-staging'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'zoedepth-staging'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

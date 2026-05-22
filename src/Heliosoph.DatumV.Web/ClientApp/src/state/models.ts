@@ -43,11 +43,11 @@ interface ModelsState {
   // task-name strings on model cards into family-coloured badges.
   tasks: readonly CatalogTaskInfo[] | null;
   // catalog id → version string currently active on disk (from
-  // <DATUM_MODELS>/<id>/active). Models without an entry here are not
+  // <DATUMV_MODELS>/<id>/active). Models without an entry here are not
   // installed; treat absence as "no drift to surface". Compared against
   // `manifest.models[i].versions[0].version` to compute drift.
   activeVersions: Readonly<Record<string, string>>;
-  // catalog id → list of version folders present under <DATUM_MODELS>/<id>/.
+  // catalog id → list of version folders present under <DATUMV_MODELS>/<id>/.
   // Drives per-version Install / Activate / Delete affordances in the
   // model card's "Previous versions" disclosure. Absence (no entry, or
   // empty array) means no version folders on disk. Refreshed alongside

@@ -66,7 +66,7 @@ public static class WebHostExtensions
 
                 // Settings-side override (set via the Settings UI, persisted
                 // to settings.json) beats the host-config value. If neither
-                // is set, ModelCatalog falls back to $DATUM_MODELS env var,
+                // is set, ModelCatalog falls back to $DATUMV_MODELS env var,
                 // then to %LOCALAPPDATA%/Heliosoph.DatumV/models.
                 string? effectiveModelsDir =
                     StartupSettingsLoader.LoadModelsDirectory(catalogRootPath)
@@ -197,7 +197,7 @@ public static class WebHostExtensions
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV"),
             ModelsDirectory: options.ModelsDirectory
-                ?? Environment.GetEnvironmentVariable("DATUM_MODELS")
+                ?? Environment.GetEnvironmentVariable("DATUMV_MODELS")
                 ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Heliosoph.DatumV", "models"));
@@ -233,12 +233,12 @@ public static class WebHostExtensions
                 "Heliosoph.DatumV");
             // Settings-side override (set via the Settings UI, persisted to
             // settings.json) beats the host-config value. If neither is
-            // set, the cascade falls through to $DATUM_DATASETS and the
+            // set, the cascade falls through to $DATUMV_DATASETS and the
             // per-user default.
             string? effectiveDatasetsDir =
                 StartupSettingsLoader.LoadDatasetsDirectory(datasetCatalogRoot)
                 ?? options.DatasetsCacheDirectory
-                ?? Environment.GetEnvironmentVariable("DATUM_DATASETS")
+                ?? Environment.GetEnvironmentVariable("DATUMV_DATASETS")
                 ?? Path.Combine(datasetCatalogRoot, "datasets-cache");
             DatasetLibraryOptions datasetLibraryOptions = new(
                 CatalogRootPath: datasetCatalogRoot,

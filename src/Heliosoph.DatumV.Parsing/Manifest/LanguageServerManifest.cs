@@ -305,7 +305,7 @@ public sealed class ModelEntry
 
     /// <summary>
     /// Version string currently active on disk for the owning catalog
-    /// entry (read from <c>&lt;DATUM_MODELS&gt;/&lt;id&gt;/active</c>).
+    /// entry (read from <c>&lt;DATUMV_MODELS&gt;/&lt;id&gt;/active</c>).
     /// <see langword="null"/> when the entry has never been installed or
     /// the identifier has no owning catalog entry (engine-only builtins).
     /// Paired with <see cref="LatestVersion"/> to drive the hover drift hint.

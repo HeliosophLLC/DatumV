@@ -4,12 +4,12 @@ namespace Heliosoph.DatumV.Diagnostics;
 
 /// <summary>
 /// Process-wide diagnostic counters. Every recording method is decorated with
-/// <see cref="ConditionalAttribute"/> keyed to the <c>DATUM_DIAGNOSTICS</c>
+/// <see cref="ConditionalAttribute"/> keyed to the <c>DATUMV_DIAGNOSTICS</c>
 /// compile-time symbol — when the symbol is not defined, the C# compiler
 /// physically strips every call site (including its argument expressions) from
 /// the IL. Zero-cost when off, instrumented when on.
 ///
-/// <para>Enable by building with the <c>DATUM_DIAGNOSTICS</c> constant defined.
+/// <para>Enable by building with the <c>DATUMV_DIAGNOSTICS</c> constant defined.
 /// The default Debug configuration sets it alongside <c>POOL_DIAGNOSTICS</c>.</para>
 ///
 /// <para>Counters are static and process-global. For per-query reporting, call
@@ -33,7 +33,7 @@ public static class DatumDiagnostics
     /// so the final report shows the high-water mark even after the arena shrinks
     /// or is recycled.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordArenaGrow(long oldCapacity, long newCapacity, long bytesCopied)
     {
         Interlocked.Increment(ref _arenaGrowCount);
@@ -44,14 +44,14 @@ public static class DatumDiagnostics
     }
 
     /// <summary>Records a call to <c>Arena.Reset</c> (position rewind, mapping retained).</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordArenaReset() => Interlocked.Increment(ref _arenaResetCount);
 
     /// <summary>
     /// Records the initial allocation of an arena's backing mapping (first-use
     /// deferred allocation in <c>EnsureCapacity</c>).
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordArenaInitialMapping(long capacity)
     {
         Interlocked.Increment(ref _arenaMmfCreateCount);
@@ -63,7 +63,7 @@ public static class DatumDiagnostics
     /// removed from play. Often means the arena exceeded the pool's capacity cap
     /// and was discarded instead of pooled.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordArenaDispose(long capacityAtDispose)
     {
         Interlocked.Increment(ref _arenaDisposeCount);
@@ -84,7 +84,7 @@ public static class DatumDiagnostics
     /// <paramref name="fromPool"/> is <c>true</c> when an existing arena was
     /// dequeued for reuse; <c>false</c> when a fresh one was allocated.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolArenaRent(bool fromPool)
     {
         Interlocked.Increment(ref _poolArenaRented);
@@ -98,7 +98,7 @@ public static class DatumDiagnostics
     /// When both are <c>false</c>, the arena still had outstanding references
     /// and the return was a no-op.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolArenaReturn(bool pooled, bool disposedOverCap)
     {
         Interlocked.Increment(ref _poolArenaReturned);
@@ -115,7 +115,7 @@ public static class DatumDiagnostics
     private static long _poolDvArrayOverLimitDiscarded;
 
     /// <summary>Records a <c>DataValue[]</c> rent from the exact-length pool.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolDataValueArrayRent(bool fromPool)
     {
         Interlocked.Increment(ref _poolDvArrayRented);
@@ -124,7 +124,7 @@ public static class DatumDiagnostics
 
     /// <summary>Records a <c>DataValue[]</c> return. <paramref name="pooled"/> is true when the
     /// buffer was enqueued; false when the per-bucket cap rejected it and the buffer will be GC'd.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolDataValueArrayReturn(bool pooled)
     {
         Interlocked.Increment(ref _poolDvArrayReturned);
@@ -141,19 +141,19 @@ public static class DatumDiagnostics
 
     /// <summary>Records a <c>RowBatch</c> rent (always newly constructed today; counter
     /// tracks construction rate rather than pool-hit rate).</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolRowBatchRent() => Interlocked.Increment(ref _poolRowBatchRented);
 
     /// <summary>Records a <c>RowBatch</c> return.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolRowBatchReturn() => Interlocked.Increment(ref _poolRowBatchReturned);
 
     /// <summary>Records a <c>ColumnBatch</c> rent.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolColumnBatchRent() => Interlocked.Increment(ref _poolColumnBatchRented);
 
     /// <summary>Records a <c>ColumnBatch</c> return.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolColumnBatchReturn() => Interlocked.Increment(ref _poolColumnBatchReturned);
 
     // ───────────────────────── Pool GroupState counters ─────────────────────────
@@ -168,7 +168,7 @@ public static class DatumDiagnostics
     private static long _poolAccumulatorArrayPooled;
 
     /// <summary>Records a <c>GroupState</c> rent from the per-accumulator-count bucket.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolGroupStateRent(bool fromPool)
     {
         Interlocked.Increment(ref _poolGroupStateRented);
@@ -177,7 +177,7 @@ public static class DatumDiagnostics
 
     /// <summary>Records a <c>GroupState</c> return; <paramref name="pooled"/> is true when the
     /// per-bucket cap admitted the instance.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolGroupStateReturn(bool pooled)
     {
         Interlocked.Increment(ref _poolGroupStateReturned);
@@ -185,7 +185,7 @@ public static class DatumDiagnostics
     }
 
     /// <summary>Records an <c>IAggregateAccumulator[]</c> rent.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolAccumulatorArrayRent(bool fromPool)
     {
         Interlocked.Increment(ref _poolAccumulatorArrayRented);
@@ -193,7 +193,7 @@ public static class DatumDiagnostics
     }
 
     /// <summary>Records an <c>IAggregateAccumulator[]</c> return.</summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void RecordPoolAccumulatorArrayReturn(bool pooled)
     {
         Interlocked.Increment(ref _poolAccumulatorArrayReturned);
@@ -207,7 +207,7 @@ public static class DatumDiagnostics
     /// measured operation (e.g. a query) so the final <see cref="Report"/>
     /// reflects only work done during that operation.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void Reset()
     {
         Interlocked.Exchange(ref _arenaGrowCount, 0);
@@ -248,10 +248,10 @@ public static class DatumDiagnostics
     /// <summary>
     /// Writes a human-readable snapshot of all counters to
     /// <paramref name="writer"/> (defaulting to <see cref="Console.Out"/>).
-    /// Only emits output when <c>DATUM_DIAGNOSTICS</c> is defined; callers need
+    /// Only emits output when <c>DATUMV_DIAGNOSTICS</c> is defined; callers need
     /// no guard.
     /// </summary>
-    [Conditional("DATUM_DIAGNOSTICS")]
+    [Conditional("DATUMV_DIAGNOSTICS")]
     public static void Report(TextWriter? writer = null)
     {
         writer ??= Console.Out;

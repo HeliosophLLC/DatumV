@@ -41,7 +41,7 @@
 #
 # Usage:
 #   ./scripts/export-triposr.ps1
-#       -- exports to $env:DATUM_MODELS\triposr-staging\
+#       -- exports to $env:DATUMV_MODELS\triposr-staging\
 #   ./scripts/export-triposr.ps1 -OutputDirectory C:\foo
 #       -- exports to a specific directory
 
@@ -49,10 +49,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'triposr-staging'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'triposr-staging'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     ),
 

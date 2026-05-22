@@ -9,7 +9,7 @@ namespace Heliosoph.DatumV.DatasetLibrary;
 /// <item><b>Raw cache</b> — the downloaded archives and their extracted
 /// trees. Sized to be expendable; the user's <c>keepRawDownloads</c>
 /// setting decides whether it survives ingest. Lives under
-/// <c>$DATUM_DATASETS</c> (or the per-user default).</item>
+/// <c>$DATUMV_DATASETS</c> (or the per-user default).</item>
 /// <item><b>Ingested catalog</b> — the produced <c>.datum</c> +
 /// <c>.datum-blob</c> pairs that the table catalog reads. Lives under
 /// <c>&lt;CatalogRootPath&gt;/datasets/</c> alongside the rest of the
@@ -20,7 +20,7 @@ public interface IDatasetPathResolver
 {
     /// <summary>
     /// Absolute path to the top-level raw archive cache directory
-    /// (<c>$DATUM_DATASETS</c> or the per-user default). Stable for the
+    /// (<c>$DATUMV_DATASETS</c> or the per-user default). Stable for the
     /// lifetime of the resolver.
     /// </summary>
     string DatasetsCacheRoot { get; }

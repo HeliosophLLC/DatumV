@@ -567,7 +567,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         // Models with no file sources are valid for kind="python" entries
         // whose weights live in an external cache (HF cache for
         // transformers / diffusers pipelines) rather than under
-        // $DATUM_MODELS. The download phase is then a no-op success;
+        // $DATUMV_MODELS. The download phase is then a no-op success;
         // the venv-install phase below does the real work. Seed
         // `anySourceSucceeded` true when there are no sources so the
         // post-loop "no sources, treat as failure" branch doesn't fire

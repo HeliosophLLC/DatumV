@@ -46,7 +46,7 @@ DatumV reads model files from a directory configured in this
 order:
 
 1. `--models <path>` flag on `datum-shell`
-2. `DATUM_MODELS` environment variable
+2. `DATUMV_MODELS` environment variable
 3. Per-user fallback (`%LOCALAPPDATA%\DatumV\models` on Windows,
    `~/.local/share/DatumV/models` on Linux/macOS)
 
@@ -54,7 +54,7 @@ The recommended setup is to pick a directory with sufficient free
 space and set the env var once:
 
 ```powershell
-[Environment]::SetEnvironmentVariable('DATUM_MODELS', 'E:\models', 'User')
+[Environment]::SetEnvironmentVariable('DATUMV_MODELS', 'E:\models', 'User')
 ```
 
 Reopen your terminal so the new variable propagates.
@@ -65,7 +65,7 @@ Single-file models live as a flat `.onnx` or `.gguf` file directly
 inside the models directory:
 
 ```
-$DATUM_MODELS\
+$DATUMV_MODELS\
   yolox_s.onnx
   mobilenetv2-12.onnx
   Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
@@ -75,7 +75,7 @@ $DATUM_MODELS\
 Catalog-driven Python models follow the same per-id subfolder
 convention (`bark-small/`, `bark/`, ...); the engine downloads the
 HuggingFace repo's files directly into that folder and points the
-worker at it via the `DATUM_MODEL_DIR` env var, so there's no
+worker at it via the `DATUMV_MODEL_DIR` env var, so there's no
 `~/.cache/huggingface/` indirection.
 
 Multi-file models live in a subfolder (the catalog entry's
@@ -83,7 +83,7 @@ Multi-file models live in a subfolder (the catalog entry's
 loader derives the rest from the parent directory):
 
 ```
-$DATUM_MODELS\
+$DATUMV_MODELS\
   vit-gpt2-image-captioning\
     encoder_model.onnx
     decoder_model.onnx
@@ -118,14 +118,14 @@ card:
    uv hardlinks wheels from its global cache across venvs, so the
    second Python model installs in seconds.
 4. **Download weights** through the same `HuggingFaceSource` pipeline
-   ONNX models use, into `$DATUM_MODELS\<catalog-id>\`. The worker
-   reads `os.environ["DATUM_MODEL_DIR"]` at startup and loads via
+   ONNX models use, into `$DATUMV_MODELS\<catalog-id>\`. The worker
+   reads `os.environ["DATUMV_MODEL_DIR"]` at startup and loads via
    `from_pretrained(MODEL_DIR)` — no `~/.cache/huggingface/`
    indirection.
 
 The engine never modifies your `PATH`, never touches your system
 Python, and writes only to `%LOCALAPPDATA%\DatumV\` and
-`$DATUM_MODELS\`. Uninstall is a directory delete.
+`$DATUMV_MODELS\`. Uninstall is a directory delete.
 
 To see current state from SQL:
 
@@ -138,7 +138,7 @@ SELECT * FROM system.python_environments;   -- one row per provisioned venv
 
 The model catalog is a manifest-driven library that lets users discover,
 license-accept, install, and remove models from the in-app Models panel
-or via REST. It replaces "drop files in `$DATUM_MODELS` and edit a config"
+or via REST. It replaces "drop files in `$DATUMV_MODELS` and edit a config"
 with a curated, versioned list of models keyed to HuggingFace repos.
 
 Catalog files live in [`models/`](../models/) at the repo root and ship
@@ -528,7 +528,7 @@ two-stage OCR pipeline.
 - **Setup**:
   ```powershell
   Invoke-WebRequest "https://huggingface.co/OwlMaster/AllFilesRope/resolve/main/realesr-general-x4v3.onnx" `
-    -OutFile $env:DATUM_MODELS\realesr-general-x4v3.onnx
+    -OutFile $env:DATUMV_MODELS\realesr-general-x4v3.onnx
   ```
 - **Memory**: V1 runs whole-image inference, no tiling. The float NCHW
   intermediates cost `3 × H × W × 4` bytes for input plus
@@ -673,7 +673,7 @@ object it finds, suitable for building a per-photo segment library.
   — TinyViT distillation of the original ViT-H SAM image encoder. Mask
   decoder weights are unchanged from upstream SAM, just re-exported to
   ONNX.
-- **Files** — two ONNX files at the root of `$DATUM_MODELS`:
+- **Files** — two ONNX files at the root of `$DATUMV_MODELS`:
   - `mobile_sam_image_encoder.onnx` (~28 MB) — TinyViT image encoder.
     Outputs a `[1, 256, 64, 64]` embedding the decoder consumes.
   - `sam_mask_decoder_multi.onnx` (~16 MB) — multi-mask decoder. Emits
@@ -687,7 +687,7 @@ object it finds, suitable for building a per-photo segment library.
 - **Setup**: produced by the [vietanhdev/samexporter](https://github.com/vietanhdev/samexporter)
   pipeline. Pre-built ONNX exports are mirrored on Hugging Face under
   several community repos (search "mobilesam onnx"). Drop the encoder
-  and one of the decoder files directly into `$DATUM_MODELS`.
+  and one of the decoder files directly into `$DATUMV_MODELS`.
 - **Architecture**: TinyViT image encoder + a six-input prompt-conditioned
   mask decoder. The decoder's six inputs are `image_embeddings`,
   `point_coords`, `point_labels`, `mask_input`, `has_mask_input`, and
@@ -921,12 +921,12 @@ one folder and one tokenizer:
   optimum-cli export onnx `
     --model microsoft/trocr-base-printed `
     --task vision2seq-lm `
-    $env:DATUM_MODELS\trocr-base-printed
+    $env:DATUMV_MODELS\trocr-base-printed
   optimum-cli onnxruntime quantize `
-    --onnx_model $env:DATUM_MODELS\trocr-base-printed `
-    --fp16 -o $env:DATUM_MODELS\trocr-base-printed-fp16
-  Move-Item $env:DATUM_MODELS\trocr-base-printed-fp16\*_fp16.onnx `
-    $env:DATUM_MODELS\trocr-base-printed\
+    --onnx_model $env:DATUMV_MODELS\trocr-base-printed `
+    --fp16 -o $env:DATUMV_MODELS\trocr-base-printed-fp16
+  Move-Item $env:DATUMV_MODELS\trocr-base-printed-fp16\*_fp16.onnx `
+    $env:DATUMV_MODELS\trocr-base-printed\
   ```
 - **fp16 decoder patch (required)**: optimum-cli's merged fp16 export
   has two structural bugs ORT rejects:
@@ -955,7 +955,7 @@ one folder and one tokenizer:
     E:\Models\trocr-base-printed\decoder_model_merged_fp16.onnx
   ```
   (Adjust the source/destination paths in the script if your
-  `$DATUM_MODELS` is elsewhere.) The fp32 decoder doesn't need this —
+  `$DATUMV_MODELS` is elsewhere.) The fp32 decoder doesn't need this —
   only the fp16 export hits the issues.
 - **Architecture**: ViT-base 384×384 (1 + 24×24 patches × 768 hidden)
   feeds a 12-layer RoBERTa decoder with cross-attention. Merged
@@ -1095,7 +1095,7 @@ aesthetic; swap by changing the model name in your query.
   Llama 8B
 - **Setup**: download the pre-built ONNX directly from
   [huggingface.co/onnxruntime/sdxl-turbo](https://huggingface.co/onnxruntime/sdxl-turbo)
-  into your `$env:DATUM_MODELS\sdxl-turbo-onnx` folder. No conversion
+  into your `$env:DATUMV_MODELS\sdxl-turbo-onnx` folder. No conversion
   required. **CUDA EP only** — CPU and DirectML are not supported by
   this build. For a portable fp32 build that runs on any EP, use
   [scripts/export-sdxl-turbo.ps1](../scripts/export-sdxl-turbo.ps1)
@@ -1155,12 +1155,12 @@ the `<loc_*>` markers.
   # fp16 variant — used by the three caption-style entries
   huggingface-cli download onnx-community/Florence-2-base-ft `
     --include "*_fp16.onnx" "*.json" "*.txt" `
-    --local-dir $env:DATUM_MODELS\florence-2-base-ft-fp16
+    --local-dir $env:DATUMV_MODELS\florence-2-base-ft-fp16
 
   # int8-quantized variant — used by florence2_caption_q8
   huggingface-cli download onnx-community/Florence-2-base-ft `
     --include "*_quantized.onnx" "*.json" "*.txt" `
-    --local-dir $env:DATUM_MODELS\florence-2-base-ft-quantized
+    --local-dir $env:DATUMV_MODELS\florence-2-base-ft-quantized
   ```
 
 ### Vision-language models (`moondream2`)
@@ -1195,7 +1195,7 @@ FROM read_directory('E:\screenshots\*.png');
 - **Setup**:
   ```powershell
   huggingface-cli download Xenova/moondream2 `
-    --local-dir $env:DATUM_MODELS\moondream2-onnx
+    --local-dir $env:DATUMV_MODELS\moondream2-onnx
   ```
 - **Runtime**: plain `Microsoft.ML.OnnxRuntime.Gpu` with explicit
   ORT IO Binding — KV cache stays GPU-resident across the
@@ -1271,7 +1271,7 @@ single string per row before returning. Token-by-token streaming via
 
 **Setup**: install via the in-app **Model Manager** — pick the entry,
 click Install, the engine fetches the GGUF from HuggingFace into
-`<DATUM_MODELS>/<catalog-id>/<version>/<file>.gguf` and runs the
+`<DATUMV_MODELS>/<catalog-id>/<version>/<file>.gguf` and runs the
 installSql to register both surfaces. Llama 3.1 prompts for license
 acceptance before download; the others are Apache / TII permissive and
 download immediately. Manual `huggingface-cli` setup still works for
@@ -1338,7 +1338,7 @@ Install is the same Models-panel click as ONNX models — the engine
 provisions the venv on demand (see the
 [Python toolchain](#python-toolchain-auto-managed) subsection
 above). Workers receive their model directory through the
-`DATUM_MODEL_DIR` env var and load weights from there directly, so
+`DATUMV_MODEL_DIR` env var and load weights from there directly, so
 there's no separate cache to manage.
 
 #### `bark_small` — TTS with embedded sound effects
@@ -1352,7 +1352,7 @@ there's no separate cache to manage.
 - **Backend**: Python bridge — wraps HuggingFace `transformers`'
   `BarkModel`.
 - **Files (catalog tracks)**: HuggingFace repo `suno/bark-small`
-  downloaded into `$DATUM_MODELS\bark-small\`. Venv lives separately
+  downloaded into `$DATUMV_MODELS\bark-small\`. Venv lives separately
   at `%LOCALAPPDATA%\DatumV\venvs\bark-small\`.
 - **Setup**: click Install on the model card. The engine auto-provisions
   the venv (`torch`, `transformers`, `scipy`, `numpy`) and downloads
@@ -1394,7 +1394,7 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
   only the catalog id differs. Each variant gets its own venv
   (`venvs\bark-small\` and `venvs\bark\`); uv's wheel cache hardlinks
   the shared dependencies so the second install is fast.
-- **Files (catalog tracks)**: `$DATUM_MODELS\bark\` (~3.5 GB).
+- **Files (catalog tracks)**: `$DATUMV_MODELS\bark\` (~3.5 GB).
 - **VRAM**: ~3-4 GB during inference (3-4× `bark_small`'s footprint).
 - **Latency**: ~15-30s per clip on a consumer GPU vs `bark_small`'s
   ~5-10s. Use `bark` for hero outputs, `bark_small` for fast iteration.
@@ -1422,7 +1422,7 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
   bundles the misaki phonemizer + ONNX inference. The model itself is
   ONNX (we go through Python only for the phonemizer).
 - **Files (catalog tracks)**: `kokoro-v1.0.onnx` — the ONNX model file
-  in `$DATUM_MODELS`. Voices and venv tracked separately:
+  in `$DATUMV_MODELS`. Voices and venv tracked separately:
   - `voices-v1.0.bin` (~26 MB, bundled all voices), OR
   - `kokoro-voices/<voice>.bin` (per-voice files; the worker bundles
     them into a temp `.npz` at startup)
@@ -1435,7 +1435,7 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
   ```powershell
   ./scripts/setup-kokoro-venv.ps1
   ```
-  Creates `$DATUM_MODELS/.venv-kokoro` and installs `kokoro-onnx`
+  Creates `$DATUMV_MODELS/.venv-kokoro` and installs `kokoro-onnx`
   (which pulls in `onnxruntime`, the misaki phonemizer, and `scipy`
   as transitive deps). You provide the model + voices files yourself
   (typical for users who already downloaded the per-voice `.bin`
@@ -1445,10 +1445,10 @@ Same architecture, voices, and worker as `bark_small` — bigger weights
   ./scripts/setup-kokoro-venv.ps1 -DownloadModel -DownloadVoices
   ```
   Downloads `kokoro-v1.0.onnx` (~326 MB) and `voices-v1.0.bin`
-  (~26 MB) from the kokoro-onnx GitHub release into `$DATUM_MODELS`.
+  (~26 MB) from the kokoro-onnx GitHub release into `$DATUMV_MODELS`.
 - **Per-voice .bin layout**: if you have separate per-voice files
   (e.g. `af_bella.bin`, `bm_george.bin`, ...), drop them into
-  `$DATUM_MODELS/kokoro-voices/`. The default registration points at
+  `$DATUMV_MODELS/kokoro-voices/`. The default registration points at
   this path; the worker bundles the per-voice arrays into a temp
   `.npz` at startup and passes that to `kokoro-onnx`.
 - **Determinism**: deterministic for a given (text, voice, speed)
@@ -1520,7 +1520,7 @@ WHERE license IN ('Apache-2.0', 'MIT', 'BSD-3-Clause');
 
 **The default path is now SQL-defined via catalog.json + installSql.**
 This is the same shape every LLM and most ONNX entries already use:
-weights download into `<DATUM_MODELS>/<catalog-id>/<version>/`, and a
+weights download into `<DATUMV_MODELS>/<catalog-id>/<version>/`, and a
 SQL file registers the model identifiers via `CREATE MODEL`. No C#
 required. See [CREATE MODEL](sql/create-model.md) for the DDL surface
 and [`models/sql/qwen2.5-coder-1.5b-instruct-gguf/2026-06-01.sql`](../models/sql/qwen2.5-coder-1.5b-instruct-gguf/2026-06-01.sql)

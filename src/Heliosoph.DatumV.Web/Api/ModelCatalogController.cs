@@ -314,7 +314,7 @@ public sealed class ModelCatalogController(
 
     // GET /api/model-catalog/active-versions — one entry per installed
     // model, mapping catalog id → the version string written into
-    // <DATUM_MODELS>/<id>/active. Entries without an active pointer
+    // <DATUMV_MODELS>/<id>/active. Entries without an active pointer
     // (never installed, fully uninstalled) are omitted; the front-end
     // treats absence as "not installed" and skips drift comparison.
     // Drift detection lives client-side: compare against

@@ -43,7 +43,7 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     /// </summary>
     private static bool BundlePresent(string folder, string firstFile)
     {
-        string root = Environment.GetEnvironmentVariable("DATUM_MODELS_DIRECTORY")
+        string root = Environment.GetEnvironmentVariable("DATUMV_MODELS_DIRECTORY")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV", "models");
         return File.Exists(Path.Combine(root, folder, firstFile));

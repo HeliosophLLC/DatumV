@@ -4,7 +4,7 @@ namespace Heliosoph.DatumV.Tests.Models.Python;
 
 /// <summary>
 /// Test-only <see cref="IPythonEnvironmentManager"/> that returns whatever
-/// <c>python</c> is on PATH (or <c>$DATUM_PYTHON</c>) and treats every
+/// <c>python</c> is on PATH (or <c>$DATUMV_PYTHON</c>) and treats every
 /// "ensure" call as a no-op. Lets the echo-worker round-trip tests run
 /// against the host's system Python without bootstrapping uv, downloading
 /// a managed CPython, or provisioning a venv — none of which the echo
@@ -23,10 +23,10 @@ internal sealed class SystemPythonEnvironmentManager : IPythonEnvironmentManager
 
     public SystemPythonEnvironmentManager()
     {
-        // DATUM_PYTHON overrides PATH for hosts that have multiple Pythons
+        // DATUMV_PYTHON overrides PATH for hosts that have multiple Pythons
         // and want tests to pin a specific one. Mirrors the convention
         // PythonAvailable() in PythonBackedModelTests uses.
-        _pythonPath = Environment.GetEnvironmentVariable("DATUM_PYTHON") ?? "python";
+        _pythonPath = Environment.GetEnvironmentVariable("DATUMV_PYTHON") ?? "python";
     }
 
     public Task<string> EnsureUvAsync(CancellationToken cancellationToken)

@@ -35,7 +35,7 @@ public sealed class ModelCatalog : IDisposable
     /// Default model directory when none is explicitly configured. Resolved in
     /// this order:
     /// <list type="number">
-    ///   <item><description>The <c>DATUM_MODELS</c> environment variable, if set.</description></item>
+    ///   <item><description>The <c>DATUMV_MODELS</c> environment variable, if set.</description></item>
     ///   <item><description>A portable per-user fallback —
     ///     <c>%LOCALAPPDATA%/Heliosoph.DatumV/models</c> on Windows,
     ///     <c>~/.local/share/Heliosoph.DatumV/models</c> on Linux/macOS — via
@@ -47,7 +47,7 @@ public sealed class ModelCatalog : IDisposable
     /// machines and self-skip when the model file is absent.
     /// </summary>
     public static string DefaultModelDirectory =>
-        Environment.GetEnvironmentVariable("DATUM_MODELS")
+        Environment.GetEnvironmentVariable("DATUMV_MODELS")
         ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Heliosoph.DatumV",

@@ -17,7 +17,7 @@
 #
 # Usage:
 #   ./scripts/export-vit-gpt-image-captioning.ps1
-#       — exports to $env:DATUM_MODELS\vit-gpt2-image-captioning
+#       — exports to $env:DATUMV_MODELS\vit-gpt2-image-captioning
 #   ./scripts/export-vit-gpt-image-captioning.ps1 -OutputDirectory C:\foo
 #       — exports to a specific directory
 
@@ -25,10 +25,10 @@
 param(
     [Parameter()]
     [string]$OutputDirectory = $(
-        if ($env:DATUM_MODELS) {
-            Join-Path $env:DATUM_MODELS 'vit-gpt2-image-captioning'
+        if ($env:DATUMV_MODELS) {
+            Join-Path $env:DATUMV_MODELS 'vit-gpt2-image-captioning'
         } else {
-            throw 'Set $env:DATUM_MODELS or pass -OutputDirectory <path>.'
+            throw 'Set $env:DATUMV_MODELS or pass -OutputDirectory <path>.'
         }
     )
 )

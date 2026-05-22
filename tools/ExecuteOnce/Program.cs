@@ -73,7 +73,7 @@ GC.WaitForPendingFinalizers();
 GC.Collect();
 
 // Clear diagnostic counters so the report at the end reflects only the query's
-// own activity, not planner/catalog setup. No-op when DATUM_DIAGNOSTICS is off.
+// own activity, not planner/catalog setup. No-op when DATUMV_DIAGNOSTICS is off.
 DatumDiagnostics.Reset();
 
 using Process proc = Process.GetCurrentProcess();
@@ -162,7 +162,7 @@ Console.WriteLine($"  Allocated during: {FormatBytes(memEnd.TotalAllocatedBytes 
 Console.WriteLine($"  GC collections:   gen0={memEnd.Gen0 - memStart.Gen0}  gen1={memEnd.Gen1 - memStart.Gen1}  gen2={memEnd.Gen2 - memStart.Gen2}");
 Console.WriteLine($"  Peak working set: {FormatBytes(peakWorkingSet)}");
 
-// Diagnostics report (no-op unless DATUM_DIAGNOSTICS is defined at compile time).
+// Diagnostics report (no-op unless DATUMV_DIAGNOSTICS is defined at compile time).
 Console.WriteLine();
 DatumDiagnostics.Report();
 

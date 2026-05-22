@@ -34,7 +34,7 @@ public sealed class MobileSamSqlParseTests : ServiceTestBase
 
     private static bool BundlePresent()
     {
-        string root = Environment.GetEnvironmentVariable("DATUM_MODELS_DIRECTORY")
+        string root = Environment.GetEnvironmentVariable("DATUMV_MODELS_DIRECTORY")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV", "models");
         return File.Exists(Path.Combine(root, "mobile-sam", "mobile_sam_image_encoder.onnx"));
