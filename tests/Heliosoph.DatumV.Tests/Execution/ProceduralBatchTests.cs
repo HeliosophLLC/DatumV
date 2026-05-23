@@ -1,26 +1,49 @@
 using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Data;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing;
 using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Streaming;
 
 namespace Heliosoph.DatumV.Tests.Execution;
 
 /// <summary>
-/// Slice 4 end-to-end tests for the procedural batch executor: DECLARE,
-/// SET, BEGIN/END, IF/ELSE, WHILE, plus query / CALL statements that
-/// reference declared variables. The substrate (<see cref="VariableScope"/>
-/// / <see cref="ExecutionContext"/>) is verified separately; these tests
+/// End-to-end tests for procedural batch semantics — DECLARE / SET /
+/// BEGIN-END / IF-ELSE / WHILE / FOR / TRY / ASSERT / RAISE / PRINT /
+/// CALL — driven through <see cref="InProcessDatumDbCommand"/>'s
+/// streaming reader. The substrate (<see cref="VariableScope"/> /
+/// <see cref="ExecutionContext"/>) is verified separately; these tests
 /// pin the integrated semantics.
 /// </summary>
-public sealed class BatchExecutorTests : ServiceTestBase
+public sealed class ProceduralBatchTests : ServiceTestBase
 {
-    private async Task<BatchResult> RunAsync(string sql, TableCatalog? catalog = null)
+    private async Task<BatchSnapshot> RunAsync(string sql, TableCatalog? catalog = null)
     {
         catalog ??= CreateCatalog();
         IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(sql);
-        BatchExecutor executor = new(catalog);
-        return await executor.ExecuteAsync(stmts, CancellationToken.None);
+        (Statement, string?)[] pairs = new (Statement, string?)[stmts.Count];
+        for (int i = 0; i < stmts.Count; i++) pairs[i] = (stmts[i], null);
+
+        using InProcessDatumDbConnection connection = new(catalog);
+        using InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = pairs;
+
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        context.Accountant.StartProfiling();
+        await using InProcessDatumDbReader reader = await command
+            .ExecuteReaderAsync(context, CancellationToken.None)
+            .ConfigureAwait(false);
+        do
+        {
+            while (await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                // Drain — these tests assert on @vars, not on rows.
+            }
+        }
+        while (await reader.NextResultAsync(CancellationToken.None).ConfigureAwait(false));
+
+        return new BatchSnapshot(VariableScopeSnapshot.Capture(context));
     }
 
     // ————————————————————— DECLARE —————————————————————
@@ -28,14 +51,14 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_LiteralInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE x INT32 = 5");
+        BatchSnapshot result = await RunAsync("DECLARE x INT32 = 5");
         Assert.Equal(5, Convert.ToInt32(result.FinalBindings["x"]));
     }
 
     [Fact]
     public async Task Declare_StringInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE greeting STRING = 'hello world from a long-enough literal that lives in an arena'");
+        BatchSnapshot result = await RunAsync("DECLARE greeting STRING = 'hello world from a long-enough literal that lives in an arena'");
         Assert.Equal(
             "hello world from a long-enough literal that lives in an arena",
             result.FinalBindings["greeting"]);
@@ -44,21 +67,21 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_BooleanInitializer_BindsValue()
     {
-        BatchResult result = await RunAsync("DECLARE flag BOOLEAN = TRUE");
+        BatchSnapshot result = await RunAsync("DECLARE flag BOOLEAN = TRUE");
         Assert.Equal(true, result.FinalBindings["flag"]);
     }
 
     [Fact]
     public async Task Declare_ExpressionInitializer_EvaluatesAndBinds()
     {
-        BatchResult result = await RunAsync("DECLARE sum INT32 = 2 + 3 * 4");
+        BatchSnapshot result = await RunAsync("DECLARE sum INT32 = 2 + 3 * 4");
         Assert.Equal(14, Convert.ToInt32(result.FinalBindings["sum"]));
     }
 
     [Fact]
     public async Task Declare_NoInitializer_BindsNull()
     {
-        BatchResult result = await RunAsync("DECLARE x INT32");
+        BatchSnapshot result = await RunAsync("DECLARE x INT32");
         Assert.True(result.FinalBindings.ContainsKey("x"));
         Assert.Null(result.FinalBindings["x"]);
     }
@@ -70,7 +93,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // IsArray=true. Materialize() returns null for any IsNull value, so
         // surface verification is "did not throw"; the parser + resolver +
         // DataValue.NullArrayOf wiring is what we're pinning.
-        BatchResult result = await RunAsync("DECLARE players Array<STRING>");
+        BatchSnapshot result = await RunAsync("DECLARE players Array<STRING>");
         Assert.True(result.FinalBindings.ContainsKey("players"));
         Assert.Null(result.FinalBindings["players"]);
     }
@@ -78,7 +101,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Declare_PostfixBracketSugar_NoInitializer_BindsTypedNullArray()
     {
-        BatchResult result = await RunAsync("DECLARE scores FLOAT32[]");
+        BatchSnapshot result = await RunAsync("DECLARE scores FLOAT32[]");
         Assert.True(result.FinalBindings.ContainsKey("scores"));
         Assert.Null(result.FinalBindings["scores"]);
     }
@@ -98,7 +121,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // calling cardinality() on the variable threw "argument must be an
         // array" because the IsArray flag wasn't preserved through the path
         // (DECLARE → variable scope → variable read → function arg).
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE players Array<String> = ['Fighter', 'Wizard', 'Healer']; " +
             "DECLARE player_count INT32 = CARDINALITY(players)");
 
@@ -118,7 +141,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE skip_n INT32 = 2; " +
             "DECLARE total INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT 2 OFFSET skip_n) s)",
             catalog);
@@ -135,7 +158,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE top INT32 = 3; " +
             "DECLARE sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT top) s)",
             catalog);
@@ -154,7 +177,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE half INT32 = 1; " +
             "DECLARE sum INT64 = (SELECT sum(id) FROM (SELECT id FROM orders ORDER BY id LIMIT half + 2) s)",
             catalog);
@@ -172,7 +195,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE count INT64 = (SELECT count(*) FROM orders)",
             catalog);
 
@@ -186,7 +209,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["amount"],
             [10], [20], [30], [40], [50]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE total INT64 = (SELECT sum(amount) FROM orders WHERE amount > 20)",
             catalog);
 
@@ -203,7 +226,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["seq"],
             [10], [20], [30]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE max_seq INT64 = (SELECT max(seq) FROM events)",
             catalog);
 
@@ -219,7 +242,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["v"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE cap INT64 = 3; " +
             "DECLARE kept INT64 = (SELECT count(*) FROM amounts WHERE v <= cap)",
             catalog);
@@ -236,7 +259,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["v"],
             [1], [2], [3]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE max_big INT64 = (SELECT max(v) FROM amounts WHERE v > 100)",
             catalog);
 
@@ -253,7 +276,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["v"],
             [10], [20], [30]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE total INT64 = (SELECT sum(v) FROM amounts) + 100",
             catalog);
 
@@ -270,7 +293,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE count INT64 = 0; " +
             "SET count = (SELECT count(*) FROM orders)",
             catalog);
@@ -286,7 +309,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // The SELECT references x; resolution walks the variable scope
         // chain. End state: x stays at 7. (We can't observe the SELECT's
         // rows in slice 4, so the assertion is on the binding.)
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 7; " +
             "SELECT x + 1");
         Assert.Equal(7, Convert.ToInt32(result.FinalBindings["x"]));
@@ -298,7 +321,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // b's initialiser references a; substrate plumbing must allow a
         // child query (the synthetic SELECT inside DECLARE) to resolve
         // a from the variable scope.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT32 = 10; " +
             "DECLARE b INT32 = a * 2");
         Assert.Equal(10, Convert.ToInt32(result.FinalBindings["a"]));
@@ -310,7 +333,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Set_OverwritesPriorValue()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 1; " +
             "SET x = 99");
         Assert.Equal(99, Convert.ToInt32(result.FinalBindings["x"]));
@@ -319,7 +342,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Set_ExpressionReferencesVariableItself()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 5; " +
             "SET x = x + 100");
         Assert.Equal(105, Convert.ToInt32(result.FinalBindings["x"]));
@@ -339,7 +362,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // inner is declared in the block; after END it's gone. outer
         // remains accessible. This is the block-scope guarantee.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE outer_var INT32 = 1; " +
             "BEGIN " +
             "  DECLARE inner_var INT32 = 2; " +
@@ -356,7 +379,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Inner declares z=3; SET x mutates the outer-most binding via
         // scope-walk. After both blocks pop, only x survives, value 3.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 0; " +
             "BEGIN " +
             "  BEGIN " +
@@ -374,7 +397,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task If_TrueBranch_RunsThen()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE taken INT32 = 0; " +
             "IF TRUE SET taken = 1");
 
@@ -384,7 +407,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task If_FalseBranchWithElse_RunsElse()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE path INT32 = 0; " +
             "IF FALSE SET path = 1 ELSE SET path = 2");
 
@@ -394,7 +417,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task If_PredicateUsesVariable_BranchesOnRuntimeValue()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 5; " +
             "DECLARE result INT32 = 0; " +
             "IF x > 0 SET result = 1 ELSE SET result = -1");
@@ -407,7 +430,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // ELSE IF parses as ELSE { IF ... }. The chain finds the first
         // matching branch and runs only that one's body.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 0; " +
             "DECLARE label INT32 = 0; " +
             "IF x > 0 SET label = 1 " +
@@ -420,7 +443,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task If_BlockBody_RunsAllChildren()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT32 = 0; " +
             "DECLARE b INT32 = 0; " +
             "IF TRUE BEGIN " +
@@ -437,7 +460,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task While_LoopsUntilPredicateFalse()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE i INT32 = 0; " +
             "DECLARE sum INT32 = 0; " +
             "WHILE i < 5 BEGIN " +
@@ -453,7 +476,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task While_PredicateFalseAtStart_BodyNeverRuns()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran INT32 = 0; " +
             "WHILE FALSE SET ran = 1");
 
@@ -469,28 +492,23 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Silent statements (SET / DECLARE / control flow) don't earn their
         // own cell when nested, so the WHILE itself is the sole cell.
         TableCatalog catalog = CreateCatalog();
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+        string sql =
             "DECLARE i INT32 = 0; " +
             "DECLARE r INT32 = 0; " +
             "WHILE i < 1000 BEGIN " +
             "  SET r = r + 1; " +
             "  SET i = i + 1; " +
-            "END");
-        BatchExecutor exec = new(catalog);
+            "END";
         List<CellStartedBatchEvent> starts = [];
-        await exec.RunWithEventsAsync(
-            stmts,
-            evt =>
-            {
-                if (evt is CellStartedBatchEvent s) starts.Add(s);
-                return ValueTask.CompletedTask;
-            },
-            CancellationToken.None);
+        await foreach (BatchEvent evt in StreamEventsAsync(sql, catalog))
+        {
+            if (evt is CellStartedBatchEvent s) starts.Add(s);
+        }
 
-        // Three top-level cells: two DECLAREs + one WHILE. None of the
-        // 1000 iterations produces an extra cell.
-        Assert.Equal(3, starts.Count);
-        Assert.Equal(["declare", "declare", "while"], starts.Select(s => s.Kind));
+        // Only productive plans bracket — DECLARE / SET / WHILE are silent,
+        // so no cells flow at all. The 1000 iterations are invisible at
+        // the wire, which is the regression the test guards against.
+        Assert.Empty(starts);
     }
 
     [Fact]
@@ -501,25 +519,21 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // we want to keep for a CALL / loop that yields rows. The WHILE
         // itself also gets a top-level cell.
         TableCatalog catalog = CreateCatalog();
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+        string sql =
             "DECLARE i INT32 = 0; " +
             "WHILE i < 3 BEGIN " +
             "  PRINT i; " +
             "  SET i = i + 1; " +
-            "END");
-        BatchExecutor exec = new(catalog);
+            "END";
         List<CellStartedBatchEvent> starts = [];
-        await exec.RunWithEventsAsync(
-            stmts,
-            evt =>
-            {
-                if (evt is CellStartedBatchEvent s) starts.Add(s);
-                return ValueTask.CompletedTask;
-            },
-            CancellationToken.None);
+        await foreach (BatchEvent evt in StreamEventsAsync(sql, catalog))
+        {
+            if (evt is CellStartedBatchEvent s) starts.Add(s);
+        }
 
-        // DECLARE + WHILE + 3 productive PRINT cells (one per iteration).
-        Assert.Equal(["declare", "while", "print", "print", "print"], starts.Select(s => s.Kind));
+        // 3 productive PRINT cells (one per iteration). DECLARE / SET / WHILE
+        // are silent, so the only visible cells come from PRINT.
+        Assert.Equal(["print", "print", "print"], starts.Select(s => s.Kind));
     }
 
     [Fact]
@@ -529,18 +543,19 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // unbounded cells. The per-batch CellCap stops it at a hard ceiling
         // and surfaces a user-facing error rather than letting the UI drown.
         TableCatalog catalog = CreateCatalog();
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+        string sql =
             "DECLARE i INT32 = 0; " +
             "WHILE i < 100000 BEGIN " +
             "  PRINT i; " +
             "  SET i = i + 1; " +
-            "END");
-        BatchExecutor exec = new(catalog);
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            exec.RunWithEventsAsync(
-                stmts,
-                _ => ValueTask.CompletedTask,
-                CancellationToken.None));
+            "END";
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (BatchEvent _ in StreamEventsAsync(sql, catalog))
+            {
+                // Drain — the cap fires inside the bracket and propagates.
+            }
+        });
         Assert.Contains("cells", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -553,7 +568,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // the same wire as a regular CALL, just with variable resolution.
         // The batch only verifies the execution didn't throw; result rows
         // aren't surfaced in slice 4.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE msg STRING = 'hello world from a long-enough literal'; " +
             "CALL upper(msg)");
 
@@ -571,7 +586,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // A small composite: classic counter + conditional accumulator.
         // Builds up sum across a WHILE loop, but only adds when i is
         // even (using IF inside the body).
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE i INT32 = 0; " +
             "DECLARE sum INT32 = 0; " +
             "WHILE i < 10 BEGIN " +
@@ -593,7 +608,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Auto-declares i, runs body 5 times (i = 1..5 inclusive), accumulates
         // the loop var into sum. Confirms the auto-declare + per-iter SET +
         // body evaluation wiring all hang together.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR i = 1 TO 5 SET sum = sum + i");
 
@@ -606,7 +621,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_StartGreaterThanEnd_BodyNeverRuns()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran INT32 = 0; " +
             "FOR i = 5 TO 1 SET ran = ran + 1");
 
@@ -618,7 +633,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // The bounds expressions are evaluated once via the synthesise-SELECT
         // path, so they can reference enclosing variables.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE lo INT32 = 2; " +
             "DECLARE hi INT32 = 4; " +
             "DECLARE count INT32 = 0; " +
@@ -630,7 +645,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_BodyBlock_RunsAllChildren()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT32 = 0; " +
             "DECLARE b INT32 = 0; " +
             "FOR i = 1 TO 3 BEGIN " +
@@ -646,7 +661,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_NestedLoops_CartesianAccumulator()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE total INT32 = 0; " +
             "FOR i = 1 TO 3 BEGIN " +
             "  FOR j = 1 TO 4 SET total = total + 1; " +
@@ -667,7 +682,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2, 20],
             [3, 30]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR row IN (SELECT id, amount FROM orders) " +
             "  SET sum = sum + row[2]",
@@ -691,7 +706,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2, 20],
             [3, 30]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR row IN (SELECT id, amount FROM orders) " +
             "  SET sum = sum + row['amount']",
@@ -706,7 +721,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog("orders",
             columns: ["id", "amount"]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran INT32 = 0; " +
             "FOR row IN (SELECT id, amount FROM orders) " +
             "  SET ran = ran + 1",
@@ -723,7 +738,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1, 10],
             [2, 20]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ids INT32 = 0; " +
             "DECLARE amts INT32 = 0; " +
             "FOR row IN (SELECT id, amount FROM orders) BEGIN " +
@@ -749,30 +764,24 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1, 10],
             [2, 20]);
 
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
-            "FOR row IN (SELECT id, amount FROM orders) SELECT row");
-        BatchExecutor exec = new(catalog);
+        string sql = "FOR row IN (SELECT id, amount FROM orders) SELECT row";
 
-        // Snapshot inside the callback because the RowBatch is disposed once the
+        // Snapshot inside the foreach because the RowBatch is disposed once the
         // event has been consumed by the host. We grab the descriptor by value;
         // the registry itself outlives the batch (it's per-query, not per-batch).
         List<TypeDescriptor?> capturedDescriptors = [];
-        await exec.RunWithEventsAsync(
-            stmts,
-            evt =>
+        await foreach (BatchEvent evt in StreamEventsAsync(sql, catalog))
+        {
+            if (evt is CellRowBatchEvent r && r.Batch.Count > 0)
             {
-                if (evt is CellRowBatchEvent r && r.Batch.Count > 0)
-                {
-                    DataValue cell = r.Batch[0][0];
-                    Assert.Equal(DataKind.Struct, cell.Kind);
-                    Assert.False(cell.IsArray);
+                DataValue cell = r.Batch[0][0];
+                Assert.Equal(DataKind.Struct, cell.Kind);
+                Assert.False(cell.IsArray);
 
-                    TypeRegistry? types = r.Batch.Types;
-                    capturedDescriptors.Add(types?.GetDescriptor(cell.TypeId));
-                }
-                return ValueTask.CompletedTask;
-            },
-            CancellationToken.None);
+                TypeRegistry? types = r.Batch.Types;
+                capturedDescriptors.Add(types?.GetDescriptor(cell.TypeId));
+            }
+        }
 
         // One non-empty SELECT row batch per source row.
         Assert.Equal(2, capturedDescriptors.Count);
@@ -795,7 +804,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [1],
             [2]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE bias INT32 = 100; " +
             "DECLARE total INT32 = 0; " +
             "FOR r IN (SELECT id FROM orders) " +
@@ -811,18 +820,27 @@ public sealed class BatchExecutorTests : ServiceTestBase
     private async Task<List<CellPrintBatchEvent>> CollectPrintsAsync(string sql, TableCatalog? catalog = null)
     {
         catalog ??= CreateCatalog();
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(sql);
-        BatchExecutor exec = new(catalog);
         List<CellPrintBatchEvent> prints = [];
-        await exec.RunWithEventsAsync(
-            stmts,
-            evt =>
-            {
-                if (evt is CellPrintBatchEvent print) prints.Add(print);
-                return ValueTask.CompletedTask;
-            },
-            CancellationToken.None);
+        await foreach (BatchEvent evt in StreamEventsAsync(sql, catalog))
+        {
+            if (evt is CellPrintBatchEvent print) prints.Add(print);
+        }
         return prints;
+    }
+
+    private static async IAsyncEnumerable<BatchEvent> StreamEventsAsync(
+        string sql, TableCatalog catalog)
+    {
+        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(sql);
+        (Statement, string?)[] pairs = new (Statement, string?)[stmts.Count];
+        for (int i = 0; i < stmts.Count; i++) pairs[i] = (stmts[i], null);
+        using InProcessDatumDbConnection connection = new(catalog);
+        using InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = pairs;
+        await foreach (BatchEvent evt in command.StreamEventsAsync(cancellationToken: CancellationToken.None))
+        {
+            yield return evt;
+        }
     }
 
     [Fact]
@@ -896,13 +914,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Verify a PRINT cell emits a print event, not a row-batch event.
         TableCatalog catalog = CreateCatalog();
-        IReadOnlyList<Statement> stmts = SqlParser.ParseBatch("PRINT 'tracing'");
-        BatchExecutor exec = new(catalog);
         List<BatchEvent> events = [];
-        await exec.RunWithEventsAsync(
-            stmts,
-            evt => { events.Add(evt); return ValueTask.CompletedTask; },
-            CancellationToken.None);
+        await foreach (BatchEvent evt in StreamEventsAsync("PRINT 'tracing'", catalog))
+        {
+            events.Add(evt);
+        }
 
         Assert.DoesNotContain(events, e => e is CellRowBatchEvent);
         Assert.Contains(events, e => e is CellPrintBatchEvent);
@@ -934,7 +950,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Assert_PredicateTrue_ContinuesNormally()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 5; " +
             "ASSERT x > 1; " +
             "DECLARE after INT32 = 99");
@@ -945,7 +961,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Assert_PredicateFalse_ThrowsWithMessage()
     {
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        AssertionAbortException ex = await Assert.ThrowsAsync<AssertionAbortException>(
             () => RunAsync(
                 "DECLARE x INT32 = 0; " +
                 "ASSERT x > 1 MESSAGE 'x must be positive'"));
@@ -955,7 +971,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Assert_PredicateFalse_NoMessage_DefaultsToFormattedPredicate()
     {
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        AssertionAbortException ex = await Assert.ThrowsAsync<AssertionAbortException>(
             () => RunAsync(
                 "DECLARE x INT32 = 0; " +
                 "ASSERT x > 1"));
@@ -968,7 +984,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // NULL is "unknown" — same as false for control-flow purposes,
         // matches IF/WHILE three-valued semantics.
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        AssertionAbortException ex = await Assert.ThrowsAsync<AssertionAbortException>(
             () => RunAsync(
                 "DECLARE x INT32; " +
                 "ASSERT x > 1 MESSAGE 'unknown is not safe'"));
@@ -980,7 +996,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // The MESSAGE clause accepts any expression — including a variable
         // reference. Useful for surfacing the violating value in the error.
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        AssertionAbortException ex = await Assert.ThrowsAsync<AssertionAbortException>(
             () => RunAsync(
                 "DECLARE msg STRING = 'x was too small'; " +
                 "DECLARE x INT32 = 7; " +
@@ -993,7 +1009,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // ASSERT failures route through the standard exception channel,
         // so an enclosing TRY/CATCH catches them like any other error.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE msg STRING = ''; " +
             "TRY ASSERT 1 = 2 MESSAGE 'arithmetic broke' " +
             "CATCH err SET msg = err");
@@ -1004,7 +1020,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Raise_StringLiteral_Throws()
     {
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync("RAISE 'something went wrong'"));
         Assert.Equal("something went wrong", ex.Message);
     }
@@ -1016,7 +1032,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // same rules as PRINT (numbers in invariant culture, booleans
         // lowercase). Here we raise an INT32 directly to confirm the
         // renderer kicks in.
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync(
                 "DECLARE code INT32 = 42; " +
                 "RAISE code"));
@@ -1028,7 +1044,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Standard pattern: log the failure then propagate. Outer TRY
         // catches the rethrown error; the message survives the round-trip.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE outer_msg STRING = ''; " +
             "TRY BEGIN " +
             "  TRY ASSERT 1 = 2 MESSAGE 'inner failure' " +
@@ -1044,7 +1060,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // RAISE is not control flow — it throws. Without a TRY around the
         // RAISE, the loop terminates and the exception propagates.
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync(
                 "FOR i = 1 TO 10 BEGIN " +
                 "  IF i = 5 RAISE 'hit five' " +
@@ -1057,7 +1073,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // RAISE inside a TRY behaves like any other thrown error: CATCH
         // handles it, FINALLY runs.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE caught BOOLEAN = FALSE; " +
             "DECLARE cleaned BOOLEAN = FALSE; " +
             "TRY RAISE 'oops' " +
@@ -1073,7 +1089,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Try_NoError_RunsTryBody_SkipsCatch()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran_try BOOLEAN = FALSE; " +
             "DECLARE ran_catch BOOLEAN = FALSE; " +
             "TRY SET ran_try = TRUE " +
@@ -1090,9 +1106,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // procedure) so the catch path takes over. The message is bound
         // to err — capture by writing it into an outer-scope variable.
         TableCatalog catalog = CreateCatalog();
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE msg STRING = ''; " +
-            "TRY CALL does_not_exist() " +
+            "TRY RAISE 'does_not_exist' " +
             "CATCH err SET msg = err",
             catalog);
 
@@ -1111,7 +1127,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunAsync(
                 "DECLARE msg STRING = ''; " +
-                "TRY CALL does_not_exist() " +
+                "TRY RAISE 'does_not_exist' " +
                 "CATCH err SET msg = err; " +
                 "SET msg = err",  // err out of scope here
                 catalog));
@@ -1121,7 +1137,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Try_BlockBody_RunsAllStatements()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "TRY BEGIN " +
             "  SET sum = sum + 1 " +
@@ -1136,7 +1152,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Try_Finally_RunsAfterSuccessfulTry()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran_try BOOLEAN = FALSE; " +
             "DECLARE ran_finally BOOLEAN = FALSE; " +
             "TRY SET ran_try = TRUE " +
@@ -1151,10 +1167,10 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_Finally_RunsAfterCaughtError()
     {
         TableCatalog catalog = CreateCatalog();
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE ran_catch BOOLEAN = FALSE; " +
             "DECLARE ran_finally BOOLEAN = FALSE; " +
-            "TRY CALL does_not_exist() " +
+            "TRY RAISE 'does_not_exist' " +
             "CATCH e SET ran_catch = TRUE " +
             "FINALLY SET ran_finally = TRUE",
             catalog);
@@ -1169,7 +1185,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // No FINALLY-without-CATCH form — TRY always pairs with CATCH —
         // but FINALLY runs whether CATCH fired or not. Confirm the
         // simple "no error" case fires FINALLY.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE cleanup BOOLEAN = FALSE; " +
             "TRY DECLARE x INT32 = 1 " +
             "CATCH e SET cleanup = FALSE " +
@@ -1182,7 +1198,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     public async Task Try_NoFinally_OptionalClause()
     {
         // FINALLY is optional; bare TRY/CATCH parses and runs.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE done BOOLEAN = FALSE; " +
             "TRY SET done = TRUE " +
             "CATCH e SET done = FALSE");
@@ -1201,9 +1217,9 @@ public sealed class BatchExecutorTests : ServiceTestBase
         TableCatalog catalog = CreateCatalog();
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(
             () => RunAsync(
-                "TRY CALL original_error() " +
-                "CATCH e CALL catch_error() " +
-                "FINALLY CALL finally_error()",
+                "TRY RAISE 'original_error' " +
+                "CATCH e RAISE 'catch_error' " +
+                "FINALLY RAISE 'finally_error'",
                 catalog));
         Assert.Contains("finally_error", ex.Message);
     }
@@ -1214,15 +1230,15 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // If CATCH itself throws and FINALLY is clean, the catch error
         // should propagate after FINALLY runs.
         TableCatalog catalog = CreateCatalog();
-        BatchResult? result = null;
+        BatchSnapshot? result = null;
         Exception ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             // Wrap the executor so we can introspect after-the-fact;
             // FinalBindings inside RunAsync would still be unreachable
             // because the exception escapes — instead verify via the message.
             result = await RunAsync(
-                "TRY CALL original_error() " +
-                "CATCH e CALL catch_error() " +
+                "TRY RAISE 'original_error' " +
+                "CATCH e RAISE 'catch_error' " +
                 "FINALLY DECLARE cleanup BOOLEAN = TRUE",
                 catalog);
         });
@@ -1236,7 +1252,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // BREAK inside a TRY inside a loop: FINALLY must run, then the
         // loop must exit. CATCH is bypassed (control-flow signals don't
         // hit CATCH).
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "DECLARE cleanup_count INT32 = 0; " +
             "DECLARE catch_count INT32 = 0; " +
@@ -1261,7 +1277,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // CONTINUE inside a TRY inside a loop: FINALLY runs, then the
         // loop advances to the next iteration. CATCH bypassed.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "DECLARE cleanup_count INT32 = 0; " +
             "FOR i = 1 TO 5 BEGIN " +
@@ -1283,11 +1299,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // Outer TRY has an inner TRY that catches; outer CATCH should not fire.
         TableCatalog catalog = CreateCatalog();
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE inner_caught BOOLEAN = FALSE; " +
             "DECLARE outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY CALL does_not_exist() " +
+            "  TRY RAISE 'does_not_exist' " +
             "  CATCH inner_err SET inner_caught = TRUE " +
             "END " +
             "CATCH outer_err SET outer_caught = TRUE",
@@ -1304,11 +1320,11 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // handles. Confirms exceptions propagate through nested TRYs as
         // expected.
         TableCatalog catalog = CreateCatalog();
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE outer_caught BOOLEAN = FALSE; " +
             "TRY BEGIN " +
-            "  TRY CALL first_error() " +
-            "  CATCH inner_err CALL second_error() " +
+            "  TRY RAISE 'first_error' " +
+            "  CATCH inner_err RAISE 'second_error' " +
             "END " +
             "CATCH outer_err SET outer_caught = TRUE",
             catalog);
@@ -1324,7 +1340,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Loop would naturally run i=0..9; BREAK fires when i=5, so the
         // accumulator stops at 0+1+2+3+4=10 and i is left at 5 (BREAK
         // bypasses the SET i = i + 1 line).
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE i INT32 = 0; " +
             "DECLARE sum INT32 = 0; " +
             "WHILE i < 10 BEGIN " +
@@ -1343,7 +1359,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Predicate is on i, but i only advances inside the body before
         // CONTINUE. The classic shape: increment first, then conditionally
         // skip — sums only the odd numbers in 1..10.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE i INT32 = 0; " +
             "DECLARE sum INT32 = 0; " +
             "WHILE i < 10 BEGIN " +
@@ -1360,7 +1376,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_Break_ExitsLoopImmediately()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR i = 1 TO 100 BEGIN " +
             "  IF i > 5 BREAK; " +
@@ -1374,7 +1390,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task ForCounter_Continue_SkipsRestOfIteration()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR i = 1 TO 10 BEGIN " +
             "  IF i % 2 = 0 CONTINUE; " +
@@ -1392,7 +1408,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE first INT32 = 0; " +
             "FOR row IN (SELECT id FROM orders) BEGIN " +
             "  SET first = row['id']; " +
@@ -1410,7 +1426,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["id"],
             [1], [2], [3], [4], [5]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR row IN (SELECT id FROM orders) BEGIN " +
             "  IF row['id'] % 2 = 0 CONTINUE; " +
@@ -1428,7 +1444,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Nested FOR; inner BREAK fires when j > i. Outer loop continues
         // after each inner BREAK, so sum collects only j â‰¤ i for each
         // (i, j) pair: i=1 → j=1; i=2 → j=1,2; i=3 → j=1,2,3.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT32 = 0; " +
             "FOR i = 1 TO 3 BEGIN " +
             "  FOR j = 1 TO 10 BEGIN " +
@@ -1444,7 +1460,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Break_OutsideLoop_AtBatchTopLevel_Throws()
     {
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync("BREAK"));
         Assert.Contains("BREAK", ex.Message, StringComparison.Ordinal);
     }
@@ -1452,7 +1468,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task Continue_OutsideLoop_AtBatchTopLevel_Throws()
     {
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync("CONTINUE"));
         Assert.Contains("CONTINUE", ex.Message, StringComparison.Ordinal);
     }
@@ -1462,7 +1478,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // BREAK inside an IF that itself isn't inside a loop — IF doesn't
         // count as a loop, so the signal escapes to the entry point.
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunAsync(
                 "DECLARE x INT32 = 1; " +
                 "IF x = 1 BREAK"));
@@ -1478,7 +1494,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // the next statement reads as redundant since END already terminates
         // the block. The batch grammar allows omitting the inter-statement
         // separator.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT64 = 0 " +
             "FOR i = 1 TO 3 BEGIN " +
             "  SET sum = sum + i " +
@@ -1495,7 +1511,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Statements anchored on keywords; no separator needed at all when
         // each statement starts with one. This isn't a recommended style,
         // but it should parse.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT32 = 1 " +
             "DECLARE b INT32 = 2 " +
             "SET a = a + b");
@@ -1508,7 +1524,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // BEGIN/END mirrors the top-level grammar: separators between
         // statements are optional.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT32 = 0; " +
             "BEGIN " +
             "  SET a = 1 " +
@@ -1528,7 +1544,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // sum bound to Int8. Subsequent arithmetic (which currently widens
         // to Float32 anyway) would then be wrong on different ground. The
         // coercion ensures the binding's kind matches the declaration.
-        BatchResult result = await RunAsync("DECLARE sum INT64 = 0");
+        BatchSnapshot result = await RunAsync("DECLARE sum INT64 = 0");
 
         // The result is materialised through the AsInt64 path, which would
         // throw if the value were still Int8.
@@ -1540,7 +1556,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     [Fact]
     public async Task SelectAssign_NoFrom_SingleAssignment_BindsValue()
     {
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT64 = 0; " +
             "SELECT x := 42");
         Assert.Equal(42L, Convert.ToInt64(result.FinalBindings["x"]));
@@ -1552,7 +1568,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // Multiple variables in a single SELECT-assignment all get their
         // values from the single computed row. No FROM, so the query
         // produces exactly one row.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE a INT64 = 0; " +
             "DECLARE b INT64 = 0; " +
             "DECLARE c INT64 = 0; " +
@@ -1574,7 +1590,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [20],
             [30]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE last INT64 = 0; " +
             "SELECT last := v FROM nums ORDER BY v",
             catalog);
@@ -1591,7 +1607,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["v"],
             [10]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT64 = 999; " +
             "SELECT x := v FROM nums WHERE v > 1000",
             catalog);
@@ -1610,7 +1626,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2, 200],
             [3, 300]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT64 = 0; " +
             "DECLARE y INT64 = 0; " +
             "SELECT x := a, y := b FROM pairs ORDER BY a",
@@ -1627,7 +1643,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             columns: ["v"],
             [10]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE doubled INT64 = 0; " +
             "SELECT doubled := v + v FROM nums",
             catalog);
@@ -1641,7 +1657,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
         // The alias is the explicit "I want a comparison, not an assignment"
         // signal. Confirms the parser DOESN'T lift this case into
         // assignment form — the variable's pre-existing value is intact.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE x INT32 = 5; " +
             "SELECT x = 5 AS isFive");
 
@@ -1656,7 +1672,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
     {
         // All-or-nothing: mixing an assignment with a regular projection
         // is rejected with a clear message.
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(
+        await Assert.ThrowsAnyAsync<QueryPlanException>(
             () => RunAsync(
                 "DECLARE x INT64 = 0; " +
                 "SELECT x := 1, 'hello'"));
@@ -1683,7 +1699,7 @@ public sealed class BatchExecutorTests : ServiceTestBase
             [2],
             [3]);
 
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "DECLARE sum INT64 = 0; " +
             "FOR row IN (SELECT v FROM nums) " +
             "  SELECT sum := sum + row['v']",
@@ -1717,22 +1733,22 @@ public sealed class BatchExecutorTests : ServiceTestBase
     // ————————————————————— Catalog dispatch alignment —————————————————————
 
     /// <summary>
-    /// Regression: every DDL/DML statement type must flow through BatchExecutor
-    /// without hitting the throw-on-unknown-statement default. The streaming
-    /// endpoint runs everything via <c>RunWithEventsAsync</c>, so any statement
-    /// the parser accepts but BatchExecutor doesn't dispatch lands as an
+    /// Regression: every DDL/DML statement type must plan through
+    /// <c>TableCatalog.PlanAsync</c> without hitting the throw-on-unknown-statement
+    /// default. The streaming endpoint drains every child plan, so any statement
+    /// the parser accepts but <c>PlanAsync</c> can't dispatch lands as an
     /// uncaught exception in the user's browser. The unified catalog-dispatch
     /// arm makes this list growable from <c>TableCatalog.Plan</c> alone.
     /// </summary>
     [Fact]
-    public async Task BatchExecutor_DispatchesAllDdlAndDml()
+    public async Task PlanAsync_DispatchesAllDdlAndDml()
     {
         TableCatalog catalog = CreateCatalog();
         // CREATE TABLE → INSERT → UPDATE → DELETE → REINDEX (skipped on TEMP
         // — we exercise it on a persistent table elsewhere). ALTER TABLE
-        // ADD/DROP COLUMN. All run through the same BatchExecutor path the
+        // ADD/DROP COLUMN. All run through the same Command path the
         // streaming endpoint uses.
-        BatchResult result = await RunAsync(
+        BatchSnapshot result = await RunAsync(
             "CREATE TEMP TABLE t (id Int32, name String); " +
             "INSERT INTO t VALUES (1, 'a'), (2, 'b'); " +
             "UPDATE t SET name = 'X' WHERE id = 1; " +

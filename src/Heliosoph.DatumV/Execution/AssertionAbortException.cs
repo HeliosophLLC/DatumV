@@ -3,9 +3,11 @@ using Heliosoph.DatumV.Parsing.Ast;
 namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
-/// Thrown when an <see cref="AssertClause"/> with <see cref="AssertFailureMode.Abort"/>
-/// evaluates to false or null for a row. Inherits from <see cref="ExecutionException"/>:
-/// the message is safe to surface to the caller as a query-level error.
+/// Thrown when an assertion fires — either a column-level <see cref="AssertClause"/>
+/// with <see cref="AssertFailureMode.Abort"/> evaluating to false/null for a row, or
+/// a procedural <see cref="AssertStatement"/> whose predicate evaluated to false/null.
+/// Inherits from <see cref="ExecutionException"/>: the message is safe to surface to
+/// the caller as a query-level error.
 /// </summary>
 public sealed class AssertionAbortException : ExecutionException
 {

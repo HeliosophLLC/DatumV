@@ -264,7 +264,7 @@ internal static class InsertExecutor
                             // Pre-fold any scalar subqueries — VALUES expressions can
                             // contain `(SELECT x FROM y LIMIT 1)` and the tableless
                             // evaluator only handles literal/binary/function shapes.
-                            // Mirrors BatchExecutor.PrefoldSubqueriesAsync for the
+                            // Mirrors ProceduralEvaluator.PrefoldSubqueriesAsync for the
                             // INSERT-VALUES path.
                             sourceExpr = await PrefoldSubqueriesAsync(
                                 sourceExpr,
@@ -1410,7 +1410,7 @@ internal static class InsertExecutor
     /// Walks <paramref name="expression"/> and replaces each scalar
     /// <see cref="SubqueryExpression"/> with a <see cref="LiteralExpression"/>
     /// holding the executed subquery's result. Mirrors
-    /// <c>BatchExecutor.PrefoldSubqueriesAsync</c> but standalone (no
+    /// <c>ProceduralEvaluator.PrefoldSubqueriesAsync</c> but standalone (no
     /// procedural batch context required) — INSERT VALUES expressions
     /// can include subqueries but the tableless evaluator only handles
     /// scalar shapes, so subqueries must be folded before evaluation.

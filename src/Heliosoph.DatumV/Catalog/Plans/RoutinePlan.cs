@@ -55,7 +55,10 @@ internal sealed class RoutinePlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>Builds a plan for <c>CREATE FUNCTION</c>.</summary>
     public static RoutinePlan ForCreateFunction(

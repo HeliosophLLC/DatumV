@@ -1,4 +1,5 @@
 using Heliosoph.DatumV.Catalog;
+using Heliosoph.DatumV.Catalog.Plans;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing;
@@ -17,7 +18,7 @@ namespace Heliosoph.DatumV.Data;
 /// Three async execution verbs mirror ADO.NET:
 /// </para>
 /// <list type="bullet">
-///   <item><description><see cref="ExecuteReaderAsync"/> — opens an
+///   <item><description><see cref="ExecuteReaderAsync(CancellationToken)"/> — opens an
 ///     <see cref="InProcessDatumDbReader"/> that yields rows. Use for
 ///     <c>SELECT</c>, <c>CALL</c>, and <c>… RETURNING</c> DML.</description></item>
 ///   <item><description><see cref="ExecuteNonQueryAsync"/> — runs the
@@ -66,6 +67,21 @@ public sealed class InProcessDatumDbCommand : IDisposable
     public Statement? Statement { get; set; }
 
     /// <summary>
+    /// Pre-parsed multi-statement script — each entry is a top-level
+    /// <see cref="Statement"/> paired with an optional source slice
+    /// (used by DDL persistence; see
+    /// <see cref="TableCatalog.PlanAsync(Heliosoph.DatumV.Parsing.Ast.Statement, string?)"/>).
+    /// When set, takes precedence over both <see cref="Statement"/> and
+    /// <see cref="CommandText"/> and produces a
+    /// <see cref="Heliosoph.DatumV.Catalog.Plans.StatementBatch"/> at
+    /// <see cref="PrepareAsync"/> time — one result set per child,
+    /// advanced via <see cref="InProcessDatumDbReader.NextResultAsync"/>.
+    /// Parameters aren't bound through this path; pre-bind via
+    /// <c>ParameterBinder</c> at the call site if needed.
+    /// </summary>
+    public IReadOnlyList<(Statement Statement, string? SourceText)>? Statements { get; set; }
+
+    /// <summary>
     /// Optional original SQL slice for DDL persistence — procedural
     /// <c>CREATE FUNCTION</c> / <c>CREATE PROCEDURE</c> bodies don't have a
     /// faithful AST formatter, so without the slice they fall back to a
@@ -77,10 +93,12 @@ public sealed class InProcessDatumDbCommand : IDisposable
     public InProcessDatumDbParameterCollection Parameters { get; }
 
     /// <summary>
-    /// Opens a reader over the prepared SQL. Multi-statement
-    /// <see cref="CommandText"/> opens against a
-    /// <see cref="Heliosoph.DatumV.Catalog.Plans.StatementBatch"/> (one result set per statement;
-    /// advance with <see cref="InProcessDatumDbReader.NextResultAsync"/>);
+    /// Opens a reader over the prepared SQL. A pre-parsed multi-statement
+    /// <see cref="Statements"/> or multi-statement <see cref="CommandText"/>
+    /// opens against a
+    /// <see cref="Heliosoph.DatumV.Catalog.Plans.StatementBatch"/> (one
+    /// result set per child; advance with
+    /// <see cref="InProcessDatumDbReader.NextResultAsync"/>);
     /// single-statement <see cref="CommandText"/> or a pre-parsed
     /// <see cref="Statement"/> opens against a single
     /// <see cref="StatementPlan"/>.
@@ -92,6 +110,28 @@ public sealed class InProcessDatumDbCommand : IDisposable
         context.Accountant.StartProfiling();
         return await InProcessDatumDbReader
             .OpenAsync(prepared, context, ownsContext: true, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Opens a reader against <paramref name="context"/> instead of
+    /// constructing a per-call context. The reader does not own
+    /// <paramref name="context"/> — the caller is responsible for its
+    /// lifetime (and for starting accountant profiling if memory samples
+    /// are wanted). Used by the streaming surface to thread one
+    /// <see cref="ExecutionContext"/> (with a wired
+    /// <see cref="Execution.ExecutionContext.CellSink"/> + shared
+    /// cell-id allocator) through every reader opened for a single SQL
+    /// batch.
+    /// </summary>
+    public async Task<InProcessDatumDbReader> ExecuteReaderAsync(
+        Execution.ExecutionContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        PreparedSql prepared = await PrepareAsync(cancellationToken).ConfigureAwait(false);
+        return await InProcessDatumDbReader
+            .OpenAsync(prepared, context, ownsContext: false, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -139,6 +179,15 @@ public sealed class InProcessDatumDbCommand : IDisposable
     public async Task<PreparedSql> PrepareAsync(CancellationToken cancellationToken = default)
     {
         _ = cancellationToken;
+
+        // Pre-parsed multi-statement batch: highest precedence — used by
+        // the streaming surface and tests that already hold a parsed
+        // batch. Skips parser and parameter binding (callers bind ahead
+        // if needed). Empty list throws via the StatementBatch ctor.
+        if (Statements is not null)
+        {
+            return new StatementBatch(_connection.Catalog, Statements);
+        }
 
         // Pre-parsed Statement overrides CommandText for dispatch — used by
         // callers that already have an AST (parameter binders, batch

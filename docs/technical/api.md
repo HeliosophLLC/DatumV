@@ -56,6 +56,115 @@ while (await reader.NextResultAsync());
 
 Children are planned lazily — the `INSERT` plans against the `CREATE TABLE` that already ran, so state dependencies across statement boundaries work.
 
+### Procedural variable snapshot
+
+`InProcessDatumDbCommand` accepts a pre-parsed `Statements` list — one entry per top-level statement, each paired with an optional source slice for DDL persistence. Pair it with a shared `ExecutionContext` and `VariableScopeSnapshot.Capture(context)` after iteration to read the procedural variables that survived the batch:
+
+```csharp
+using Heliosoph.DatumV.Execution;
+
+IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(
+    "DECLARE counter Int64 = 0; " +
+    "FOR row IN (SELECT id FROM data) SET counter = counter + 1");
+(Statement, string?)[] pairs = stmts.Select(s => (s, (string?)null)).ToArray();
+
+using InProcessDatumDbConnection connection = new(catalog);
+using InProcessDatumDbCommand command = connection.CreateCommand();
+command.Statements = pairs;
+
+using ExecutionContext context = catalog.CreateExecutionContext();
+context.Accountant.StartProfiling();
+await using InProcessDatumDbReader reader = await command.ExecuteReaderAsync(context);
+do
+{
+    while (await reader.ReadAsync()) { /* drain */ }
+}
+while (await reader.NextResultAsync());
+
+IReadOnlyDictionary<string, object?> bindings = VariableScopeSnapshot.Capture(context);
+long count = Convert.ToInt64(bindings["counter"]);
+```
+
+The shared-context overload `ExecuteReaderAsync(context, ct)` keeps the reader from owning the context's lifetime; the caller disposes both. `VariableScopeSnapshot.Capture` materializes each binding into managed form (numerics, strings, booleans, `null`), so the snapshot is safe to read after the context disposes.
+
+### Streaming per-cell events
+
+Beyond rows, the engine emits per-cell lifecycle events for streaming consumers (NDJSON-over-HTTP, REPL renderers, CLI progress reporters). `StreamEventsAsync` on a `Command` returns an `IAsyncEnumerable<BatchEvent>`:
+
+```csharp
+using Heliosoph.DatumV.Streaming;
+
+using InProcessDatumDbConnection connection = new(catalog);
+using InProcessDatumDbCommand command = connection.CreateCommand(
+    "CREATE TEMP TABLE staging (id Int32); " +
+    "INSERT INTO staging VALUES (1), (2), (3); " +
+    "SELECT id FROM staging ORDER BY id");
+
+await foreach (BatchEvent ev in command.StreamEventsAsync(cancellationToken: ct))
+{
+    switch (ev)
+    {
+        case CellStartedBatchEvent started:
+            // started.CellId is "c0", "c1", … (monotonic across the batch).
+            // started.Kind is a lowercase statement-family label
+            // ("select", "createtable", "insert", "print", …).
+            break;
+
+        case CellRowBatchEvent rowEvent:
+            // rowEvent.Batch is live for the duration of the foreach body.
+            // Consume rows synchronously inside this arm — the streaming
+            // surface gates the bracket on the body returning, so the
+            // RowBatch isn't recycled while you hold it.
+            for (int r = 0; r < rowEvent.Batch.Count; r++)
+            {
+                Row row = rowEvent.Batch[r];
+                // …
+            }
+            break;
+
+        case CellPrintBatchEvent print:
+            Console.WriteLine(print.Text);
+            break;
+
+        case CellMemorySampleBatchEvent sample:
+            // 1 Hz residency snapshot — current/peak GC-resident bytes,
+            // arena bytes (across every live arena rented from the pool),
+            // VRAM if NVML is available, and the configured spill budget.
+            break;
+
+        case CellCompletedBatchEvent completed:
+            // completed.ElapsedMs is the cell's wall-time.
+            break;
+
+        case CellFailedBatchEvent failed:
+            // failed.Error is re-thrown by the foreach after this event;
+            // catch at the outer try if you need a single-error wire.
+            break;
+    }
+}
+```
+
+| Event | When it fires |
+|-------|---------------|
+| `CellStartedBatchEvent` | A productive plan opens its bracket (SELECT, DML, DDL, PRINT). |
+| `CellRowBatchEvent` | A row-yielding plan produces a `RowBatch`. Batch lifetime is the foreach body. |
+| `CellPrintBatchEvent` | A `PRINT` statement renders a value. Stamped with the enclosing cell id. |
+| `CellMemorySampleBatchEvent` | 1 Hz sidecar timer fires while any cell is open. |
+| `CellCompletedBatchEvent` / `CellFailedBatchEvent` | The productive plan's bracket closes (success or throw). |
+
+Silent statements (DECLARE, SET, BREAK, CONTINUE, control-flow wrappers) don't open cells — only productive plans do. The per-batch cell counter is capped at 10 000 to prevent a tight loop around a productive statement from flooding the wire; hitting the cap throws an `InvalidOperationException` with a user-actionable message.
+
+The default memory budget is 2 GiB, surfaced via the `memoryBudgetBytes` parameter:
+
+```csharp
+// Tighter budget for an interactive desktop host.
+await foreach (BatchEvent ev in command.StreamEventsAsync(
+    memoryBudgetBytes: 256L * 1024 * 1024, cancellationToken: ct))
+{
+    // …
+}
+```
+
 ### Without ADO surface
 
 For procedural batches that share an `ExecutionContext` across many plans, or for callers that already hold a parsed `Statement`, the catalog exposes the lower-level surface directly:

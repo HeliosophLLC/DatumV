@@ -53,7 +53,10 @@ internal sealed class ViewPlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>Builds a plan for <c>CREATE VIEW</c>.</summary>
     public static ViewPlan ForCreateView(

@@ -1,5 +1,6 @@
 using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Data;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Parsing;
 using Heliosoph.DatumV.Parsing.Ast;
@@ -337,12 +338,12 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public async Task Reopen_ProceduralUdfRegisteredViaBatchExecutor_RoundTripsBody()
+    public async Task Reopen_ProceduralUdfRegisteredViaCommand_RoundTripsBody()
     {
-        // Regression test: the batch executor path
+        // Regression test: the multi-statement Command path
         // parses via ParseBatchWithText and passes per-statement source
-        // slices through BatchExecutor → Plan(Statement, sourceText) so
-        // the catalog file captures the body verbatim. Without the slice,
+        // slices through Plan(Statement, sourceText) so the catalog file
+        // captures the body verbatim. Without the slice,
         // the descriptor falls back to the synthesised "CREATE FUNCTION
         // <name>" placeholder which fails to reparse on reopen and the
         // function disappears.
@@ -360,8 +361,10 @@ public class CatalogStoreTests : ServiceTestBase, IDisposable
         (Statement, string?)[] nullablePairs = new (Statement, string?)[pairs.Count];
         for (int i = 0; i < pairs.Count; i++)
             nullablePairs[i] = (pairs[i].Statement, pairs[i].SourceText);
-        BatchExecutor executor = new(first);
-        await executor.ExecuteAsync(nullablePairs, CancellationToken.None);
+        using InProcessDatumDbConnection connection = new(first);
+        using InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = nullablePairs;
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
 
         TableCatalog second = OpenCatalog();
 

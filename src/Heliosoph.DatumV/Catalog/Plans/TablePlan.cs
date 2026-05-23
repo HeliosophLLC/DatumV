@@ -52,7 +52,10 @@ internal sealed class TablePlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>Builds a plan for <c>CREATE TABLE</c>.</summary>
     public static TablePlan ForCreateTable(

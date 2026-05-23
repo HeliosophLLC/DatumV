@@ -878,7 +878,7 @@ public sealed class HoverProvider
             case ForCounterStatement forCtr:
                 // `FOR i = start TO end` introduces i in the loop scope.
                 // Kind is the engine's loop-counter contract — Int32 (matches
-                // BatchExecutor's counter binding).
+                // ForCounterPlan's counter binding).
                 AddIfNew(sink, forCtr.VariableName, "Int32");
                 CollectDeclaredVariables(forCtr.Body, sink);
                 break;

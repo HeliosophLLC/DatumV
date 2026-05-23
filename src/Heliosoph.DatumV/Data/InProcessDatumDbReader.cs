@@ -132,7 +132,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         // (shouldn't be — ctor enforces N >= 1), surface as empty result set.
         IAsyncEnumerator<RowBatch>? batchEnumerator = null;
         RowBatch? prefetched = null;
-        if (await childPlanEnumerator.MoveNextAsync().ConfigureAwait(false))
+        if (await MoveNextWithSignalConversionAsync(childPlanEnumerator).ConfigureAwait(false))
         {
             StatementPlan firstChild = childPlanEnumerator.Current;
             batchEnumerator = firstChild.ExecuteAsync(ct, context).GetAsyncEnumerator(ct);
@@ -148,7 +148,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
 
     private static async Task<RowBatch?> PrefetchFirstBatchAsync(IAsyncEnumerator<RowBatch> enumerator)
     {
-        while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+        while (await MoveNextWithSignalConversionAsync(enumerator).ConfigureAwait(false))
         {
             if (enumerator.Current.Count > 0) return enumerator.Current;
         }
@@ -208,8 +208,8 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         {
             return false;
         }
-        
-        while (await _batchEnumerator.MoveNextAsync().ConfigureAwait(false))
+
+        while (await MoveNextWithSignalConversionAsync(_batchEnumerator).ConfigureAwait(false))
         {
             if (_batchEnumerator.Current.Count == 0) continue;
             _currentBatch = _batchEnumerator.Current;
@@ -220,6 +220,31 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
         _currentBatch = null;
         _rowIndex = -1;
         return false;
+    }
+
+    /// <summary>
+    /// Advances <paramref name="enumerator"/> by one step, converting any
+    /// escaping <see cref="LoopBreakSignal"/> / <see cref="LoopContinueSignal"/>
+    /// — internal control-flow markers that should never leave the plan
+    /// runtime — into a user-actionable <see cref="ExecutionException"/>.
+    /// A signal that reaches here means the user wrote
+    /// <c>BREAK</c>/<c>CONTINUE</c> outside any enclosing loop.
+    /// </summary>
+    private static async ValueTask<bool> MoveNextWithSignalConversionAsync<T>(
+        IAsyncEnumerator<T> enumerator)
+    {
+        try
+        {
+            return await enumerator.MoveNextAsync().ConfigureAwait(false);
+        }
+        catch (LoopBreakSignal)
+        {
+            throw new ExecutionException("BREAK is only valid inside a WHILE or FOR loop.");
+        }
+        catch (LoopContinueSignal)
+        {
+            throw new ExecutionException("CONTINUE is only valid inside a WHILE or FOR loop.");
+        }
     }
 
     /// <summary>
@@ -257,7 +282,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
             _batchEnumerator = null;
         }
 
-        if (!await _childPlanEnumerator.MoveNextAsync().ConfigureAwait(false))
+        if (!await MoveNextWithSignalConversionAsync(_childPlanEnumerator).ConfigureAwait(false))
         {
             _currentBatch = null;
             _rowIndex = -1;
@@ -276,7 +301,7 @@ public sealed class InProcessDatumDbReader : IAsyncDisposable
     private async ValueTask DrainCurrentResultSetAsync()
     {
         if (_batchEnumerator is null) return;
-        while (await _batchEnumerator.MoveNextAsync().ConfigureAwait(false))
+        while (await MoveNextWithSignalConversionAsync(_batchEnumerator).ConfigureAwait(false))
         {
             // Discard — the plan's iterator returns each prior batch on advance.
         }

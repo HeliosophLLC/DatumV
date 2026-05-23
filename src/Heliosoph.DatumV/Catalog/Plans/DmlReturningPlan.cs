@@ -111,7 +111,10 @@ internal sealed class DmlReturningPlan : StatementPlan
         }
         tree.Children.Add(capturedSource.ExplainTree);
         ExplainTree = tree;
+        Kind = $"{kind}Returning".ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>
     /// Composer-mode construction: the <paramref name="dmlPlan"/> applies

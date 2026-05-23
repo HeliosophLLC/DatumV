@@ -2745,7 +2745,7 @@ public class SqlParserTests : ServiceTestBase
         // NumberLiteral) and the error surfaced at `FROM (` rather than at
         // the OFFSET. Now `OFFSET expression` is supported end-to-end and
         // this exact shape parses cleanly. The companion runtime tests in
-        // BatchExecutorTests verify the variable resolves correctly.
+        // ProceduralBatchTests verify the variable resolves at execute time.
         const string sql =
             "SELECT * FROM (\n" +
             "  SELECT * FROM t LIMIT 5 OFFSET skip_n\n" +

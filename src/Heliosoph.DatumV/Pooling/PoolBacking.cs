@@ -77,7 +77,7 @@ public sealed class PoolBacking
     // streaming memory profile to report a query's total in-flight arena
     // bytes — including operator-local arenas (OrderBy bufferArena, spill
     // consolidated arenas) that aren't otherwise visible to the
-    // BatchExecutor sidecar. ConcurrentDictionary acts as a thread-safe
+    // memory-sample sidecar. ConcurrentDictionary acts as a thread-safe
     // set; the byte value is a placeholder. Add on rent paths, remove
     // when the arena's refcount drops to zero (TryReturn).
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Arena, byte> _liveArenas = new();
@@ -452,7 +452,7 @@ public sealed class PoolBacking
     /// rented from this pool (refcount &gt; 0). Used by the streaming memory
     /// profile's Arena sparkline to report the total in-flight arena bytes
     /// for a running query — including operator-local arenas that the
-    /// BatchExecutor sidecar can't otherwise observe (OrderBy's bufferArena
+    /// memory-sample sidecar can't otherwise observe (OrderBy's bufferArena
     /// during accumulation, hash-join build arenas, SpillReaderWriter
     /// consolidated arenas).
     /// </summary>

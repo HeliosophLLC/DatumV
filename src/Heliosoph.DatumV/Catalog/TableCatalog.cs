@@ -772,15 +772,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         CancellationToken cancellationToken = default)
         => new(
             this,
-            memoryBudgetBytes,
-            store,
-            types,
-            accountant,
-            videoRegistry,
-            variableScope,
-            variableStore,
-            printHandler,
-            cancellationToken)
+            memoryBudgetBytes: memoryBudgetBytes,
+            store: store,
+            types: types,
+            accountant: accountant,
+            videoRegistry: videoRegistry,
+            variableScope: variableScope,
+            variableStore: variableStore,
+            printSink: printHandler,
+            cancellationToken: cancellationToken)
         {
             // Snapshot the catalog's tracer into the per-query context.
             // Setting / clearing TableCatalog.ModelTracer at runtime affects
@@ -893,10 +893,26 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // Pure queries: plan eagerly (the planner has no side effects, just builds an operator tree).
         if (statement is QueryStatement queryStatement)
         {
+            // Assignment-form (every column is `@v = expr`) routes through
+            // a dedicated plan that drains the projection into the variable
+            // scope; non-assignment falls through to the standard query
+            // planner.
+            if (Plans.AssignmentSelectPlan.TryPlan(this, queryStatement, out Plans.AssignmentSelectPlan? assignPlan))
+            {
+                return assignPlan!;
+            }
             return PlanQuery(queryStatement.Query);
         }
         if (statement is CallStatement call)
         {
+            // CALL of a procedure is a procedural side-effect path with its
+            // own scope + depth cap; CALL of a function (or unresolved name)
+            // falls through to PlanCall which lowers it to a tableless
+            // SELECT and surfaces "Unknown function" at evaluation time.
+            if (Plans.ProcedureCallPlan.TryPlan(this, call, out Plans.ProcedureCallPlan? procPlan))
+            {
+                return procPlan!;
+            }
             return PlanCall(call);
         }
 
@@ -988,9 +1004,8 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // SET / PRINT) compose at plan time so EXPLAIN of a procedural
         // batch shows the full structure. Child plans are recursively
         // planned through this method. Runtime execution still flows
-        // through BatchExecutor's AST walk in this step — the plan
-        // classes' ExecuteImplAsync throws until a future step migrates
-        // the procedural runtime into the plans.
+        // recursively to materialise the full plan tree, with their own
+        // ExecuteImplAsync owning the per-family runtime.
         if (statement is BlockStatement block)
         {
             List<StatementPlan> children = new(block.Statements.Count);
@@ -1043,6 +1058,23 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         else if (statement is ContinueStatement continueStmt)
         {
             return Plans.ProceduralLeafPlan.ForContinue(this, continueStmt);
+        }
+        else if (statement is TryStatement tryStmt)
+        {
+            StatementPlan tryBodyPlan = await PlanAsync(tryStmt.TryBody, sourceText).ConfigureAwait(false);
+            StatementPlan catchBodyPlan = await PlanAsync(tryStmt.CatchBody, sourceText).ConfigureAwait(false);
+            StatementPlan? finallyBodyPlan = tryStmt.FinallyBody is not null
+                ? await PlanAsync(tryStmt.FinallyBody, sourceText).ConfigureAwait(false)
+                : null;
+            return new Plans.TryPlan(this, tryStmt, tryBodyPlan, catchBodyPlan, finallyBodyPlan);
+        }
+        else if (statement is AssertStatement assertStmt)
+        {
+            return new Plans.AssertPlan(this, assertStmt);
+        }
+        else if (statement is RaiseStatement raiseStmt)
+        {
+            return new Plans.RaisePlan(this, raiseStmt);
         }
         else if (statement is CreateFunctionStatement createFn)
         {

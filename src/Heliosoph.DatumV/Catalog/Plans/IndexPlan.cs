@@ -51,7 +51,10 @@ internal sealed class IndexPlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>Builds a plan for <c>CREATE INDEX</c>.</summary>
     public static IndexPlan ForCreateIndex(

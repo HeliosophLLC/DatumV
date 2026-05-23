@@ -186,9 +186,10 @@ lowercase `true` / `false` (matching SQL convention), strings pass
 through unchanged. `NULL` produces a null event payload so consumers can
 distinguish a missing value from the literal text `"null"`.
 
-Print events surface as `CellPrintBatchEvent` on the `RunWithEventsAsync`
-stream — a debug pane, stderr, or a log can route them anywhere; the
-non-streaming `ExecuteAsync` path silently discards them.
+Print events surface as `CellPrintBatchEvent` on the
+`InProcessDatumDbCommand.StreamEventsAsync` stream — a debug pane,
+stderr, or a log can route them anywhere; the non-streaming
+`ExecuteReaderAsync` path silently discards them.
 
 ## ASSERT and RAISE
 

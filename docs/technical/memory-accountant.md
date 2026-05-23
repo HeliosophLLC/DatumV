@@ -31,13 +31,13 @@ Arena bytes are recorded for diagnostics (the UI shows them in a separate sparkl
 
 ## The spill budget
 
-Every batch executed via `BatchExecutor.RunWithEventsAsync` runs against a budget. The default is **2 GiB**:
+Every batch executed via `InProcessDatumDbCommand.StreamEventsAsync` runs against a budget. The default is **2 GiB**:
 
 ```csharp
-public const long DefaultMemoryBudgetBytes = 2L * 1024 * 1024 * 1024;
+public const long DefaultStreamMemoryBudgetBytes = 2L * 1024 * 1024 * 1024;
 ```
 
-The default applies when no explicit budget is passed; callers that need different behavior pass their own value, or `long.MaxValue` for effectively unbounded execution. Standalone queries that bypass `BatchExecutor` (constructed directly via `catalog.CreateExecutionContext(...)`) can set `memoryBudgetBytes` on the factory call or leave it null for unbounded behavior.
+The default applies when no explicit budget is passed; callers that need different behavior pass their own value, or `long.MaxValue` for effectively unbounded execution. Standalone queries that bypass the streaming surface (constructed directly via `catalog.CreateExecutionContext(...)`) can set `memoryBudgetBytes` on the factory call or leave it null for unbounded behavior.
 
 ### How operators consult the budget
 
@@ -73,7 +73,7 @@ Once an operator's held state is no longer in memory (spilled or operator comple
 
 Memory samples flow from the server to the Web UI's status-bar memory chip during query execution. Two emission paths combine into one stream:
 
-- **Sidecar timer.** A background `PeriodicTimer` in `BatchExecutor.RunWithEventsAsync` ticks once per second and emits a `memory_sample` event regardless of row cadence. This is what populates the chip during long operators that don't yield rows for minutes (large GROUP BY accumulation, ORDER BY external sort).
+- **Sidecar timer.** A background `PeriodicTimer` in `InProcessDatumDbCommand.StreamEventsAsync` ticks once per second and emits a `memory_sample` event regardless of row cadence. This is what populates the chip during long operators that don't yield rows for minutes (large GROUP BY accumulation, ORDER BY external sort).
 - **Cell boundary samples.** Immediate samples fire at cell start (so the chip appears before the first 1Hz tick) and at cell completion (so the post-mortem value freezes the final state).
 
 Both paths serialize through one `SemaphoreSlim` inside the executor so events arrive on the wire in emission order alongside row events.
@@ -129,7 +129,7 @@ Release happens at operator scope end. For most operators that's the `finally` b
 
 ## Procedural batches and VariableScope
 
-A procedural batch (`BatchExecutor.ExecuteAsync` on a multi-statement script) holds one accountant for the lifetime of the batch — *not* one per query inside it. Every query the batch runs constructs an `ExecutionContext` that borrows the batch's accountant rather than constructing its own.
+A multi-statement script (`InProcessDatumDbCommand` driving a `StatementBatch` via `InProcessDatumDbReader`) holds one accountant for the lifetime of the batch — *not* one per query inside it. Every query the batch runs constructs an `ExecutionContext` that borrows the batch's accountant rather than constructing its own.
 
 This means a DECLARE'd payload from one statement counts against the budget when the next statement runs:
 

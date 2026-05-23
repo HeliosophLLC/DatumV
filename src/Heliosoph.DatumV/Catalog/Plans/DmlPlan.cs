@@ -67,7 +67,10 @@ internal sealed class DmlPlan : StatementPlan
             tree.Children.Add(sourcePlan.ExplainTree);
         }
         ExplainTree = tree;
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>
     /// Builds a DML plan for <c>INSERT</c>. For <c>INSERT … SELECT</c>

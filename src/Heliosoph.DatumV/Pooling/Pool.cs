@@ -168,7 +168,7 @@ public sealed class Pool
     /// currently rented from this pool (refcount &gt; 0). Used by the
     /// streaming memory profile to report a query's in-flight arena bytes
     /// — including operator-local arenas like OrderBy's bufferArena and
-    /// spill consolidated arenas that the BatchExecutor sidecar can't
+    /// spill consolidated arenas that the memory-sample sidecar can't
     /// observe directly. Iteration is at-most-1Hz from the sidecar; the
     /// approximate snapshot is fine for visualisation.
     /// </summary>

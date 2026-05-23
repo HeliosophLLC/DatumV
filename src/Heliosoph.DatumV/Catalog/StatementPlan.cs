@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Streaming;
 using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 
 namespace Heliosoph.DatumV.Catalog;
@@ -33,8 +36,8 @@ namespace Heliosoph.DatumV.Catalog;
 /// construct a fresh <c>catalog.CreateExecutionContext()</c> in a
 /// <c>using</c> scope, or call the
 /// <c>TableCatalog.ExecuteAsync(plan, ct)</c> convenience that owns the
-/// lifetime; procedural batches share the one their
-/// <see cref="BatchExecutor"/> owns.
+/// lifetime; multi-statement readers share the one the
+/// <see cref="Data.InProcessDatumDbReader"/> owns.
 /// </para>
 /// </remarks>
 public abstract class StatementPlan : PreparedSql
@@ -74,17 +77,94 @@ public abstract class StatementPlan : PreparedSql
     }
 
     /// <summary>
+    /// Lowercase statement-category label stamped onto
+    /// <see cref="CellStartedBatchEvent"/> by the streaming bracket
+    /// ("select", "dml", "ddl", "create_table", "if", "while", …). Plans
+    /// declare it once at the type level so the bracket needs no AST
+    /// switch.
+    /// </summary>
+    public abstract string Kind { get; }
+
+    /// <summary>
+    /// True when this plan can produce user-visible output (rows, or a
+    /// PRINT diagnostic) and therefore earns its own streaming cell.
+    /// False for silent control-flow wrappers
+    /// (<c>BlockPlan</c>, <c>IfPlan</c>, <c>WhilePlan</c>,
+    /// <c>ForCounterPlan</c>, <c>ForInPlan</c>,
+    /// <see cref="Plans.ProceduralLeafPlan"/>) — their productive
+    /// descendants speak for themselves and no separate cell is created
+    /// for the wrapper. Defaults to <see langword="true"/>.
+    /// </summary>
+    public virtual bool IsProductive => true;
+
+    /// <summary>
     /// Streams the plan's output as a sequence of <see cref="RowBatch"/>.
     /// Each batch is automatically returned to the pool when the iterator
     /// advances past it, so consumers must finish using the current batch
     /// before requesting the next one.
     /// </summary>
+    /// <remarks>
+    /// When <see cref="IsProductive"/> is <see langword="true"/> AND a
+    /// streaming consumer has installed
+    /// <see cref="ExecutionContext.CellSink"/> the call is bracketed with
+    /// <see cref="CellStartedBatchEvent"/> /
+    /// <see cref="CellRowBatchEvent"/> /
+    /// (<see cref="CellCompletedBatchEvent"/> or
+    /// <see cref="CellFailedBatchEvent"/>) emissions. Non-streaming callers
+    /// (the no-op default sink) skip the bracket entirely so internal
+    /// expression-eval queries don't burn cell-id budget or pay per-batch
+    /// overhead.
+    /// </remarks>
     public IAsyncEnumerable<RowBatch> ExecuteAsync(
         CancellationToken cancellationToken,
         ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return ExecuteImplAsync(cancellationToken, context);
+        return IsProductive && context.IsStreamingActive
+            ? ExecuteWithBracketAsync(cancellationToken, context)
+            : ExecuteImplAsync(cancellationToken, context);
+    }
+
+    private async IAsyncEnumerable<RowBatch> ExecuteWithBracketAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        ExecutionContext context)
+    {
+        string cellId = context.NextCellId();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        await context.CellSink(new CellStartedBatchEvent(cellId, Kind)).ConfigureAwait(false);
+        context.EnterCell(cellId);
+
+        IAsyncEnumerator<RowBatch> enumerator =
+            ExecuteImplAsync(cancellationToken, context).GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            while (true)
+            {
+                bool hasNext;
+                RowBatch? batch;
+                try
+                {
+                    hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                    batch = hasNext ? enumerator.Current : null;
+                }
+                catch (Exception ex)
+                {
+                    await context.CellSink(new CellFailedBatchEvent(cellId, ex)).ConfigureAwait(false);
+                    throw;
+                }
+                if (!hasNext) break;
+                await context.CellSink(new CellRowBatchEvent(cellId, batch!)).ConfigureAwait(false);
+                yield return batch!;
+            }
+            await context.CellSink(
+                new CellCompletedBatchEvent(cellId, stopwatch.Elapsed.TotalMilliseconds))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+            context.ExitCell();
+        }
     }
 
     /// <summary>

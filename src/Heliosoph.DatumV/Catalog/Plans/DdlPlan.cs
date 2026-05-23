@@ -60,7 +60,10 @@ internal sealed class DdlPlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>
     /// Constructs an already-applied <see cref="DdlPlan"/>. The side

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Data;
 using Heliosoph.DatumV.DatumFile.Sidecar;
 using Heliosoph.DatumV.Diagnostics;
 using Heliosoph.DatumV.Execution;
@@ -10,20 +11,23 @@ using Heliosoph.DatumV.ModelLibrary;
 using Heliosoph.DatumV.Parsing;
 using Heliosoph.DatumV.Parsing.Ast;
 using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Streaming;
 
 namespace Heliosoph.DatumV.Web.Execution;
 
 /// <summary>
-/// Runs SQL batches through the <see cref="BatchExecutor"/> and streams
-/// per-cell events (schema, rows, truncation, completion, errors,
-/// model-token chunks) as NDJSON to an output stream.
+/// Runs SQL batches through the in-process streaming surface
+/// (<see cref="InProcessDatumDbCommandStreamingExtensions.StreamEventsAsync"/>)
+/// and forwards per-cell events (schema, rows, truncation, completion,
+/// errors, model-token chunks) as NDJSON to an output stream.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Single execution path: every batch goes through <see cref="BatchExecutor"/>.
-/// Procedural blocks, single SELECT, multi-statement scripts all funnel
-/// through the same event channel. LLM token streams arrive as
-/// <c>chunk</c> events live on the same wire.
+/// Single execution path: every batch flows through one
+/// <see cref="InProcessDatumDbCommand"/> backed by a pre-parsed
+/// <see cref="StatementBatch"/>. Procedural blocks, single SELECT,
+/// multi-statement scripts all funnel through the same event channel.
+/// LLM token streams arrive as <c>chunk</c> events live on the same wire.
 /// </para>
 /// <para>
 /// Cancellation: when the caller's <see cref="CancellationToken"/> fires
@@ -114,15 +118,15 @@ public sealed class QueryStreamService
             : null;
 
         // When tracing is enabled, every write to the response stream
-        // serialises through this semaphore — BatchExecutor's OnEvent
-        // path (rows, schema, memory_sample) and the trace sidecar Task
-        // both produce JSON lines concurrently, and Stream.WriteAsync
+        // serialises through this semaphore — the StreamEventsAsync
+        // foreach (rows, schema, memory_sample) and the trace sidecar
+        // Task both produce JSON lines concurrently, and Stream.WriteAsync
         // on the response body offers no built-in ordering. Without the
         // lock, two writes can interleave their bytes and produce
         // `{...}{...}` on a single line, which the client's JSON.parse
         // rejects with "Unexpected non-whitespace character after JSON".
-        // Null when tracing is off — only the BatchExecutor-serialised
-        // path writes, so no contention exists.
+        // Null when tracing is off — only the StreamEventsAsync path
+        // writes, so no contention exists.
         SemaphoreSlim? writeLock = traceLog is not null ? new SemaphoreSlim(1, 1) : null;
 
         // Parse outside the response body — parse errors map to an
@@ -256,9 +260,9 @@ public sealed class QueryStreamService
                 try
                 {
                     // writeLock already disposed above — but at this
-                    // point the sidecar is stopped and BatchExecutor is
-                    // unwinding, so passing null is safe (the lock can't
-                    // be needed for serialisation anymore).
+                    // point the sidecar is stopped and the streaming
+                    // reader is unwinding, so passing null is safe (the
+                    // lock can't be needed for serialisation anymore).
                     await WriteEventAsync(output, jsonOptions, writeLock: null, new CompleteEvent("complete", sw.Elapsed.TotalMilliseconds), CancellationToken.None).ConfigureAwait(false);
                 }
                 catch { /* response stream broken; nothing to do */ }
@@ -276,138 +280,143 @@ public sealed class QueryStreamService
         TraceState? traceState,
         CancellationToken ct)
     {
-        BatchExecutor executor = new(_catalog);
-
         // Per-cell row-count + schema-emitted state. Reset on each
         // CellStartedBatchEvent so each cell has its own row budget.
         bool schemaEmitted = false;
         int cellRowCount = 0;
         bool cellTruncated = false;
-        // When a cell fails, the executor re-throws after we emit the
+        // When a cell fails, the stream re-throws after we emit the
         // per-cell error event. The outer try/catch in ExecuteAsync
         // would normally write a top-level error for the same failure
         // — this flag tells it to suppress the duplicate so the client
         // only sees one error per failure.
         bool cellErrorEmitted = false;
 
-        async ValueTask OnEvent(BatchEvent ev)
-        {
-            switch (ev)
-            {
-                case CellStartedBatchEvent started:
-                    schemaEmitted = false;
-                    cellRowCount = 0;
-                    cellTruncated = false;
-                    if (traceState is not null) traceState.OnCellStarted(started.CellId);
-                    await WriteEventAsync(output, jsonOptions, writeLock, new CellStartedEvent("cell_started", started.CellId, started.Kind, null), ct).ConfigureAwait(false);
-                    break;
-
-                case CellRowBatchEvent rowEvent:
-                {
-                    if (cellTruncated) break; // drain remaining batches in this cell
-
-                    RowBatch batch = rowEvent.Batch;
-                    Arena arena = batch.Arena;
-
-                    if (!schemaEmitted)
-                    {
-                        await WriteEventAsync(output, jsonOptions, writeLock, new SchemaEvent("schema", rowEvent.CellId, BuildSchema(batch)), ct).ConfigureAwait(false);
-                        schemaEmitted = true;
-                    }
-
-                    for (int r = 0; r < batch.Count; r++)
-                    {
-                        if (cellRowCount >= maxRows)
-                        {
-                            cellTruncated = true;
-                            break;
-                        }
-                        Row row = batch[r];
-                        JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
-                        for (int c = 0; c < batch.ColumnLookup.Count; c++)
-                        {
-                            cells[c] = WebCellFormatter.Format(row[c], arena, registry, batch.Types, batch.TypeIdTranslations);
-                        }
-                        await WriteEventAsync(output, jsonOptions, writeLock, new RowEvent("row", rowEvent.CellId, cells), ct).ConfigureAwait(false);
-                        cellRowCount++;
-                    }
-                    break;
-                }
-
-                case CellMemorySampleBatchEvent memEvent:
-                    // 1Hz residency sample. Translates to a wire `memory_sample`
-                    // event the UI feeds into its sparkline + chip.
-                    await WriteEventAsync(
-                        output,
-                        jsonOptions,
-                        writeLock,
-                        new MemorySampleEvent(
-                            "memory_sample",
-                            memEvent.CellId,
-                            memEvent.ElapsedMs,
-                            memEvent.RowBytes,
-                            memEvent.ArenaBytes,
-                            memEvent.PeakRowBytes,
-                            memEvent.BudgetBytes,
-                            memEvent.VramUsedBytes,
-                            memEvent.VramTotalBytes),
-                        ct).ConfigureAwait(false);
-                    break;
-
-                case CellCompletedBatchEvent completed:
-                    if (cellTruncated)
-                    {
-                        await WriteEventAsync(output, jsonOptions, writeLock, new TruncatedEvent("truncated", completed.CellId, cellRowCount), ct).ConfigureAwait(false);
-                    }
-                    // Drain any trace entries still in the ring for this
-                    // cell (the 1Hz sidecar might be mid-tick); emit the
-                    // terminal trace_complete so the client can freeze
-                    // the popover state. Must precede cell_completed so
-                    // the client sees the cell's trace tail before the
-                    // cell formally ends.
-                    if (traceState is not null)
-                    {
-                        await traceState.DrainAndEmitAsync(isFinal: true, ct).ConfigureAwait(false);
-                    }
-                    await WriteEventAsync(output, jsonOptions, writeLock, new CellCompletedEvent("cell_completed", completed.CellId, completed.ElapsedMs), ct).ConfigureAwait(false);
-                    break;
-
-                case CellFailedBatchEvent failed:
-                    cellErrorEmitted = true;
-                    // Emit the trace tail before the error so the popover
-                    // has the full picture up to the failure.
-                    if (traceState is not null)
-                    {
-                        await traceState.DrainAndEmitAsync(isFinal: true, ct).ConfigureAwait(false);
-                    }
-                    Console.WriteLine($"CELL FAILED: {failed.Error}");
-                    await WriteEventAsync(output, jsonOptions, writeLock, new ErrorEvent("error", failed.CellId, failed.Error.Message, failed.Error.ToString()), ct).ConfigureAwait(false);
-                    // Exception propagates after this event; ExecuteAsync
-                    // catches it and, seeing cellErrorEmitted, skips the
-                    // top-level duplicate. Still writes the terminal
-                    // `complete` so the client's stream parser sees a
-                    // clean end.
-                    break;
-            }
-        }
-
-        // Widen each statement's source text to nullable so the executor's
-        // unified pair signature accepts our parsed-from-SQL list. The
+        // Widen each statement's source text to nullable so the
+        // Statements property accepts our parsed-from-SQL list. The
         // verbatim slice is what `CREATE FUNCTION` / `CREATE PROCEDURE`
         // catalog-persistence needs.
         (Statement, string?)[] pairs = new (Statement, string?)[statements.Count];
         for (int i = 0; i < statements.Count; i++)
             pairs[i] = (statements[i].Statement, statements[i].SourceText);
 
+        // Web-app default budget: ~1 GiB. Tighter than the engine's 2 GiB
+        // default so interactive desktop queries see spill behavior trigger
+        // on moderately large workloads rather than running for tens of
+        // minutes before the budget engages. Hosted / server deployments
+        // can override via configuration once that's wired up.
+        const long WebQueryBudgetBytes = 1000L * 1024 * 1024;
+
+        using InProcessDatumDbConnection connection = new(_catalog);
+        using InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = pairs;
+
         try
         {
-            // Web-app default budget: 300 MiB. Tighter than the engine's 2 GiB
-            // default so interactive desktop queries see spill behavior trigger
-            // on moderately large workloads rather than running for tens of
-            // minutes before the budget engages. Hosted / server deployments
-            // can override via configuration once that's wired up.
-            const long WebQueryBudgetBytes = 1000L * 1024 * 1024;
-            await executor.RunWithEventsAsync(pairs, OnEvent, ct, memoryBudgetBytes: WebQueryBudgetBytes).ConfigureAwait(false);
+            await foreach (BatchEvent ev in command
+                .StreamEventsAsync(WebQueryBudgetBytes, ct)
+                .ConfigureAwait(false))
+            {
+                switch (ev)
+                {
+                    case CellStartedBatchEvent started:
+                        schemaEmitted = false;
+                        cellRowCount = 0;
+                        cellTruncated = false;
+                        if (traceState is not null) traceState.OnCellStarted(started.CellId);
+                        await WriteEventAsync(output, jsonOptions, writeLock, new CellStartedEvent("cell_started", started.CellId, started.Kind, null), ct).ConfigureAwait(false);
+                        break;
+
+                    case CellRowBatchEvent rowEvent:
+                    {
+                        if (cellTruncated) break; // drain remaining batches in this cell
+
+                        RowBatch batch = rowEvent.Batch;
+                        Arena arena = batch.Arena;
+
+                        if (!schemaEmitted)
+                        {
+                            await WriteEventAsync(output, jsonOptions, writeLock, new SchemaEvent("schema", rowEvent.CellId, BuildSchema(batch)), ct).ConfigureAwait(false);
+                            schemaEmitted = true;
+                        }
+
+                        for (int r = 0; r < batch.Count; r++)
+                        {
+                            if (cellRowCount >= maxRows)
+                            {
+                                cellTruncated = true;
+                                break;
+                            }
+                            Row row = batch[r];
+                            JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
+                            for (int c = 0; c < batch.ColumnLookup.Count; c++)
+                            {
+                                cells[c] = WebCellFormatter.Format(row[c], arena, registry, batch.Types, batch.TypeIdTranslations);
+                            }
+                            await WriteEventAsync(output, jsonOptions, writeLock, new RowEvent("row", rowEvent.CellId, cells), ct).ConfigureAwait(false);
+                            cellRowCount++;
+                        }
+                        break;
+                    }
+
+                    case CellMemorySampleBatchEvent memEvent:
+                        // 1Hz residency sample. Translates to a wire
+                        // `memory_sample` event the UI feeds into its
+                        // sparkline + chip.
+                        await WriteEventAsync(
+                            output,
+                            jsonOptions,
+                            writeLock,
+                            new MemorySampleEvent(
+                                "memory_sample",
+                                memEvent.CellId,
+                                memEvent.ElapsedMs,
+                                memEvent.RowBytes,
+                                memEvent.ArenaBytes,
+                                memEvent.PeakRowBytes,
+                                memEvent.BudgetBytes,
+                                memEvent.VramUsedBytes,
+                                memEvent.VramTotalBytes),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case CellCompletedBatchEvent completed:
+                        if (cellTruncated)
+                        {
+                            await WriteEventAsync(output, jsonOptions, writeLock, new TruncatedEvent("truncated", completed.CellId, cellRowCount), ct).ConfigureAwait(false);
+                        }
+                        // Drain any trace entries still in the ring for
+                        // this cell (the 1Hz sidecar might be mid-tick);
+                        // emit the terminal trace_complete so the client
+                        // can freeze the popover state. Must precede
+                        // cell_completed so the client sees the cell's
+                        // trace tail before the cell formally ends.
+                        if (traceState is not null)
+                        {
+                            await traceState.DrainAndEmitAsync(isFinal: true, ct).ConfigureAwait(false);
+                        }
+                        await WriteEventAsync(output, jsonOptions, writeLock, new CellCompletedEvent("cell_completed", completed.CellId, completed.ElapsedMs), ct).ConfigureAwait(false);
+                        break;
+
+                    case CellFailedBatchEvent failed:
+                        cellErrorEmitted = true;
+                        // Emit the trace tail before the error so the
+                        // popover has the full picture up to the failure.
+                        if (traceState is not null)
+                        {
+                            await traceState.DrainAndEmitAsync(isFinal: true, ct).ConfigureAwait(false);
+                        }
+                        Console.WriteLine($"CELL FAILED: {failed.Error}");
+                        await WriteEventAsync(output, jsonOptions, writeLock, new ErrorEvent("error", failed.CellId, failed.Error.Message, failed.Error.ToString()), ct).ConfigureAwait(false);
+                        // StreamEventsAsync re-throws after this event;
+                        // ExecuteAsync catches it and, seeing
+                        // cellErrorEmitted, skips the top-level
+                        // duplicate. Still writes the terminal
+                        // `complete` so the client's stream parser
+                        // sees a clean end.
+                        break;
+                }
+            }
         }
         catch when (cellErrorEmitted)
         {
@@ -449,14 +458,14 @@ public sealed class QueryStreamService
     // and aborts the response with a 500 before any bytes reach the client.
     //
     // The optional <paramref name="writeLock"/> serialises the JSON +
-    // newline + flush triplet so concurrent producers (BatchExecutor
-    // OnEvent calls, the trace sidecar Task, the trace cell-boundary
-    // drain) can't interleave bytes on the wire and corrupt a line.
-    // Without the lock, two producers might land
+    // newline + flush triplet so concurrent producers (the
+    // StreamEventsAsync foreach, the trace sidecar Task, the trace
+    // cell-boundary drain) can't interleave bytes on the wire and
+    // corrupt a line. Without the lock, two producers might land
     // `{...}{"type":"foo"}\n\n` as a single physical line, which the
     // client's JSON.parse rejects with "Unexpected non-whitespace
     // character after JSON". Lock is null when tracing is off (only
-    // the BatchExecutor-serialised path writes, so no contention).
+    // the streaming foreach writes, so no contention).
     private async Task<PreFlightRequiredEvent> BuildPreFlightEventAsync(
         PreFlightRequiredException ex, CancellationToken ct)
     {
@@ -678,10 +687,9 @@ internal sealed class TraceState
 
     public void OnCellStarted(string cellId)
     {
-        // Called from inside the OnEvent handler (already serialised by
-        // BatchExecutor's emit-lock). Snapshot under _drainLock so the
-        // sidecar timer never sees a half-updated (cellId, startUtc)
-        // pair.
+        // Called from inside the streaming foreach's CellStartedBatchEvent
+        // arm (single-reader). Snapshot under _drainLock so the sidecar
+        // timer never sees a half-updated (cellId, startUtc) pair.
         lock (_drainLock)
         {
             _currentCellId = cellId;

@@ -3,6 +3,7 @@ using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Streaming;
 
 namespace Heliosoph.DatumV.Catalog.Plans;
 
@@ -30,7 +31,18 @@ internal sealed class ProceduralLeafPlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
+
+    /// <summary>
+    /// PRINT is productive (emits a diagnostic event); DECLARE, SET,
+    /// BREAK, CONTINUE are silent (mutate variables / unwind loops).
+    /// Mirrors the productive/silent split the streaming wire expects so
+    /// nested PRINT inside a loop earns its own cell per iteration.
+    /// </summary>
+    public override bool IsProductive => _statement is PrintStatement;
 
     /// <summary>Builds a plan for <c>DECLARE @name TypeName [= initializer]</c>.</summary>
     public static ProceduralLeafPlan ForDeclare(TableCatalog catalog, DeclareStatement statement)
@@ -149,11 +161,13 @@ internal sealed class ProceduralLeafPlan : StatementPlan
     {
         DataValue value = await ProceduralEvaluator.EvaluateScalarAsync(print.Value, context, ct).ConfigureAwait(false);
         string? text = ProceduralEvaluator.RenderForPrint(value, context.VariableStore);
-        // No event channel on the plan contract — emission goes through
-        // ExecutionContext.PrintSink. BatchExecutor's AST-walk emits
-        // CellPrintBatchEvent directly via onEvent; standalone plan
-        // callers that want PRINT visibility set PrintSink before
-        // iteration. Null sink silently drops.
+        // Streaming path: CellSink picks up the diagnostic stamped on the
+        // enclosing cell (which is PRINT's own cell when productive
+        // bracketing fired, falling through to any enclosing productive
+        // cell otherwise). PrintSink stays wired alongside for direct
+        // in-process consumers that capture text without going through
+        // the cell-event channel.
+        await context.CellSink(new CellPrintBatchEvent(context.CurrentCellId ?? "", text)).ConfigureAwait(false);
         context.PrintSink(text);
     }
 }
@@ -192,6 +206,9 @@ internal sealed class BlockPlan : StatementPlan
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
+
+    public override string Kind => "block";
+    public override bool IsProductive => false;
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
@@ -265,6 +282,9 @@ internal sealed class IfPlan : StatementPlan
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
+    public override string Kind => "if";
+    public override bool IsProductive => false;
+
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
@@ -322,6 +342,9 @@ internal sealed class WhilePlan : StatementPlan
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
+
+    public override string Kind => "while";
+    public override bool IsProductive => false;
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
@@ -382,7 +405,7 @@ internal sealed class WhilePlan : StatementPlan
 /// <see cref="StatementPlan"/> for counter-FOR loops:
 /// <c>FOR @i = start TO end body</c>. Auto-declares the loop variable
 /// in a fresh frame, increments by one each iteration (STEP not yet
-/// supported here — matches the BatchExecutor reference implementation),
+/// supported here — matches the legacy reference implementation),
 /// catches <c>BREAK</c> / <c>CONTINUE</c> signals from the body.
 /// </summary>
 internal sealed class ForCounterPlan : StatementPlan
@@ -413,6 +436,9 @@ internal sealed class ForCounterPlan : StatementPlan
 
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
+
+    public override string Kind => "for";
+    public override bool IsProductive => false;
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
@@ -534,6 +560,9 @@ internal sealed class ForInPlan : StatementPlan
     /// <inheritdoc />
     public override ExplainPlanNode ExplainTree { get; }
 
+    public override string Kind => "for";
+    public override bool IsProductive => false;
+
     /// <inheritdoc />
     protected override async IAsyncEnumerable<RowBatch> ExecuteImplAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken,
@@ -545,8 +574,12 @@ internal sealed class ForInPlan : StatementPlan
         ushort rowTypeId = 0;
         bool broke = false;
 
+        // Suppress streaming brackets on the source query — its rows feed
+        // into the loop variable, not the user's wire. Productive
+        // statements in the body still bracket via the original context.
+        Execution.ExecutionContext sourceContext = context.WithoutStreaming();
         await foreach (RowBatch batch in _sourcePlan
-            .ExecuteAsync(cancellationToken, context)
+            .ExecuteAsync(cancellationToken, sourceContext)
             .ConfigureAwait(false))
         {
             if (broke) break;

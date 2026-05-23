@@ -5,6 +5,7 @@ using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing.Ast;
 using Heliosoph.DatumV.Pooling;
+using Heliosoph.DatumV.Streaming;
 
 namespace Heliosoph.DatumV.Execution;
 
@@ -22,6 +23,7 @@ public delegate void PrintHandler(string? text);
 public sealed class ExecutionContext : IDisposable
 {
     private static readonly PrintHandler NoOpPrintSink = static _ => { };
+    private static readonly CellSinkHandler NoOpCellSink = static _ => ValueTask.CompletedTask;
 
     private int _disposeCount;
     private readonly bool _ownsStore;
@@ -58,6 +60,18 @@ public sealed class ExecutionContext : IDisposable
     /// <param name="printSink">
     /// Optional <c>PRINT</c> handler. Defaults to a no-op delegate that ignores all input; assign a non-null delegate to capture output.
     /// </param>
+    /// <param name="cellSink">
+    /// Optional sink for per-cell streaming events emitted by productive
+    /// Plans. Defaults to a no-op so non-streaming callers ignore it; the
+    /// streaming reader installs a writer that forwards every event to the
+    /// response stream. Inherited unchanged by <see cref="Derive"/>.
+    /// </param>
+    /// <param name="cellIds">
+    /// Optional shared cell-id allocator. Derived contexts pass the parent's
+    /// allocator so every productive Plan in one SQL batch reaches the same
+    /// monotonic counter (and the same per-batch cap). Defaults to a fresh
+    /// allocator at root construction.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
     internal ExecutionContext(
         TableCatalog catalog,
@@ -69,6 +83,8 @@ public sealed class ExecutionContext : IDisposable
         VariableScope? variableScope = null,
         Arena? variableStore = null,
         PrintHandler? printSink = null,
+        CellSinkHandler? cellSink = null,
+        CellIdAllocator? cellIds = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -79,6 +95,8 @@ public sealed class ExecutionContext : IDisposable
         Pool = catalog.Pool;
         Types = types ?? new TypeRegistry();
         PrintSink = printSink ?? NoOpPrintSink;
+        CellSink = cellSink ?? NoOpCellSink;
+        _cellIds = cellIds ?? new CellIdAllocator();
 
         if (store is null)
         {
@@ -475,7 +493,9 @@ public sealed class ExecutionContext : IDisposable
             variableScope: variableScope ?? VariableScope,
             variableStore: variableStore ?? VariableStore,
             cancellationToken: CancellationToken,
-            printSink: PrintSink)
+            printSink: PrintSink,
+            cellSink: CellSink,
+            cellIds: _cellIds)
         {
             OuterRow = outerRow ?? OuterRow,
             RowLimit = RowLimit,
@@ -489,6 +509,87 @@ public sealed class ExecutionContext : IDisposable
             ProcedureCallDepth = ProcedureCallDepth
         };
     }
+
+    /// <summary>
+    /// Returns this context if streaming is already off; otherwise a
+    /// borrowed child with the <see cref="CellSink"/> replaced by the
+    /// no-op singleton. Used by <see cref="ProceduralEvaluator"/> so
+    /// internal synthesized SELECTs (DECLARE / SET initialisers, IF /
+    /// WHILE predicates, FOR bounds) don't bracket each evaluation —
+    /// the user only sees a cell per statement they typed, not per
+    /// internal expression eval.
+    /// </summary>
+    internal ExecutionContext WithoutStreaming()
+    {
+        if (!IsStreamingActive) return this;
+        return new ExecutionContext(
+            Catalog,
+            store: Store,
+            types: Types,
+            accountant: Accountant,
+            videoRegistry: VideoRegistry,
+            variableScope: VariableScope,
+            variableStore: VariableStore,
+            printSink: PrintSink,
+            cellSink: NoOpCellSink,
+            cellIds: _cellIds,
+            cancellationToken: CancellationToken)
+        {
+            OuterRow = OuterRow,
+            RowLimit = RowLimit,
+            MaxRecursionDepth = MaxRecursionDepth,
+            DegreeOfParallelism = DegreeOfParallelism,
+            BatchSize = BatchSize,
+            AssertionDiagnostics = AssertionDiagnostics,
+            MaxStratifyClasses = MaxStratifyClasses,
+            ModelTracer = ModelTracer,
+            SpillDirectory = SpillDirectory,
+            ProcedureCallDepth = ProcedureCallDepth,
+        };
+    }
+
+    /// <summary>
+    /// Builds a child <see cref="ExecutionContext"/> for a procedure body.
+    /// The child allocates a fresh <see cref="VariableScope"/> and
+    /// <see cref="VariableStore"/> so the body's <c>@vars</c> stay
+    /// isolated from the caller; <strong>everything else is borrowed</strong>
+    /// from the caller — the per-query <see cref="Store"/>, the
+    /// <see cref="Types"/> registry, the <see cref="Accountant"/>, the
+    /// <see cref="VideoRegistry"/>, the streaming surface
+    /// (<see cref="CellSink"/> + shared cell-id allocator), and the
+    /// <see cref="PrintSink"/>. Sharing those four resource handles is
+    /// what keeps row values that cross the proc boundary readable on the
+    /// caller side: struct/array type ids resolve against the same
+    /// registry, video frames against the same video registry, and the
+    /// caller's spill budget covers the proc body's residency.
+    /// <paramref name="procedureCallDepth"/> is the new depth
+    /// (<see cref="ProcedureCallDepth"/> + 1); the caller validates the
+    /// 32-level cap before calling this so the error message can name
+    /// the failing procedure.
+    /// </summary>
+    internal ExecutionContext CreateProcedureChild(int procedureCallDepth)
+        => new(
+            Catalog,
+            store: Store,
+            types: Types,
+            accountant: Accountant,
+            videoRegistry: VideoRegistry,
+            // variableScope/variableStore left null so the constructor
+            // allocates a fresh pair and marks them owned by this child —
+            // disposing the child releases them but leaves caller-owned
+            // resources untouched.
+            printSink: PrintSink,
+            cellSink: CellSink,
+            cellIds: _cellIds,
+            cancellationToken: CancellationToken)
+        {
+            ProcedureCallDepth = procedureCallDepth,
+            SpillDirectory = SpillDirectory,
+            ModelTracer = ModelTracer,
+            MaxRecursionDepth = MaxRecursionDepth,
+            DegreeOfParallelism = DegreeOfParallelism,
+            BatchSize = BatchSize,
+        };
 
     /// <summary>
     /// Returns a child context that borrows every parent slot but replaces
@@ -512,7 +613,9 @@ public sealed class ExecutionContext : IDisposable
             variableScope: VariableScope,
             variableStore: VariableStore,
             cancellationToken: CancellationToken,
-            printSink: PrintSink)
+            printSink: PrintSink,
+            cellSink: CellSink,
+            cellIds: _cellIds)
         {
             OuterRow = OuterRow,
             RowLimit = rowLimit,
@@ -583,7 +686,7 @@ public sealed class ExecutionContext : IDisposable
     /// batch is depth 0; the body of a <c>CALL proc.X(...)</c> runs at
     /// depth 1; any <c>CALL proc.Y(...)</c> inside that body runs at
     /// depth 2; and so on. The procedure executor rejects new calls once
-    /// the depth would exceed <see cref="BatchExecutor.MaxProcedureCallDepth"/>
+    /// the depth would exceed <see cref="Catalog.Plans.ProcedureCallPlan.MaxProcedureCallDepth"/>
     /// so a self- or mutually recursive procedure fails fast with a clear
     /// message instead of running until the call stack overflows. Defaults
     /// to <c>0</c> for top-level queries and any context not opened by a
@@ -601,6 +704,60 @@ public sealed class ExecutionContext : IDisposable
     /// context rather than mutating it afterwards.
     /// </summary>
     public PrintHandler PrintSink { get; }
+
+    /// <summary>
+    /// Sink for per-cell streaming events emitted by productive Plans
+    /// (<see cref="CellStartedBatchEvent"/>, <see cref="CellRowBatchEvent"/>,
+    /// <see cref="CellCompletedBatchEvent"/>, <see cref="CellFailedBatchEvent"/>,
+    /// <see cref="CellPrintBatchEvent"/>, <see cref="CellMemorySampleBatchEvent"/>).
+    /// Always non-null — omitting the <c>cellSink</c> constructor parameter
+    /// installs a no-op handler so non-streaming callers (single-statement
+    /// reads, internal procedural evaluation, tests) silently drop events.
+    /// The streaming reader installs a handler that forwards every event to
+    /// its response stream.
+    /// </summary>
+    internal CellSinkHandler CellSink { get; }
+
+    /// <summary>
+    /// True when a non-default <see cref="CellSink"/> has been installed —
+    /// i.e., a streaming consumer is listening. Productive plan brackets
+    /// gate their per-cell allocation and event emission on this so the
+    /// non-streaming path (single-statement reads, internal expression
+    /// eval through synthesized SELECTs) pays nothing and does not
+    /// consume <see cref="CellIdAllocator.CellCap"/> headroom.
+    /// </summary>
+    internal bool IsStreamingActive => !ReferenceEquals(CellSink, NoOpCellSink);
+
+    private readonly CellIdAllocator _cellIds;
+
+    /// <summary>
+    /// Allocates the next <c>"c{n}"</c> cell id for this batch. Backed by
+    /// a shared <see cref="CellIdAllocator"/> so every Plan in a batch —
+    /// including the descendants <see cref="Derive"/> opens — pulls from
+    /// the same monotonic counter and the same per-batch cap. Called from
+    /// productive Plans at the start of their bracket.
+    /// </summary>
+    internal string NextCellId() => _cellIds.Next();
+
+    /// <summary>
+    /// Pushes <paramref name="cellId"/> as the live cell while a
+    /// productive plan's bracket is open. Paired with <see cref="ExitCell"/>
+    /// in the bracket's finally.
+    /// </summary>
+    internal void EnterCell(string cellId) => _cellIds.EnterCell(cellId);
+
+    /// <summary>
+    /// Pops the most-recently-pushed live cell. See
+    /// <see cref="EnterCell"/>.
+    /// </summary>
+    internal void ExitCell() => _cellIds.ExitCell();
+
+    /// <summary>
+    /// Most-recently-started, not-yet-completed cell id; <see langword="null"/>
+    /// when no bracket is open. Read by silent leaf plans (PRINT) that
+    /// piggyback diagnostic events on the enclosing cell.
+    /// </summary>
+    internal string? CurrentCellId => _cellIds.CurrentCellId;
 
     /// <summary>
     /// Sidecar registry borrowed from the active <see cref="Catalog"/>. Each

@@ -72,6 +72,8 @@ internal sealed class CtasPlan : StatementPlan
         ExplainTree = tree;
     }
 
+    public override string Kind => "createtableasselect";
+
     /// <summary>
     /// Plan-time factory. Validates the statement shape, resolves the
     /// target schema from the source query's projection, plans the source

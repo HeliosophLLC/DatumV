@@ -44,6 +44,9 @@ internal sealed class CapturedRowsSource : StatementPlan
         };
     }
 
+    public override string Kind => "capturedrows";
+    public override bool IsProductive => false;
+
     /// <summary>
     /// Appends a captured batch to the source. Called by the upstream
     /// DML side-effect application (executor) before the consumer

@@ -47,7 +47,7 @@ internal sealed partial class RoutineRegistrar
             [create.Body], create.Parameters, _functions, $"procedure {qn}");
 
         // When the source text isn't available (e.g. registered via the AST-only
-        // BatchExecutor path), store a placeholder so the procedure can still run
+        // procedure-call path), store a placeholder so the procedure can still run
         // and persist. The display in system_procedures.source_text will show this
         // synthetic text rather than the user's original formatting.
         string text = sourceText ?? $"CREATE PROCEDURE {qn}";

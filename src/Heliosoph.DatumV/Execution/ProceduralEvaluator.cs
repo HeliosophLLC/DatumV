@@ -6,12 +6,13 @@ using Heliosoph.DatumV.Parsing.Ast;
 namespace Heliosoph.DatumV.Execution;
 
 /// <summary>
-/// Procedural-runtime helpers extracted from <see cref="BatchExecutor"/>:
-/// scalar / predicate evaluation, scalar-subquery pre-folding, boundary
-/// value lifting, and PRINT-style rendering. Static so they can be reused
-/// by both <see cref="BatchExecutor"/>'s AST walk and the procedural
-/// plan classes (<c>ProceduralLeafPlan</c>, <c>BlockPlan</c>, etc.) once
-/// those classes carry their own execution.
+/// Procedural-runtime helpers: scalar / predicate evaluation, scalar-
+/// subquery pre-folding, boundary value lifting, and PRINT-style
+/// rendering. Static so they can be reused by every procedural plan
+/// class (<c>ProceduralLeafPlan</c>, <c>BlockPlan</c>, <c>IfPlan</c>,
+/// <c>WhilePlan</c>, <c>ForCounterPlan</c>, <c>ForInPlan</c>,
+/// <c>TryPlan</c>, <c>AssertPlan</c>, <c>RaisePlan</c>,
+/// <c>AssignmentSelectPlan</c>, <c>ProcedureCallPlan</c>).
 /// </summary>
 internal static class ProceduralEvaluator
 {
@@ -44,10 +45,16 @@ internal static class ProceduralEvaluator
             .PlanAsync(synthetic, sourceText: null)
             .ConfigureAwait(false);
 
+        // Suppress streaming brackets on the internal SELECT — these
+        // synthesised plans evaluate a procedural expression (DECLARE
+        // initializer, SET value, IF / WHILE predicate, FOR bounds);
+        // the user sees one cell per statement they typed, not per
+        // internal expression eval.
+        Execution.ExecutionContext silentContext = context.WithoutStreaming();
         DataValue stable = default;
         bool captured = false;
         await foreach (RowBatch batch in plan
-            .ExecuteAsync(ct, context)
+            .ExecuteAsync(ct, silentContext)
             .ConfigureAwait(false))
         {
             if (captured) continue; // drain remainder; auto-pool happens on iteration

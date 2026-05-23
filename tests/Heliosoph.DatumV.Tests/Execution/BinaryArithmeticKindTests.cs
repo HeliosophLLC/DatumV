@@ -342,12 +342,29 @@ public sealed class BinaryArithmeticKindTests : ServiceTestBase
             "FOR row IN (SELECT size FROM files) " +
             "  SET sum = sum + row['size']");
 
-        Heliosoph.DatumV.Execution.BatchExecutor exec = new(catalog);
-        Heliosoph.DatumV.Execution.BatchResult result = await exec.ExecuteAsync(stmts, CancellationToken.None);
+        (Heliosoph.DatumV.Parsing.Ast.Statement, string?)[] pairs = new (Heliosoph.DatumV.Parsing.Ast.Statement, string?)[stmts.Count];
+        for (int i = 0; i < stmts.Count; i++) pairs[i] = (stmts[i], null);
+
+        using Heliosoph.DatumV.Data.InProcessDatumDbConnection connection = new(catalog);
+        using Heliosoph.DatumV.Data.InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = pairs;
+
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        context.Accountant.StartProfiling();
+        await using Heliosoph.DatumV.Data.InProcessDatumDbReader reader = await command
+            .ExecuteReaderAsync(context, CancellationToken.None);
+        do
+        {
+            while (await reader.ReadAsync(CancellationToken.None)) { /* drain */ }
+        }
+        while (await reader.NextResultAsync(CancellationToken.None));
+
+        IReadOnlyDictionary<string, object?> bindings =
+            Heliosoph.DatumV.Execution.VariableScopeSnapshot.Capture(context);
 
         // Convert.ToInt64 round-trips correctly only if sum was bound as
         // an integer kind through the whole loop — Float32 would have
         // dropped precision below the asserted exact total.
-        Assert.Equal(6_000_000_003L, Convert.ToInt64(result.FinalBindings["sum"]));
+        Assert.Equal(6_000_000_003L, Convert.ToInt64(bindings["sum"]));
     }
 }

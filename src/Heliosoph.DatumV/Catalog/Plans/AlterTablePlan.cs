@@ -62,7 +62,10 @@ internal sealed class AlterTablePlan : StatementPlan
             Details = details,
             EstimatedRows = 0,
         };
+        Kind = operatorName.ToLowerInvariant();
     }
+
+    public override string Kind { get; }
 
     /// <summary>Builds a plan for <c>ALTER TABLE ADD COLUMN</c>.</summary>
     public static AlterTablePlan ForAddColumn(

@@ -39,6 +39,8 @@ internal sealed class SelectPlan : StatementPlan
 
     public override ExplainPlanNode ExplainTree => QueryExplainer.Explain(_operator);
 
+    public override string Kind => "select";
+
     public override async Task<ExplainPlanNode> AnalyzeAsync(
         CancellationToken cancellationToken,
         Execution.ExecutionContext context)

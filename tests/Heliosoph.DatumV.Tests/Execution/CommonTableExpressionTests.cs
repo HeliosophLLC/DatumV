@@ -637,7 +637,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
     /// <see cref="ServiceTestBase.ExecuteQueryAsync"/> path skips that step
     /// — that's why the simpler test variant passes. This test uses
     /// <c>TableCatalog.PlanQuery</c> (the path the Web layer's
-    /// <c>BatchExecutor</c> takes) so <c>LiteralHoister</c> runs and the
+    /// streaming reader takes) so <c>LiteralHoister</c> runs and the
     /// hoisted DataValue is the one the operators actually see during
     /// recursive iteration.
     /// </summary>
@@ -650,7 +650,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
 
         // Go through TableCatalog.PlanQuery → SelectPlan (internal). SelectPlan's
         // constructor runs LiteralHoister, which bakes literals into a
-        // plan-scoped arena. This is the same path the Web BatchExecutor uses;
+        // plan-scoped arena. This is the same path the streaming reader uses;
         // the simpler ExecuteQueryAsync path skips LiteralHoister and so does
         // not reproduce the bug.
         QueryExpression query = SqlParser.Parse(

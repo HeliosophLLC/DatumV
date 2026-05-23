@@ -1,8 +1,10 @@
 using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Catalog.Registries;
+using Heliosoph.DatumV.Data;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Parsing;
 using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Tests.Execution;
 
 namespace Heliosoph.DatumV.Tests.Catalog;
 
@@ -14,11 +16,28 @@ namespace Heliosoph.DatumV.Tests.Catalog;
 /// </summary>
 public class ProcedureIntegrationTests : ServiceTestBase
 {
-    private async Task<BatchResult> RunBatchAsync(string sql, TableCatalog catalog)
+    private async Task<BatchSnapshot> RunBatchAsync(string sql, TableCatalog catalog)
     {
         IReadOnlyList<Statement> stmts = SqlParser.ParseBatch(sql);
-        BatchExecutor exec = new(catalog);
-        return await exec.ExecuteAsync(stmts, CancellationToken.None);
+        (Statement, string?)[] pairs = new (Statement, string?)[stmts.Count];
+        for (int i = 0; i < stmts.Count; i++) pairs[i] = (stmts[i], null);
+
+        using InProcessDatumDbConnection connection = new(catalog);
+        using InProcessDatumDbCommand command = connection.CreateCommand();
+        command.Statements = pairs;
+
+        using Heliosoph.DatumV.Execution.ExecutionContext context = catalog.CreateExecutionContext();
+        context.Accountant.StartProfiling();
+        await using InProcessDatumDbReader reader = await command
+            .ExecuteReaderAsync(context, CancellationToken.None)
+            .ConfigureAwait(false);
+        do
+        {
+            while (await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false)) { /* drain */ }
+        }
+        while (await reader.NextResultAsync(CancellationToken.None).ConfigureAwait(false));
+
+        return new BatchSnapshot(VariableScopeSnapshot.Capture(context));
     }
 
     // ───────────────────── Registration ─────────────────────
@@ -172,7 +191,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // the procedure ends — so we can't observe it via FinalBindings.
         // We assert that the call doesn't throw and the procedure is
         // registered & callable.
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "CALL setone()",
             catalog);
 
@@ -192,7 +211,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  DECLARE local INT64 = v + 100 " +
             "END");
 
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE answer INT64 = 0; " +
             "CALL assign_outer(5)",
             catalog);
@@ -213,7 +232,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  SET v = 999 " +
             "END");
 
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE counter INT64 = 5; " +
             "CALL shadow(counter)",
             catalog);
@@ -232,7 +251,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  DECLARE sum INT32 = a + b " +
             "END");
 
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(
+        await Assert.ThrowsAnyAsync<ExecutionException>(
             () => RunBatchAsync("CALL need_two(1)", catalog));
     }
 
@@ -280,7 +299,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  DECLARE x INT64 = v " +
             "END");
 
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE input INT64 = 42; " +
             "CALL noop(input + 8)",
             catalog);
@@ -301,7 +320,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  CALL recurse() " +
             "END");
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunBatchAsync("CALL recurse()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("recurse", ex.Message);
@@ -315,7 +334,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL b() END");
         catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL a() END");
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunBatchAsync("CALL a()", catalog));
         Assert.Contains("call depth", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -330,7 +349,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         catalog.Plan("CREATE PROCEDURE b() AS BEGIN CALL c() END");
         catalog.Plan("CREATE PROCEDURE a() AS BEGIN CALL b() END");
 
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE x INT64 = 1; CALL a()",
             catalog);
 
@@ -445,7 +464,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         // Caller provides only a → b takes its default.
         // Procedure's sum can't escape, so verify via a caller-side var
         // that the proc completed without an arity error.
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE ok BOOLEAN = FALSE; " +
             "CALL add_default(7); " +
             "SET ok = TRUE",
@@ -465,7 +484,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
             "  DECLARE captured INT64 = n " +
             "END");
 
-        BatchResult result = await RunBatchAsync(
+        BatchSnapshot result = await RunBatchAsync(
             "DECLARE done BOOLEAN = FALSE; " +
             "CALL record(); " +    // omit → default = 0
             "CALL record(42); " +   // explicit
@@ -482,7 +501,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         catalog.Plan(
             "CREATE PROCEDURE need_one(a INT64, b INT64 = 0) AS BEGIN SELECT a END");
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunBatchAsync("CALL need_one()", catalog));
         Assert.Contains("need_one", ex.Message);
     }
@@ -494,7 +513,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         catalog.Plan(
             "CREATE PROCEDURE one_or_two(a INT64, b INT64 = 0) AS BEGIN SELECT a END");
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunBatchAsync("CALL one_or_two(1, 2, 3)", catalog));
         Assert.Contains("one_or_two", ex.Message);
     }
@@ -508,7 +527,7 @@ public class ProcedureIntegrationTests : ServiceTestBase
         catalog.Plan(
             "CREATE PROCEDURE need_one(a INT64 IS NOT NULL = NULL) AS BEGIN SELECT a END");
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        ExecutionException ex = await Assert.ThrowsAsync<ExecutionException>(
             () => RunBatchAsync("CALL need_one()", catalog));
         Assert.Contains("must not be null", ex.Message);
         Assert.Contains("a", ex.Message);
