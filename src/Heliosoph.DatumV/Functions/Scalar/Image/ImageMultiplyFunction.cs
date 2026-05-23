@@ -111,7 +111,7 @@ public sealed class ImageMultiplyFunction : IFunction, IScalarFunction
 
         // Mask → RGBA8888 sized to the source. Resize doubles as a colour-
         // type conversion.
-        using SKBitmap maskRgba = maskBitmap.Resize(rgbaInfo, SKSamplingOptions.Default)
+        using SKBitmap maskRgba = maskBitmap.Resize(rgbaInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"image_multiply: failed to resize/convert the mask to {width}×{height} RGBA8888.");
 

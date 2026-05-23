@@ -50,7 +50,8 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 /// </para>
 /// <para>
 /// <strong>Resize filter.</strong> Bilinear (SkiaSharp's
-/// <c>SKSamplingOptions.Default</c>), matching PIL/Pillow's default.
+/// <c>SKFilterMode.Linear</c>), matching the OpenCV / torchvision /
+/// TensorFlow defaults.
 /// </para>
 /// </remarks>
 public sealed class ImageToTensorChwGrayFunction : IFunction, IScalarFunction
@@ -136,7 +137,7 @@ public sealed class ImageToTensorChwGrayFunction : IFunction, IScalarFunction
         // resize) handle this, so models trained against those reference
         // pipelines see matched preprocessing.
         SKImageInfo targetInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(targetInfo, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(targetInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"{Name}: SkiaSharp failed to resize the source " +
                 $"({source.Width}×{source.Height} {source.ColorType}) to {width}×{height} RGBA8888.");

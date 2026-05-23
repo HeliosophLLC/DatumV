@@ -394,7 +394,7 @@ internal sealed class SamplePreviewCollector
         }
 
         using SKBitmap resized = original.Resize(
-            new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
+            new SKImageInfo(targetWidth, targetHeight), new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"Failed to resize image thumbnail to {targetWidth}×{targetHeight}.");
 

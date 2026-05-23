@@ -56,7 +56,7 @@ public sealed class PerceptualHashFunction : IFunction, IScalarFunction
 
         SKBitmap source = imgArg.AsImage();
         using SKBitmap? resized = source.Resize(
-            new SKImageInfo(HashWidth, HashHeight), SKSamplingOptions.Default);
+            new SKImageInfo(HashWidth, HashHeight), new SKSamplingOptions(SKFilterMode.Linear));
         if (resized is null)
         {
             throw new FunctionArgumentException(Name,

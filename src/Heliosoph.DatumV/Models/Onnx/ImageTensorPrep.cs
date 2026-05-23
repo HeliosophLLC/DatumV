@@ -44,7 +44,7 @@ internal static class ImageTensorPrep
         bool bgr = false)
     {
         SKImageInfo info = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"SkiaSharp failed to resize image to {width}×{height}.");
 
@@ -104,7 +104,7 @@ internal static class ImageTensorPrep
         bool bgr = false)
     {
         SKImageInfo info = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"SkiaSharp failed to resize image to {width}×{height}.");
 
@@ -153,7 +153,7 @@ internal static class ImageTensorPrep
         int newH = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origH * ratio)));
 
         SKImageInfo info = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"SkiaSharp failed to resize image to {newW}×{newH} for letterbox.");
 
@@ -210,7 +210,7 @@ internal static class ImageTensorPrep
         int newH = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origH * ratio)));
 
         SKImageInfo info = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"SkiaSharp failed to resize image to {newW}×{newH} for letterbox.");
 
@@ -280,7 +280,7 @@ internal static class ImageTensorPrep
         int newH = Math.Max(1, Math.Min(targetSize, (int)MathF.Round(origH * ratio)));
 
         SKImageInfo info = new(newW, newH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"SkiaSharp failed to resize image to {newW}×{newH} for letterbox.");
 

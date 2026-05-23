@@ -133,12 +133,26 @@ SELECT image_to_tensor_chw(resize(file_bytes, 224, 224)) AS pixels FROM images
 
 ### resize
 
-`resize(img, w, h)` → Image
+`resize(img, w, h [, mode])` → Image
 
-Resize image to target width × height. Width and height must be positive; float arguments truncate to integers.
+Resize image to target width × height. Width and height must be positive; float arguments truncate to integers. Optional `mode` selects the sampling filter (case-insensitive); defaults to `'bilinear'`.
+
+| mode | filter | when to use |
+|---|---|---|
+| `'nearest'` | nearest-neighbour | pixel-art upscales, label/index maps where blending would invent new classes |
+| `'bilinear'` *(default)* | 2×2 linear | general-purpose; matches the OpenCV / torchvision / TensorFlow defaults used by most CV preprocessing |
+| `'trilinear'` | bilinear + linear mipmap | downscales of more than ~2×; closer to OpenCV `INTER_AREA` |
+| `'mitchell'` | Mitchell–Netravali cubic (B=1/3, C=1/3) | photographic resampling when bilinear looks too soft; balanced sharpness/ringing |
+| `'catmullrom'` | Catmull–Rom cubic (B=0, C=0.5) | sharper than Mitchell at the cost of more visible ringing on hard edges |
+
+Lanczos is not available — SkiaSharp does not ship it; the cubic resamplers are the highest-quality option.
 
 ```sql
+-- Default bilinear
 SELECT resize(file_bytes, 224, 224) AS img, label FROM images
+
+-- Nearest-neighbour for a segmentation mask
+SELECT resize(mask, 512, 512, 'nearest') AS mask FROM segmentation
 ```
 
 ### image_crop

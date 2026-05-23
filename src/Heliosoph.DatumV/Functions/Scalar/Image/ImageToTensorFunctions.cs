@@ -50,8 +50,10 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 /// </para>
 /// <para>
 /// <strong>Resize filter.</strong> Bilinear (SkiaSharp's
-/// <c>SKSamplingOptions.Default</c>), matching PIL/Pillow's default and
-/// the standard for ImageNet eval pipelines.
+/// <c>SKFilterMode.Linear</c>), matching the OpenCV, torchvision, and
+/// TensorFlow defaults used by virtually all shipping ImageNet eval
+/// pipelines. (Modern PIL defaults to bicubic since 9.1; CLIP/SigLIP
+/// preprocessing is also bicubic — pair those with a future bicubic mode.)
 /// </para>
 /// </remarks>
 public sealed class ImageToTensorChwFunction : IFunction, IScalarFunction
@@ -258,7 +260,7 @@ internal static class ImageToTensorShared
         // conversion — cheaper than two passes, and stable across host
         // platforms (whose native bitmap layout may be BGRA).
         SKImageInfo targetInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(targetInfo, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(targetInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"{fnName}: SkiaSharp failed to resize the source ({source.Width}×{source.Height} {source.ColorType}) to {width}×{height} RGBA8888.");
 

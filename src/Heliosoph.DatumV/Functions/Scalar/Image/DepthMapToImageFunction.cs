@@ -176,7 +176,7 @@ public sealed class DepthMapToImageFunction : IFunction, IScalarFunction
         // Resize back to target dimensions. Identity resize when sizes
         // match — Skia handles that as a no-op copy.
         SKImageInfo finalInfo = new(targetW, targetH, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        SKBitmap final = small.Resize(finalInfo, SKSamplingOptions.Default)
+        SKBitmap final = small.Resize(finalInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"depth_map_to_image: SkiaSharp failed to resize to {targetW}×{targetH}.");
 

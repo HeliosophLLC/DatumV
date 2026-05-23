@@ -121,7 +121,7 @@ public sealed class ImageResizeToStrideFunction : IFunction, IScalarFunction
         int snappedH = System.Math.Max(stride, (int)MathF.Round(targetH / (float)stride) * stride);
 
         SKImageInfo targetInfo = new(snappedW, snappedH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        SKBitmap resized = source.Resize(targetInfo, SKSamplingOptions.Default)
+        SKBitmap resized = source.Resize(targetInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"{Name}: SkiaSharp failed to resize the source ({origW}×{origH} {source.ColorType}) to {snappedW}×{snappedH} RGBA8888.");
 

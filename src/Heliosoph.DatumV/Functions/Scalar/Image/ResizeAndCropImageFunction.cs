@@ -75,7 +75,7 @@ public sealed class ResizeAndCropImageFunction : IFunction, IScalarFunction
         int scaledHeight = (int)System.Math.Ceiling(source.Height * scale);
 
         using SKBitmap? resized = source.Resize(
-            new SKImageInfo(scaledWidth, scaledHeight), SKSamplingOptions.Default);
+            new SKImageInfo(scaledWidth, scaledHeight), new SKSamplingOptions(SKFilterMode.Linear));
         if (resized is null)
         {
             throw new FunctionArgumentException(Name,

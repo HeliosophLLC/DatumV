@@ -43,8 +43,8 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 /// </para>
 /// <para>
 /// <strong>Resize filter.</strong> Bilinear (SkiaSharp's
-/// <c>SKSamplingOptions.Default</c>), matching PIL's default and the canonical
-/// detector preprocessing.
+/// <c>SKFilterMode.Linear</c>), matching the OpenCV / torchvision /
+/// TensorFlow defaults used by canonical detector preprocessing.
 /// </para>
 /// <para>
 /// <strong>What's not exposed.</strong> Per-channel <c>pad_fill</c> (each

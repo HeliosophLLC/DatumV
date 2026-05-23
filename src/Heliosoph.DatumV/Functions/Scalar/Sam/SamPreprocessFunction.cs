@@ -97,7 +97,7 @@ public sealed class SamPreprocessFunction : IFunction, IScalarFunction
         int resizedH = System.Math.Max(1, (int)MathF.Round(origH * scale));
 
         SKImageInfo info = new(resizedW, resizedH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        using SKBitmap resized = source.Resize(info, SKSamplingOptions.Default)
+        using SKBitmap resized = source.Resize(info, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"sam_preprocess: SkiaSharp failed to resize {origW}×{origH} → {resizedW}×{resizedH}.");
 

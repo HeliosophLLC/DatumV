@@ -138,7 +138,7 @@ public sealed class PointCloudFromPointsFunction : IFunction, IScalarFunction
         }
         else
         {
-            colorMatched = colorRgba.Resize(rgbaInfo, SKSamplingOptions.Default)
+            colorMatched = colorRgba.Resize(rgbaInfo, new SKSamplingOptions(SKFilterMode.Linear))
                 ?? throw new InvalidOperationException(
                     $"{Name}: SkiaSharp failed to resize color image to {w}×{h}.");
             disposeMatched = true;
@@ -384,7 +384,7 @@ public sealed class PointsToDepthImageFunction : IFunction, IScalarFunction
         }
 
         SKImageInfo finalInfo = new(targetW, targetH, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        SKBitmap final = small.Resize(finalInfo, SKSamplingOptions.Default)
+        SKBitmap final = small.Resize(finalInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"{Name}: SkiaSharp failed to resize to {targetW}×{targetH}.");
 
@@ -525,7 +525,7 @@ public sealed class NormalToImageFunction : IFunction, IScalarFunction
         }
 
         SKImageInfo finalInfo = new(targetW, targetH, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        SKBitmap final = small.Resize(finalInfo, SKSamplingOptions.Default)
+        SKBitmap final = small.Resize(finalInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"{Name}: SkiaSharp failed to resize to {targetW}×{targetH}.");
 

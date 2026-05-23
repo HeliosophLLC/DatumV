@@ -117,7 +117,7 @@ public sealed class ImageCutoutFunction : IFunction, IScalarFunction
         // type conversion. When dimensions already match, this still walks
         // the mask once — cheap relative to the source's own conversion and
         // avoids a branch in the per-pixel loop below.
-        using SKBitmap maskRgba = maskBitmap.Resize(rgbaInfo, SKSamplingOptions.Default)
+        using SKBitmap maskRgba = maskBitmap.Resize(rgbaInfo, new SKSamplingOptions(SKFilterMode.Linear))
             ?? throw new InvalidOperationException(
                 $"image_cutout: failed to resize/convert the mask to {width}×{height} RGBA8888.");
 
