@@ -94,7 +94,7 @@ export function ResultsPane({ leafId }: { leafId: string }) {
     else if (exec.status === 'done') emptyMessage = t('resultsCompleted');
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
+        <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs select-none">
           {emptyMessage}
         </div>
         <StatusBar tabId={activeTabId} exec={(exec as TabExecution | undefined) ?? null} />
@@ -316,7 +316,7 @@ function StatusBar({ tabId, exec }: { tabId: string; exec: TabExecution | null }
   // ensureExecution() so the real slot lands on first click.
   const trace = exec?.trace ?? EMPTY_TRACE_STATE;
   return (
-    <div className="bg-status-bar text-status-bar-foreground border-border flex shrink-0 items-stretch overflow-hidden border-t text-xs">
+    <div className="bg-status-bar text-status-bar-foreground border-border flex shrink-0 items-stretch overflow-hidden border-t text-xs select-none">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1">
         <StatusIcon status={status} hasError={hasError} />
         <span className="truncate">{leftMessage}</span>
@@ -549,6 +549,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       );
     }
     const bytes = bytesFromBase64(cell.dataB64);
+    if (bytes <= 64 && cell.dataB64) {
+      return <HexBytesView dataB64={cell.dataB64} title={`${cell.mime ?? 'binary'} · ${bytes} byte${bytes === 1 ? '' : 's'}`} />;
+    }
     return (
       <span className="text-muted-foreground font-mono text-sm">
         [{cell.mime ?? 'binary'}, {formatBytes(bytes)}]
@@ -577,6 +580,19 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
     return <SingleValueMesh cell={cell} />;
   }
   if (cell.kind === 'numeric_array') {
+    if (
+      (cell.elementKind === 'u8' || cell.elementKind === 'i8')
+      && (cell.count ?? 0) <= 64
+      && cell.dataB64
+    ) {
+      const n = cell.count ?? 0;
+      return (
+        <HexBytesView
+          dataB64={cell.dataB64}
+          title={`${cell.elementKind}[${n}] · ${n} byte${n === 1 ? '' : 's'}`}
+        />
+      );
+    }
     return <SingleValueNumericArray cell={cell} />;
   }
   if (cell.kind === 'struct') {
@@ -2106,6 +2122,33 @@ function SingleValueNumericArray({ cell }: { cell: JsonCell }) {
     <div className="flex max-h-full w-full max-w-3xl flex-col gap-4 overflow-auto p-4">
       <NumericArrayInspector cell={cell} />
     </div>
+  );
+}
+
+// Small byte buffers (≤ 64 bytes) render as a hex string — useful for
+// digests, fingerprints, and other opaque fixed-size byte buffers where
+// the per-element stats are noise and the hex form is what the user
+// actually wants to copy. Reused by the numeric_array (u8/i8) path and
+// the media (application/octet-stream) path.
+function HexBytesView({ dataB64, title }: { dataB64: string; title: string }) {
+  const hex = useMemo(() => {
+    const binStr = atob(dataB64);
+    let out = '0x';
+    for (let i = 0; i < binStr.length; i++) {
+      out += binStr.charCodeAt(i).toString(16).padStart(2, '0');
+    }
+    return out;
+  }, [dataB64]);
+  return (
+    <pre
+      className={cn(
+        'text-foreground max-w-full overflow-auto font-mono text-2xl leading-relaxed',
+        'break-all whitespace-pre-wrap text-center',
+      )}
+      title={title}
+    >
+      {hex}
+    </pre>
   );
 }
 

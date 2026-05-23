@@ -28,6 +28,8 @@ public sealed class DigestFunction : IFunction, IScalarFunction
         "Computes the digest of `data` using the named hash algorithm. "
         + "Supported: md5, sha1, sha256, sha384, sha512. Returns UInt8[].";
 
+    private static readonly string[] AlgorithmValues = ["md5", "sha1", "sha256", "sha384", "sha512"];
+
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
     [
@@ -35,7 +37,7 @@ public sealed class DigestFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("data", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
-                new ParameterSpec("algorithm", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("algorithm", DataKindMatcher.StringEnum(AlgorithmValues), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.UInt8))),
@@ -43,7 +45,7 @@ public sealed class DigestFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("data", DataKindMatcher.Exact(DataKind.UInt8), IsArray: ArrayMatch.Array),
-                new ParameterSpec("algorithm", DataKindMatcher.Exact(DataKind.String), IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("algorithm", DataKindMatcher.StringEnum(AlgorithmValues), IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.UInt8))),
