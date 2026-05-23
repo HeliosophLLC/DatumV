@@ -99,32 +99,16 @@ export function hasCatalogMarker(folder: string): boolean {
   }
 }
 
-// What main should do at launch.
-//   - `use` → spawn the backend pointed at `path` and load the SPA.
-//   - `welcome` → defer backend startup; load the loader page in
-//     welcome mode and let the user pick a catalog before we go further.
-export type InitialCatalog =
-  | { kind: 'use'; path: string }
-  | { kind: 'welcome' };
-
-// Decide which arm the boot flow takes.
-//   1. Walk recents.json — first folder that still exists wins.
-//   2. Legacy fallback: a catalog file sitting at the global-data root
-//      from the pre-workspace layout. Seed recents with that folder
-//      and use it; the user can move it later via "New Catalog".
-//   3. Otherwise → welcome screen (no auto-create — the user picks).
-export function determineInitialCatalog(globalDataPath: string): InitialCatalog {
-  for (const r of readRecents(globalDataPath)) {
-    if (fs.existsSync(r.path)) {
-      touchRecent(globalDataPath, r.path);
-      return { kind: 'use', path: r.path };
-    }
-  }
-
-  if (hasCatalogMarker(globalDataPath)) {
-    touchRecent(globalDataPath, globalDataPath);
-    return { kind: 'use', path: globalDataPath };
-  }
-
-  return { kind: 'welcome' };
+// Migration helper run at boot. The app always lands on the welcome
+// screen now; this just guarantees that a user upgrading from the
+// pre-workspace layout sees their existing catalog in the recents
+// list instead of having to hunt for it via "Open Catalog".
+//
+// Idempotent: skips when recents already contains the legacy folder
+// (or any other entry — once the user has touched recents at all, we
+// trust them to manage it).
+export function seedLegacyRecentsIfNeeded(globalDataPath: string): void {
+  if (readRecents(globalDataPath).length > 0) return;
+  if (!hasCatalogMarker(globalDataPath)) return;
+  touchRecent(globalDataPath, globalDataPath);
 }

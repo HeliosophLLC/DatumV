@@ -14,9 +14,9 @@ import path from 'node:path';
 import {
   CATALOG_MARKER,
   computeGlobalDataPath,
-  determineInitialCatalog,
   hasCatalogMarker,
   readRecents,
+  seedLegacyRecentsIfNeeded,
   touchRecent,
   type RecentCatalog,
 } from './catalog-recents';
@@ -927,50 +927,29 @@ app.whenReady().then(async () => {
   setPlaceholderApplicationMenu();
   const win = createMainWindow();
 
-  const initial = determineInitialCatalog(globalDataPath);
-  console.log(`[main] initial catalog:`, initial);
+  // Always land on welcome — the user explicitly picks (or
+  // re-picks) a catalog rather than us auto-opening the last one.
+  // This makes the launch a single, predictable surface that
+  // surfaces recents prominently, and means the backend doesn't
+  // spin up until the user has chosen what to point it at. The
+  // legacy-layout migration still runs so an upgrading user sees
+  // their existing catalog in the recents list.
+  seedLegacyRecentsIfNeeded(globalDataPath);
+  await loadLoader(win, 'welcome');
 
-  if (initial.kind === 'welcome') {
-    // Fresh install: no recents, no legacy catalog. Navigate the
-    // (still hidden) main window to the loader in welcome mode and
-    // defer backend startup until the user picks. createWindow's
-    // ready-to-show handler shows the window once welcome paints.
-    await loadLoader(win, 'welcome');
-    return;
-  }
-
-  // Show the loader (splash mode) first so the user sees something
-  // while the .NET backend starts (1–10s typically). Await the load
-  // before sending status — the loader's IPC subscription has to be
-  // wired up first.
-  await loadLoader(win, 'splash');
-
-  let kestrelUrl: string;
-  try {
-    // First-launch splash uses the English defaults in `hostStrings`
-    // — the renderer hasn't shipped its translated copy yet (state
-    // /hostStrings.ts runs after the SPA loads). Subsequent swaps
-    // pick up the user's locale.
-    setSplashStatus(hostStrings.splash.startingBackend);
-    kestrelUrl = await startDotnetBackend(initial.path);
-    console.log(`[main] .NET backend ready at ${kestrelUrl}`);
-    setSplashStatus(hostStrings.splash.loadingWorkspace);
-  } catch (err) {
-    console.error('[main] failed to start .NET backend:', err);
-    app.quit();
-    return;
-  }
-
-  // Dev: load Vite (HMR proxies /api + /hubs to Kestrel). Prod: load
-  // Kestrel directly — it serves wwwroot/ for the SPA.
-  const loadUrl = app.isPackaged ? kestrelUrl : DEV_VITE_URL;
-  cachedLoadUrl = loadUrl;
-  await win.loadURL(loadUrl);
-
+  // Mac dock re-activation: if the user closed every window
+  // (window-all-closed doesn't quit on darwin), reopen the welcome
+  // screen on dock click. If a catalog session was previously
+  // active and is still loaded — cachedLoadUrl is set by swapCatalog
+  // — restore that instead so a mid-session dock click doesn't
+  // throw away their state.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      const next = createMainWindow();
-      void next.loadURL(loadUrl);
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    const next = createMainWindow();
+    if (cachedLoadUrl) {
+      void next.loadURL(cachedLoadUrl);
+    } else {
+      void loadLoader(next, 'welcome');
     }
   });
 });
