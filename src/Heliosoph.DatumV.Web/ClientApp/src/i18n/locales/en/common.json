@@ -42,12 +42,30 @@
     "elapsed": "{duration} elapsed",
     "remaining": "~{duration} remaining"
   },
+  "catalog": {
+    "openTitle": "Open Catalog",
+    "openButtonLabel": "Open",
+    "newTitle": "New Catalog",
+    "newButtonLabel": "Create",
+    "invalidTitle": "Not a catalog folder",
+    "invalidMessage": "Not a catalog folder",
+    "invalidDetail": "{path} does not contain {marker}.\n\nUse \"New Catalog\" if you want to create one here."
+  },
+  "splash": {
+    "stoppingBackend": "Stopping backend…",
+    "startingBackend": "Starting backend…",
+    "loadingWorkspace": "Loading workspace…"
+  },
   "menu": {
     "app": "DatumV",
     "file": {
       "label": "&File",
+      "newCatalog": "New &Catalog…",
+      "openCatalog": "&Open Catalog…",
+      "openRecent": "Open &Recent",
+      "openRecentEmpty": "(no recent catalogs)",
       "newQuery": "&New Query",
-      "closeTab": "&Close Tab",
+      "closeTab": "Close &Tab",
       "exit": "E&xit"
     },
     "edit": {

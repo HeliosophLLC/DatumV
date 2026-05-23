@@ -10,6 +10,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Relative asset URLs so loader.html works when loaded via file:// in
+  // the packaged app. Splash and welcome render before Kestrel exists
+  // (or while it's being restarted during a catalog swap), so they
+  // can't be served over http — main.ts loadFile's them directly off
+  // disk. The SPA itself still works fine: relative paths resolve
+  // against the document URL whether served by Vite or Kestrel.
+  base: './',
   build: {
     outDir: '../wwwroot',
     emptyOutDir: true,
@@ -18,6 +25,12 @@ export default defineConfig({
     // reloads fresh on each launch, so we don't need hash-based cache
     // busting.
     rollupOptions: {
+      // Two entry points: the SPA (index.html) and the pre-SPA loader
+      // (loader.html), which renders splash + welcome via React.
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        loader: path.resolve(__dirname, 'loader.html'),
+      },
       output: {
         entryFileNames: 'assets/[name].js',
         chunkFileNames: 'assets/[name].js',

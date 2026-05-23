@@ -61,6 +61,52 @@ contextBridge.exposeInMainWorld('electronHost', {
   setApplicationMenu: (tree: unknown) =>
     ipcRenderer.invoke('menu.set', tree),
 
+  // Catalog selection. The renderer drives these from the File menu's
+  // "New Catalog" / "Open Catalog" / "Open Recent" entries. Main owns
+  // the picker, the recents file, the backend respawn, and the splash
+  // overlay — the renderer just kicks the action off.
+  catalogGetRecents: () =>
+    ipcRenderer.invoke('catalog.getRecents') as Promise<
+      Array<{ path: string; displayName: string; lastOpenedAt: string }>
+    >,
+  catalogOpenPicker: () =>
+    ipcRenderer.invoke('catalog.openPicker') as Promise<{
+      canceled: boolean;
+      path?: string;
+    }>,
+  catalogNewPicker: () =>
+    ipcRenderer.invoke('catalog.newPicker') as Promise<{
+      canceled: boolean;
+      path?: string;
+    }>,
+  catalogOpenPath: (catalogPath: string) =>
+    ipcRenderer.invoke('catalog.openPath', catalogPath) as Promise<{
+      canceled: boolean;
+      path?: string;
+    }>,
+  // Translated dialog + splash strings; renderer republishes on locale
+  // change. Main caches and uses these in lieu of hardcoded English
+  // for the catalog-swap UX.
+  setHostStrings: (strings: unknown) =>
+    ipcRenderer.invoke('host.strings.set', strings),
+
+  // Last-resolved theme ('light' | 'dark'); renderer republishes on
+  // every change. Main persists it to disk and passes it on the
+  // loader URL so splash / welcome paint in the user's chosen scheme
+  // on the next load instead of falling back to OS preference.
+  setHostTheme: (theme: 'light' | 'dark') =>
+    ipcRenderer.invoke('host.theme.set', theme),
+
+  // Loader-state status text pushed from main during boot / catalog
+  // swap. Subscribed by the loader page (splash mode) so it can
+  // render the current stage; not used by the SPA itself. Returns an
+  // unsubscribe.
+  onSplashStatus: (cb: (text: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, text: string) => cb(text);
+    ipcRenderer.on('splash:status', handler);
+    return () => ipcRenderer.off('splash:status', handler);
+  },
+
   // Native-menu click delivery. Fires with the commandId the renderer
   // assigned in its menu definition; the renderer's command registry
   // looks up the handler. Returns an unsubscribe.

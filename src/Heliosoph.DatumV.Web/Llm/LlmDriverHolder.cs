@@ -71,9 +71,7 @@ internal sealed class LlmDriverHolder : IAsyncDisposable
         // load picks up changes without a second redeploy hop. The setting
         // file path is the same one ISettingsService writes to; reading it
         // directly avoids the scoped-from-singleton plumbing.
-        string? preferred = !string.IsNullOrWhiteSpace(_options.CatalogRootPath)
-            ? StartupSettingsLoader.LoadDefaultLlm(_options.CatalogRootPath)
-            : null;
+        string? preferred = StartupSettingsLoader.LoadDefaultLlm(_options);
 
         ModelSelection? maybeSelection = ModelSelector.TrySelect(modelCatalog, preferred);
         if (maybeSelection is null)

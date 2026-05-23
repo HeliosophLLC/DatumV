@@ -3,6 +3,7 @@ import { useSnapshot } from 'valtio';
 import { settingsState } from '@/state/settings';
 import { hostState, type HostOs } from '@/state/host';
 import type { ChromeStyle } from '@/api/generated/openapi-client';
+import type { WindowChromeKind } from '@/components/window/WindowChrome';
 import { WindowsTitleBar } from './WindowsTitleBar';
 import { MacTitleBar } from './MacTitleBar';
 import { LinuxTitleBar } from './LinuxTitleBar';
@@ -26,7 +27,13 @@ const TITLEBAR_HEIGHT_PX: Record<ResolvedChrome, number> = {
   linux: 36,
 };
 
-export function TitleBar({ dialog = false }: { dialog?: boolean } = {}) {
+export function TitleBar({
+  kind = 'main',
+  title,
+}: {
+  kind?: WindowChromeKind;
+  title?: string;
+} = {}) {
   const { chromeStyle } = useSnapshot(settingsState);
   const { os } = useSnapshot(hostState);
 
@@ -43,7 +50,7 @@ export function TitleBar({ dialog = false }: { dialog?: boolean } = {}) {
     document.documentElement.style.setProperty('--app-titlebar-h', `${px}px`);
   }, [resolved]);
 
-  if (resolved === 'macos') return <MacTitleBar dialog={dialog} />;
-  if (resolved === 'linux') return <LinuxTitleBar dialog={dialog} />;
-  return <WindowsTitleBar dialog={dialog} />;
+  if (resolved === 'macos') return <MacTitleBar kind={kind} title={title} />;
+  if (resolved === 'linux') return <LinuxTitleBar kind={kind} title={title} />;
+  return <WindowsTitleBar kind={kind} title={title} />;
 }

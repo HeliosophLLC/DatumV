@@ -2,11 +2,19 @@ namespace Heliosoph.DatumV.Web.Hosting;
 
 public sealed class WebHostOptions
 {
-    // Root directory the per-principal catalog path is derived from.
-    // Desktop: %LOCALAPPDATA%/Heliosoph.DatumV. Container: /var/lib/datum (or
-    // wherever the volume is mounted). The principal resolver carves a
-    // subdirectory from this for each user/tenant.
+    // Root directory of the workspace catalog the user has opened. One
+    // folder = one catalog (VSCode-workspace model); the Electron shell
+    // hands the path to us per launch. No fallback — if this is null
+    // when ManageLocalCatalog is true, host startup fails fast.
     public string? CatalogRootPath { get; init; }
+
+    // Per-machine global storage. Holds settings.json, the recent-
+    // catalogs list, downloaded models, and anything else that lives
+    // independently of which workspace catalog is open. Defaults to
+    // %LOCALAPPDATA%/Heliosoph.DatumV when null. The Electron shell
+    // computes the same path and passes it via DATUMV_GLOBAL_PATH so
+    // both sides agree.
+    public string? GlobalDataPath { get; init; }
 
     // When true (desktop default), AddDatumVWeb opens a singleton
     // TableCatalog at CatalogRootPath and runs embedded SQL migrations on

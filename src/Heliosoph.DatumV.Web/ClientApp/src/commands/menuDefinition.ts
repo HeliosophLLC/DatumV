@@ -6,6 +6,9 @@
 // time the same way.
 
 import type { CommandId } from './registry';
+import { OPEN_RECENT_PREFIX } from './registry';
+import type { RecentCatalog } from '@/host';
+import i18next from 'i18next';
 
 // Closed set of menu-label translation keys. Listed explicitly so
 // i18next's typed-t can validate that every labelKey used in the
@@ -16,6 +19,10 @@ export type MenuLabelKey =
   | 'menu.app'
   | 'menu.file.label'
   | 'menu.file.newQuery'
+  | 'menu.file.newCatalog'
+  | 'menu.file.openCatalog'
+  | 'menu.file.openRecent'
+  | 'menu.file.openRecentEmpty'
   | 'menu.file.closeTab'
   | 'menu.file.exit'
   | 'menu.edit.label'
@@ -64,6 +71,18 @@ export type MenuNode =
       accelerator?: string;
       enabled?: boolean;
     }
+  // Pre-resolved item: label is the final string (not a translation
+  // key) and commandId is free-form. Used for dynamic entries like
+  // the Open Recent submenu, where the visible label is user data
+  // (a folder name) and per-row context (the catalog path) is
+  // encoded into the commandId.
+  | {
+      kind: 'rawItem';
+      label: string;
+      commandId: string;
+      accelerator?: string;
+      enabled?: boolean;
+    }
   | {
       kind: 'role';
       role: ElectronRole;
@@ -101,15 +120,43 @@ function role(r: ElectronRole, labelKey?: MenuLabelKey): MenuNode {
 
 const sep: MenuNode = { kind: 'separator' };
 
+// Drops the currently-open catalog from the list — switching to the
+// catalog you're already in is a no-op and clutters the menu. The
+// head of recents is always the open one (touchRecent moves it
+// there on every open / swap).
+function recentChildren(recents: RecentCatalog[]): MenuNode[] {
+  const tail = recents.slice(1);
+  if (tail.length === 0) {
+    return [{
+      kind: 'rawItem',
+      label: i18next.t('menu.file.openRecentEmpty'),
+      commandId: 'noop',
+      enabled: false,
+    }];
+  }
+  return tail.map((r): MenuNode => ({
+    kind: 'rawItem',
+    label: r.displayName,
+    commandId: OPEN_RECENT_PREFIX + r.path,
+  }));
+}
+
 // Builds the menu fresh on every call so locale changes propagate by
 // re-running buildMenu + republishing. isMac branches only on where
 // the App / Window menus sit and on whether the exit/quit item lives
 // in File (Win/Linux) vs the App menu (macOS, supplied by appMenu).
-export function buildMenu(opts: { isMac: boolean }): MenuNode[] {
-  const { isMac } = opts;
+export function buildMenu(opts: {
+  isMac: boolean;
+  recentCatalogs?: RecentCatalog[];
+}): MenuNode[] {
+  const { isMac, recentCatalogs = [] } = opts;
   return [
     ...(isMac ? [submenu('menu.app', [], 'appMenu')] : []),
     submenu('menu.file.label', [
+      item('menu.file.newCatalog', 'file.newCatalog', 'CmdOrCtrl+Shift+N'),
+      item('menu.file.openCatalog', 'file.openCatalog', 'CmdOrCtrl+Shift+O'),
+      submenu('menu.file.openRecent', recentChildren(recentCatalogs)),
+      sep,
       item('menu.file.newQuery', 'file.newQuery', 'CmdOrCtrl+N'),
       sep,
       item('menu.file.closeTab', 'file.closeTab', 'CmdOrCtrl+W'),

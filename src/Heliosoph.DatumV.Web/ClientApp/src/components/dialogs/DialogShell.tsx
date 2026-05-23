@@ -90,7 +90,7 @@ export function DialogShell() {
 
   if (!parsed || !parsed.requestId) {
     return (
-      <WindowChrome dialog>
+      <WindowChrome kind="dialog">
         <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-sm">
           Unknown dialog (no requestId in URL).
         </div>
@@ -99,7 +99,7 @@ export function DialogShell() {
   }
 
   const child = renderDialogBody(parsed);
-  return <WindowChrome dialog>{child}</WindowChrome>;
+  return <WindowChrome kind="dialog">{child}</WindowChrome>;
 }
 
 function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactNode {

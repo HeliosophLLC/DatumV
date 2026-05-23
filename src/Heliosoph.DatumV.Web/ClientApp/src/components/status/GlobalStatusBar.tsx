@@ -1,7 +1,8 @@
 import { cn } from '@/lib/utils';
 
 // Global status bar pinned to the bottom of every main / torn-out
-// window (suppressed in dialog windows by WindowChrome). Empty by
+// window (WindowChrome only renders it for `kind="main"` — the
+// loader and dialog kinds skip it). Empty by
 // design today — the slots below are the home for future chips
 // (compute-node id, connection state, active query stats, residency
 // summary, etc.). Mirrors the SSMS-style status row at the bottom of

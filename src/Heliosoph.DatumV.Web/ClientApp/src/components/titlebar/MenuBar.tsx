@@ -25,6 +25,12 @@ import { cn } from '@/lib/utils';
 
 type SubmenuNode = Extract<MenuNode, { kind: 'submenu' }>;
 type ItemNode = Extract<MenuNode, { kind: 'item' }>;
+type RawItemNode = Extract<MenuNode, { kind: 'rawItem' }>;
+type ActivatableNode = ItemNode | RawItemNode;
+
+function isActivatable(node: MenuNode): node is ActivatableNode {
+  return node.kind === 'item' || node.kind === 'rawItem';
+}
 
 interface ParsedLabel {
   display: string;
@@ -107,7 +113,7 @@ export function MenuBar({ className }: { className?: string }) {
         (n): n is SubmenuNode =>
           n.kind === 'submenu' &&
           !n.macRole &&
-          n.children.some((c) => c.kind === 'item'),
+          n.children.some((c) => isActivatable(c) || c.kind === 'submenu'),
       ),
     [tree],
   );
@@ -148,11 +154,30 @@ export function MenuBar({ className }: { className?: string }) {
     setFocusedItemIdx(null);
   };
 
-  const activatableChildren = (idx: number): ItemNode[] =>
-    topLevels[idx].children.filter((c): c is ItemNode => c.kind === 'item');
+  // Flat list of activatable items in the popup, in render order. The
+  // popup body renders a single nested-submenu level (for Open Recent)
+  // inline, so the flat order goes: direct activatable children of the
+  // top-level, with any nested-submenu children spliced in at their
+  // position. Keep this in sync with the Popup's itemCursor walk.
+  const activatableChildren = (idx: number): ActivatableNode[] => {
+    const out: ActivatableNode[] = [];
+    for (const c of topLevels[idx].children) {
+      if (isActivatable(c)) out.push(c);
+      else if (c.kind === 'submenu') {
+        for (const cc of c.children) {
+          if (isActivatable(cc)) out.push(cc);
+        }
+      }
+    }
+    return out;
+  };
 
   // Activate the item-of-focus or the supplied item. Always closes.
-  const activate = (item: ItemNode): void => {
+  const activate = (item: ActivatableNode): void => {
+    if (item.enabled === false) {
+      reset();
+      return;
+    }
     runCommand(item.commandId);
     reset();
   };
@@ -287,9 +312,10 @@ export function MenuBar({ className }: { className?: string }) {
         const ch = e.key.toLowerCase();
         if (popupOpen) {
           const items = activatableChildren(openIdx);
-          const idx = items.findIndex(
-            (it) => parseMnemonic(t(it.labelKey)).mnemonic === ch,
-          );
+          const idx = items.findIndex((it) => {
+            const label = it.kind === 'rawItem' ? it.label : t(it.labelKey);
+            return parseMnemonic(label).mnemonic === ch;
+          });
           if (idx >= 0) {
             e.preventDefault();
             activate(items[idx]);
@@ -419,7 +445,7 @@ function TopLevel({
   onMouseClose: () => void;
   submenu: MenuNode[];
   focusedItemIdx: number | null;
-  activate: (item: ItemNode) => void;
+  activate: (item: ActivatableNode) => void;
   showUnderlines: boolean;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -471,7 +497,7 @@ function Popup({
   y: number;
   nodes: MenuNode[];
   focusedItemIdx: number | null;
-  activate: (item: ItemNode) => void;
+  activate: (item: ActivatableNode) => void;
   showUnderlines: boolean;
 }) {
   const { t } = useTranslation();
@@ -493,9 +519,55 @@ function Popup({
         // in-window menu keeps it focused on commands the user
         // can't trigger any other way.
         if (n.kind === 'role') return null;
-        if (n.kind === 'submenu') return null; // nested submenus not used yet
+        if (n.kind === 'submenu') {
+          // Nested submenus aren't fully implemented in the in-window
+          // bar yet: render the first level only and surface the
+          // children as flat items beneath their parent label. The
+          // submenu's own label is shown as a non-interactive divider
+          // so the recents grouping is still visible. Native menus
+          // (macOS / Electron's accelerator hosting) get the full
+          // nested tree.
+          if (n.children.length === 0) return null;
+          return (
+            <div key={i}>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {t(n.labelKey).replace(/&/g, '')}
+              </div>
+              {n.children.map((c, j) => {
+                if (!isActivatable(c)) return null;
+                itemCursor++;
+                const label = c.kind === 'rawItem' ? c.label : t(c.labelKey);
+                const parsed = parseMnemonic(label);
+                const isFocused = focusedItemIdx === itemCursor;
+                return (
+                  <button
+                    key={`${i}-${j}`}
+                    type="button"
+                    tabIndex={-1}
+                    disabled={c.enabled === false}
+                    onClick={() => activate(c)}
+                    className={cn(
+                      'flex w-full items-center justify-between px-3 py-1 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50',
+                      isFocused && 'bg-muted',
+                    )}
+                  >
+                    <span className="truncate">
+                      <MnemonicLabel parsed={parsed} underline={showUnderlines} />
+                    </span>
+                    {c.kind === 'item' && c.accelerator && (
+                      <span className="ml-6 text-muted-foreground">
+                        {formatAccelerator(c.accelerator)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        }
         itemCursor++;
-        const parsed = parseMnemonic(t(n.labelKey));
+        const label = n.kind === 'rawItem' ? n.label : t(n.labelKey);
+        const parsed = parseMnemonic(label);
         const isFocused = focusedItemIdx === itemCursor;
         return (
           <button
@@ -509,10 +581,10 @@ function Popup({
               isFocused && 'bg-muted',
             )}
           >
-            <span>
+            <span className="truncate">
               <MnemonicLabel parsed={parsed} underline={showUnderlines} />
             </span>
-            {n.accelerator && (
+            {n.kind === 'item' && n.accelerator && (
               <span className="ml-6 text-muted-foreground">
                 {formatAccelerator(n.accelerator)}
               </span>

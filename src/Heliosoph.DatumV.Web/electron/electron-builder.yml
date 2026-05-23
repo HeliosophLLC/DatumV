@@ -14,7 +14,6 @@ directories:
 # stays unpacked on disk (executable bit preserved, easier to debug).
 files:
   - dist/**
-  - splash.html
   - package.json
   - "node_modules/**/*"
   - "!node_modules/.bin"

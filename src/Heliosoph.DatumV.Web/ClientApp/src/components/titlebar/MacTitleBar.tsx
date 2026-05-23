@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { minimize, toggleMaximize, close } from '@/state/window';
+import type { WindowChromeKind } from '@/components/window/WindowChrome';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
@@ -9,8 +10,21 @@ import { minimize, toggleMaximize, close } from '@/state/window';
 //
 // Drag is CSS-only: the header carries `app-drag` (-webkit-app-region:
 // drag) which Chromium honors at the compositor layer.
-export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
+// macOS convention has no app icon in the titlebar — the traffic
+// lights mark the window. So we ignore favicon here regardless of
+// kind, unlike Windows / Linux. Title text is the *document* (catalog
+// name, dialog kind) — HIG explicitly avoids the app name here since
+// the screen-top menubar already shows "DatumV" as the bold first
+// item. Undefined title → empty bar (matches Finder on a fresh window).
+export function MacTitleBar({
+  kind = 'main',
+  title,
+}: {
+  kind?: WindowChromeKind;
+  title?: string;
+} = {}) {
   const { t } = useTranslation();
+  const showWindowControls = kind !== 'dialog';
   return (
     <header className="app-drag relative flex h-9 items-center gap-3 border-b bg-background px-3 select-none">
       <div className="app-no-drag relative z-10 flex items-center gap-2">
@@ -20,7 +34,7 @@ export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
           aria-label={t('window.close')}
           className="size-3 rounded-full bg-[#ff5f57] hover:brightness-90"
         />
-        {!dialog && (
+        {showWindowControls && (
           <>
             <button
               type="button"
@@ -37,9 +51,11 @@ export function MacTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
           </>
         )}
       </div>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-        {t('app.name')}
-      </div>
+      {title && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+          {title}
+        </div>
+      )}
     </header>
   );
 }

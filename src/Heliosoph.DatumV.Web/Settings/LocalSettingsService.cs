@@ -9,7 +9,11 @@ namespace Heliosoph.DatumV.Web.Settings;
 // JSON-file impl of ISettingsService. Reads on demand (low frequency
 // today; can add caching when patterns require). Atomic writes via
 // temp-file + rename so a torn write can't corrupt the document.
-internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsService
+//
+// Settings live under WebHostOptions.GlobalDataPath — per-machine, not
+// per-catalog — so theme, locale, and models-directory survive when
+// the user opens a different workspace.
+internal sealed class LocalSettingsService(WebHostOptions options) : ISettingsService
 {
     // Locale is a BCP 47 tag (e.g. "en", "en-US") or the sentinel "system",
     // which tells the client to resolve from navigator.language. Server
@@ -54,7 +58,7 @@ internal sealed class LocalSettingsService(ICurrentContext context) : ISettingsS
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    private string SettingsPath => Path.Combine(context.CatalogPath, "settings.json");
+    private string SettingsPath => StartupSettingsLoader.ResolveSettingsFile(options);
 
     public async Task<SettingsDto> GetAsync(CancellationToken ct = default)
     {

@@ -8,6 +8,12 @@ export type HostOs = 'windows' | 'macos' | 'linux' | 'unknown';
 
 export type HostMessageHandler = (message: string) => void;
 
+export interface RecentCatalog {
+  path: string;
+  displayName: string;
+  lastOpenedAt: string;
+}
+
 export interface HostBridge {
   minimize(): void;
   toggleMaximize(): void;
@@ -26,6 +32,22 @@ export interface HostBridge {
   // what was assigned in the menu definition; state/menu.ts routes
   // it through the command registry.
   onMenuCommand(handler: (commandId: string) => void): void;
+  // Recent-catalog management. Main owns the recents file plus the
+  // backend-respawn-on-swap flow; the renderer reads recents to
+  // populate the "Open Recent" submenu and kicks off swaps through
+  // these calls.
+  getRecentCatalogs(): Promise<RecentCatalog[]>;
+  pickAndOpenCatalog(): Promise<void>;
+  pickAndCreateCatalog(): Promise<void>;
+  openCatalogPath(path: string): Promise<void>;
+  // Ship translated dialog + splash strings to main so its native
+  // dialogs and splash overlay render in the user's locale. Plain
+  // data; main caches them and re-renders on each invocation.
+  setHostStrings(strings: unknown): void;
+  // Ship the last-resolved theme so main can pass it on the loader
+  // URL (splash / welcome paint in the user's scheme rather than OS
+  // preference). Called by state/theme.ts on every change.
+  setHostTheme(theme: 'light' | 'dark'): void;
 }
 
 declare global {
@@ -72,6 +94,17 @@ declare global {
       openExternal(url: string): Promise<void>;
       setApplicationMenu(tree: unknown): Promise<void>;
       onMenuCommand(cb: (commandId: string) => void): () => void;
+
+      // Catalog selection IPC — see electron/preload.ts.
+      catalogGetRecents(): Promise<
+        Array<{ path: string; displayName: string; lastOpenedAt: string }>
+      >;
+      catalogOpenPicker(): Promise<{ canceled: boolean; path?: string }>;
+      catalogNewPicker(): Promise<{ canceled: boolean; path?: string }>;
+      catalogOpenPath(path: string): Promise<{ canceled: boolean; path?: string }>;
+      setHostStrings(strings: unknown): Promise<void>;
+      setHostTheme(theme: 'light' | 'dark'): Promise<void>;
+      onSplashStatus(cb: (text: string) => void): () => void;
 
       // Tab tear-out IPC. See electron/preload.ts for the protocol
       // each method speaks; the renderer consumers live in the query
@@ -165,6 +198,25 @@ function createHostBridge(): HostBridge {
     },
     onMenuCommand: (handler) => {
       eh.onMenuCommand(handler);
+    },
+    getRecentCatalogs: () => eh.catalogGetRecents(),
+    pickAndOpenCatalog: async () => {
+      console.log('[host] → catalog.openPicker');
+      await eh.catalogOpenPicker();
+    },
+    pickAndCreateCatalog: async () => {
+      console.log('[host] → catalog.newPicker');
+      await eh.catalogNewPicker();
+    },
+    openCatalogPath: async (path) => {
+      console.log('[host] → catalog.openPath', path);
+      await eh.catalogOpenPath(path);
+    },
+    setHostStrings: (strings) => {
+      void eh.setHostStrings(strings);
+    },
+    setHostTheme: (theme) => {
+      void eh.setHostTheme(theme);
     },
   };
 }

@@ -67,9 +67,11 @@ public static class WebHostExtensions
                 // Settings-side override (set via the Settings UI, persisted
                 // to settings.json) beats the host-config value. If neither
                 // is set, ModelCatalog falls back to $DATUMV_MODELS env var,
-                // then to %LOCALAPPDATA%/Heliosoph.DatumV/models.
+                // then to %LOCALAPPDATA%/Heliosoph.DatumV/models. Models are
+                // per-machine, not per-catalog, so settings.json lives under
+                // the global data path.
                 string? effectiveModelsDir =
-                    StartupSettingsLoader.LoadModelsDirectory(catalogRootPath)
+                    StartupSettingsLoader.LoadModelsDirectory(options)
                     ?? modelsDirectory;
 
                 // Attach the model subsystem (catalog manifest, calibration,
@@ -181,9 +183,10 @@ public static class WebHostExtensions
             return factory.ForNode(ctx.Node);
         });
 
-        // Per-user settings. Scoped because the file path resolves from the
-        // request's principal/catalog. Today a single LocalUser; tomorrow
-        // each user gets their own settings.json under their compute node.
+        // Per-machine settings. The file lives under
+        // WebHostOptions.GlobalDataPath and is shared across catalogs the
+        // user opens. Registration stays Scoped to leave room for a
+        // future per-principal split when SaaS hosting lands.
         services.AddScoped<ISettingsService, LocalSettingsService>();
 
         // Model catalog: manifest reader, HF Hub HTTP client, license
@@ -192,19 +195,20 @@ public static class WebHostExtensions
         // the same surface without dragging in the Web project. The Web host
         // then registers a SignalR-backed progress reporter that bridges
         // core download events to connected hub clients.
-        string modelCatalogRoot = options.CatalogRootPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Heliosoph.DatumV");
+        string globalDataPath = StartupSettingsLoader.ResolveGlobalDataPath(options);
+        string modelCatalogRoot = options.CatalogRootPath ?? globalDataPath;
         // Settings-side override (set via the Settings UI, persisted to
         // settings.json) beats the host-config value. Must match the
         // precedence used by the TableCatalog factory above — otherwise the
         // query path resolves models from the settings-configured directory
-        // while the download path lands them under the AppData default.
+        // while the download path lands them under the global-data default.
+        // Models are intentionally per-machine (shared across catalogs) so
+        // ONNX files aren't duplicated per workspace.
         string? effectiveInstallModelsDir =
-            StartupSettingsLoader.LoadModelsDirectory(modelCatalogRoot)
+            StartupSettingsLoader.LoadModelsDirectory(options)
             ?? options.ModelsDirectory
             ?? Environment.GetEnvironmentVariable("DATUMV_MODELS")
-            ?? Path.Combine(modelCatalogRoot, "models");
+            ?? Path.Combine(globalDataPath, "models");
         ModelLibraryOptions modelLibraryOptions = new(
             CatalogRootPath: modelCatalogRoot,
             ModelsDirectory: effectiveInstallModelsDir);
@@ -235,15 +239,15 @@ public static class WebHostExtensions
             // inside AddDatasetLibrary) with a SignalR-backed adapter,
             // and the default DefaultKeepRawDownloadsPolicy with a
             // settings.json-backed one so user preferences flow through.
-            string datasetCatalogRoot = options.CatalogRootPath ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Heliosoph.DatumV");
+            string datasetCatalogRoot = options.CatalogRootPath ?? globalDataPath;
             // Settings-side override (set via the Settings UI, persisted to
             // settings.json) beats the host-config value. If neither is
             // set, the cascade falls through to $DATUMV_DATASETS and the
-            // per-user default.
+            // per-catalog default. Datasets stay catalog-relative (raw
+            // archives + extracted trees can be huge per project), unlike
+            // models which are shared per-machine.
             string? effectiveDatasetsDir =
-                StartupSettingsLoader.LoadDatasetsDirectory(datasetCatalogRoot)
+                StartupSettingsLoader.LoadDatasetsDirectory(options)
                 ?? options.DatasetsCacheDirectory
                 ?? Environment.GetEnvironmentVariable("DATUMV_DATASETS")
                 ?? Path.Combine(datasetCatalogRoot, "datasets-cache");

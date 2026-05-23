@@ -9,7 +9,17 @@ import {
 } from 'electron';
 import type { IpcMainEvent } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
+import {
+  CATALOG_MARKER,
+  computeGlobalDataPath,
+  determineInitialCatalog,
+  hasCatalogMarker,
+  readRecents,
+  touchRecent,
+  type RecentCatalog,
+} from './catalog-recents';
 
 const DEV_VITE_URL = 'http://localhost:5173';
 const DEV_KESTREL_URL = 'http://127.0.0.1:5050';
@@ -48,6 +58,13 @@ app.on('second-instance', () => {
   main.focus();
 });
 
+// Per-machine global-data folder — settings.json, recents.json, models
+// cache. The backend reads DATUMV_GLOBAL_PATH so both sides agree on the
+// exact directory regardless of how each platform names its app-data
+// folder. Resolved once at module init since it's a function of the
+// current OS, never per-launch state.
+const globalDataPath = computeGlobalDataPath();
+
 // .NET subprocess lifecycle. The renderer is the entry; the .NET app is
 // a headless child spawned at startup. We pin Kestrel to a known port
 // in dev so vite.config.ts's proxy stays static; in prod we read the
@@ -55,7 +72,7 @@ app.on('second-instance', () => {
 let dotnetProcess: ChildProcess | null = null;
 let stoppingDotnet = false;
 
-async function startDotnetBackend(): Promise<string> {
+async function startDotnetBackend(catalogPath: string): Promise<string> {
   const isDev = !app.isPackaged;
 
   // Dev: dotnet run on the source csproj. Prod: the published binary
@@ -73,9 +90,13 @@ async function startDotnetBackend(): Promise<string> {
     : path.join(process.resourcesPath, 'backend', 'Heliosoph.DatumV.Web.exe');
   const args = isDev ? ['run', '--project', projectDir, '-c', dotnetConfig] : [];
 
+  // Catalog + global-data paths are the workspace contract: backend
+  // refuses to start without DATUMV_CATALOG_PATH (see Program.cs).
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     DATUMV_WEB_URL: isDev ? DEV_KESTREL_URL : 'http://127.0.0.1:0',
+    DATUMV_CATALOG_PATH: catalogPath,
+    DATUMV_GLOBAL_PATH: globalDataPath,
   };
 
   console.log(`[dotnet] spawning: ${cmd} ${args.join(' ')}`);
@@ -151,6 +172,30 @@ function stopDotnetBackend(): void {
   dotnetProcess = null;
 }
 
+// Stop the backend and await its actual exit. Catalog swap calls this
+// before respawning so the new catalog never collides with the old
+// child's file lock. Bounded by a 10s safety timer to keep the UI
+// responsive even if the child wedges on shutdown.
+function stopDotnetBackendAndAwait(): Promise<void> {
+  return new Promise((resolve) => {
+    const proc = dotnetProcess;
+    if (!proc || proc.killed) {
+      resolve();
+      return;
+    }
+    const onExit = (): void => {
+      proc.off('exit', onExit);
+      resolve();
+    };
+    proc.on('exit', onExit);
+    stopDotnetBackend();
+    setTimeout(() => {
+      proc.off('exit', onExit);
+      resolve();
+    }, 10_000);
+  });
+}
+
 function buildDialogUrl(parentUrl: string, spec: DialogOpenSpec): string {
   // Reuse the parent's origin so dev (Vite) and prod (Kestrel) work the
   // same way — no special-casing needed. Hash routing matches the
@@ -213,15 +258,16 @@ function createWindow(opts: { dialog?: boolean; parent?: BrowserWindow; modal?: 
 let mainWindow: BrowserWindow | null = null;
 const tornOutWindows = new Set<BrowserWindow>();
 
-function createMainWindow(loadUrl: string): BrowserWindow {
+// Single main window for the whole app session. It hosts two
+// rendered surfaces in turn — the loader page (splash or welcome
+// mode) and the SPA — sharing the same preload + contextIsolation
+// webPreferences. We never spawn a separate splash/welcome window
+// (an earlier draft did; it floated above the main content and
+// looked broken). Subsequent transitions are just `loadFile` /
+// `loadURL` calls on this same window.
+function createMainWindow(): BrowserWindow {
   const win = createWindow({});
-  win.loadURL(loadUrl);
   mainWindow = win;
-  // Hand off from splash → main on first paint. createWindow already
-  // wires `ready-to-show` to win.show(); we piggyback to close the
-  // splash atomically so the user sees one window fade to the next
-  // rather than a blank-frame gap.
-  win.once('ready-to-show', closeSplash);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
     for (const child of [...tornOutWindows]) {
@@ -230,6 +276,229 @@ function createMainWindow(loadUrl: string): BrowserWindow {
   });
   return win;
 }
+
+// ───────────────────────── Host strings ─────────────────────────
+
+// Translated copies of every user-visible string main renders
+// natively (folder-picker titles, error-dialog text, splash status
+// during catalog swap). The renderer ships these once mounted and on
+// every locale change via the `host.strings.set` IPC; English
+// defaults cover the brief window before the renderer publishes
+// (first-launch splash, etc.).
+interface HostStrings {
+  catalog: {
+    openTitle: string;
+    openButtonLabel: string;
+    newTitle: string;
+    newButtonLabel: string;
+    invalidTitle: string;
+    invalidMessage: string;
+    invalidDetail: string;
+  };
+  splash: {
+    stoppingBackend: string;
+    startingBackend: string;
+    loadingWorkspace: string;
+  };
+}
+
+let hostStrings: HostStrings = {
+  catalog: {
+    openTitle: 'Open Catalog',
+    openButtonLabel: 'Open',
+    newTitle: 'New Catalog',
+    newButtonLabel: 'Create',
+    invalidTitle: 'Not a catalog folder',
+    invalidMessage: 'Not a catalog folder',
+    invalidDetail:
+      '{path} does not contain {marker}.\n\n' +
+      'Use "New Catalog" if you want to create one here.',
+  },
+  splash: {
+    stoppingBackend: 'Stopping backend…',
+    startingBackend: 'Starting backend…',
+    loadingWorkspace: 'Loading workspace…',
+  },
+};
+
+// Last-known resolved theme from the SPA's state/theme.ts. Persisted to
+// disk so the loader page (different origin → can't share the SPA's
+// localStorage) can paint in the user-chosen theme on first frame at
+// next launch, not just match prefers-color-scheme. Republished by the
+// SPA on every settings change, on system theme change while
+// preference='system', and on first SPA mount.
+type ResolvedTheme = 'light' | 'dark';
+const THEME_FILE = path.join(globalDataPath, 'loader-theme');
+
+function readPersistedTheme(): ResolvedTheme | null {
+  try {
+    const v = fs.readFileSync(THEME_FILE, 'utf8').trim();
+    return v === 'light' || v === 'dark' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedTheme(theme: ResolvedTheme): void {
+  try {
+    fs.mkdirSync(globalDataPath, { recursive: true });
+    fs.writeFileSync(THEME_FILE, theme, 'utf8');
+  } catch (err) {
+    console.error('[host] failed to persist loader theme:', err);
+  }
+}
+
+let loaderTheme: ResolvedTheme | null = readPersistedTheme();
+
+ipcMain.handle('host.theme.set', (_event, incoming: unknown) => {
+  if (incoming !== 'light' && incoming !== 'dark') return;
+  if (loaderTheme === incoming) return;
+  loaderTheme = incoming;
+  writePersistedTheme(incoming);
+});
+
+ipcMain.handle('host.strings.set', (_event, incoming: unknown) => {
+  // Defensive: take what we recognise; ignore extra fields. The
+  // renderer's snapshot() shape is the contract, but we don't want a
+  // typo there to drop main into all-undefined-labels mode.
+  if (!incoming || typeof incoming !== 'object') return;
+  const next = incoming as Partial<HostStrings>;
+  hostStrings = {
+    catalog: { ...hostStrings.catalog, ...(next.catalog ?? {}) },
+    splash: { ...hostStrings.splash, ...(next.splash ?? {}) },
+  };
+});
+
+function fillInvalidDetail(template: string, pickedPath: string): string {
+  return template
+    .replaceAll('{path}', pickedPath)
+    .replaceAll('{marker}', CATALOG_MARKER);
+}
+
+// ───────────────────────── Catalog swap ─────────────────────────
+
+// Restart-on-swap model: opening a different catalog tears down the
+// current backend, respawns it pointed at the new folder, and reloads
+// the renderer so SignalR / query state reconnect cleanly against the
+// new database. Cheaper than building true in-process catalog teardown
+// (which would have to dispose every singleton that captured the old
+// catalog by reference) and matches what VSCode does when a workspace
+// switches.
+let catalogSwapInProgress = false;
+
+async function swapCatalog(newCatalogPath: string): Promise<void> {
+  if (catalogSwapInProgress) return;
+  if (!mainWindow) return;
+  catalogSwapInProgress = true;
+  try {
+    // Navigate the main window to the loader (splash mode). Await the
+    // load so the loader's `onSplashStatus` subscription is wired up
+    // before we send the first status text — otherwise the IPC fires
+    // into a window without a listener and the user sees stale content
+    // from whatever page was previously mounted.
+    await loadLoader(mainWindow, 'splash');
+
+    // No-op when there isn't a backend yet (welcome → SPA transition);
+    // skip the "Stopping…" status in that case so the user doesn't see
+    // a flash of misleading text.
+    if (dotnetProcess) {
+      setSplashStatus(hostStrings.splash.stoppingBackend);
+      await stopDotnetBackendAndAwait();
+    }
+
+    // Reset so the next spawn's `exit` handler treats a future crash as
+    // unexpected. Without this, the planned teardown would persistently
+    // suppress the auto-quit-on-backend-crash safety.
+    stoppingDotnet = false;
+
+    touchRecent(globalDataPath, newCatalogPath);
+
+    setSplashStatus(hostStrings.splash.startingBackend);
+    let kestrelUrl: string;
+    try {
+      kestrelUrl = await startDotnetBackend(newCatalogPath);
+    } catch (err) {
+      console.error('[catalog] swap failed during backend restart:', err);
+      app.quit();
+      return;
+    }
+
+    setSplashStatus(hostStrings.splash.loadingWorkspace);
+    const newLoadUrl = app.isPackaged ? kestrelUrl : DEV_VITE_URL;
+    cachedLoadUrl = newLoadUrl;
+    await mainWindow.loadURL(newLoadUrl);
+  } finally {
+    catalogSwapInProgress = false;
+  }
+}
+
+// Open the system folder picker for an existing catalog. Refuses to
+// swap if the chosen folder doesn't carry the marker file — that's the
+// "New Catalog" path, not "Open Catalog".
+async function pickAndOpenCatalog(parent: BrowserWindow): Promise<{ canceled: boolean; path?: string }> {
+  const result = await electronDialog.showOpenDialog(parent, {
+    title: hostStrings.catalog.openTitle,
+    buttonLabel: hostStrings.catalog.openButtonLabel,
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+  const chosen = result.filePaths[0];
+  if (!hasCatalogMarker(chosen)) {
+    await electronDialog.showMessageBox(parent, {
+      type: 'error',
+      title: hostStrings.catalog.invalidTitle,
+      message: hostStrings.catalog.invalidMessage,
+      detail: fillInvalidDetail(hostStrings.catalog.invalidDetail, chosen),
+    });
+    return { canceled: true };
+  }
+  void swapCatalog(chosen);
+  return { canceled: false, path: chosen };
+}
+
+// Open the system folder picker (with create-directory enabled) for a
+// new catalog. The backend lazily creates the marker file when it
+// opens an empty folder, so we don't need to seed anything here. If
+// the picked folder happens to already be a catalog, this acts like
+// Open — same target either way.
+async function pickAndCreateCatalog(parent: BrowserWindow): Promise<{ canceled: boolean; path?: string }> {
+  const result = await electronDialog.showOpenDialog(parent, {
+    title: hostStrings.catalog.newTitle,
+    buttonLabel: hostStrings.catalog.newButtonLabel,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+  const chosen = result.filePaths[0];
+  void swapCatalog(chosen);
+  return { canceled: false, path: chosen };
+}
+
+// Filter to recents whose folder still exists on disk. The welcome
+// screen and File → Open Recent submenu both render these directly,
+// and clicking a recent triggers a backend respawn against the path;
+// if the folder is gone the respawn fails and main.ts quits the app.
+// Cheaper to hide the stale entry than to teach swapCatalog to recover.
+ipcMain.handle('catalog.getRecents', (): RecentCatalog[] =>
+  readRecents(globalDataPath).filter((r) => fs.existsSync(r.path)),
+);
+
+ipcMain.handle('catalog.openPicker', async (event) => {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent) return { canceled: true };
+  return await pickAndOpenCatalog(parent);
+});
+
+ipcMain.handle('catalog.newPicker', async (event) => {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent) return { canceled: true };
+  return await pickAndCreateCatalog(parent);
+});
+
+ipcMain.handle('catalog.openPath', async (_event, p: string) => {
+  if (typeof p !== 'string' || p.length === 0) return { canceled: true };
+  void swapCatalog(p);
+  return { canceled: false, path: p };
+});
 
 // ───────────────────────── Tab tear-out ─────────────────────────
 
@@ -423,59 +692,62 @@ ipcMain.handle('menu.set', (event, tree: MenuNode[]) => {
   Menu.setApplicationMenu(menu);
 });
 
-// ───────────────────────── Splash window ─────────────────────────
+// ───────────────────────── Loader (in-window) ─────────────────────────
 
-// Lightweight static-HTML window shown immediately at app launch to
-// cover the .NET-startup + SPA-load gap (otherwise the user clicks the
-// icon and sees nothing for 1–10 seconds beyond the OS dock bounce).
-// Closed atomically when the main window fires `ready-to-show`.
-let splashWindow: BrowserWindow | null = null;
-let splashShownAt = 0;
-const SPLASH_MIN_DISPLAY_MS = 600;
+// Splash, welcome, and the SPA all render inside the same main
+// BrowserWindow — there is no floating splash window. They share one
+// webPreferences set (contextIsolation + preload), which is what
+// allows the navigation between the loader page and the SPA URL.
+//
+// Splash and welcome are two modes of a single React entry
+// (loader.html, built from the ClientApp/src/loader/ tree). Vite's
+// multi-entry build emits loader.html alongside index.html in
+// wwwroot/; in dev we load it through Vite (HMR comes for free), in
+// prod we load it straight off disk because Kestrel isn't up yet
+// (first launch) or is being respawned (catalog swap).
+//
+// The "splash:status" channel is the same one the loader subscribes
+// to via the preload-exposed `onSplashStatus` bridge.
 
-function createSplash(): void {
-  splashWindow = new BrowserWindow({
-    width: 420,
-    height: 260,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    show: false,
-    webPreferences: {
-      // Splash loads a single local file with no remote content; running
-      // its tiny status-update script via nodeIntegration avoids needing
-      // a separate preload bundle for ~10 lines of code.
-      nodeIntegration: true,
-      contextIsolation: false,
-    },
-  });
-  splashWindow.loadFile(path.join(__dirname, '..', 'splash.html'));
-  splashWindow.once('ready-to-show', () => {
-    splashShownAt = Date.now();
-    splashWindow?.show();
-  });
+type LoaderMode = 'splash' | 'welcome';
+
+function loaderSearchParams(mode: LoaderMode): string {
+  const params = new URLSearchParams({ mode });
+  // Pass the last-known resolved theme so the loader paints in the
+  // user-chosen scheme rather than prefers-color-scheme — relevant on
+  // catalog swap (SPA had already resolved the theme) and on app
+  // launch after the user picked light/dark in settings. Omitted on
+  // truly cold start; the loader falls back to prefers-color-scheme.
+  if (loaderTheme) params.set('theme', loaderTheme);
+  return params.toString();
 }
 
-function setSplashStatus(text: string): void {
-  if (splashWindow && !splashWindow.isDestroyed()) {
-    splashWindow.webContents.send('splash:status', text);
+function loadLoader(win: BrowserWindow, mode: LoaderMode): Promise<void> {
+  const search = loaderSearchParams(mode);
+  if (!app.isPackaged) {
+    return win.loadURL(`${DEV_VITE_URL}/loader.html?${search}`);
   }
+  // Packaged: wwwroot is part of the .NET publish output, shipped via
+  // electron-builder's extraResources. file:// load means the loader's
+  // relative asset URLs (base: './' in vite.config) resolve against
+  // the same directory.
+  const loaderPath = path.join(
+    process.resourcesPath,
+    'backend',
+    'wwwroot',
+    'loader.html',
+  );
+  return win.loadFile(loaderPath, { search });
 }
 
-function closeSplash(): void {
-  if (!splashWindow) return;
-  // Enforce a minimum display time so fast startups don't flash the
-  // splash for ~50ms — looks broken. Slow startups bypass the delay.
-  const elapsed = Date.now() - splashShownAt;
-  const wait = Math.max(0, SPLASH_MIN_DISPLAY_MS - elapsed);
-  const target = splashWindow;
-  setTimeout(() => {
-    if (!target.isDestroyed()) target.close();
-  }, wait);
-  splashWindow = null;
+// Status updates target whatever page is currently mounted in
+// mainWindow; if it isn't the loader in splash mode the IPC is
+// harmless (only the loader subscribes). Callers await loadLoader
+// before the first status push so the renderer's handler is wired up.
+function setSplashStatus(text: string): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('splash:status', text);
+  }
 }
 
 // Window control handlers. The sender's BrowserWindow is the implicit
@@ -653,17 +925,38 @@ ipcMain.handle('shell.openExternal', async (_event, url: string) => {
 
 app.whenReady().then(async () => {
   setPlaceholderApplicationMenu();
-  createSplash();
+  const win = createMainWindow();
+
+  const initial = determineInitialCatalog(globalDataPath);
+  console.log(`[main] initial catalog:`, initial);
+
+  if (initial.kind === 'welcome') {
+    // Fresh install: no recents, no legacy catalog. Navigate the
+    // (still hidden) main window to the loader in welcome mode and
+    // defer backend startup until the user picks. createWindow's
+    // ready-to-show handler shows the window once welcome paints.
+    await loadLoader(win, 'welcome');
+    return;
+  }
+
+  // Show the loader (splash mode) first so the user sees something
+  // while the .NET backend starts (1–10s typically). Await the load
+  // before sending status — the loader's IPC subscription has to be
+  // wired up first.
+  await loadLoader(win, 'splash');
 
   let kestrelUrl: string;
   try {
-    setSplashStatus('Starting backend…');
-    kestrelUrl = await startDotnetBackend();
+    // First-launch splash uses the English defaults in `hostStrings`
+    // — the renderer hasn't shipped its translated copy yet (state
+    // /hostStrings.ts runs after the SPA loads). Subsequent swaps
+    // pick up the user's locale.
+    setSplashStatus(hostStrings.splash.startingBackend);
+    kestrelUrl = await startDotnetBackend(initial.path);
     console.log(`[main] .NET backend ready at ${kestrelUrl}`);
-    setSplashStatus('Loading workspace…');
+    setSplashStatus(hostStrings.splash.loadingWorkspace);
   } catch (err) {
     console.error('[main] failed to start .NET backend:', err);
-    closeSplash();
     app.quit();
     return;
   }
@@ -672,10 +965,13 @@ app.whenReady().then(async () => {
   // Kestrel directly — it serves wwwroot/ for the SPA.
   const loadUrl = app.isPackaged ? kestrelUrl : DEV_VITE_URL;
   cachedLoadUrl = loadUrl;
-  createMainWindow(loadUrl);
+  await win.loadURL(loadUrl);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(loadUrl);
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const next = createMainWindow();
+      void next.loadURL(loadUrl);
+    }
   });
 });
 

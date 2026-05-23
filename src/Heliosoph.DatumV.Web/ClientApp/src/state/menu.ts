@@ -1,15 +1,13 @@
-// Renderer side of the application-menu plumbing. Side-effect module:
+// Renderer side of the application-menu plumbing. `initMenu()`
 // publishes the localized menu template to main once at startup and
 // re-publishes on locale change, and routes native-menu clicks through
-// the shared command registry. Imported once from main.tsx.
-//
-// Mac uses the native screen-top menubar built from this template;
-// Win/Linux additionally render the same tree in <MenuBar> inside the
-// custom titlebar (the native bar is hidden by frame: false on those
-// platforms, but accelerators registered through setApplicationMenu
-// still fire globally).
+// the shared command registry. Called from main.tsx for the SPA root
+// only — the loader page and dialog windows skip it, so the loader
+// doesn't install a menu it can't service (welcome would otherwise
+// surface "New Query", "Close Tab", etc. with no catalog open).
 
 import i18next from 'i18next';
+import { subscribe } from 'valtio';
 import { host, os } from '@/host';
 import {
   buildMenu,
@@ -17,6 +15,7 @@ import {
   type MenuLabelKey,
 } from '@/commands/menuDefinition';
 import { runCommand } from '@/commands/registry';
+import { catalogRecentsState, refreshCatalogRecents } from '@/state/catalogRecents';
 
 // Strip mnemonic-marker ampersands for the macOS native menu, where
 // `&` would render as a literal character instead of underlining the
@@ -42,12 +41,21 @@ function localize(nodes: MenuNode[]): unknown[] {
     const raw = i18next.t(key) as string;
     return isMac ? stripMnemonicMarkers(raw) : raw;
   };
+  const passRaw = (s: string): string => (isMac ? stripMnemonicMarkers(s) : s);
   return nodes.map((n): unknown => {
     if (n.kind === 'submenu') {
       return { ...n, labelKey: resolve(n.labelKey), children: localize(n.children) };
     }
     if (n.kind === 'item') {
       return { ...n, labelKey: resolve(n.labelKey) };
+    }
+    if (n.kind === 'rawItem') {
+      // Reshape to the wire `item` form — main.ts has no concept of
+      // rawItem; for the native menu side, a rawItem with a final
+      // label is indistinguishable from a regular item whose key has
+      // already been resolved.
+      const { label, ...rest } = n;
+      return { ...rest, kind: 'item', labelKey: passRaw(label) };
     }
     if (n.kind === 'role') {
       // Role items prefer Electron's built-in localized label; only
@@ -59,16 +67,40 @@ function localize(nodes: MenuNode[]): unknown[] {
 }
 
 function publish(): void {
-  const tree = localize(buildMenu({ isMac: os === 'macos' }));
+  const tree = localize(
+    buildMenu({
+      isMac: os === 'macos',
+      recentCatalogs: catalogRecentsState.recents,
+    }),
+  );
   host.setApplicationMenu(tree);
 }
 
-host.onMenuCommand((id) => runCommand(id));
+let initialized = false;
 
-// Re-publish on locale change. i18next emits 'languageChanged' when
-// state/locale.ts flips settingsState.locale.
-i18next.on('languageChanged', publish);
+export function initMenu(): void {
+  // Guard against accidental double-init (e.g. a future caller doing
+  // it from a useEffect, which StrictMode runs twice in dev). The
+  // i18next.on / valtio subscribe wires aren't trivially de-dupable
+  // once registered.
+  if (initialized) return;
+  initialized = true;
 
-// First publish: deferred a microtask so i18next has finished its
-// synchronous init() before t() runs against it.
-queueMicrotask(publish);
+  host.onMenuCommand((id) => runCommand(id));
+
+  // Re-publish on locale change. i18next emits 'languageChanged' when
+  // state/locale.ts flips settingsState.locale.
+  i18next.on('languageChanged', publish);
+
+  // Re-publish when the recents list changes (open / new catalog
+  // flows touch the file via main and refreshCatalogRecents() syncs
+  // us back).
+  subscribe(catalogRecentsState, publish);
+
+  // First publish: deferred a microtask so i18next has finished its
+  // synchronous init() before t() runs against it. The recents fetch
+  // runs in parallel — the initial publish uses whatever is in state
+  // (empty array), and the post-fetch subscribe triggers a republish.
+  queueMicrotask(publish);
+  void refreshCatalogRecents();
+}

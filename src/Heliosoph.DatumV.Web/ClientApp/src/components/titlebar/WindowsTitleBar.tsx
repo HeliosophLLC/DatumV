@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
+import type { WindowChromeKind } from '@/components/window/WindowChrome';
 import { MenuBar } from './MenuBar';
+import favicon from './favicon.png';
 
 // Win11-flavored: 32px tall, app title left, [-][□/❐][×] right, square buttons,
 // close turns red on hover. Maximize icon swaps to a "restore" glyph (overlapping
@@ -13,17 +15,36 @@ import { MenuBar } from './MenuBar';
 // honors at the compositor layer — clicking anywhere in the header starts
 // the OS drag automatically. The button row needs `app-no-drag` so clicks
 // reach the React handlers instead of starting a drag.
-export function WindowsTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
+export function WindowsTitleBar({
+  kind = 'main',
+  title,
+}: {
+  kind?: WindowChromeKind;
+  title?: string;
+} = {}) {
   const { maximized } = useSnapshot(windowState);
   const { t } = useTranslation();
   const MaxIcon = maximized ? Copy : Square;
+  const showFavicon = kind !== 'dialog';
+  const showMenu = kind === 'main';
+  const showWindowControls = kind !== 'dialog';
 
   return (
     <header className="app-drag relative flex h-8 items-center border-b bg-background select-none">
-      <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
-      {!dialog && <MenuBar className="relative z-10 h-full" />}
+      {showFavicon && (
+        <img
+          src={favicon}
+          alt=""
+          aria-hidden
+          className="relative z-10 ml-2 size-4 select-none"
+        />
+      )}
+      {title && (
+        <div className="relative z-10 px-3 text-xs text-muted-foreground">{title}</div>
+      )}
+      {showMenu && <MenuBar className="relative z-10 h-full" />}
       <div className="app-no-drag relative z-10 ml-auto flex">
-        {!dialog && (
+        {showWindowControls && (
           <>
             <WinButton onClick={minimize} aria-label={t('window.minimize')}>
               <Minus className="size-3.5" />

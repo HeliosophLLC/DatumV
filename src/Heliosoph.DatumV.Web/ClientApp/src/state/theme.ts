@@ -1,4 +1,5 @@
 import { proxy, subscribe } from 'valtio';
+import { host } from '@/host';
 import { settingsState, updateSettings, type ThemePreference } from './settings';
 
 // Theme is a *derived* state — preference lives in settingsState (server-backed),
@@ -59,11 +60,18 @@ export const themeState = proxy<ThemeState>({
   resolved: initialResolved,
 });
 
+// Publish the resolved theme to Electron main so the loader page
+// (splash / welcome — different origin, no localStorage handoff) can
+// paint in the user's chosen scheme on the next load. Main persists
+// it across launches.
+host.setHostTheme(initialResolved);
+
 // React to server-side preference changes (refreshSettings, updateSettings).
 subscribe(settingsState, () => {
   themeState.resolved = resolve(settingsState.theme);
   applyToDocument(themeState.resolved);
   writeCachedTheme(themeState.resolved);
+  host.setHostTheme(themeState.resolved);
 });
 
 // React to OS-level changes while preference is 'system'.
@@ -72,6 +80,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   themeState.resolved = osPrefersDark() ? 'dark' : 'light';
   applyToDocument(themeState.resolved);
   writeCachedTheme(themeState.resolved);
+  host.setHostTheme(themeState.resolved);
 });
 
 // Single mutator. Server is the source of truth; the subscribe above

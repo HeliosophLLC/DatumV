@@ -17,7 +17,11 @@ public static class Program
         var bootstrap = new WebHostBootstrap(
             args,
             url,
-            new WebHostOptions { CatalogRootPath = ResolveCatalogRoot() });
+            new WebHostOptions
+            {
+                CatalogRootPath = ResolveCatalogRoot(),
+                GlobalDataPath = ResolveGlobalDataPath(),
+            });
 
         var host = WebHost.Start(bootstrap);
         // Electron's main process greps stdout for this line to detect ready.
@@ -55,12 +59,37 @@ public static class Program
         }
     }
 
+    // DATUMV_CATALOG_PATH is mandatory — the Electron shell sets it per
+    // launch from the user's recent-catalogs list (or first-run prompt).
+    // Failing fast here keeps every "is this catalog open?" code path
+    // honest; nothing should ever guess a default.
     private static string ResolveCatalogRoot()
     {
-        var path = Environment.GetEnvironmentVariable("DATUMV_CATALOG_PATH")
-            ?? Path.Combine(
+        var path = Environment.GetEnvironmentVariable("DATUMV_CATALOG_PATH");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException(
+                "DATUMV_CATALOG_PATH is required. The Electron shell sets this when " +
+                "launching the backend. If running the backend directly, point it at " +
+                "a workspace folder (one containing or that will contain .datum-catalog.json).");
+        }
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    // DATUMV_GLOBAL_PATH is optional but normally supplied by Electron so
+    // both sides agree on the exact folder. When unset (e.g. running the
+    // backend standalone in tests / scripts), fall back to the platform
+    // user-data directory.
+    private static string ResolveGlobalDataPath()
+    {
+        var path = Environment.GetEnvironmentVariable("DATUMV_GLOBAL_PATH");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV");
+        }
         Directory.CreateDirectory(path);
         return path;
     }
