@@ -14,6 +14,11 @@ import './state/theme';
 // Loads the dialog-message subscriber so openDialog promises resolve.
 // Side-effect only; safe to import in both roots.
 import './state/dialogs';
+// Publishes the application menu (native + in-titlebar) and subscribes
+// to native-menu click delivery. Side-effect only; main window mounts
+// it for the menubar, dialog windows pick up its native accelerators
+// (Cmd+W to close, etc.) the same way.
+import './state/menu';
 // Wires Monaco's worker + loader to the bundled instance. Idempotent;
 // safe to import in both roots (dialog windows never mount Monaco
 // today, but the cost of the early init is a single function call).

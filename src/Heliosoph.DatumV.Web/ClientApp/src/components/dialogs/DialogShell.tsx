@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
+import { AboutDialog } from './AboutDialog';
 import { LicenseDialog } from './LicenseDialog';
 import { PreFlightDialog } from './PreFlightDialog';
 import { resolveDialog } from '@/state/dialogs';
@@ -103,6 +104,8 @@ export function DialogShell() {
 
 function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactNode {
   switch (kind) {
+    case 'about':
+      return <AboutDialog requestId={requestId} />;
     case 'confirmLicense':
       return (
         <LicenseDialog

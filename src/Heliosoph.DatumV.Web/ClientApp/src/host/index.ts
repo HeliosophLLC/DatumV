@@ -17,6 +17,15 @@ export interface HostBridge {
   // Electron's typed window.maximizedChanged channel so existing
   // subscribers in state/window.ts keep their string-match shape.
   onMessage(handler: HostMessageHandler): void;
+  // Ship a localized application-menu template to main. Plain-data
+  // tree (see src/commands/menuDefinition.ts); main re-builds the
+  // native Electron menu from it. Called on app start and on every
+  // locale change from state/menu.ts.
+  setApplicationMenu(tree: unknown): void;
+  // Subscribe to native-menu click delivery. The commandId matches
+  // what was assigned in the menu definition; state/menu.ts routes
+  // it through the command registry.
+  onMenuCommand(handler: (commandId: string) => void): void;
 }
 
 declare global {
@@ -61,6 +70,8 @@ declare global {
         filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
       }): Promise<{ canceled: boolean; filePaths: string[] }>;
       openExternal(url: string): Promise<void>;
+      setApplicationMenu(tree: unknown): Promise<void>;
+      onMenuCommand(cb: (commandId: string) => void): () => void;
 
       // Tab tear-out IPC. See electron/preload.ts for the protocol
       // each method speaks; the renderer consumers live in the query
@@ -94,6 +105,15 @@ declare global {
       // Synchronous accessor. Returns null briefly during the window's
       // first few milliseconds while preload's `window.id` IPC settles.
       windowId(): number | null;
+      // Synchronously-resolved version block — captured by preload
+      // at init time so renderers can read these as plain fields.
+      // The About dialog is the primary consumer.
+      versions: {
+        app: string;
+        electron: string;
+        chrome: string;
+        node: string;
+      };
     };
   }
 }
@@ -140,6 +160,12 @@ function createHostBridge(): HostBridge {
       void eh.close();
     },
     onMessage: (handler) => handlers.push(handler),
+    setApplicationMenu: (tree) => {
+      void eh.setApplicationMenu(tree);
+    },
+    onMenuCommand: (handler) => {
+      eh.onMenuCommand(handler);
+    },
   };
 }
 

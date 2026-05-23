@@ -41,5 +41,27 @@
   "download": {
     "elapsed": "{duration} elapsed",
     "remaining": "~{duration} remaining"
+  },
+  "menu": {
+    "app": "DatumV",
+    "file": {
+      "label": "&File",
+      "newQuery": "&New Query",
+      "closeTab": "&Close Tab",
+      "exit": "E&xit"
+    },
+    "edit": {
+      "label": "&Edit"
+    },
+    "view": {
+      "label": "&View"
+    },
+    "window": {
+      "label": "&Window"
+    },
+    "help": {
+      "label": "&Help",
+      "about": "&About DatumV"
+    }
   }
 }

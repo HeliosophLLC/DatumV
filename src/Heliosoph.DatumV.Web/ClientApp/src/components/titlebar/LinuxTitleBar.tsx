@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
+import { MenuBar } from './MenuBar';
 
 // GNOME-flavored: 36px tall, title centered, controls right. GNOME tends to
 // be taller than Windows and centers the title. Square buttons match our
@@ -20,6 +21,7 @@ export function LinuxTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
         {t('app.name')}
       </div>
+      {!dialog && <MenuBar className="relative z-10 h-full" />}
       <div className="app-no-drag relative z-10 ml-auto flex">
         {!dialog && (
           <>

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
+import { MenuBar } from './MenuBar';
 
 // Win11-flavored: 32px tall, app title left, [-][□/❐][×] right, square buttons,
 // close turns red on hover. Maximize icon swaps to a "restore" glyph (overlapping
@@ -20,6 +21,7 @@ export function WindowsTitleBar({ dialog = false }: { dialog?: boolean } = {}) {
   return (
     <header className="app-drag relative flex h-8 items-center border-b bg-background select-none">
       <div className="relative z-10 px-3 text-xs text-muted-foreground">{t('app.name')}</div>
+      {!dialog && <MenuBar className="relative z-10 h-full" />}
       <div className="app-no-drag relative z-10 ml-auto flex">
         {!dialog && (
           <>

@@ -55,6 +55,21 @@ contextBridge.exposeInMainWorld('electronHost', {
   // protocol and silently drops anything else — see main.ts.
   openExternal: (url: string) => ipcRenderer.invoke('shell.openExternal', url),
 
+  // Application menu: the renderer ships a localized template (plain
+  // data, no i18next on the main side) and re-ships on locale change.
+  // Replaces whatever menu is currently installed atomically.
+  setApplicationMenu: (tree: unknown) =>
+    ipcRenderer.invoke('menu.set', tree),
+
+  // Native-menu click delivery. Fires with the commandId the renderer
+  // assigned in its menu definition; the renderer's command registry
+  // looks up the handler. Returns an unsubscribe.
+  onMenuCommand: (cb: (commandId: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, id: string) => cb(id);
+    ipcRenderer.on('menu.command', handler);
+    return () => ipcRenderer.off('menu.command', handler);
+  },
+
   // Tab tear-out IPC. The renderer drives these directly from the
   // drag-and-drop handlers in TabStrip / LeafPaneView — see PR 8.
   //
@@ -125,4 +140,16 @@ contextBridge.exposeInMainWorld('electronHost', {
     const cached = ipcRenderer.sendSync('window.id.sync') as number | null;
     return (): number | null => cached;
   })(),
+
+  // Version block resolved synchronously at preload time so the
+  // About dialog (and anyone else who wants to display these) can
+  // read them as plain fields without async ceremony. App version
+  // comes via sendSync from main (which reads package.json);
+  // electron/chrome/node come straight from process.versions.
+  versions: {
+    app: ipcRenderer.sendSync('app.version.sync') as string,
+    electron: process.versions.electron ?? '',
+    chrome: process.versions.chrome ?? '',
+    node: process.versions.node ?? '',
+  },
 });

@@ -217,6 +217,11 @@ function createMainWindow(loadUrl: string): BrowserWindow {
   const win = createWindow({});
   win.loadURL(loadUrl);
   mainWindow = win;
+  // Hand off from splash → main on first paint. createWindow already
+  // wires `ready-to-show` to win.show(); we piggyback to close the
+  // splash atomically so the user sees one window fade to the next
+  // rather than a blank-frame gap.
+  win.once('ready-to-show', closeSplash);
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
     for (const child of [...tornOutWindows]) {
@@ -351,28 +356,126 @@ ipcMain.handle('tabwindow.isCursorOverApp', () => {
   return false;
 });
 
-function buildApplicationMenu(): void {
+// Placeholder native menu installed before the renderer boots. On
+// macOS this keeps the screen-top menubar populated (App/Edit/Window
+// stock items + their accelerators) instead of blank during the
+// .NET-startup + SPA-load window. On Win/Linux it registers the same
+// stock accelerators globally even though the bar itself is hidden by
+// `frame: false`. Replaced atomically by `menu.set` once the renderer
+// publishes its localized template via state/menu.ts.
+function setPlaceholderApplicationMenu(): void {
   const isMac = process.platform === 'darwin';
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: 'appMenu' as const }] : []),
     { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
     { role: 'windowMenu' },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// Renderer-published menu template. Plain data crosses the IPC boundary
+// so main never imports i18next; the renderer resolves labelKey → text
+// before sending and re-sends on locale change.
+type MenuNode =
+  | { kind: 'submenu'; labelKey: string; children: MenuNode[]; macRole?: string }
+  | { kind: 'item'; labelKey: string; commandId: string; accelerator?: string; enabled?: boolean }
+  | { kind: 'role'; role: string; labelKey?: string }
+  | { kind: 'separator' };
+
+function toElectronTemplate(
+  nodes: MenuNode[],
+  sender: Electron.WebContents,
+): Electron.MenuItemConstructorOptions[] {
+  return nodes.map((n): Electron.MenuItemConstructorOptions => {
+    if (n.kind === 'separator') return { type: 'separator' };
+    if (n.kind === 'role') {
+      return {
+        role: n.role as Electron.MenuItemConstructorOptions['role'],
+        ...(n.labelKey ? { label: n.labelKey } : {}),
+      };
+    }
+    if (n.kind === 'submenu') {
+      // macRole pulls in Electron's stock localized submenus (App/Edit/
+      // Window) when present, ignoring `children` — those submenus are
+      // populated by Electron itself.
+      if (n.macRole) {
+        return {
+          role: n.macRole as Electron.MenuItemConstructorOptions['role'],
+          label: n.labelKey,
+        };
+      }
+      return { label: n.labelKey, submenu: toElectronTemplate(n.children, sender) };
+    }
+    return {
+      label: n.labelKey,
+      accelerator: n.accelerator,
+      enabled: n.enabled !== false,
+      // Route native-menu clicks back to the originating renderer; the
+      // renderer's command registry (src/commands/registry.ts) is the
+      // single source of truth for what each commandId does.
+      click: () => sender.send('menu.command', n.commandId),
+    };
+  });
+}
+
+ipcMain.handle('menu.set', (event, tree: MenuNode[]) => {
+  const menu = Menu.buildFromTemplate(toElectronTemplate(tree, event.sender));
+  Menu.setApplicationMenu(menu);
+});
+
+// ───────────────────────── Splash window ─────────────────────────
+
+// Lightweight static-HTML window shown immediately at app launch to
+// cover the .NET-startup + SPA-load gap (otherwise the user clicks the
+// icon and sees nothing for 1–10 seconds beyond the OS dock bounce).
+// Closed atomically when the main window fires `ready-to-show`.
+let splashWindow: BrowserWindow | null = null;
+let splashShownAt = 0;
+const SPLASH_MIN_DISPLAY_MS = 600;
+
+function createSplash(): void {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 260,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: {
+      // Splash loads a single local file with no remote content; running
+      // its tiny status-update script via nodeIntegration avoids needing
+      // a separate preload bundle for ~10 lines of code.
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+  splashWindow.loadFile(path.join(__dirname, '..', 'splash.html'));
+  splashWindow.once('ready-to-show', () => {
+    splashShownAt = Date.now();
+    splashWindow?.show();
+  });
+}
+
+function setSplashStatus(text: string): void {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('splash:status', text);
+  }
+}
+
+function closeSplash(): void {
+  if (!splashWindow) return;
+  // Enforce a minimum display time so fast startups don't flash the
+  // splash for ~50ms — looks broken. Slow startups bypass the delay.
+  const elapsed = Date.now() - splashShownAt;
+  const wait = Math.max(0, SPLASH_MIN_DISPLAY_MS - elapsed);
+  const target = splashWindow;
+  setTimeout(() => {
+    if (!target.isDestroyed()) target.close();
+  }, wait);
+  splashWindow = null;
 }
 
 // Window control handlers. The sender's BrowserWindow is the implicit
@@ -409,6 +512,14 @@ ipcMain.handle('window.id', (event) => {
 ipcMain.on('window.id.sync', (event) => {
   event.returnValue =
     BrowserWindow.fromWebContents(event.sender)?.id ?? null;
+});
+
+// App version (read from package.json by Electron). Sync so preload
+// can capture it before any renderer JS runs and expose it as a
+// plain field on electronHost — the About dialog reads it without
+// needing an async fetch.
+ipcMain.on('app.version.sync', (event) => {
+  event.returnValue = app.getVersion();
 });
 
 // Dialog open: spawn a child BrowserWindow with parent + modal, await the
@@ -541,14 +652,18 @@ ipcMain.handle('shell.openExternal', async (_event, url: string) => {
 });
 
 app.whenReady().then(async () => {
-  buildApplicationMenu();
+  setPlaceholderApplicationMenu();
+  createSplash();
 
   let kestrelUrl: string;
   try {
+    setSplashStatus('Starting backend…');
     kestrelUrl = await startDotnetBackend();
     console.log(`[main] .NET backend ready at ${kestrelUrl}`);
+    setSplashStatus('Loading workspace…');
   } catch (err) {
     console.error('[main] failed to start .NET backend:', err);
+    closeSplash();
     app.quit();
     return;
   }
