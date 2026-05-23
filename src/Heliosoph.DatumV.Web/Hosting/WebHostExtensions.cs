@@ -192,15 +192,22 @@ public static class WebHostExtensions
         // the same surface without dragging in the Web project. The Web host
         // then registers a SignalR-backed progress reporter that bridges
         // core download events to connected hub clients.
+        string modelCatalogRoot = options.CatalogRootPath ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Heliosoph.DatumV");
+        // Settings-side override (set via the Settings UI, persisted to
+        // settings.json) beats the host-config value. Must match the
+        // precedence used by the TableCatalog factory above — otherwise the
+        // query path resolves models from the settings-configured directory
+        // while the download path lands them under the AppData default.
+        string? effectiveInstallModelsDir =
+            StartupSettingsLoader.LoadModelsDirectory(modelCatalogRoot)
+            ?? options.ModelsDirectory
+            ?? Environment.GetEnvironmentVariable("DATUMV_MODELS")
+            ?? Path.Combine(modelCatalogRoot, "models");
         ModelLibraryOptions modelLibraryOptions = new(
-            CatalogRootPath: options.CatalogRootPath ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Heliosoph.DatumV"),
-            ModelsDirectory: options.ModelsDirectory
-                ?? Environment.GetEnvironmentVariable("DATUMV_MODELS")
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Heliosoph.DatumV", "models"));
+            CatalogRootPath: modelCatalogRoot,
+            ModelsDirectory: effectiveInstallModelsDir);
         services.AddModelLibrary(modelLibraryOptions);
 
         services.AddSingleton<IDownloadProgressReporter, SignalRDownloadProgressReporter>();
