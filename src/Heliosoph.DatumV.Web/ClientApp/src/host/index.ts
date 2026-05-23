@@ -91,6 +91,19 @@ declare global {
         >;
         filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
       }): Promise<{ canceled: boolean; filePaths: string[] }>;
+      showSaveDialog(options: {
+        title?: string;
+        defaultPath?: string;
+        buttonLabel?: string;
+        filters?: ReadonlyArray<{ name: string; extensions: string[] }>;
+        properties?: ReadonlyArray<
+          | 'showHiddenFiles'
+          | 'createDirectory'
+          | 'treatPackageAsDirectory'
+          | 'showOverwriteConfirmation'
+          | 'dontAddToRecent'
+        >;
+      }): Promise<{ canceled: boolean; filePath?: string }>;
       openExternal(url: string): Promise<void>;
       setApplicationMenu(tree: unknown): Promise<void>;
       onMenuCommand(cb: (commandId: string) => void): () => void;

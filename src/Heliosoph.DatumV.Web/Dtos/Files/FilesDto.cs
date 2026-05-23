@@ -19,6 +19,8 @@ public sealed record FilesDto(IReadOnlyList<FileEntryDto> Files);
 //   udf          — `udfs/<schema>/<name>.sql`
 //   procedure    — `procedures/<schema>/<name>.sql`
 //   model        — user-authored `models/<name>.sql`
+//   view         — `views/<schema>/<name>.sql`
+//   query        — user-authored `.sql` anywhere outside the managed dirs above
 //   manifest     — `.datum-catalog.json`
 //   gitignore    — `.gitignore` / `.gitattributes`
 //   other        — anything else (README, user-deposited files)

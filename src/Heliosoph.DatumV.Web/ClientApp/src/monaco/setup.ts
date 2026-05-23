@@ -73,6 +73,10 @@ export function initMonaco(): void {
   monaco.editor.addKeybindingRules([
     { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, command: null },
     { keybinding: monaco.KeyCode.F5, command: null },
+    // Ctrl/Cmd+S: clear Monaco's default `editor.action.save` (a no-op
+    // in standalone Monaco) so the keystroke reliably bubbles to the
+    // window-level "save the active tab" handler.
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, command: null },
   ]);
 
   // Register a dummy "no-op" language whose only purpose is to be the

@@ -249,6 +249,39 @@ public sealed class SystemFilesProviderTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task TopLevelSqlFile_ClassifiesAsQuery()
+    {
+        TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        File.WriteAllText(Path.Combine(_scratchDir, "report.sql"), "SELECT 1");
+        List<FileRow> rows = await ScanAsync(catalog);
+
+        FileRow report = rows.Single(r => r.Path == "report.sql");
+        Assert.Equal("query", report.Kind);
+        Assert.Null(report.Schema);
+        Assert.Equal("report", report.Name);
+        Assert.False(report.IsOrphan);
+    }
+
+    [Fact]
+    public async Task NestedNonManagedSqlFile_ClassifiesAsQuery()
+    {
+        TableCatalog catalog = CreateCatalog(_catalogPath);
+
+        // .sql under arbitrary user-chosen sub-dir — not in udfs/procedures/
+        // views/models — is still a saved query, not "other".
+        string nested = Path.Combine(_scratchDir, "scratch", "draft.sql");
+        Directory.CreateDirectory(Path.GetDirectoryName(nested)!);
+        File.WriteAllText(nested, "SELECT 2");
+
+        List<FileRow> rows = await ScanAsync(catalog);
+        FileRow draft = rows.Single(r => r.Path == "scratch/draft.sql");
+        Assert.Equal("query", draft.Kind);
+        Assert.Null(draft.Schema);
+        Assert.Equal("draft", draft.Name);
+    }
+
+    [Fact]
     public async Task Rows_AreOrderedByPath()
     {
         TableCatalog catalog = CreateCatalog(_catalogPath);

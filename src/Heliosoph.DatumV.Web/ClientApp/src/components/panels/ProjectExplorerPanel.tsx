@@ -36,6 +36,7 @@ import {
   toggleSystemFilesVisible,
   type FileTreeNode,
 } from '@/state/files';
+import { openFileInTab } from '@/state/tabs';
 import type { DockSide } from '@/state/nav';
 import type { FileEntryDto } from '@/api/generated/openapi-client';
 import { TreeBranch, TreeRoot, TreeRow } from '@/components/ui/tree';
@@ -49,7 +50,19 @@ interface RowContext {
   selectedPaths: Readonly<Record<string, true>>;
   focusedPath: string | null;
   onRowClick: (path: string, isDir: boolean, e: MouseEvent) => void;
+  onFileActivate: (file: FileEntryDto) => void;
 }
+
+// Kinds the editor can open as a SQL tab. The user-data file kinds
+// (`data`, `data_sidecar`) and bookkeeping kinds (`manifest`, `gitignore`,
+// `other`) aren't text-editable here and stay click-to-select only.
+const OPENABLE_FILE_KINDS: ReadonlySet<string> = new Set([
+  'query',
+  'udf',
+  'procedure',
+  'view',
+  'model',
+]);
 
 // Project Explorer: renders the catalog directory as a tree, backed by
 // /api/files (which surfaces SystemFilesProvider's `system.files` view).
@@ -133,6 +146,13 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
     }
   };
 
+  const handleFileActivate = (file: FileEntryDto) => {
+    const kind = file.kind ?? 'other';
+    const path = file.path;
+    if (!path || !OPENABLE_FILE_KINDS.has(kind)) return;
+    void openFileInTab(path);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     switch (e.key) {
       case 'ArrowDown':
@@ -155,6 +175,22 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
         e.preventDefault();
         clearSelection();
         break;
+      case 'Enter': {
+        // Enter on a focused file = open as a SQL tab; on a focused dir
+        // = toggle expansion. Mirrors the double-click affordance so
+        // keyboard-only users have the same "activate the row" gesture.
+        if (!focusedPath) break;
+        const file = files.find((f) => f.path === focusedPath);
+        if (file) {
+          e.preventDefault();
+          handleFileActivate(file);
+        } else {
+          // No file means the focused row is a directory.
+          e.preventDefault();
+          toggleDirExpanded(focusedPath);
+        }
+        break;
+      }
     }
   };
 
@@ -163,6 +199,7 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
     selectedPaths,
     focusedPath,
     onRowClick: handleRowClick,
+    onFileActivate: handleFileActivate,
   };
 
   const isRefreshing = status === 'loading' && files.length > 0;
@@ -204,7 +241,7 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col select-none">
       {header}
       <div className="flex-1 overflow-hidden">
         {status === 'loading' && files.length === 0 ? (
@@ -311,6 +348,7 @@ function FileRow({
       selected={selected}
       focused={focused}
       onRowClick={(e) => ctx.onRowClick(path, false, e)}
+      onRowDoubleClick={() => ctx.onFileActivate(file)}
       dataPath={path}
       title={`${file.path ?? ''} • ${formatSize(file.sizeBytes ?? 0)}`}
     >
@@ -338,6 +376,15 @@ function iconForKind(kind: string): {
   colorClass: string;
 } {
   switch (kind) {
+    case 'query':
+      // Sky paper — user-authored saved queries. Distinct from the green
+      // udf/procedure tone so registered code-as-data reads differently
+      // from "scripts the user might re-run."
+      return {
+        Icon: FileCode2,
+        colorClass:
+          'fill-sky-100 text-sky-600 dark:fill-sky-900/40 dark:text-sky-300',
+      };
     case 'data':
       // Blue — data files
       return { Icon: Database, colorClass: 'text-sky-600 dark:text-sky-400' };

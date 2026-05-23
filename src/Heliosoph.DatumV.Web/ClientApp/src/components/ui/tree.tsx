@@ -106,6 +106,7 @@ export function TreeRow({
   selected = false,
   focused = false,
   onRowClick,
+  onRowDoubleClick,
   dataPath,
   title,
 }: {
@@ -114,6 +115,12 @@ export function TreeRow({
   selected?: boolean;
   focused?: boolean;
   onRowClick?: (e: MouseEvent<HTMLDivElement>) => void;
+  /**
+   * Double-click intercept. Panels use this to "open" the row's payload
+   * — ProjectExplorer opens the file in a tab, for example. Plain click
+   * (`onRowClick`) keeps single-click selection unchanged.
+   */
+  onRowDoubleClick?: (e: MouseEvent<HTMLDivElement>) => void;
   /** See TreeBranch.dataPath — lives on the layout element. */
   dataPath?: string;
   title?: string;
@@ -130,6 +137,7 @@ export function TreeRow({
         )}
         title={title}
         onClick={onRowClick}
+        onDoubleClick={onRowDoubleClick}
         aria-selected={selected || undefined}
         data-path={dataPath}
       >

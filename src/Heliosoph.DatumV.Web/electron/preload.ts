@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('electronHost', {
   // shape: { canceled: boolean, filePaths: string[] }.
   showOpenDialog: (options: unknown) => ipcRenderer.invoke('fs.showOpenDialog', options),
 
+  // Native file save dialog. Returns Electron's SaveDialogReturnValue
+  // shape: { canceled: boolean, filePath?: string }. Used by the editor
+  // Ctrl+S flow for scratch SQL tabs.
+  showSaveDialog: (options: unknown) => ipcRenderer.invoke('fs.showSaveDialog', options),
+
   // Open an http(s) URL in the user's default browser. Main-side validates
   // protocol and silently drops anything else — see main.ts.
   openExternal: (url: string) => ipcRenderer.invoke('shell.openExternal', url),

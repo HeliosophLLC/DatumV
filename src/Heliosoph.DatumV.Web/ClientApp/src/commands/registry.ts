@@ -7,11 +7,12 @@
 // commands/menuDefinition.ts. That's it; both surfaces pick it up.
 
 import { host } from '@/host';
-import { openTab, closeTab, getFocusedLeaf } from '@/state/tabs';
+import { openTab, getFocusedLeaf, requestCloseTab, saveActiveTab } from '@/state/tabs';
 import { openDialog } from '@/state/dialogs';
 
 export type CommandId =
   | 'file.newQuery'
+  | 'file.save'
   | 'file.closeTab'
   | 'file.newCatalog'
   | 'file.openCatalog'
@@ -30,9 +31,10 @@ const handlers: Record<CommandId, CommandHandler> = {
   'file.newQuery': () => {
     openTab('', undefined, 'sql');
   },
+  'file.save': () => saveActiveTab(),
   'file.closeTab': () => {
     const leaf = getFocusedLeaf();
-    if (leaf.activeTabId !== null) closeTab(leaf.activeTabId);
+    if (leaf.activeTabId !== null) return requestCloseTab(leaf.activeTabId);
   },
   'file.newCatalog': () => host.pickAndCreateCatalog(),
   'file.openCatalog': () => host.pickAndOpenCatalog(),

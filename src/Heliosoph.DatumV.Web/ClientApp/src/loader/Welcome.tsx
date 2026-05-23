@@ -34,7 +34,7 @@ export function Welcome(): React.JSX.Element {
   }
 
   return (
-    <div className="flex w-full max-w-[560px] flex-col gap-7">
+    <div className="flex w-full max-w-[560px] flex-col gap-7 select-none">
       <div className="text-center">
         <h1 className="text-foreground m-0 mb-2 text-3xl font-semibold tracking-wide">
           Welcome to DatumV

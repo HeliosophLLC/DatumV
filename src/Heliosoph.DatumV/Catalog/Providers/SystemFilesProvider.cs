@@ -11,8 +11,8 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 /// Virtual table that surfaces the on-disk contents of the catalog directory
 /// as a SQL-queryable view. Each file under the catalog root becomes one row;
 /// each row is classified by its location into a <c>kind</c> (data, udf,
-/// procedure, model, view, manifest, gitignore, data_sidecar, other) and
-/// joined against the in-memory registries so the <c>is_orphan</c> column
+/// procedure, model, view, query, manifest, gitignore, data_sidecar, other)
+/// and joined against the in-memory registries so the <c>is_orphan</c> column
 /// flags files on disk that have no matching registry entry.
 /// </summary>
 /// <remarks>
@@ -27,7 +27,7 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 /// Schema:
 /// <list type="table">
 ///   <item><term>path</term><description>Catalog-relative path, forward slashes.</description></item>
-///   <item><term>kind</term><description>One of <c>data</c>, <c>data_sidecar</c>, <c>udf</c>, <c>procedure</c>, <c>model</c>, <c>view</c>, <c>manifest</c>, <c>gitignore</c>, <c>other</c>.</description></item>
+///   <item><term>kind</term><description>One of <c>data</c>, <c>data_sidecar</c>, <c>udf</c>, <c>procedure</c>, <c>model</c>, <c>view</c>, <c>query</c>, <c>manifest</c>, <c>gitignore</c>, <c>other</c>.</description></item>
 ///   <item><term>schema</term><description>Parsed from path when the kind has one (<c>public</c> for <c>data/public/foo.datum</c>, <c>models</c> for model files); null otherwise.</description></item>
 ///   <item><term>name</term><description>Filename stem for <c>data</c>/<c>data_sidecar</c>/<c>udf</c>/<c>procedure</c>/<c>model</c>; null otherwise.</description></item>
 ///   <item><term>size_bytes</term><description>File size from <see cref="FileInfo.Length"/>.</description></item>
@@ -212,12 +212,16 @@ public sealed class SystemFilesProvider : NonSeekableTableProviderBase
 
         if (parts.Length == 1)
         {
-            return parts[0] switch
+            string only = parts[0];
+            if (only == CatalogStore.DefaultFileName) return ("manifest", null, null);
+            if (only is ".gitignore" or ".gitattributes") return ("gitignore", null, null);
+            // Top-level .sql is a user-authored saved query. Anything else
+            // top-level (README, notes, data dumps) falls through to `other`.
+            if (only.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
             {
-                CatalogStore.DefaultFileName => ("manifest", null, null),
-                ".gitignore" or ".gitattributes" => ("gitignore", null, null),
-                _ => ("other", null, null),
-            };
+                return ("query", null, Path.GetFileNameWithoutExtension(only));
+            }
+            return ("other", null, null);
         }
 
         string root = parts[0];
@@ -263,6 +267,14 @@ public sealed class SystemFilesProvider : NonSeekableTableProviderBase
             && parts[2].EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
         {
             return ("view", parts[1], Path.GetFileNameWithoutExtension(parts[2]));
+        }
+
+        // Any other .sql under the catalog root that didn't match a managed
+        // location is a user-authored saved query. Tab editor's "save" flow
+        // drops files anywhere the user picks, including arbitrary sub-dirs.
+        if (parts[parts.Length - 1].EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("query", null, Path.GetFileNameWithoutExtension(parts[parts.Length - 1]));
         }
 
         return ("other", null, null);

@@ -5,7 +5,7 @@ import { refreshSettings } from './state/settings';
 import { hydrateDockFromSettings, navState } from './state/nav';
 import { subscribeCatalogExplorerToHub } from './state/catalogExplorer';
 import { subscribeRoutinesToHub } from './state/functionCatalog';
-import { isTornOutWindow } from './state/tabs';
+import { hydrateTabsFromCatalog, isTornOutWindow } from './state/tabs';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { AppDock } from '@/components/nav/AppDock';
 import { QueryEditorView } from '@/components/query/QueryEditorView';
@@ -43,6 +43,7 @@ export default function App() {
   useEffect(() => {
     refreshHealth();
     void refreshSettings().then(() => hydrateDockFromSettings());
+    void hydrateTabsFromCatalog();
     subscribeCatalogExplorerToHub();
     subscribeRoutinesToHub();
   }, []);

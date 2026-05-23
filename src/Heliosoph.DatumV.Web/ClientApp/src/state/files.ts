@@ -52,8 +52,13 @@ interface FilesState {
  * infrastructure. Everything under one of these roots is hidden when
  * `showSystemFiles` is off. Matches by literal prefix on the
  * forward-slash path the server emits.
+ *
+ * `.datumv/` is the per-catalog editor-state directory (tabs.json today,
+ * other restore state later). Always rendered as system noise so it
+ * doesn't compete visually with the user's own files.
  */
 export const SYSTEM_PATH_PREFIXES: readonly string[] = [
+  '.datumv/',
   'data/',
   'python/',
   'uv/',

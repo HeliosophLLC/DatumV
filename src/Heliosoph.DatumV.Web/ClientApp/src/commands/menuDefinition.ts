@@ -19,6 +19,7 @@ export type MenuLabelKey =
   | 'menu.app'
   | 'menu.file.label'
   | 'menu.file.newQuery'
+  | 'menu.file.save'
   | 'menu.file.newCatalog'
   | 'menu.file.openCatalog'
   | 'menu.file.openRecent'
@@ -158,6 +159,7 @@ export function buildMenu(opts: {
       submenu('menu.file.openRecent', recentChildren(recentCatalogs)),
       sep,
       item('menu.file.newQuery', 'file.newQuery', 'CmdOrCtrl+N'),
+      item('menu.file.save', 'file.save', 'CmdOrCtrl+S'),
       sep,
       item('menu.file.closeTab', 'file.closeTab', 'CmdOrCtrl+W'),
       ...(isMac ? [] : [sep, item('menu.file.exit', 'file.exit', 'Alt+F4')]),

@@ -1,8 +1,10 @@
 import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { AboutDialog } from './AboutDialog';
+import { ExternalChangeDialog } from './ExternalChangeDialog';
 import { LicenseDialog } from './LicenseDialog';
 import { PreFlightDialog } from './PreFlightDialog';
+import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import { resolveDialog } from '@/state/dialogs';
 import { refreshSettings } from '@/state/settings';
 import type { PreFlightBlock } from '@/state/execution';
@@ -106,6 +108,25 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
   switch (kind) {
     case 'about':
       return <AboutDialog requestId={requestId} />;
+    case 'externalChange':
+      return (
+        <ExternalChangeDialog
+          requestId={requestId}
+          fileName={params.fileName ?? ''}
+          filePath={params.filePath ?? ''}
+          // Booleans arrive as the string 'true'/'false' from URL-encoded
+          // params (main.ts JSON.stringifies non-string payload values).
+          isDirty={params.isDirty === 'true'}
+        />
+      );
+    case 'unsavedChanges':
+      return (
+        <UnsavedChangesDialog
+          requestId={requestId}
+          fileName={params.fileName ?? ''}
+          filePath={params.filePath ?? ''}
+        />
+      );
     case 'confirmLicense':
       return (
         <LicenseDialog

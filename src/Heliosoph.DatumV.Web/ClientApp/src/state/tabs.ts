@@ -4,6 +4,15 @@ import {
   serializeFunctionForm,
   type PersistedFunctionForm,
 } from './functionForm';
+import { api } from '@/api';
+import { fetchTabsState, putTabsState } from '@/api/tabsState';
+import { acquireCatalogHub, onFilesChanged } from '@/api/catalogHub';
+import { openDialog } from '@/state/dialogs';
+import type { ExternalChangeDialogResult } from '@/components/dialogs/ExternalChangeDialog';
+import type {
+  UnsavedChangesAction,
+  UnsavedChangesDialogResult,
+} from '@/components/dialogs/UnsavedChangesDialog';
 
 // Query-editor pane tree. PR 1 shipped a flat `tabs[]` model; PR 7 lifts
 // that into a recursive binary tree of panes so the user can split the
@@ -61,7 +70,16 @@ export interface Tab {
   kind: TabKind;
   /** Current editor text. Mirrors the Monaco model when the editor is mounted. */
   sql: string;
-  /** True when `sql` differs from the last persisted-or-saved baseline. */
+  /**
+   * Baseline `sql` corresponds to: the on-disk content for file-backed
+   * tabs (set on open + every successful save + every accepted external
+   * reload), or the initial scratch content otherwise. `dirty` is
+   * derived from `sql !== savedSql`, which means Ctrl+Z back to the
+   * baseline correctly clears the dirty indicator.
+   */
+  savedSql: string;
+  /** Derived: true iff `sql !== savedSql`. Kept as a field so React
+   *  consumers can subscribe without computing on every snapshot. */
   dirty: boolean;
   /**
    * Editor-pane share of the editor/results vertical split, as a
@@ -76,6 +94,22 @@ export interface Tab {
    * "Tables", "Files") can reuse the same guards.
    */
   pinned?: boolean;
+  /**
+   * Catalog-relative path (forward slashes) when this tab is backed by a
+   * file under the catalog root. Absent on scratch / Untitled tabs.
+   * Ctrl+S writes through to this path; the chip label switches to the
+   * basename so users see the filename instead of "Untitled-N".
+   */
+  filePath?: string;
+  /**
+   * Last-known disk mtime (epoch ms) for the backing file. Set on
+   * `openFileInTab` (initial GET), refreshed on every successful save
+   * (`saveTab`) and external-change reconciliation (`refreshFileBackedTabs`).
+   * Watcher ticks compare the live mtime against this baseline; only a
+   * drift triggers the external-change prompt. Not persisted — re-
+   * established on first watcher tick after restart.
+   */
+  baselineMtime?: number;
 }
 
 export interface LeafPane {
@@ -113,7 +147,12 @@ interface PanesState {
   focusedLeafId: string;
 }
 
-const STORAGE_KEY = 'datumv:panes';
+// Per-catalog tabs state lives in `.datumv/tabs.json` (HTTP) instead of
+// localStorage so each catalog gets its own pane tree and queries don't
+// leak across catalogs. The renderer hydrates lazily on App mount; until
+// the fetch resolves, panesState carries the default first-boot tabs and
+// auto-save stays suppressed so the catalog's real state isn't trampled
+// by a transient mutation against the defaults.
 const SAVE_DEBOUNCE_MS = 500;
 
 // No layout cap. The per-axis rule we tried earlier turned out to be a
@@ -224,6 +263,17 @@ interface PersistedTab {
   editorSize?: number;
   pinned?: boolean;
   /**
+   * Catalog-relative file path when the tab is backed by a saved `.sql`.
+   * Round-trips so reopening the catalog reattaches the tab to its file.
+   */
+  filePath?: string;
+  /**
+   * Persisted baseline so `dirty` survives reload — a tab the user
+   * edited but didn't save before closing the catalog comes back still
+   * dirty. Absent (or equal to `sql`) → tab restored as clean.
+   */
+  savedSql?: string;
+  /**
    * Function-tab form state. Absent for SQL tabs and for function tabs
    * the user hasn't interacted with yet. File handles don't survive the
    * round-trip — the `fileNames` mirror is included as a display hint,
@@ -247,23 +297,16 @@ interface PersistedState {
   focusedLeafId: string;
 }
 
-function readPersisted(): PanesState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PersistedState>;
-    if (!parsed.root) return null;
-    const root = parsePersistedNode(parsed.root);
-    if (!root) return null;
-    // Validate the focused leaf still exists; fall back to the first leaf.
-    const focused =
-      typeof parsed.focusedLeafId === 'string' && findLeaf(root, parsed.focusedLeafId)
-        ? parsed.focusedLeafId
-        : firstLeaf(root).id;
-    return { root, focusedLeafId: focused };
-  } catch {
-    return null;
-  }
+function parsePersistedState(parsed: Partial<PersistedState>): PanesState | null {
+  if (!parsed.root) return null;
+  const root = parsePersistedNode(parsed.root);
+  if (!root) return null;
+  // Validate the focused leaf still exists; fall back to the first leaf.
+  const focused =
+    typeof parsed.focusedLeafId === 'string' && findLeaf(root, parsed.focusedLeafId)
+      ? parsed.focusedLeafId
+      : firstLeaf(root).id;
+  return { root, focusedLeafId: focused };
 }
 
 function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
@@ -290,12 +333,15 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
                   : t.kind === 'docs'
                     ? 'docs'
                     : 'sql';
+        const savedSql =
+          typeof t.savedSql === 'string' ? t.savedSql : t.sql;
         tabs.push({
           id: t.id,
           title: t.title,
           kind,
           sql: t.sql,
-          dirty: false,
+          savedSql,
+          dirty: t.sql !== savedSql,
           editorSize:
             typeof t.editorSize === 'number' &&
             t.editorSize > 0 &&
@@ -303,6 +349,10 @@ function parsePersistedNode(raw: PersistedNode | undefined): PaneNode | null {
               ? t.editorSize
               : undefined,
           pinned: t.pinned === true ? true : undefined,
+          filePath:
+            typeof t.filePath === 'string' && t.filePath.length > 0
+              ? t.filePath
+              : undefined,
         });
         // Restore the function-form proxy slot before the React tree
         // mounts the form. `ensureFunctionForm` would otherwise create
@@ -376,6 +426,7 @@ function readSeedFromHash(): Tab | null {
       title: parsed.title,
       kind,
       sql: parsed.sql,
+      savedSql: parsed.sql,
       dirty: false,
       editorSize:
         typeof parsed.editorSize === 'number' &&
@@ -402,27 +453,7 @@ function readSeedFromHash(): Tab | null {
  */
 export const isTornOutWindow: boolean = readSeedFromHash() !== null;
 
-function createInitialState(): PanesState {
-  const seed = readSeedFromHash();
-  if (seed) {
-    // Torn-out windows are single-purpose editor surfaces — no pinned
-    // tabs, no AppDock chrome. The Models tab lives only in the main
-    // window.
-    const leaf: LeafPane = {
-      kind: 'leaf',
-      id: newLeafId(),
-      tabs: [seed],
-      activeTabId: seed.id,
-    };
-    return { root: leaf, focusedLeafId: leaf.id };
-  }
-
-  const persisted = readPersisted();
-  if (persisted) {
-    ensurePinnedTabs(persisted);
-    return persisted;
-  }
-
+function createDefaultState(): PanesState {
   // First-ever boot: pinned Models / Datasets / Settings / Docs tabs +
   // one Untitled-1 SQL tab. Pinned tabs take indices 0..N so they sit
   // to the LEFT of user-created tabs on the strip, matching VS Code's
@@ -432,6 +463,7 @@ function createInitialState(): PanesState {
     title: 'Untitled-1',
     kind: 'sql',
     sql: '',
+    savedSql: '',
     dirty: false,
   };
   const leaf: LeafPane = {
@@ -447,6 +479,27 @@ function createInitialState(): PanesState {
     activeTabId: firstUntitled.id,
   };
   return { root: leaf, focusedLeafId: leaf.id };
+}
+
+function createInitialState(): PanesState {
+  const seed = readSeedFromHash();
+  if (seed) {
+    // Torn-out windows are single-purpose editor surfaces — no pinned
+    // tabs, no AppDock chrome. The Models tab lives only in the main
+    // window.
+    const leaf: LeafPane = {
+      kind: 'leaf',
+      id: newLeafId(),
+      tabs: [seed],
+      activeTabId: seed.id,
+    };
+    return { root: leaf, focusedLeafId: leaf.id };
+  }
+  // Main window: start with defaults; hydrateTabsFromCatalog() runs from
+  // App.tsx and swaps in the persisted tree once `.datumv/tabs.json` is
+  // fetched. The brief flash of default tabs before hydrate resolves is
+  // the cost of not blocking SPA render on a network round trip.
+  return createDefaultState();
 }
 
 function pinnedIdForKind(kind: TabKind): string {
@@ -488,6 +541,7 @@ function createPinnedTab(kind: TabKind): Tab {
     title: pinnedTitleForKind(kind),
     kind,
     sql: '',
+    savedSql: '',
     dirty: false,
     pinned: true,
   };
@@ -548,25 +602,238 @@ if (isTornOutWindow) {
   });
 }
 
-// Debounced auto-save. Skipped in torn-out windows so the main window's
-// persisted state isn't trampled by a transient secondary window.
+// Debounced auto-save to `.datumv/tabs.json`. Subscribes lazily — only
+// after hydrateTabsFromCatalog() resolves — so the network round trip
+// can't race against an early mutation that overwrites the catalog's
+// real state with the boot-default Untitled-1.
+//
+// Skipped entirely in torn-out windows: they're session-scoped editor
+// surfaces that don't own the catalog's persisted layout.
 let saveTimer: number | undefined;
-if (!isTornOutWindow) {
+let persistenceArmed = false;
+
+function armPersistence(): void {
+  if (persistenceArmed || isTornOutWindow) return;
+  persistenceArmed = true;
   subscribe(panesState, () => {
     if (saveTimer !== undefined) window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
       saveTimer = undefined;
-      try {
-        const snapshot: PersistedState = {
-          root: serializeNode(panesState.root),
-          focusedLeafId: panesState.focusedLeafId,
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      } catch {
-        // Quota errors / disabled storage — drop the save silently.
-      }
+      const snapshot: PersistedState = {
+        root: serializeNode(panesState.root),
+        focusedLeafId: panesState.focusedLeafId,
+      };
+      void putTabsState(snapshot).catch((err) => {
+        // Backend isn't reachable / catalog is in-memory — drop the save
+        // silently. The next mutation re-attempts; nothing is lost.
+        console.warn('[tabs] persist failed', err);
+      });
     }, SAVE_DEBOUNCE_MS);
   });
+}
+
+/**
+ * Loads `.datumv/tabs.json` and swaps the result into `panesState`.
+ * Runs once from App.tsx on mount. Idempotent — repeat calls short-
+ * circuit. Skipped in torn-out windows (their state is window-local).
+ *
+ * Always arms the HTTP persistence subscription, even when the catalog
+ * has no tabs.json yet (204) — the first user edit then writes the
+ * file. Hydration failures (network error, malformed JSON, focused leaf
+ * missing from the tree) fall back to the boot-default state and still
+ * arm persistence so the next mutation writes a usable file.
+ */
+let hydrationStarted = false;
+export async function hydrateTabsFromCatalog(): Promise<void> {
+  if (hydrationStarted || isTornOutWindow) return;
+  hydrationStarted = true;
+  try {
+    const raw = await fetchTabsState();
+    if (raw && typeof raw === 'object') {
+      const parsed = parsePersistedState(raw as Partial<PersistedState>);
+      if (parsed) {
+        ensurePinnedTabs(parsed);
+        panesState.root = parsed.root;
+        panesState.focusedLeafId = parsed.focusedLeafId;
+      }
+    }
+    // 204 / null → keep the default tree; armPersistence will save it
+    // on first edit.
+  } catch (err) {
+    console.warn('[tabs] hydrate failed', err);
+  } finally {
+    armPersistence();
+    subscribeFileBackedTabsToWatcher();
+  }
+}
+
+// ────────── External-edit refresh ──────────
+//
+// `OnFilesChanged` fires whenever the catalog's directory watcher sees
+// a write — including our own PUTs and edits made outside the app (VS
+// Code save, git checkout, hand-edit). For each clean file-backed tab,
+// re-fetch the file's contents on this signal so an external edit
+// surfaces in the editor instead of being silently overwritten on the
+// next Ctrl+S. Dirty tabs are left alone — preserving the user's
+// in-flight work wins over disk parity.
+//
+// 250ms debounce mirrors state/files.ts so a burst of writes (rg-grep
+// + sed pipeline, an installer touching dozens of files) collapses
+// into one refresh per tab.
+
+const WATCHER_DEBOUNCE_MS = 250;
+let watcherTimer: number | undefined;
+let watcherSubscribed = false;
+
+function subscribeFileBackedTabsToWatcher(): void {
+  if (watcherSubscribed || isTornOutWindow) return;
+  watcherSubscribed = true;
+  void acquireCatalogHub().catch((err) => {
+    console.warn('[tabs] hub acquire failed', err);
+  });
+  onFilesChanged(() => {
+    if (watcherTimer !== undefined) window.clearTimeout(watcherTimer);
+    watcherTimer = window.setTimeout(() => {
+      watcherTimer = undefined;
+      void refreshFileBackedTabs();
+    }, WATCHER_DEBOUNCE_MS);
+  });
+}
+
+// NSwag types `modifiedAt` as `Date` but the generated client doesn't
+// install a date-reviver, so the value arrives as the raw ISO string at
+// runtime. Centralised so the three baseline-update sites
+// (openFileInTab / save / reconcile) all parse the same way and don't
+// trip on TypeError when the cast is wrong.
+function mtimeOf(raw: unknown): number | undefined {
+  if (raw == null) return undefined;
+  if (raw instanceof Date) {
+    const t = raw.getTime();
+    return Number.isNaN(t) ? undefined : t;
+  }
+  if (typeof raw === 'string') {
+    const t = Date.parse(raw);
+    return Number.isNaN(t) ? undefined : t;
+  }
+  return undefined;
+}
+
+// Paths currently displayed in a prompt — guards against re-prompting
+// for the same file when a follow-up watcher tick arrives while the
+// user is still deciding. Cleared on resolve.
+const promptingForPath = new Set<string>();
+// Single in-flight reconciliation pass; serializes prompts so the user
+// sees them one at a time instead of an indeterminate stack of dialog
+// windows.
+let refreshInFlight: Promise<void> | null = null;
+// Coalesces watcher ticks that fired while a reconciliation pass was
+// already running — schedules exactly one re-run after the current pass
+// resolves rather than queueing an unbounded chain.
+let refreshPending = false;
+
+async function refreshFileBackedTabs(): Promise<void> {
+  if (refreshInFlight) {
+    refreshPending = true;
+    return refreshInFlight;
+  }
+  refreshInFlight = (async () => {
+    try {
+      do {
+        refreshPending = false;
+        await reconcileFileBackedTabsOnce();
+      } while (refreshPending);
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+// One reconciliation pass: snapshot the file-backed tabs at entry time,
+// walk them sequentially. For each path with a real change, prompt the
+// user and apply their decision before moving to the next file.
+async function reconcileFileBackedTabsOnce(): Promise<void> {
+  const candidates: Tab[] = [];
+  forEachTab(panesState.root, (t) => {
+    if (t.kind !== 'sql' || !t.filePath) return;
+    if (promptingForPath.has(t.filePath)) return;
+    candidates.push(t);
+  });
+  for (const tab of candidates) {
+    await reconcileTab(tab);
+  }
+}
+
+async function reconcileTab(tab: Tab): Promise<void> {
+  const path = tab.filePath;
+  if (!path) return;
+  let contents: string;
+  let mtime: number | undefined;
+  try {
+    const dto = await api.files.getContents(path);
+    contents = dto.contents ?? '';
+    mtime = mtimeOf(dto.modifiedAt);
+  } catch (err) {
+    // 404 means the file was deleted out of band; leave the buffer in
+    // place so the user can decide whether to save-as elsewhere. The
+    // next save attempt will recreate the file at the same path.
+    console.warn('[tabs] external refresh failed', path, err);
+    return;
+  }
+
+  // First-touch initialization: a tab restored from `.datumv/tabs.json`
+  // has no baselineMtime yet. Adopt the live mtime silently rather than
+  // prompt immediately — the persisted sql is authoritative as of
+  // hydrate, and we only want to prompt for changes that happen *after*
+  // the user opened the catalog.
+  if (tab.baselineMtime === undefined) {
+    tab.baselineMtime = mtime;
+    return;
+  }
+  if (mtime !== undefined && mtime === tab.baselineMtime) return;
+  // Same content despite a touched mtime — likely an editor that
+  // rewrote the file with identical bytes (or our own write echoing
+  // back). Bump baseline and move on.
+  if (tab.sql === contents) {
+    tab.baselineMtime = mtime;
+    return;
+  }
+
+  promptingForPath.add(path);
+  try {
+    const fileName = path.split('/').pop() ?? path;
+    const wasDirty = tab.dirty;
+    const { result } = openDialog<
+      ExternalChangeDialogResult,
+      { fileName: string; filePath: string; isDirty: boolean }
+    >({
+      kind: 'externalChange',
+      payload: { fileName, filePath: path, isDirty: wasDirty },
+    });
+    const decision = (await result)?.action ?? 'keep';
+    // Re-find the tab — between dialog open and resolve the user could
+    // have closed it, dragged it cross-window, etc. If it's gone, the
+    // decision is moot.
+    const live = findTab(panesState.root, tab.id);
+    if (!live) return;
+    if (decision === 'reload') {
+      live.tab.sql = contents;
+      live.tab.savedSql = contents;
+      live.tab.dirty = false;
+    } else {
+      // Keep: the user's buffer is the authoritative version now. Move
+      // savedSql up to disk so the dirty indicator reflects "your
+      // buffer differs from disk" going forward; if the user undoes
+      // back to disk content, dirty correctly flips off.
+      live.tab.savedSql = contents;
+      live.tab.dirty = live.tab.sql !== contents;
+    }
+    // Either choice advances the baseline so we don't re-prompt for
+    // the same change.
+    live.tab.baselineMtime = mtime;
+  } finally {
+    promptingForPath.delete(path);
+  }
 }
 
 function serializeNode(node: PaneNode): PersistedNode {
@@ -582,10 +849,15 @@ function serializeNode(node: PaneNode): PersistedNode {
           sql: t.sql,
           editorSize: t.editorSize,
           pinned: t.pinned,
+          filePath: t.filePath,
+          // Only persist the baseline when it actually diverges from
+          // sql — keeps the common case (clean tab) byte-for-byte
+          // identical to the old shape.
+          savedSql: t.savedSql === t.sql ? undefined : t.savedSql,
         };
         // Function-tab content lives in a sibling proxy keyed by tabId.
-        // Pull the slice here so the existing panesState localStorage
-        // save carries it without a second persistence channel.
+        // Pull the slice here so the persistence path carries it without
+        // a second channel.
         if (t.kind === 'function') {
           const form = serializeFunctionForm(t.id);
           if (form !== null) persisted.functionForm = form;
@@ -688,12 +960,58 @@ export function openTab(
     title: nextUntitledTitle(panesState.root),
     kind,
     sql: initialSql,
+    savedSql: initialSql,
     dirty: false,
   };
   leaf.tabs.push(tab);
   leaf.activeTabId = tab.id;
   panesState.focusedLeafId = leaf.id;
   return tab;
+}
+
+/**
+ * User-initiated close. Prompts with Save / Don't Save / Cancel when
+ * the tab has unsaved changes; bypasses the prompt on pinned tabs,
+ * function tabs, clean tabs, and any tab the prompt itself can't reach
+ * (no Electron host). Internal callers that need an unconditional
+ * close — cross-window receive, source-collapse on move/split — keep
+ * calling `closeTab` directly.
+ */
+export async function requestCloseTab(tabId: string): Promise<void> {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  const tab = found.tab;
+  if (tab.pinned) return;
+  if (!tab.dirty || tab.kind !== 'sql') {
+    closeTab(tabId);
+    return;
+  }
+  // Make the focused tab match what the user is being prompted about —
+  // otherwise the editor behind the dialog shows unrelated content.
+  selectTab(tabId);
+  const fileName = tab.filePath
+    ? (tab.filePath.split('/').pop() ?? tab.filePath)
+    : tab.title;
+  const { result } = openDialog<
+    UnsavedChangesDialogResult,
+    { fileName: string; filePath: string }
+  >({
+    kind: 'unsavedChanges',
+    payload: { fileName, filePath: tab.filePath ?? '' },
+  });
+  // X-close maps to Cancel — non-destructive default so an accidental
+  // dismiss never silently drops the user's unsaved changes.
+  const action: UnsavedChangesAction = (await result)?.action ?? 'cancel';
+  if (action === 'cancel') return;
+  if (action === 'save') {
+    await saveTab(tabId);
+    // Re-check dirty: if the user cancelled the save dialog (scratch
+    // tab → no path picked), the tab is still dirty and the close
+    // should also abort to avoid silently dropping their work.
+    const after = findTab(panesState.root, tabId);
+    if (after && after.tab.dirty) return;
+  }
+  closeTab(tabId);
 }
 
 export function closeTab(tabId: string): void {
@@ -742,9 +1060,181 @@ export function renameTab(tabId: string, title: string): void {
 export function setTabSql(tabId: string, sql: string): void {
   const found = findTab(panesState.root, tabId);
   if (!found) return;
-  if (found.tab.sql === sql) return;
-  found.tab.sql = sql;
-  found.tab.dirty = true;
+  if (found.tab.sql !== sql) {
+    found.tab.sql = sql;
+  }
+  // Recompute dirty against the saved baseline every call — undoing all
+  // the way back to the baseline (Ctrl+Z, Ctrl+Z, …) lands on the
+  // matching `sql === savedSql` branch and flips dirty back to false.
+  // Also handles the inverse: after a Reload (which moves savedSql),
+  // Monaco's setValue → onChange round-trip lands here and dirty
+  // collapses to false even if the previous frame was true.
+  const nextDirty = sql !== found.tab.savedSql;
+  if (found.tab.dirty !== nextDirty) {
+    found.tab.dirty = nextDirty;
+  }
+}
+
+/**
+ * Ctrl+S handler. Writes the active tab's SQL through to the catalog:
+ *   - Function tab: no-op (form state already persists via tabs.json).
+ *   - SQL tab with `filePath`: PUT in place, clear dirty.
+ *   - SQL tab without `filePath`: native save dialog rooted at the
+ *     catalog root, then PUT + attach the path so subsequent saves go
+ *     in-place. Files saved outside the catalog root are rejected — the
+ *     catalog is the unit of portability + the only thing the file API
+ *     can address.
+ *
+ * Silent no-ops on the pinned tabs (Models/Settings/etc.) — they aren't
+ * editable content.
+ */
+/**
+ * Opens a catalog-relative SQL file in a tab. If a tab is already
+ * attached to <paramref name="path"/> (anywhere in the pane tree, not
+ * just the focused leaf), focus it instead of opening a duplicate.
+ * Otherwise fetch the file's contents and drop a new SQL tab into the
+ * focused leaf with the path attached so subsequent Ctrl+S writes go
+ * in-place.
+ *
+ * No-op when the file doesn't exist on disk (404) — the explorer can
+ * race with an out-of-band delete. Errors are logged and swallowed; a
+ * silent failure is better than a thrown exception that blows up the
+ * click handler.
+ */
+export async function openFileInTab(path: string): Promise<void> {
+  // Already open? Focus + done.
+  let existing: { leaf: LeafPane; tab: Tab } | null = null;
+  forEachLeaf(panesState.root, (leaf) => {
+    if (existing) return;
+    const tab = leaf.tabs.find((t) => t.filePath === path);
+    if (tab) existing = { leaf, tab };
+  });
+  if (existing) {
+    const { leaf, tab } = existing as { leaf: LeafPane; tab: Tab };
+    leaf.activeTabId = tab.id;
+    panesState.focusedLeafId = leaf.id;
+    return;
+  }
+
+  let contents: string;
+  let mtime: number | undefined;
+  try {
+    const dto = await api.files.getContents(path);
+    contents = dto.contents ?? '';
+    mtime = mtimeOf(dto.modifiedAt);
+  } catch (err) {
+    console.warn('[tabs] open file failed', path, err);
+    return;
+  }
+
+  const leaf = getFocusedLeaf();
+  const basename = path.split('/').pop() ?? path;
+  const tab: Tab = {
+    id: newTabId(),
+    title: basename,
+    kind: 'sql',
+    sql: contents,
+    savedSql: contents,
+    dirty: false,
+    filePath: path,
+    baselineMtime: mtime,
+  };
+  leaf.tabs.push(tab);
+  leaf.activeTabId = tab.id;
+  panesState.focusedLeafId = leaf.id;
+}
+
+const saveInFlight = new Set<string>();
+
+export function saveActiveTab(): Promise<void> {
+  const tab = getActiveTab();
+  if (!tab) return Promise.resolve();
+  return saveTab(tab.id);
+}
+
+/**
+ * Save a specific tab by id. Same semantics as saveActiveTab but works
+ * on any tab in the tree — used by the dirty-close prompt to save a
+ * tab the user is closing whether or not it's the focused one.
+ */
+export async function saveTab(tabId: string): Promise<void> {
+  const found = findTab(panesState.root, tabId);
+  if (!found) return;
+  const tab = found.tab;
+  if (tab.kind !== 'sql') return;
+  if (tab.pinned) return;
+  // Ctrl+S can fire twice on platforms where both a native-menu
+  // accelerator and the window-level keydown listener catch the
+  // keystroke. Per-tab guard so the user doesn't see two save dialogs
+  // stacked, and so a quick repeat doesn't double-PUT.
+  if (saveInFlight.has(tab.id)) return;
+  saveInFlight.add(tab.id);
+  try {
+    await saveActiveTabInner(tab);
+  } finally {
+    saveInFlight.delete(tab.id);
+  }
+}
+
+async function saveActiveTabInner(tab: Tab): Promise<void> {
+  if (tab.filePath) {
+    const dto = await api.files.putContents(tab.filePath, { contents: tab.sql });
+    tab.savedSql = tab.sql;
+    tab.dirty = false;
+    // Advance baseline so the watcher tick fired by our own write
+    // doesn't bounce back as an external-change prompt.
+    tab.baselineMtime = mtimeOf(dto.modifiedAt);
+    return;
+  }
+
+  // Scratch tab — prompt the user for a path. Default to catalog root so
+  // they land inside the catalog without having to navigate from $HOME.
+  const eh = window.electronHost;
+  if (!eh) return;
+  let defaultPath: string | undefined;
+  try {
+    const root = await api.files.getRoot();
+    defaultPath = root.catalogRoot;
+  } catch (err) {
+    console.warn('[tabs] catalog root lookup failed', err);
+  }
+  const suggested = tab.title.endsWith('.sql') ? tab.title : `${tab.title}.sql`;
+  const result = await eh.showSaveDialog({
+    defaultPath: defaultPath ? `${defaultPath}/${suggested}` : suggested,
+    filters: [{ name: 'SQL', extensions: ['sql'] }],
+  });
+  if (result.canceled || !result.filePath || !defaultPath) return;
+
+  const relPath = relativizeUnderCatalog(result.filePath, defaultPath);
+  if (relPath === null) {
+    console.warn('[tabs] save target outside catalog root, ignoring', result.filePath);
+    return;
+  }
+
+  const dto = await api.files.putContents(relPath, { contents: tab.sql });
+  tab.filePath = relPath;
+  tab.title = relPath.split('/').pop() ?? relPath;
+  tab.savedSql = tab.sql;
+  tab.dirty = false;
+  tab.baselineMtime = mtimeOf(dto.modifiedAt);
+}
+
+/**
+ * Converts an absolute path the OS dialog returned into a catalog-
+ * relative forward-slash path, or null when the absolute path doesn't
+ * live under the catalog root. The dialog's filePath uses the host
+ * OS separator (backslash on Windows); both forms normalize the same
+ * way for prefix-matching.
+ */
+function relativizeUnderCatalog(absolute: string, catalogRoot: string): string | null {
+  const normAbs = absolute.replace(/\\/g, '/');
+  const normRoot = catalogRoot.replace(/\\/g, '/').replace(/\/$/, '');
+  // Case-insensitive on Windows; the platform check would mirror this
+  // distinction more precisely, but startsWith with .toLowerCase() is a
+  // small enough surface that the cross-platform consistency is worth
+  // the comparison cost.
+  if (!normAbs.toLowerCase().startsWith(normRoot.toLowerCase() + '/')) return null;
+  return normAbs.substring(normRoot.length + 1);
 }
 
 /**
@@ -940,6 +1430,7 @@ export function importTabIntoLeaf(
     title: tab.title,
     kind,
     sql: tab.sql,
+    savedSql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,
   };
@@ -983,6 +1474,7 @@ export function importTabAsSplit(
     title: tab.title,
     kind,
     sql: tab.sql,
+    savedSql: tab.sql,
     dirty: false,
     editorSize: tab.editorSize,
   };

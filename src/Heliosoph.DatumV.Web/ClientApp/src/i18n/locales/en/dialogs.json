@@ -49,6 +49,22 @@
       "allInFlightHint": "All required models are already downloading. Cancel and resubmit when they finish."
     }
   },
+  "externalChange": {
+    "title": "File changed on disk",
+    "message": "{name} has been modified outside the editor.",
+    "detailClean": "Reload to pick up the latest version, or keep the editor's current contents.",
+    "detailDirty": "You have unsaved changes in this tab. Reloading will discard them.",
+    "reload": "Reload",
+    "keep": "Keep current"
+  },
+  "unsavedChanges": {
+    "title": "Unsaved changes",
+    "message": "{name} has unsaved changes.",
+    "detail": "Save your changes before closing?",
+    "save": "Save",
+    "dontSave": "Don't Save",
+    "cancel": "Cancel"
+  },
   "about": {
     "title": "About DatumV",
     "tagline": "DatumV™ — Heliosoph",

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
-import { panesState, findLeaf, type PaneNode } from '@/state/tabs';
+import { panesState, findLeaf, saveActiveTab, type PaneNode } from '@/state/tabs';
 import { runTab } from '@/state/execution';
 import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
@@ -31,13 +31,22 @@ export function QueryEditorView() {
     const handler = (e: KeyboardEvent) => {
       const isRunKey =
         ((e.ctrlKey || e.metaKey) && e.key === 'Enter') || e.key === 'F5';
-      if (!isRunKey) return;
+      const isSaveKey = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
+      if (!isRunKey && !isSaveKey) return;
       if (e.defaultPrevented) return; // a Monaco editor already handled it.
       const leafId = panesState.focusedLeafId;
       const leaf = findLeaf(panesState.root, leafId);
       if (!leaf || leaf.activeTabId === null) return;
       const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
       if (!tab) return;
+      if (isSaveKey) {
+        // saveActiveTab is a no-op on pinned + function tabs internally;
+        // unconditionally preventDefault so Ctrl+S never falls through
+        // to the browser's "Save Page As" dialog inside Electron.
+        e.preventDefault();
+        void saveActiveTab();
+        return;
+      }
       // Models tab has nothing to run — let the keystroke fall through
       // without preventDefault so the user's browser shortcut (e.g.
       // refresh on F5) isn't suppressed without doing anything in return.

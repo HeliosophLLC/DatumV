@@ -31,7 +31,7 @@ export function ProceduresPanel({ side }: { side: DockSide }) {
   }, []);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col select-none">
       <PanelHeader title={tPanels('procedures.title')} onClose={() => closePanel(side)} />
       <div className="flex-1 overflow-y-auto py-1 text-xs">
       <Section

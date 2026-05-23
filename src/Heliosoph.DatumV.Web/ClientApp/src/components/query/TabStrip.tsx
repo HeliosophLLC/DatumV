@@ -17,7 +17,7 @@ import {
 import {
   panesState,
   openTab,
-  closeTab,
+  requestCloseTab,
   selectTab,
   renameTab,
   moveTab,
@@ -153,6 +153,7 @@ export function TabStrip({ leafId }: { leafId: string }) {
         id={tab.id}
         index={index}
         title={tab.title}
+        filePath={tab.filePath}
         kind={tab.kind}
         sql={tab.sql}
         editorSize={tab.editorSize}
@@ -160,7 +161,6 @@ export function TabStrip({ leafId }: { leafId: string }) {
         pinned={tab.pinned === true}
         active={tab.id === leaf.activeTabId}
         isStreaming={isStreaming}
-        renameLabel={t('renameTab')}
         renamePromptLabel={t('renamePrompt')}
         closeLabel={t('closeTab')}
       />
@@ -289,6 +289,7 @@ function TabChip({
   id,
   index,
   title,
+  filePath,
   kind,
   sql,
   editorSize,
@@ -296,7 +297,6 @@ function TabChip({
   pinned,
   active,
   isStreaming,
-  renameLabel,
   renamePromptLabel,
   closeLabel,
 }: {
@@ -304,6 +304,7 @@ function TabChip({
   id: string;
   index: number;
   title: string;
+  filePath: string | undefined;
   kind: TabKind;
   sql: string;
   editorSize: number | undefined;
@@ -311,7 +312,6 @@ function TabChip({
   pinned: boolean;
   active: boolean;
   isStreaming: boolean;
-  renameLabel: string;
   renamePromptLabel: string;
   closeLabel: string;
 }) {
@@ -336,7 +336,7 @@ function TabChip({
 
   function onClose(e: React.MouseEvent) {
     e.stopPropagation();
-    closeTab(id);
+    void requestCloseTab(id);
   }
 
   function onMouseDown(e: React.MouseEvent) {
@@ -346,7 +346,7 @@ function TabChip({
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
-      if (!pinned) closeTab(id);
+      if (!pinned) void requestCloseTab(id);
     }
   }
 
@@ -459,6 +459,10 @@ function TabChip({
     }
   }
 
+  // File-backed tabs read their label from the filename so the strip
+  // shows what's on disk, not the user's last rename. Pinned chips win
+  // first because their localized labels never overlap with file names.
+  const fileBasename = filePath ? (filePath.split('/').pop() ?? null) : null;
   const displayTitle =
     kind === 'models'
       ? tModels('title')
@@ -468,7 +472,7 @@ function TabChip({
           ? tSettingsNs('title')
           : kind === 'docs'
             ? tDocs('title')
-            : title;
+            : (fileBasename ?? title);
 
   return (
     <div
@@ -484,7 +488,12 @@ function TabChip({
       onClick={onSelect}
       onMouseDown={onMouseDown}
       onDoubleClick={onRename}
-      title={pinned ? displayTitle : renameLabel}
+      // Hover tooltip: pinned chips show their localized label (chip is
+      // icon-only). File-backed tabs show the catalog-relative path so
+      // the user can disambiguate two tabs with the same basename. Scratch
+      // tabs show their title. Rename is on double-click — advertising
+      // "Rename" in the tooltip mismatched the actual click behavior.
+      title={pinned ? displayTitle : (filePath ?? title)}
       className={cn(
         'group border-border relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 py-1.5 text-sm transition-colors',
         active

@@ -905,6 +905,17 @@ ipcMain.handle('fs.showOpenDialog', async (event, options: Electron.OpenDialogOp
   return await electronDialog.showOpenDialog(parentWin, options);
 });
 
+// Native file save dialog. Parented to the sender's window so it inherits
+// modality. The SPA's editor Ctrl+S handler uses this for scratch SQL
+// tabs — the renderer hands in the catalog root as defaultPath; main
+// returns the absolute path the user chose, then the renderer writes
+// through PUT /api/files/contents using a catalog-relative form.
+ipcMain.handle('fs.showSaveDialog', async (event, options: Electron.SaveDialogOptions) => {
+  const parentWin = BrowserWindow.fromWebContents(event.sender);
+  if (!parentWin) return { canceled: true, filePath: undefined };
+  return await electronDialog.showSaveDialog(parentWin, options);
+});
+
 // Open a URL in the user's default OS browser. Restricted to http(s) —
 // renderer code shouldn't be able to launch arbitrary protocol handlers
 // (file://, mailto:, custom-scheme:) that the user didn't initiate. This

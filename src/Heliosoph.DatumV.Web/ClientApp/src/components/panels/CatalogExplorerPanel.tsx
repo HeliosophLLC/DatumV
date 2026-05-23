@@ -158,7 +158,7 @@ export function CatalogExplorerPanel({ side: _side }: { side: DockSide }) {
   const isRefreshing = status === 'loading' && tables.length > 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col select-none">
       <PanelHeader
         title={tPanels('catalog.title')}
         actions={
