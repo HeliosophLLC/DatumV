@@ -68,7 +68,7 @@ export function CalibrationChip() {
   if (active) {
     chipLabel = t('calibrationChip.rampingShort');
     chipClasses =
-      'border-blue-700 bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600';
+      'animate-pulse border-blue-700 bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600';
   } else if (recentInWindow) {
     chipLabel = t('calibrationChip.label');
     chipClasses =
