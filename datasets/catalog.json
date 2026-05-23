@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Heliosoph.DatumV dataset catalog — v1 manifest read by the in-app Datasets",
+    "DatumV dataset catalog — v1 manifest read by the in-app Datasets",
     "panel and (eventually) the catalog-aware datasets.<name> SQL resolver.",
     "",
     "Schema shape:",
@@ -16,7 +16,7 @@
     "",
     "Install pipeline: download source(s) into the raw cache",
     "(`DATUMV_DATASETS`) -> for each ingest[] job, point",
-    "Heliosoph.DatumV.Ingestion.Ingester at the named source path so the",
+    "DatumV.Ingestion.Ingester at the named source path so the",
     "output `.datum` lands at <catalog>/datasets/<variantId>/<version>/<tableName>.datum.",
     "The FormatRegistry resolves the format from the source file's",
     "extension or magic bytes (e.g. ZipDeserializer reads a JPEG-bag",
@@ -407,7 +407,7 @@
                 {
                   "type": "huggingface",
                   "repoType": "dataset",
-                  "repo": "Heliosoph.DatumV/LJ-Speech-Dataset",
+                  "repo": "DatumV/LJ-Speech-Dataset",
                   "revision": "81d7ce28576278f81036034a94b4cf87180daf17",
                   "include": ["LJSpeech-1.1.tar.gz"]
                 }

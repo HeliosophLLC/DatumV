@@ -24,7 +24,7 @@ namespace Heliosoph.DatumV.Catalog.Providers;
 /// <c>WHERE body_scope = 'modelbody'</c>; the plan-time gate refuses
 /// out-of-context call sites separately.
 /// </remarks>
-internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBase
+internal sealed class SystemFunctionsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system.functions";
@@ -34,7 +34,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
     private readonly FunctionRegistry _registry;
 
     /// <summary>Creates a provider backed by the given function registry.</summary>
-    internal DatumCatalogFunctionsProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
+    internal SystemFunctionsProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
     {
         _registry = registry;
     }
@@ -176,7 +176,7 @@ internal sealed class DatumCatalogFunctionsProvider : NonSeekableTableProviderBa
 /// data_type, is_optional. Only scalar functions with declared signatures
 /// are included; aggregate and TVF parameters are not surfaced here.
 /// </remarks>
-internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableProviderBase
+internal sealed class SystemFunctionParametersProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system.function_parameters";
@@ -186,7 +186,7 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
     private readonly FunctionRegistry _registry;
 
     /// <summary>Creates a provider backed by the given function registry.</summary>
-    internal DatumCatalogFunctionParametersProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
+    internal SystemFunctionParametersProvider(Pool pool, FunctionRegistry registry) : base(pool, QualifiedName.Parse(TableName))
     {
         _registry = registry;
     }
@@ -285,7 +285,7 @@ internal sealed class DatumCatalogFunctionParametersProvider : NonSeekableTableP
 /// Rows are sourced from <see cref="ITableProvider.GetManifest"/>. Providers
 /// without a manifest (virtual tables, non-analysed sources) produce no rows.
 /// </remarks>
-internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderBase
+internal sealed class SystemStatisticsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system.statistics";
@@ -295,7 +295,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects statistics from all registered tables.</summary>
-    internal DatumCatalogStatisticsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
+    internal SystemStatisticsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }
@@ -453,7 +453,7 @@ internal sealed class DatumCatalogStatisticsProvider : NonSeekableTableProviderB
 /// Rows are sourced from <see cref="ITableProvider.GetSourceIndex"/>. Providers
 /// without a source index produce no rows.
 /// </remarks>
-internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
+internal sealed class SystemIndexesProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system.indexes";
@@ -463,7 +463,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects index metadata from all registered tables.</summary>
-    internal DatumCatalogIndexesProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
+    internal SystemIndexesProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }
@@ -597,7 +597,7 @@ internal sealed class DatumCatalogIndexesProvider : NonSeekableTableProviderBase
 /// Rows are sourced from <see cref="QueryResultsManifest.Interactions"/>.
 /// Tables without a manifest or without computed interactions produce no rows.
 /// </remarks>
-internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProviderBase
+internal sealed class SystemInteractionsProvider : NonSeekableTableProviderBase
 {
     /// <summary>The conventional table name registered in the catalog.</summary>
     public const string TableName = "system.interactions";
@@ -607,7 +607,7 @@ internal sealed class DatumCatalogInteractionsProvider : NonSeekableTableProvide
     private readonly TableCatalog _catalog;
 
     /// <summary>Creates a provider that reflects interaction data from all registered tables.</summary>
-    internal DatumCatalogInteractionsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
+    internal SystemInteractionsProvider(Pool pool, TableCatalog catalog) : base(pool, QualifiedName.Parse(TableName))
     {
         _catalog = catalog;
     }

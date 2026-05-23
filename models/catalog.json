@@ -1,7 +1,7 @@
 {
   "$schema": "./catalog.schema.json",
   "_comment": [
-    "Heliosoph.DatumV model catalog — v1 manifest read by the in-app Model Manager",
+    "DatumV model catalog — v1 manifest read by the in-app Model Manager",
     "and (eventually) the catalog-aware variants of scripts/download-*.ps1.",
     "",
     "Schema notes:",
@@ -21,7 +21,7 @@
     "    derivative contributors (fine-tuner / quantizer / ONNX exporter).",
     "    Surfaced in the model card; HF READMEs inherit from this list.",
     "",
-    "Entries marked `placeholder: true` point at huggingface.co/Heliosoph.DatumV/*",
+    "Entries marked `placeholder: true` point at huggingface.co/Heliosoph/*",
     "repos that do not exist yet — see models/upload-plan.json for the upload",
     "plan that brings them online. The downloader should treat placeholder",
     "entries as unavailable until they're cleared.",
@@ -38,10 +38,10 @@
     "The downloader tries each in order; the first source that can list and",
     "deliver every expected file wins. Each source has a `type` discriminator",
     "(today: 'huggingface', 'github-release', 'https') that selects which",
-    "client knows how to fetch from it. Heliosoph.DatumV-mirror first is the policy:",
-    "pinned-sha Heliosoph.DatumV entries lead for reproducibility; upstream URLs",
-    "trail as fallbacks (where present) so a Heliosoph.DatumV outage doesn't block",
-    "downloads. Today most entries declare a single Heliosoph.DatumV source — adding",
+    "client knows how to fetch from it. Heliosoph-mirror first is the policy:",
+    "pinned-sha Heliosoph entries lead for reproducibility; upstream URLs",
+    "trail as fallbacks (where present) so a Heliosoph outage doesn't block",
+    "downloads. Today most entries declare a single Heliosoph source — adding",
     "an upstream fallback per entry is a future per-model judgement call.",
     "",
     "Install SQL: a model entry may optionally include `installSql`, a path",
@@ -384,7 +384,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/florence-2-base-ft-fp16-onnx",
+              "repo": "Heliosoph/florence-2-base-ft-fp16-onnx",
               "revision": "2e11444f5ad958b10719bdefba8bbaf53bb20ac9",
               "include": [
                 "*.onnx",
@@ -448,7 +448,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/florence-2-base-ft-quantized-onnx",
+              "repo": "Heliosoph/florence-2-base-ft-quantized-onnx",
               "revision": "319f5a0a4cafca00d363aeecf43bcbe45e79f48e",
               "include": [
                 "*.onnx",
@@ -505,7 +505,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/vit-gpt2-image-captioning-onnx",
+              "repo": "Heliosoph/vit-gpt2-image-captioning-onnx",
               "revision": "3dad8333f9ccef7b81a5bc5e6d71a4a341944ce1",
               "include": [
                 "*.onnx",
@@ -544,7 +544,7 @@
       ],
       "attributions": [
         "Vikhyat Korrapati — Moondream",
-        "Heliosoph.DatumV (Optimum ONNX export from vikhyatk/moondream2 PyTorch weights)"
+        "Heliosoph (Optimum ONNX export from vikhyatk/moondream2 PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 4096,
@@ -557,7 +557,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/moondream2-onnx",
+              "repo": "Heliosoph/moondream2-onnx",
               "revision": "a5a7e0a0e55a53de6b1ae349edeba6a33a0d4f83",
               "include": [
                 "decoder_model_merged_fp16.onnx",
@@ -611,7 +611,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_s.onnx",
@@ -660,7 +660,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_nano.onnx",
@@ -709,7 +709,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_x.onnx",
@@ -758,7 +758,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_tiny.onnx",
@@ -806,7 +806,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_m.onnx",
@@ -855,7 +855,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_l.onnx",
@@ -904,7 +904,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/yolox-onnx",
+              "repo": "Heliosoph/yolox-onnx",
               "revision": "a234298d8a5fffd47f293c4ac4465c6f8f4d4122",
               "include": [
                 "yolox_darknet.onnx",
@@ -1114,7 +1114,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/sam-onnx",
+              "repo": "Heliosoph/sam-onnx",
               "revision": "465be8e75889fea5afd37924f678ad6559ed5439",
               "include": [
                 "mobile_sam_image_encoder.onnx",
@@ -1168,7 +1168,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/u2net-onnx",
+              "repo": "Heliosoph/u2net-onnx",
               "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59",
               "include": [
                 "u2netp.onnx"
@@ -1216,7 +1216,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/u2net-onnx",
+              "repo": "Heliosoph/u2net-onnx",
               "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59",
               "include": [
                 "u2net.onnx"
@@ -1263,7 +1263,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/dpt-large-onnx",
+              "repo": "Heliosoph/dpt-large-onnx",
               "revision": "b7927a19c25a7b855da2ce55c00bfbb63bc35641",
               "include": [
                 "dpt_large_384.onnx"
@@ -1310,7 +1310,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/midas-small-onnx",
+              "repo": "Heliosoph/midas-small-onnx",
               "revision": "f3a5a5e4c852c7bfac10517767e5b0636cb42b92",
               "include": [
                 "midas_v21_small_256.onnx"
@@ -1870,7 +1870,7 @@
       ],
       "attributions": [
         "Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)",
-        "Heliosoph.DatumV (Optimum / torch.onnx.export from Intel/zoedepth-nyu-kitti PyTorch weights)"
+        "Heliosoph (Optimum / torch.onnx.export from Intel/zoedepth-nyu-kitti PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 2048,
@@ -1883,7 +1883,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/zoedepth-nyu-kitti-onnx",
+              "repo": "Heliosoph/zoedepth-nyu-kitti-onnx",
               "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a",
               "include": [
                 "model.onnx",
@@ -1925,7 +1925,7 @@
       ],
       "attributions": [
         "Shariq Farooq Bhat, Reiner Birkl, Diana Wofk, Peter Wonka, Matthias Müller — ZoeDepth (Intel ISL)",
-        "Heliosoph.DatumV (Optimum + onnxconverter-common fp16 conversion from Intel/zoedepth-nyu-kitti PyTorch weights)"
+        "Heliosoph (Optimum + onnxconverter-common fp16 conversion from Intel/zoedepth-nyu-kitti PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 1024,
@@ -1938,7 +1938,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/zoedepth-nyu-kitti-onnx",
+              "repo": "Heliosoph/zoedepth-nyu-kitti-onnx",
               "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a",
               "include": [
                 "model_fp16.onnx",
@@ -1980,7 +1980,7 @@
       ],
       "attributions": [
         "Stability AI + Tripo AI / VAST-AI-Research — TripoSR (Tochilkin, Pankratz, Liu, Huang, Letts, Li, Liang, Laforte, Jampani, Cao, 2024)",
-        "Heliosoph.DatumV (ONNX export from upstream PyTorch weights)"
+        "Heliosoph (ONNX export from upstream PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 4096,
@@ -1993,7 +1993,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/triposr-onnx",
+              "repo": "Heliosoph/triposr-onnx",
               "revision": "74e81c9afeeb53a236a1ae75dfb09c7fc6d95e58",
               "include": [
                 "triplane.onnx",
@@ -2099,7 +2099,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/mediapipe-face-onnx",
+              "repo": "Heliosoph/mediapipe-face-onnx",
               "revision": "40558a441d87663a533137cefb838e853ef491da",
               "include": [
                 "float/*"
@@ -2151,7 +2151,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/mediapipe-face-onnx",
+              "repo": "Heliosoph/mediapipe-face-onnx",
               "revision": "40558a441d87663a533137cefb838e853ef491da",
               "include": [
                 "int8/*"
@@ -2199,7 +2199,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/paddleocr-v4-det-onnx",
+              "repo": "Heliosoph/paddleocr-v4-det-onnx",
               "revision": "e8454256830dd5e4eb08f9e6f6d8b84d7d1c9dab",
               "include": [
                 "ch_PP-OCRv4_det.onnx"
@@ -2236,7 +2236,7 @@
       ],
       "attributions": [
         "Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)",
-        "Heliosoph.DatumV (Optimum ONNX export from microsoft/trocr-base-printed PyTorch weights)"
+        "Heliosoph (Optimum ONNX export from microsoft/trocr-base-printed PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 1024,
@@ -2249,7 +2249,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/trocr-base-printed-onnx",
+              "repo": "Heliosoph/trocr-base-printed-onnx",
               "revision": "4fcdb5c7813942239ddb6c2539daa36be5018480",
               "include": [
                 "onnx/encoder_model.onnx",
@@ -2296,7 +2296,7 @@
       ],
       "attributions": [
         "Microsoft Research — TrOCR (Li, Lv, Yu, Cui, Lu, Wei, 2021)",
-        "Heliosoph.DatumV (Optimum fp16 ONNX export from microsoft/trocr-base-printed PyTorch weights)"
+        "Heliosoph (Optimum fp16 ONNX export from microsoft/trocr-base-printed PyTorch weights)"
       ],
       "hardware": {
         "minRamMb": 512,
@@ -2309,7 +2309,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/trocr-base-printed-onnx",
+              "repo": "Heliosoph/trocr-base-printed-onnx",
               "revision": "4fcdb5c7813942239ddb6c2539daa36be5018480",
               "include": [
                 "onnx/encoder_model_fp16.onnx",
@@ -2365,7 +2365,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/realesrgan-onnx",
+              "repo": "Heliosoph/realesrgan-onnx",
               "revision": "488e5dda07333179f229a6205d92135eea4c25e9",
               "include": [
                 "realesr-general-x4v3.onnx"
@@ -2414,7 +2414,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/swinir-onnx",
+              "repo": "Heliosoph/swinir-onnx",
               "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06",
               "include": [
                 "swinir_realsr_x4.onnx"
@@ -2462,7 +2462,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/swinir-onnx",
+              "repo": "Heliosoph/swinir-onnx",
               "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06",
               "include": [
                 "swinir_denoising_color_25.onnx"
@@ -2511,7 +2511,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_color_real_psnr.onnx",
@@ -2562,7 +2562,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_color_real_gan.onnx",
@@ -2619,7 +2619,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_color_15.onnx",
@@ -2676,7 +2676,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_color_25.onnx",
@@ -2733,7 +2733,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_color_50.onnx",
@@ -2791,7 +2791,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_gray_15.onnx",
@@ -2849,7 +2849,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_gray_25.onnx",
@@ -2908,7 +2908,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/scunet-onnx",
+              "repo": "Heliosoph/scunet-onnx",
               "revision": "75c7857c1ae254174fbeed18fa57fe4a1acb9ecf",
               "include": [
                 "scunet_gray_50.onnx",
@@ -2959,7 +2959,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/mobilenetv2-onnx",
+              "repo": "Heliosoph/mobilenetv2-onnx",
               "revision": "c0ec47a7c78d4a60f37c2cd8c65d6bd5e5e6289c",
               "include": [
                 "mobilenetv2-12.onnx",
@@ -3007,7 +3007,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/kokoro-v1.0-onnx",
+              "repo": "Heliosoph/kokoro-v1.0-onnx",
               "revision": "c5a2538d51dae0519689f84b89bb189ddeeea3c3",
               "include": [
                 "kokoro-v1.0.onnx",
@@ -3178,7 +3178,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/absolute-reality-hyper-onnx",
+              "repo": "Heliosoph/absolute-reality-hyper-onnx",
               "revision": "991ad06804ea1e50c1c763c4034537b104a237ca",
               "include": [
                 "**/*"
@@ -3229,7 +3229,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/dreamshaper-hyper-onnx",
+              "repo": "Heliosoph/dreamshaper-hyper-onnx",
               "revision": "688bcca73391b678eae25ad7020c9bb7fa297239",
               "include": [
                 "**/*"
@@ -3280,7 +3280,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/epicrealism-hyper-onnx",
+              "repo": "Heliosoph/epicrealism-hyper-onnx",
               "revision": "e3431df3011a8b9a80cfd281e04f158b8ecbd4cc",
               "include": [
                 "**/*"
@@ -3331,7 +3331,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/mo-di-hyper-onnx",
+              "repo": "Heliosoph/mo-di-hyper-onnx",
               "revision": "a67d98c917fcba4a93f99de56bb17986cb60a1d2",
               "include": [
                 "**/*"
@@ -3381,7 +3381,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/openjourney-hyper-onnx",
+              "repo": "Heliosoph/openjourney-hyper-onnx",
               "revision": "8dcbd8fcac0a7c79d2c793b08f07843b394f37a4",
               "include": [
                 "**/*"
@@ -3433,7 +3433,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/realistic-vision-hyper-onnx",
+              "repo": "Heliosoph/realistic-vision-hyper-onnx",
               "revision": "03929f3369a4daa8e0e4c988fb90b39b15cf2274",
               "include": [
                 "**/*"
@@ -3484,7 +3484,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/juggernaut-xl-lightning-onnx",
+              "repo": "Heliosoph/juggernaut-xl-lightning-onnx",
               "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7",
               "include": [
                 "**/*"
@@ -3533,7 +3533,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/sd-turbo-onnx",
+              "repo": "Heliosoph/sd-turbo-onnx",
               "revision": "611cbf7fa293601889e84fdd2e4177bc7f4b9fab",
               "include": [
                 "**/*"
@@ -3582,7 +3582,7 @@
           "sources": [
             {
               "type": "huggingface",
-              "repo": "Heliosoph.DatumV/sdxl-turbo-onnx",
+              "repo": "Heliosoph/sdxl-turbo-onnx",
               "revision": "b5182c3d2301755eef59dae6d32d8521f8a6081a",
               "include": [
                 "**/*"

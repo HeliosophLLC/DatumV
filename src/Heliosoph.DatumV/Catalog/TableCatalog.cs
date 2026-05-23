@@ -160,7 +160,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // views. They reject CREATE / DROP / CREATE INDEX but accept Add()
         // so the host can attach providers (e.g. ModelsTableProvider).
         this.SystemCatalog = new ReadOnlyTableCatalog(new[] { "system" });
-        this.VirtualCatalog = new ReadOnlyTableCatalog(new[] { "information_schema", "system" });
+        this.VirtualCatalog = new ReadOnlyTableCatalog(new[] { "information_schema" });
 
         // Models is a real, non-droppable schema mounted alongside the
         // other built-ins (S9). The schema is empty as a table namespace —
@@ -173,14 +173,13 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         this.ModelCatalog = new ReadOnlyTableCatalog(new[] { "models" });
 
         // Schema → backend map. Lookups, DDL, and Add() route through this.
-        // Public is the home for user data; system/info_schema/system/
+        // Public is the home for user data; system/information_schema/
         // models are read-only projections.
         this.Backends = new Dictionary<string, ITableCatalog>(StringComparer.OrdinalIgnoreCase)
         {
             ["public"] = FlatFileCatalog,
             ["system"] = SystemCatalog,
             ["information_schema"] = VirtualCatalog,
-            ["system"] = VirtualCatalog,
             ["models"] = ModelCatalog,
         };
 
@@ -191,18 +190,18 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         SystemCatalog.Add(new Providers.ProceduresTableProvider(pool, Procedures));
         SystemCatalog.Add(new Providers.ViewsTableProvider(pool, Views));
         SystemCatalog.Add(new Providers.SystemFilesProvider(pool, catalogDirectory, this));
+        SystemCatalog.Add(new Providers.TaskContractsTableProvider(pool));
+        SystemCatalog.Add(new Providers.SystemFunctionsProvider(pool, Functions));
+        SystemCatalog.Add(new Providers.SystemFunctionParametersProvider(pool, Functions));
+        SystemCatalog.Add(new Providers.SystemStatisticsProvider(pool, this));
+        SystemCatalog.Add(new Providers.SystemIndexesProvider(pool, this));
+        SystemCatalog.Add(new Providers.SystemInteractionsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaTablesProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaColumnsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaSchemataProvider(pool));
         VirtualCatalog.Add(new Providers.InformationSchemaTableConstraintsProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaKeyColumnUsageProvider(pool, this));
         VirtualCatalog.Add(new Providers.InformationSchemaViewsProvider(pool, Views));
-        VirtualCatalog.Add(new Providers.DatumCatalogFunctionsProvider(pool, Functions));
-        VirtualCatalog.Add(new Providers.DatumCatalogFunctionParametersProvider(pool, Functions));
-        SystemCatalog.Add(new Providers.TaskContractsTableProvider(pool));
-        VirtualCatalog.Add(new Providers.DatumCatalogStatisticsProvider(pool, this));
-        VirtualCatalog.Add(new Providers.DatumCatalogIndexesProvider(pool, this));
-        VirtualCatalog.Add(new Providers.DatumCatalogInteractionsProvider(pool, this));
 
         // Replay any persisted UDFs / procedures into the registries.
         // Done after the system table registrations so the rehydrated

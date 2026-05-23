@@ -21,17 +21,18 @@ interface DialogOpenSpec {
   modal?: boolean;
 }
 
+// Identify the app to the OS. On Windows, toast notifications display the
+// AppUserModelId as their title — without this they read "electron.app.Electron".
+// setName overrides package.json's productName for `app.getName()`, the default
+// menu's "About …" item, and the window-title fallback.
+app.setName('DatumV');
+app.setAppUserModelId('com.heliosoph.datumv');
+
 // Single-instance lock. Without this, the user double-clicking the
 // shortcut would spawn a second Electron + .NET pair, which the .NET
 // catalog opener doesn't tolerate (it holds an exclusive file lock).
 // Failing to get the lock → quit immediately; the existing instance's
 // 'second-instance' handler focuses its main window.
-// Identify the app to the OS. On Windows, toast notifications display the
-// AppUserModelId as their title — without this they read "electron.app.Electron".
-// setName also reframes the default menu item ("About electron" → "About Heliosoph.DatumV")
-// and is the source of `app.getName()` used elsewhere.
-
-
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
@@ -424,7 +425,7 @@ ipcMain.handle('dialog.open', async (event, spec: DialogOpenSpec) => {
       parent: parentWin,
       modal: spec.modal !== false,
     });
-    dialog.setTitle(`Heliosoph.DatumV — ${spec.kind}`);
+    dialog.setTitle(`DatumV — ${spec.kind}`);
 
     let settled = false;
     const settle = (result: unknown) => {

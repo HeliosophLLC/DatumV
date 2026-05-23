@@ -84,7 +84,7 @@ export function DialogShell() {
 
   useEffect(() => {
     if (!parsed) return;
-    document.title = `Heliosoph.DatumV — ${parsed.kind}`;
+    document.title = `DatumV — ${parsed.kind}`;
   }, [parsed]);
 
   if (!parsed || !parsed.requestId) {

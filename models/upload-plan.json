@@ -2,7 +2,7 @@
   "$schema": "./upload-plan.schema.json",
   "_comment": [
     "Pre-flight plan for uploading the curated ONNX artifacts under E:/Models to the",
-    "huggingface.co/Heliosoph.DatumV organization. Each entry pairs a local folder with its",
+    "huggingface.co/Heliosoph organization. Each entry pairs a local folder with its",
     "target HF repo, license obligations, and provenance.",
     "",
     "Workflow per entry:",
@@ -11,7 +11,7 @@
     "     the local folder as README.md. Fill in any [BRACKETED] placeholders.",
     "  3. Drop the upstream LICENSE file(s) listed in `licenseFiles` into the folder.",
     "  4. huggingface-cli login (one-time).",
-    "  5. huggingface-cli upload Heliosoph.DatumV/<repoSuffix> <localFolder> --repo-type model",
+    "  5. huggingface-cli upload Heliosoph/<repoSuffix> <localFolder> --repo-type model",
     "  6. Once uploaded, copy the commit sha from the HF web UI into models/catalog.json's",
     "     `source.revision` field for that model.",
     "",
@@ -20,7 +20,7 @@
     "All license assignments below need a human eyeball before upload."
   ],
   "schemaVersion": 1,
-  "organization": "Heliosoph.DatumV",
+  "organization": "Heliosoph",
   "uploads": [
     {
       "repoSuffix": "absolute-reality-hyper-onnx",
@@ -418,7 +418,7 @@
         "url": "https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE",
         "confidence": "high",
         "requiresAcceptance": false,
-        "notes": "Baidu / Chinese-affiliated source — Heliosoph.DatumV mirror is a trade-stability hedge."
+        "notes": "Baidu / Chinese-affiliated source — Heliosoph mirror is a trade-stability hedge."
       },
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE" }
@@ -442,7 +442,7 @@
         "url": "https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE",
         "confidence": "high",
         "requiresAcceptance": false,
-        "notes": "Chinese-affiliated author — Heliosoph.DatumV mirror is a trade-stability hedge."
+        "notes": "Chinese-affiliated author — Heliosoph mirror is a trade-stability hedge."
       },
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://raw.githubusercontent.com/xinntao/Real-ESRGAN/master/LICENSE" }
@@ -580,7 +580,7 @@
         "baseModel": "vikhyatk/moondream2 — Apache-2.0 (Vikhyat Korrapati, 2024). 1.86B-param vision-language model: SigLIP vision encoder + Phi-1.5-based text decoder + cross-modal projection.",
         "exportToolchain": "Optimum ONNX exporter from upstream PyTorch weights. Multi-file export pattern: vision encoder, text decoder (with KV-cache merged), and embed_tokens as separate ONNX files. Original conversion was done locally; the exact toolchain version isn't recorded — re-derivation would need someone to re-run `optimum-cli export onnx --model vikhyatk/moondream2 --task image-to-text` against current Optimum + verify the output matches.",
         "precision": "fp32",
-        "notes": "Re-hosted under Heliosoph.DatumV for distribution stability — vikhyatk/moondream2 doesn't ship its own ONNX exports, the file layout drifts across revisions, and runtimes that need ONNX have nowhere upstream to point at. This is the canonical ONNX form for the model. Drive via raw onnxruntime sessions (onnxruntime-genai's model_builder doesn't currently accept Moondream2's architecture)."
+        "notes": "Re-hosted under Heliosoph for distribution stability — vikhyatk/moondream2 doesn't ship its own ONNX exports, the file layout drifts across revisions, and runtimes that need ONNX have nowhere upstream to point at. This is the canonical ONNX form for the model. Drive via raw onnxruntime sessions (onnxruntime-genai's model_builder doesn't currently accept Moondream2's architecture)."
       },
       "license": {
         "spdx": "Apache-2.0",
@@ -626,7 +626,7 @@
       "repoSuffix": "trocr-base-printed-onnx",
       "sourceFolder": "${DATUMV_MODELS}/trocr-base-printed-fp16",
       "expectedSizeMb": 2100,
-      "exportedBy": "scripts/export-trocr-base-printed-fp16.ps1 (despite the -fp16 suffix on the script name, it now produces both fp32 + fp16 .onnx files in the same staging folder for the bundled Heliosoph.DatumV repo)",
+      "exportedBy": "scripts/export-trocr-base-printed-fp16.ps1 (despite the -fp16 suffix on the script name, it now produces both fp32 + fp16 .onnx files in the same staging folder for the bundled Heliosoph repo)",
       "expectedContents": [
         "onnx/encoder_model.onnx",
         "onnx/encoder_model_fp16.onnx",
@@ -641,12 +641,12 @@
         "merges.txt",
         "special_tokens_map.json"
       ],
-      "uploadStaging": "Run scripts/export-trocr-base-printed-fp16.ps1. It runs optimum-cli to produce fp32 ONNX into a staging dir, then onnxconverter-common.float16 (with keep_io_types=True) to cast to fp16, then copies BOTH precision .onnx files into the output's onnx/ subdir alongside the shared tokenizer + config files. Drop README.md + LICENSE in the staging root before upload. Bundled into one Heliosoph.DatumV repo (fp32 + fp16 sharing tokenizer / configs) for symmetry — the two catalog entries (trocr-base-printed + trocr-base-printed-fp16) differ only in their include glob.",
+      "uploadStaging": "Run scripts/export-trocr-base-printed-fp16.ps1. It runs optimum-cli to produce fp32 ONNX into a staging dir, then onnxconverter-common.float16 (with keep_io_types=True) to cast to fp16, then copies BOTH precision .onnx files into the output's onnx/ subdir alongside the shared tokenizer + config files. Drop README.md + LICENSE in the staging root before upload. Bundled into one Heliosoph repo (fp32 + fp16 sharing tokenizer / configs) for symmetry — the two catalog entries (trocr-base-printed + trocr-base-printed-fp16) differ only in their include glob.",
       "provenance": {
         "baseModel": "microsoft/trocr-base-printed — MIT (Li, Lv, Yu, Cui, Lu, Wei, 2021). Encoder-decoder VLM: ViT image encoder + GPT-style text decoder, trained on printed-text crops (SROIE dataset).",
         "exportToolchain": "Two-step pipeline: (1) optimum-cli `--task image-to-text-with-past` produces the fp32 encoder + merged decoder ONNX; (2) onnxconverter-common.float16 casts the fp32 graph in place to fp16 with keep_io_types=True (inputs/outputs stay fp32 at the wire boundary). Avoids optimum-cli's --dtype fp16 CUDA-only path + its If-subgraph wiring bug on merged decoders.",
         "precision": "fp32 (model.onnx pair) + fp16 (model_fp16.onnx pair) — same architecture, different precision. fp16 keeps fp32 IO types so the runtime feeds the same input tensors regardless of variant.",
-        "notes": "Re-hosted under Heliosoph.DatumV as a single bundled repo. Both fp32 and fp16 share the same tokenizer + config files at the repo root; per-precision .onnx files live under onnx/. Catalog entries pick precision via include glob (encoder_model.onnx vs encoder_model_fp16.onnx)."
+        "notes": "Re-hosted under Heliosoph as a single bundled repo. Both fp32 and fp16 share the same tokenizer + config files at the repo root; per-precision .onnx files live under onnx/. Catalog entries pick precision via include glob (encoder_model.onnx vs encoder_model_fp16.onnx)."
       },
       "license": {
         "spdx": "MIT",
@@ -679,14 +679,14 @@
         "baseModel": "stabilityai/TripoSR (HF weights at config.yaml + model.ckpt) + VAST-AI-Research/TripoSR (GitHub architecture module). Single-image-to-mesh: DINOv1 image tokenizer + cross-attention triplane transformer + triplane post-processor + NeRF MLP. Tochilkin, Pankratz, Liu, Huang, Letts, Li, Liang, Laforte, Jampani, Cao (2024).",
         "exportToolchain": "torch.onnx.export from upstream PyTorch weights. Two-graph split: (1) triplane.onnx encapsulates image_tokenizer + tokenizer + backbone + post_processor (the per-image cost); (2) nerf.onnx encapsulates renderer.query_triplane + decoder (the per-chunk cost queried over a 3D point grid). opset 17 (grid_sample), do_constant_folding=True, external_data_format=True for the triplane graph.",
         "precision": "fp32 (default). Pass -Fp16 to the script for half-precision siblings triplane_fp16.onnx + triplane_fp16.onnx_data + nerf_fp16.onnx, ~half the disk footprint, IO types kept fp32.",
-        "notes": "Re-hosted under Heliosoph.DatumV for catalog distribution. Marching cubes is NOT part of either ONNX graph — that step lives in the host engine via the mesh_compute_* SQL function family. Standard convention for implicit-field mesh-gen models. The reproducibility quartet (requirements*.txt + README.txt) lets anyone with just these files rebuild the exact venv that produced them — pinned PyPI deps, torch + torchvision cu124 wheels, and the TripoSR architecture-repo commit sha at trace time."
+        "notes": "Re-hosted under Heliosoph for catalog distribution. Marching cubes is NOT part of either ONNX graph — that step lives in the host engine via the mesh_compute_* SQL function family. Standard convention for implicit-field mesh-gen models. The reproducibility quartet (requirements*.txt + README.txt) lets anyone with just these files rebuild the exact venv that produced them — pinned PyPI deps, torch + torchvision cu124 wheels, and the TripoSR architecture-repo commit sha at trace time."
       },
       "license": {
         "spdx": "MIT",
         "url": "https://huggingface.co/stabilityai/TripoSR",
         "confidence": "high",
         "requiresAcceptance": false,
-        "notes": "MIT per the upstream model card's YAML frontmatter (`license: mit`). The stabilityai/TripoSR HF repo is also gated via `extra_gated_fields` requiring a user to provide name/email/affiliation + opt-in to Stability marketing — that's HF's access-gate mechanism, NOT a license-binding click-through. The MIT license alone governs what users can do with the bytes once obtained. Heliosoph.DatumV re-host: distribute under MIT freely; downstream users get standard MIT terms (no $1M threshold, no AUP propagation requirements). Upstream ships no LICENSE file in the repo, so the Heliosoph.DatumV mirror should include a freshly-written one with proper MIT copyright attribution to Stability AI + Tripo AI."
+        "notes": "MIT per the upstream model card's YAML frontmatter (`license: mit`). The stabilityai/TripoSR HF repo is also gated via `extra_gated_fields` requiring a user to provide name/email/affiliation + opt-in to Stability marketing — that's HF's access-gate mechanism, NOT a license-binding click-through. The MIT license alone governs what users can do with the bytes once obtained. Heliosoph re-host: distribute under MIT freely; downstream users get standard MIT terms (no $1M threshold, no AUP propagation requirements). Upstream ships no LICENSE file in the repo, so the Heliosoph mirror should include a freshly-written one with proper MIT copyright attribution to Stability AI + Tripo AI."
       },
       "licenseFiles": [
         { "name": "LICENSE", "source": "https://opensource.org/license/mit", "notes": "Use canonical MIT template — Stability didn't ship a LICENSE file at the upstream repo, just the `license: mit` declaration in the model card YAML. Author the LICENSE locally with `Copyright (c) 2024 Stability AI and Tripo AI / VAST-AI-Research` as the holders before upload." }
@@ -744,11 +744,11 @@
   "rejected": [
     {
       "folder": "yolov8n.onnx",
-      "reason": "Ultralytics YOLOv8 is AGPL-3.0; redistributing under Heliosoph.DatumV/ would impose AGPL obligations on downstream consumers. Use yolox-onnx bundle instead — same task, Apache-2.0."
+      "reason": "Ultralytics YOLOv8 is AGPL-3.0; redistributing under Heliosoph/ would impose AGPL obligations on downstream consumers. Use yolox-onnx bundle instead — same task, Apache-2.0."
     },
     {
       "folder": "musicgen-small-onnx / musicgen-medium-onnx",
-      "reason": "Meta MusicGen is CC-BY-NC-4.0 (non-commercial only). Cannot mirror under Heliosoph.DatumV/ without implying commercial use is OK. Catalog should reference Meta's repo directly if used at all."
+      "reason": "Meta MusicGen is CC-BY-NC-4.0 (non-commercial only). Cannot mirror under Heliosoph/ without implying commercial use is OK. Catalog should reference Meta's repo directly if used at all."
     },
     {
       "folder": "sdxl-lightning-2step-onnx",
