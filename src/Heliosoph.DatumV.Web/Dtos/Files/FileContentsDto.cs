@@ -18,3 +18,9 @@ public sealed record FileContentsRequestDto(string Contents);
 // Body of the PUT response — just the new mtime so the client can pin
 // its in-memory baseline.
 public sealed record FileContentsResponseDto(DateTimeOffset ModifiedAt);
+
+// Body of POST /api/files/rename. Both paths are catalog-relative
+// (forward slashes); traversal outside the catalog root is rejected
+// with 400, and renames are refused when the destination already
+// exists so the controller never silently overwrites user work.
+public sealed record FileRenameRequestDto(string FromPath, string ToPath);

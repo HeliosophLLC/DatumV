@@ -39,6 +39,7 @@ export function TreeBranch({
   selected = false,
   focused = false,
   onRowClick,
+  onRowContextMenu,
   dataPath,
   children,
 }: {
@@ -59,6 +60,12 @@ export function TreeBranch({
    */
   onRowClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   /**
+   * Optional right-click intercept. Panels wire this to the native
+   * Electron context menu (`window.electronHost.showContextMenu`) so
+   * the menu styling tracks the OS instead of the React surface.
+   */
+  onRowContextMenu?: (e: MouseEvent<HTMLButtonElement>) => void;
+  /**
    * Tagging hook for callers that need to query the row by path (e.g.
    * arrow-key navigation that calls scrollIntoView on the focused row).
    * Lives on the layout element directly so scrollIntoView actually
@@ -72,6 +79,7 @@ export function TreeBranch({
       <button
         type="button"
         onClick={(e) => (onRowClick ? onRowClick(e) : onToggle())}
+        onContextMenu={onRowContextMenu}
         className={cn(
           'flex w-full items-center gap-1 px-2 py-1 text-left transition-colors',
           selectionClasses(selected, focused, dimmed),
@@ -107,6 +115,7 @@ export function TreeRow({
   focused = false,
   onRowClick,
   onRowDoubleClick,
+  onRowContextMenu,
   dataPath,
   title,
 }: {
@@ -121,6 +130,11 @@ export function TreeRow({
    * (`onRowClick`) keeps single-click selection unchanged.
    */
   onRowDoubleClick?: (e: MouseEvent<HTMLDivElement>) => void;
+  /**
+   * Right-click intercept. Panels wire this to the native Electron
+   * context menu so the menu styling tracks the OS — see TreeBranch.
+   */
+  onRowContextMenu?: (e: MouseEvent<HTMLDivElement>) => void;
   /** See TreeBranch.dataPath — lives on the layout element. */
   dataPath?: string;
   title?: string;
@@ -138,6 +152,7 @@ export function TreeRow({
         title={title}
         onClick={onRowClick}
         onDoubleClick={onRowDoubleClick}
+        onContextMenu={onRowContextMenu}
         aria-selected={selected || undefined}
         data-path={dataPath}
       >

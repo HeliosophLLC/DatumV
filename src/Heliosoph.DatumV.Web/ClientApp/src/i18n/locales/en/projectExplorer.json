@@ -9,6 +9,15 @@
   "collapseAll": "Collapse all",
   "hideSystem": "Hide system files",
   "showSystem": "Show system files",
+  "menu": {
+    "open": "Open",
+    "rename": "Rename",
+    "delete": "Delete"
+  },
+  "renameInvalid": "Names can't be empty or contain a slash.",
+  "renameConflict": "A file or folder with that name already exists.",
+  "renameFailed": "Couldn't rename — see console for details.",
+  "deleteFailed": "Couldn't delete — see console for details.",
   "kinds": {
     "data": "Table data",
     "data_sidecar": "Sidecar",

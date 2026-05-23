@@ -51,6 +51,13 @@
   "fnVariadicRemove": "Remove",
   "fnVariadicMin": "min: {{count}}",
   "closeTab": "Close",
+  "tabMenu": {
+    "close": "Close",
+    "closeOthers": "Close Others",
+    "closeToRight": "Close to the Right",
+    "closeToLeft": "Close to the Left",
+    "closeAll": "Close All"
+  },
   "scrollPrev": "Scroll left",
   "scrollNext": "Scroll right",
   "renamePrompt": "Tab name:",

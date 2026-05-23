@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSnapshot } from 'valtio';
 import { useTranslation } from 'react-i18next';
 import {
@@ -18,11 +18,15 @@ import {
   SquareMinus,
 } from 'lucide-react';
 import {
+  beginInlineRename,
   buildFileTree,
+  cancelInlineRename,
   clearSelection,
   collapseAllDirs,
   collapseOrAscendFocused,
   collectVisiblePaths,
+  commitInlineRename,
+  deleteFile,
   expandOrDescendFocused,
   extendSelectionTo,
   filesState,
@@ -37,6 +41,10 @@ import {
   type FileTreeNode,
 } from '@/state/files';
 import { openFileInTab } from '@/state/tabs';
+import { openDialog } from '@/state/dialogs';
+import type {
+  DeleteFileDialogResult,
+} from '@/components/dialogs/DeleteFileDialog';
 import type { DockSide } from '@/state/nav';
 import type { FileEntryDto } from '@/api/generated/openapi-client';
 import { TreeBranch, TreeRoot, TreeRow } from '@/components/ui/tree';
@@ -49,8 +57,15 @@ interface RowContext {
   expandedDirs: Readonly<Record<string, true>>;
   selectedPaths: Readonly<Record<string, true>>;
   focusedPath: string | null;
+  renamingPath: string | null;
   onRowClick: (path: string, isDir: boolean, e: MouseEvent) => void;
   onFileActivate: (file: FileEntryDto) => void;
+  onContextMenu: (
+    path: string,
+    isDir: boolean,
+    file: FileEntryDto | null,
+    e: MouseEvent,
+  ) => void;
 }
 
 // Kinds the editor can open as a SQL tab. The user-data file kinds
@@ -85,6 +100,7 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
     selectedPaths,
     focusedPath,
     showSystemFiles,
+    renamingPath,
   } = useSnapshot(filesState);
 
   useEffect(() => {
@@ -153,7 +169,78 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
     void openFileInTab(path);
   };
 
+  const handleRequestDelete = async (path: string, isDir: boolean) => {
+    selectNode(path);
+    const basename = path.split('/').pop() ?? path;
+    const { result } = openDialog<
+      DeleteFileDialogResult,
+      { name: string; path: string; isDirectory: boolean }
+    >({
+      kind: 'deleteFile',
+      payload: { name: basename, path, isDirectory: isDir },
+    });
+    const action = (await result)?.action ?? 'cancel';
+    if (action !== 'confirm') return;
+    try {
+      await deleteFile(path);
+    } catch {
+      // Watcher refetch will reconcile if the server somehow accepted
+      // a partial delete; surface the failure as a soft warning rather
+      // than blocking the UI.
+      console.warn('[explorer] delete failed', path);
+    }
+  };
+
+  const handleContextMenu = async (
+    path: string,
+    isDir: boolean,
+    file: FileEntryDto | null,
+    e: MouseEvent,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const host = window.electronHost;
+    if (!host) return;
+    // Match VS Code: right-click on a non-selected row moves selection
+    // to it before the menu opens so the menu's actions clearly refer
+    // to the row under the cursor.
+    selectNode(path);
+    const kind = file?.kind ?? null;
+    const canOpen = !isDir && kind !== null && OPENABLE_FILE_KINDS.has(kind);
+    const result = await host.showContextMenu({
+      items: isDir
+        ? [
+            { id: 'rename', label: t('menu.rename'), accelerator: 'F2' },
+            { id: 'delete', label: t('menu.delete'), accelerator: 'Delete' },
+          ]
+        : [
+            { id: 'open', label: t('menu.open'), enabled: canOpen },
+            { type: 'separator' },
+            { id: 'rename', label: t('menu.rename'), accelerator: 'F2' },
+            { id: 'delete', label: t('menu.delete'), accelerator: 'Delete' },
+          ],
+    });
+    if (result === null) return;
+    switch (result) {
+      case 'open':
+        if (file) handleFileActivate(file);
+        break;
+      case 'rename':
+        beginInlineRename(path);
+        break;
+      case 'delete':
+        void handleRequestDelete(path, isDir);
+        break;
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Arrow / Enter / Esc are owned by the inline-rename input when
+    // it's mounted; the tree handler must not steal them. The input
+    // itself stops propagation, so this only fires for keys that
+    // bubbled past it — but pinning the guard here makes the rule
+    // explicit.
+    if (renamingPath !== null) return;
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -174,6 +261,19 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
       case 'Escape':
         e.preventDefault();
         clearSelection();
+        break;
+      case 'F2':
+        if (!focusedPath) break;
+        e.preventDefault();
+        beginInlineRename(focusedPath);
+        break;
+      case 'Delete':
+        if (!focusedPath) break;
+        e.preventDefault();
+        void handleRequestDelete(
+          focusedPath,
+          !files.find((f) => f.path === focusedPath),
+        );
         break;
       case 'Enter': {
         // Enter on a focused file = open as a SQL tab; on a focused dir
@@ -198,8 +298,10 @@ export function ProjectExplorerPanel({ side: _side }: { side: DockSide }) {
     expandedDirs,
     selectedPaths,
     focusedPath,
+    renamingPath,
     onRowClick: handleRowClick,
     onFileActivate: handleFileActivate,
+    onContextMenu: handleContextMenu,
   };
 
   const isRefreshing = status === 'loading' && files.length > 0;
@@ -293,11 +395,13 @@ function TreeNode({
   const Icon = open ? FolderOpen : Folder;
   const selected = ctx.selectedPaths[node.path] === true;
   const focused = ctx.focusedPath === node.path;
+  const renaming = ctx.renamingPath === node.path;
   return (
     <TreeBranch
       open={open}
       onToggle={() => toggleDirExpanded(node.path)}
       onRowClick={(e) => ctx.onRowClick(node.path, true, e)}
+      onRowContextMenu={(e) => ctx.onContextMenu(node.path, true, null, e)}
       selected={selected}
       focused={focused}
       dataPath={node.path}
@@ -307,7 +411,11 @@ function TreeNode({
               tan in both light and dark themes. fill-current paints the
               folder body so it's not just an outline. */}
           <Icon className="size-3 shrink-0 fill-amber-400 text-amber-500 dark:fill-amber-300 dark:text-amber-400" />
-          <span className="truncate font-mono">{node.name}</span>
+          {renaming ? (
+            <InlineRenameInput initialName={node.name} path={node.path} />
+          ) : (
+            <span className="truncate font-mono">{node.name}</span>
+          )}
         </>
       }
     >
@@ -342,6 +450,7 @@ function FileRow({
     kind === 'manifest';
   const selected = ctx.selectedPaths[path] === true;
   const focused = ctx.focusedPath === path;
+  const renaming = ctx.renamingPath === path;
   return (
     <TreeRow
       dimmed={isSecondary}
@@ -349,20 +458,138 @@ function FileRow({
       focused={focused}
       onRowClick={(e) => ctx.onRowClick(path, false, e)}
       onRowDoubleClick={() => ctx.onFileActivate(file)}
+      onRowContextMenu={(e) => ctx.onContextMenu(path, false, file, e)}
       dataPath={path}
       title={`${file.path ?? ''} • ${formatSize(file.sizeBytes ?? 0)}`}
     >
       <Icon className={`size-3 shrink-0 ${colorClass}`} />
-      <span className="truncate">{name}</span>
-      {file.isOrphan && (
-        <span
-          className="ml-auto pl-2 text-[9px] tracking-wide uppercase text-amber-600 dark:text-amber-400"
-          title={t('orphanTitle')}
-        >
-          {t('orphan')}
-        </span>
+      {renaming ? (
+        <InlineRenameInput initialName={name} path={path} />
+      ) : (
+        <>
+          <span className="truncate">{name}</span>
+          {file.isOrphan && (
+            <span
+              className="ml-auto pl-2 text-[9px] tracking-wide uppercase text-amber-600 dark:text-amber-400"
+              title={t('orphanTitle')}
+            >
+              {t('orphan')}
+            </span>
+          )}
+        </>
       )}
     </TreeRow>
+  );
+}
+
+type RenameErrorKey = 'renameInvalid' | 'renameConflict' | 'renameFailed';
+
+function errorKeyFor(code: string): RenameErrorKey {
+  switch (code) {
+    case 'invalid':
+      return 'renameInvalid';
+    case 'conflict':
+      return 'renameConflict';
+    default:
+      return 'renameFailed';
+  }
+}
+
+/**
+ * VS Code-style inline rename: the row's label is replaced with a focused
+ * `<input>` that commits on Enter or blur and cancels on Escape. Commits
+ * call <c>commitInlineRename</c>; a non-null return is rendered inline as
+ * an error message and the input stays mounted so the user can correct
+ * (typically a name conflict).
+ */
+function InlineRenameInput({
+  initialName,
+  path,
+}: {
+  initialName: string;
+  path: string;
+}) {
+  const { t } = useTranslation('projectExplorer');
+  const [value, setValue] = useState(initialName);
+  const [errorKey, setErrorKey] = useState<RenameErrorKey | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // After a failed commit (conflict / invalid name), we re-focus the
+  // input without restarting the selection so the user's cursor sits
+  // where they left it. The blur-handler path also needs to know not to
+  // re-commit during an in-flight commit cycle.
+  const committingRef = useRef(false);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    // VS Code selects the stem (filename minus extension) so typing
+    // replaces just that; extensionless names get the whole label
+    // selected. A leading-dot file (.gitignore) reads its dot as the
+    // start of the extension, so guard against `dotIdx === 0`.
+    const dotIdx = initialName.lastIndexOf('.');
+    const end = dotIdx > 0 ? dotIdx : initialName.length;
+    el.setSelectionRange(0, end);
+  }, [initialName]);
+
+  async function tryCommit() {
+    if (committingRef.current) return;
+    committingRef.current = true;
+    try {
+      const result = await commitInlineRename(path, value);
+      if (result !== null) {
+        setErrorKey(errorKeyFor(result));
+        // Restore focus — blur drops out of the input but we want the
+        // user to see the error and keep editing.
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+    } finally {
+      committingRef.current = false;
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // Always stop propagation so the tree's arrow / Enter / Esc handler
+    // doesn't double-fire.
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void tryCommit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelInlineRename();
+    }
+  }
+
+  return (
+    <span className="flex flex-1 items-center gap-2">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          if (errorKey) setErrorKey(null);
+        }}
+        onBlur={() => {
+          // Blur counts as confirm (VS Code parity). Skip when a commit
+          // is already in flight — its re-focus would re-trigger this.
+          void tryCommit();
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+        className="bg-input border-primary text-foreground min-w-0 flex-1 rounded-sm border px-1 font-mono text-xs outline-none"
+      />
+      {errorKey && (
+        <span
+          className="text-destructive text-[10px] whitespace-nowrap"
+          title={t(errorKey)}
+        >
+          {t(errorKey)}
+        </span>
+      )}
+    </span>
   );
 }
 

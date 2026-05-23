@@ -45,6 +45,11 @@ interface FilesState {
   // full layout — flipping it off is the user's "clean up the noise"
   // gesture once they know what's there.
   showSystemFiles: boolean;
+  // Path of the node currently being inline-renamed (VS Code-style: row
+  // swaps its label for a text input). Null when no rename is active.
+  // Only one row at a time can be in rename mode — the input owns focus
+  // for the duration.
+  renamingPath: string | null;
 }
 
 /**
@@ -76,6 +81,7 @@ export const filesState = proxy<FilesState>({
   anchorPath: null,
   focusedPath: null,
   showSystemFiles: true,
+  renamingPath: null,
 });
 
 export function toggleSystemFilesVisible(): void {
@@ -455,4 +461,98 @@ export function collapseOrAscendFocused(tree: FileTreeNode): void {
 export function clearSelection(): void {
   filesState.selectedPaths = {};
   filesState.anchorPath = null;
+}
+
+// ──────────────────────── Inline rename + delete ────────────────────────
+
+/** Enter VS Code-style inline-rename mode for the given path. */
+export function beginInlineRename(path: string): void {
+  filesState.renamingPath = path;
+}
+
+/** Leave inline-rename mode without writing. */
+export function cancelInlineRename(): void {
+  filesState.renamingPath = null;
+}
+
+/**
+ * Replace the basename of <paramref name="fromPath"/> with
+ * <paramref name="newName"/> and call the rename endpoint. Returns null on
+ * success, or a translatable error key on failure (`"invalid"`,
+ * `"unchanged"`, `"conflict"`, `"failed"`). The directory watcher pushes
+ * a refetch on success — no need to mutate the local cache here.
+ */
+export async function commitInlineRename(
+  fromPath: string,
+  newName: string,
+): Promise<string | null> {
+  const trimmed = newName.trim();
+  // Reject empty + path-separator characters: a / or \ would silently
+  // move the file into a different directory, which is surprising from
+  // a rename gesture.
+  if (trimmed.length === 0 || trimmed.includes('/') || trimmed.includes('\\')) {
+    return 'invalid';
+  }
+  const lastSlash = fromPath.lastIndexOf('/');
+  const oldBasename = lastSlash >= 0 ? fromPath.slice(lastSlash + 1) : fromPath;
+  if (trimmed === oldBasename) {
+    filesState.renamingPath = null;
+    return null;
+  }
+  const parent = lastSlash >= 0 ? fromPath.slice(0, lastSlash) : '';
+  const toPath = parent.length > 0 ? `${parent}/${trimmed}` : trimmed;
+  try {
+    await api.files.renameFile({ fromPath, toPath });
+  } catch (err) {
+    // 409 from the controller (destination exists) surfaces as a thrown
+    // exception in the generated client; map it to a distinguishable
+    // result code so the UI can show the right message.
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('409') || message.toLowerCase().includes('conflict')) {
+      return 'conflict';
+    }
+    console.warn('[files] rename failed', fromPath, toPath, err);
+    return 'failed';
+  }
+  filesState.renamingPath = null;
+  // Eagerly point selection + focus at the new path so the user's next
+  // arrow-key press doesn't jump back to the stale location. The
+  // upcoming refetch will keep this in sync.
+  if (filesState.focusedPath === fromPath) {
+    filesState.focusedPath = toPath;
+  }
+  if (filesState.selectedPaths[fromPath]) {
+    const next = { ...filesState.selectedPaths };
+    delete next[fromPath];
+    next[toPath] = true;
+    filesState.selectedPaths = next;
+  }
+  return null;
+}
+
+/**
+ * Delete a file or directory under the catalog root. Used by the Project
+ * Explorer's right-click "Delete" after the user confirms. The directory
+ * watcher pushes a refetch on success — no local-cache mutation here.
+ */
+export async function deleteFile(path: string): Promise<void> {
+  try {
+    await api.files.deleteContents(path);
+  } catch (err) {
+    console.warn('[files] delete failed', path, err);
+    throw err;
+  }
+  // Clear selection / focus when they pointed at the removed node so a
+  // follow-up arrow-key press doesn't try to extend from a ghost row.
+  if (filesState.focusedPath === path) {
+    filesState.focusedPath = null;
+  }
+  if (filesState.selectedPaths[path]) {
+    const next = { ...filesState.selectedPaths };
+    delete next[path];
+    filesState.selectedPaths = next;
+  }
+  if (filesState.anchorPath === path) {
+    filesState.anchorPath = null;
+  }
 }

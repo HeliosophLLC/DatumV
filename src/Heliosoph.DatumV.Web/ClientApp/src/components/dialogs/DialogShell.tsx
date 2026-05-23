@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { AboutDialog } from './AboutDialog';
+import { DeleteFileDialog } from './DeleteFileDialog';
 import { ExternalChangeDialog } from './ExternalChangeDialog';
 import { LicenseDialog } from './LicenseDialog';
 import { PreFlightDialog } from './PreFlightDialog';
@@ -125,6 +126,15 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           requestId={requestId}
           fileName={params.fileName ?? ''}
           filePath={params.filePath ?? ''}
+        />
+      );
+    case 'deleteFile':
+      return (
+        <DeleteFileDialog
+          requestId={requestId}
+          name={params.name ?? ''}
+          path={params.path ?? ''}
+          isDirectory={params.isDirectory === 'true'}
         />
       );
     case 'confirmLicense':

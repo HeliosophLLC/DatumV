@@ -18,6 +18,10 @@ import {
   panesState,
   openTab,
   requestCloseTab,
+  requestCloseAllInLeaf,
+  requestCloseOthersInLeaf,
+  requestCloseTabsToLeft,
+  requestCloseTabsToRight,
   selectTab,
   renameTab,
   moveTab,
@@ -315,6 +319,7 @@ function TabChip({
   renamePromptLabel: string;
   closeLabel: string;
 }) {
+  const { t } = useTranslation('query');
   const { t: tModels } = useTranslation('models');
   const { t: tDatasets } = useTranslation('datasets');
   const { t: tSettingsNs } = useTranslation('settings');
@@ -474,6 +479,47 @@ function TabChip({
             ? tDocs('title')
             : (fileBasename ?? title);
 
+  // Tab strip right-click menu. Pinned chips (Models / Datasets / etc.)
+  // can't be closed, so right-click is a no-op for them rather than a
+  // row of disabled items the user can never use. Bulk close items loop
+  // requestCloseTab so each dirty SQL tab still gets its own Save /
+  // Don't Save / Cancel prompt.
+  async function onContextMenu(e: React.MouseEvent) {
+    if (pinned) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const host = window.electronHost;
+    if (!host) return;
+    const result = await host.showContextMenu({
+      items: [
+        { id: 'close', label: t('tabMenu.close') },
+        { id: 'closeOthers', label: t('tabMenu.closeOthers') },
+        { id: 'closeToRight', label: t('tabMenu.closeToRight') },
+        { id: 'closeToLeft', label: t('tabMenu.closeToLeft') },
+        { type: 'separator' },
+        { id: 'closeAll', label: t('tabMenu.closeAll') },
+      ],
+    });
+    if (result === null) return;
+    switch (result) {
+      case 'close':
+        void requestCloseTab(id);
+        break;
+      case 'closeOthers':
+        void requestCloseOthersInLeaf(leafId, id);
+        break;
+      case 'closeToRight':
+        void requestCloseTabsToRight(leafId, id);
+        break;
+      case 'closeToLeft':
+        void requestCloseTabsToLeft(leafId, id);
+        break;
+      case 'closeAll':
+        void requestCloseAllInLeaf(leafId);
+        break;
+    }
+  }
+
   return (
     <div
       role="tab"
@@ -488,6 +534,7 @@ function TabChip({
       onClick={onSelect}
       onMouseDown={onMouseDown}
       onDoubleClick={onRename}
+      onContextMenu={onContextMenu}
       // Hover tooltip: pinned chips show their localized label (chip is
       // icon-only). File-backed tabs show the catalog-relative path so
       // the user can disambiguate two tabs with the same basename. Scratch

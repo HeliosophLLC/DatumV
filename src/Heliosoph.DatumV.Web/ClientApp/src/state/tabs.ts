@@ -1014,6 +1014,66 @@ export async function requestCloseTab(tabId: string): Promise<void> {
   closeTab(tabId);
 }
 
+/**
+ * Walks `leafId` left-to-right and calls `requestCloseTab` for every tab
+ * matching the predicate. Pinned tabs are filtered out so the canonical
+ * Models / Datasets / Settings / Docs strip never participates in bulk
+ * closes. Each dirty SQL tab gets its own Save / Don't Save / Cancel
+ * prompt — `cancel` aborts the rest of the batch, matching VS Code.
+ */
+async function requestCloseBatch(
+  leafId: string,
+  predicate: (tab: Tab, index: number) => boolean,
+): Promise<void> {
+  const leaf = findLeaf(panesState.root, leafId);
+  if (!leaf) return;
+  // Snapshot ids up front — `requestCloseTab` mutates the leaf's tab
+  // list, and iterating the live array would skip the next tab on every
+  // close. Pinned tabs filtered here so the predicate doesn't have to.
+  const targets = leaf.tabs
+    .map((tab, index) => ({ tab, index }))
+    .filter(({ tab }) => !tab.pinned)
+    .filter(({ tab, index }) => predicate(tab, index))
+    .map(({ tab }) => tab.id);
+  for (const id of targets) {
+    const before = findTab(panesState.root, id);
+    if (!before) continue;
+    await requestCloseTab(id);
+    // If the tab is still around after the prompt resolves, the user
+    // chose Cancel. Honour that by stopping the batch rather than
+    // re-prompting for every remaining tab.
+    if (findTab(panesState.root, id)) return;
+  }
+}
+
+/** Close every tab in `leafId` except `keepTabId` (and pinned tabs). */
+export function requestCloseOthersInLeaf(leafId: string, keepTabId: string): Promise<void> {
+  return requestCloseBatch(leafId, (tab) => tab.id !== keepTabId);
+}
+
+/** Close every non-pinned tab strictly to the left of `refTabId`. */
+export function requestCloseTabsToLeft(leafId: string, refTabId: string): Promise<void> {
+  const leaf = findLeaf(panesState.root, leafId);
+  if (!leaf) return Promise.resolve();
+  const refIndex = leaf.tabs.findIndex((t) => t.id === refTabId);
+  if (refIndex < 0) return Promise.resolve();
+  return requestCloseBatch(leafId, (_tab, index) => index < refIndex);
+}
+
+/** Close every non-pinned tab strictly to the right of `refTabId`. */
+export function requestCloseTabsToRight(leafId: string, refTabId: string): Promise<void> {
+  const leaf = findLeaf(panesState.root, leafId);
+  if (!leaf) return Promise.resolve();
+  const refIndex = leaf.tabs.findIndex((t) => t.id === refTabId);
+  if (refIndex < 0) return Promise.resolve();
+  return requestCloseBatch(leafId, (_tab, index) => index > refIndex);
+}
+
+/** Close every non-pinned tab in `leafId`. */
+export function requestCloseAllInLeaf(leafId: string): Promise<void> {
+  return requestCloseBatch(leafId, () => true);
+}
+
 export function closeTab(tabId: string): void {
   const found = findTab(panesState.root, tabId);
   if (!found) return;

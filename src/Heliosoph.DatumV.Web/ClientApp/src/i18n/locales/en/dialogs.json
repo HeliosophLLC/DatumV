@@ -65,6 +65,15 @@
     "dontSave": "Don't Save",
     "cancel": "Cancel"
   },
+  "deleteFile": {
+    "title": "Delete file",
+    "message": "Delete {name}?",
+    "messageDirectory": "Delete {name} and everything inside it?",
+    "detail": "The file will be removed from disk and can't be recovered from the app.",
+    "detailDirectory": "The folder and all of its contents will be removed from disk and can't be recovered from the app.",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
   "about": {
     "title": "About DatumV",
     "tagline": "DatumV™ — Heliosoph",

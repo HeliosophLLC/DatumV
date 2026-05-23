@@ -170,6 +170,82 @@ public sealed class FilesController(TableCatalog catalog) : ControllerBase
     }
 
     /// <summary>
+    /// Deletes a file or directory under the catalog root. Directories are
+    /// removed recursively so the Project Explorer's right-click "Delete"
+    /// can target a folder without forcing the user to empty it first.
+    /// </summary>
+    [HttpDelete("contents")]
+    public ActionResult DeleteContents([FromQuery] string path)
+    {
+        if (!TryResolveCatalogPath(path, out string? fullPath, out ActionResult? error))
+        {
+            return error;
+        }
+        // Refuse to delete the catalog root itself — a relative path of
+        // "" or "." normalises to the root and would wipe the entire
+        // catalog. TryResolveCatalogPath already rejects empty input;
+        // this guards the edge case where a single-segment path resolves
+        // back to the root.
+        if (string.Equals(fullPath, Path.GetFullPath(catalog.CatalogDirectory!), StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("cannot delete catalog root");
+        }
+        if (System.IO.File.Exists(fullPath))
+        {
+            System.IO.File.Delete(fullPath);
+            return NoContent();
+        }
+        if (Directory.Exists(fullPath))
+        {
+            Directory.Delete(fullPath, recursive: true);
+            return NoContent();
+        }
+        return NotFound();
+    }
+
+    /// <summary>
+    /// Renames or moves a file or directory under the catalog root. Both
+    /// endpoints must stay catalog-relative. Refuses to overwrite an
+    /// existing destination so a typo can't silently clobber another file.
+    /// </summary>
+    [HttpPost("rename")]
+    public ActionResult RenameFile([FromBody] FileRenameRequestDto body)
+    {
+        if (!TryResolveCatalogPath(body.FromPath, out string? fromFull, out ActionResult? fromErr))
+        {
+            return fromErr;
+        }
+        if (!TryResolveCatalogPath(body.ToPath, out string? toFull, out ActionResult? toErr))
+        {
+            return toErr;
+        }
+        if (string.Equals(fromFull, toFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return NoContent();
+        }
+        if (System.IO.File.Exists(toFull) || Directory.Exists(toFull))
+        {
+            return Conflict("destination already exists");
+        }
+        string? parent = Path.GetDirectoryName(toFull);
+        if (!string.IsNullOrEmpty(parent))
+        {
+            Directory.CreateDirectory(parent);
+        }
+        if (System.IO.File.Exists(fromFull))
+        {
+            System.IO.File.Move(fromFull, toFull);
+            return NoContent();
+        }
+        if (Directory.Exists(fromFull))
+        {
+            Directory.Move(fromFull, toFull);
+            return NoContent();
+        }
+        return NotFound();
+    }
+
+    /// <summary>
     /// Reads the per-catalog tabs state from <c>.datumv/tabs.json</c>.
     /// Returns 204 (no content) when the file does not exist — the
     /// renderer treats that as "fresh catalog, start with one Untitled

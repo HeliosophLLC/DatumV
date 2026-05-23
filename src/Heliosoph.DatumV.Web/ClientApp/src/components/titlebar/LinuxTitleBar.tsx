@@ -46,7 +46,7 @@ export function LinuxTitleBar({
           className="relative z-10 ml-2 size-4 select-none"
         />
       )}
-      {showMenu && <MenuBar className="relative z-10 h-full" />}
+      {showMenu && <MenuBar className="relative z-10 h-full ml-2" />}
       <div className="app-no-drag relative z-10 ml-auto flex">
         {showWindowControls && (
           <>
