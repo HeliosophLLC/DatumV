@@ -32,6 +32,21 @@ import { initMonaco } from './monaco/setup';
 
 initMonaco();
 
+// Monaco's basic-languages `sql.contribution` lazily loads its tokenizer
+// through a `Delayer` wrapped in a `DisposableStore`. When the one-shot
+// listener disposes itself (on load completion, or when we override the
+// Monarch provider in monaco/lsp.ts), the Delayer's pending promise is
+// rejected with a `CancellationError` (`.name === 'Canceled'`). Nothing
+// inside Monaco awaits it, so it escapes as an uncaught rejection. Filter
+// is intentionally narrow — only the exact Monaco cancellation shape —
+// so real rejections still surface in the console.
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason as { name?: string; message?: string } | undefined;
+  if (reason?.name === 'Canceled' || reason?.message === 'Canceled') {
+    event.preventDefault();
+  }
+});
+
 // Dual-root mount: the same SPA bundle serves both the main app and
 // dialog windows. The coordinator (server-side) loads dialog windows at
 // URLs whose hash starts with '#/dialog/'; we branch on that here to

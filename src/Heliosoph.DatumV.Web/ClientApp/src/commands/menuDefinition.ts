@@ -26,6 +26,8 @@ export type MenuLabelKey =
   | 'menu.file.openRecentEmpty'
   | 'menu.file.closeTab'
   | 'menu.file.exit'
+  | 'menu.run.label'
+  | 'menu.run.run'
   | 'menu.edit.label'
   | 'menu.view.label'
   | 'menu.window.label'
@@ -163,6 +165,9 @@ export function buildMenu(opts: {
       sep,
       item('menu.file.closeTab', 'file.closeTab', 'CmdOrCtrl+W'),
       ...(isMac ? [] : [sep, item('menu.file.exit', 'file.exit', 'Alt+F4')]),
+    ]),
+    submenu('menu.run.label', [
+      item('menu.run.run', 'query.run', 'CmdOrCtrl+Enter'),
     ]),
     submenu('menu.edit.label', [
       role('undo'),

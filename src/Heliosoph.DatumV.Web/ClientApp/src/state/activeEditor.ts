@@ -1,49 +1,46 @@
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 
-// Module-scoped reference to the currently-focused Monaco editor. Set by
-// each LeafPaneView on focus and cleared on dispose. Read from the
-// per-leaf toolbars / keybinds so they can sample the editor's current
-// selection without prop-drilling the ref.
-//
-// With split panes there are multiple Monaco editors alive at once;
-// `activeEditor` is whichever one most recently had focus. The owning
-// leaf's id is paired so callers can sanity-check that the editor and
-// the state they're reading from are talking about the same pane.
+// Leaf-keyed registry of mounted Monaco editors. Each LeafPaneView
+// registers its editor on mount and unregisters on dispose. Lookups go
+// through `getEditorForLeaf(leafId)` rather than a "whoever last had
+// focus" global, so a Run command targeting a specific leaf reads the
+// right editor regardless of where DOM focus currently sits — which
+// matters because Electron menu accelerators fire without disturbing
+// renderer focus, and a popup-menu click hands focus to the menu
+// button before the command runs.
 
-let activeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
-let activeLeafId: string | null = null;
+const editorsByLeaf = new Map<string, monaco.editor.IStandaloneCodeEditor>();
 
-export function setActiveEditor(
-  editor: monaco.editor.IStandaloneCodeEditor | null,
-  leafId: string | null = null,
+export function registerLeafEditor(
+  leafId: string,
+  editor: monaco.editor.IStandaloneCodeEditor,
 ): void {
-  activeEditor = editor;
-  activeLeafId = leafId;
+  editorsByLeaf.set(leafId, editor);
 }
 
-export function clearActiveEditorForLeaf(leafId: string): void {
-  if (activeLeafId === leafId) {
-    activeEditor = null;
-    activeLeafId = null;
+export function unregisterLeafEditor(
+  leafId: string,
+  editor: monaco.editor.IStandaloneCodeEditor,
+): void {
+  // Only clear if the slot still points at *this* editor — a remount
+  // (e.g. SQL ↔ function tab kind swap) may have already replaced it.
+  if (editorsByLeaf.get(leafId) === editor) {
+    editorsByLeaf.delete(leafId);
   }
 }
 
 /**
- * Returns the SQL to execute for "run". If the editor has a non-empty
- * selection, runs just that text — matches SSMS / DataGrip / VSCode SQL
- * Tools. Otherwise returns the full tab SQL.
- *
- * The optional `leafId` lets the caller insist on a specific leaf's
- * editor — falls back to `fallbackSql` if the focused editor belongs to
- * a different leaf (i.e. the user hit Run on one pane's toolbar while
- * another pane has focus).
+ * Returns the SQL to execute for "run" on the given leaf. If that
+ * leaf's editor has a non-empty selection, returns just that text —
+ * matches SSMS / DataGrip / VSCode SQL Tools. Otherwise returns the
+ * full tab SQL.
  */
-export function resolveRunSql(fallbackSql: string, leafId?: string): string {
-  if (!activeEditor) return fallbackSql;
-  if (leafId && activeLeafId !== leafId) return fallbackSql;
-  const selection = activeEditor.getSelection();
+export function resolveRunSql(fallbackSql: string, leafId: string): string {
+  const editor = editorsByLeaf.get(leafId);
+  if (!editor) return fallbackSql;
+  const selection = editor.getSelection();
   if (!selection || selection.isEmpty()) return fallbackSql;
-  const model = activeEditor.getModel();
+  const model = editor.getModel();
   if (!model) return fallbackSql;
   const selected = model.getValueInRange(selection);
   return selected.trim().length > 0 ? selected : fallbackSql;

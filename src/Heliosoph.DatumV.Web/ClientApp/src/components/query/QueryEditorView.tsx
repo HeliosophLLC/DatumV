@@ -1,9 +1,7 @@
 import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
-import { panesState, findLeaf, saveActiveTab, type PaneNode } from '@/state/tabs';
-import { runTab } from '@/state/execution';
-import { runFunctionTab } from '@/state/functionForm';
-import { resolveRunSql } from '@/state/activeEditor';
+import { panesState, saveActiveTab, type PaneNode } from '@/state/tabs';
+import { runCommand } from '@/commands/registry';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -20,43 +18,26 @@ import { LeafPaneView } from './LeafPaneView';
 export function QueryEditorView() {
   useSnapshot(panesState);
 
-  // Run-the-focused-tab keybinds (Ctrl/Cmd+Enter, F5) bound at the
-  // window level. The per-editor Monaco command bindings stay in place
-  // and intercept first when the user is typing in an editor — this
-  // handler is the fallback for non-editor focus (results pane, tab
-  // strip, the empty pane around the splits). It reads
-  // `focusedLeafId` to know which leaf to act on, which the rest of
-  // the UI keeps current via click + Monaco-focus events.
+  // Ctrl/Cmd+Enter is owned by the application menu's "Run > Run Query"
+  // accelerator (electron/main.ts → Menu.setApplicationMenu), which
+  // dispatches via runCommand('query.run') even when Monaco has focus.
+  // The remaining window-level keys are the ones that don't have a menu
+  // entry yet: F5 (run) and Ctrl/Cmd+S (save) as a backstop alongside
+  // the File menu's Ctrl+S accelerator so the keystroke never falls
+  // through to the browser's "Save Page As" dialog.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const isRunKey =
-        ((e.ctrlKey || e.metaKey) && e.key === 'Enter') || e.key === 'F5';
+      const isRunKey = e.key === 'F5';
       const isSaveKey = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (!isRunKey && !isSaveKey) return;
-      if (e.defaultPrevented) return; // a Monaco editor already handled it.
-      const leafId = panesState.focusedLeafId;
-      const leaf = findLeaf(panesState.root, leafId);
-      if (!leaf || leaf.activeTabId === null) return;
-      const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
-      if (!tab) return;
+      if (e.defaultPrevented) return;
       if (isSaveKey) {
-        // saveActiveTab is a no-op on pinned + function tabs internally;
-        // unconditionally preventDefault so Ctrl+S never falls through
-        // to the browser's "Save Page As" dialog inside Electron.
         e.preventDefault();
         void saveActiveTab();
         return;
       }
-      // Models tab has nothing to run — let the keystroke fall through
-      // without preventDefault so the user's browser shortcut (e.g.
-      // refresh on F5) isn't suppressed without doing anything in return.
-      if (tab.kind === 'models') return;
       e.preventDefault();
-      if (tab.kind === 'function') {
-        void runFunctionTab(leaf.activeTabId);
-        return;
-      }
-      void runTab(leaf.activeTabId, resolveRunSql(tab.sql, leafId));
+      runCommand('query.run');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

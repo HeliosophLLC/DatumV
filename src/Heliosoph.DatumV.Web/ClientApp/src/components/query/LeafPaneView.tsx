@@ -25,8 +25,8 @@ import { DatasetsView } from '@/components/datasets/DatasetsView';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { DocsView } from '@/components/docs/DocsView';
 import {
-  setActiveEditor,
-  clearActiveEditorForLeaf,
+  registerLeafEditor,
+  unregisterLeafEditor,
 } from '@/state/activeEditor';
 import { acquireModel, releaseModel } from '@/state/monacoModels';
 import {
@@ -60,6 +60,17 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
   const leaf = findLeaf(panesState.root, leafId);
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // Mirror of editorRef as state so the leafId-keyed registration effect
+  // below re-runs when Monaco actually finishes mounting. Refs don't
+  // trigger effects; we still keep the ref for synchronous reads like
+  // syncActiveModel that happen mid-callback.
+  const [mountedEditor, setMountedEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // Latest leafId in a ref so callbacks captured at mount-time (focus,
+  // dispose) read the CURRENT leaf rather than whatever it was when
+  // Monaco first booted. A pane-tree restructure can swap the leafId
+  // prop on this React instance without remounting Monaco.
+  const leafIdRef = useRef(leafId);
+  leafIdRef.current = leafId;
   // Tracks which tab ids this leaf has hosted so the cleanup effect can
   // notice when a tab leaves the leaf. The set is local — disposal
   // decisions consult the global tree via `findTabAnywhere`, not this
@@ -195,7 +206,6 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
   useEffect(() => {
     const knownTabs = knownTabsRef;
     return () => {
-      clearActiveEditorForLeaf(leafId);
       for (const id of knownTabs.current) {
         if (!findTabAnywhere(id)) {
           releaseModel(id);
@@ -206,24 +216,37 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
     };
   }, [leafId]);
 
+  // Register the mounted editor under the CURRENT leafId. Re-runs when
+  // either changes, so a leafId-prop swap (pane-tree restructure that
+  // reuses this React instance) re-keys the registration without
+  // remounting Monaco. Cleanup unregisters under the previous leafId,
+  // which is exactly what we want — leftover entries would make Run
+  // target a phantom leaf.
+  useEffect(() => {
+    if (!mountedEditor) return;
+    registerLeafEditor(leafId, mountedEditor);
+    return () => unregisterLeafEditor(leafId, mountedEditor);
+  }, [leafId, mountedEditor]);
+
   const onMount: OnMount = (editor) => {
     editorRef.current = editor;
-    setActiveEditor(editor, leafId);
+    setMountedEditor(editor);
 
     editor.onDidDispose(() => {
       if (editorRef.current === editor) editorRef.current = null;
-      clearActiveEditorForLeaf(leafId);
+      setMountedEditor((current) => (current === editor ? null : current));
     });
 
     editor.onDidFocusEditorWidget(() => {
-      setActiveEditor(editor, leafId);
-      focusLeaf(leafId);
+      focusLeaf(leafIdRef.current);
     });
 
-    // Ctrl/Cmd+Enter and F5 are handled at the window level by
-    // QueryEditorView (which reads panesState.focusedLeafId so the
-    // run follows focus). Defaults are unbound globally in monaco/setup
-    // so those keystrokes bubble out of Monaco untouched.
+    // Ctrl/Cmd+Enter is owned by the application menu's Run > Run Query
+    // accelerator (commands/menuDefinition.ts). F5 stays a window-level
+    // shortcut in QueryEditorView. Both ultimately resolve through
+    // commands/registry.ts → resolveRunSql, which reads the selection
+    // from the leaf-keyed editor registry above. Monaco's default
+    // Ctrl+Enter (insertLineAfter) is unbound globally in monaco/setup.
 
     syncActiveModel();
   };

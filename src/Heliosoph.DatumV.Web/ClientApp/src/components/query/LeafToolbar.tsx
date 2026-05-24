@@ -85,14 +85,14 @@ export function LeafToolbar({ leafId }: { leafId: string }) {
       <button
         type="button"
         onClick={onExplain}
-        disabled={!explainable || isExplaining}
+        disabled={!explainable || isExplaining || isStreaming}
         aria-label={isExplaining ? explainingLabel : explainLabel}
         title={isExplaining ? explainingLabel : explainLabel}
         className={cn(
           'flex size-7 items-center justify-center rounded-xs transition-colors',
-          !explainable && 'cursor-default text-muted-foreground/40',
-          explainable && !isExplaining && 'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground',
-          explainable && isExplaining && 'cursor-wait text-muted-foreground animate-pulse',
+          (!explainable || isStreaming) && 'cursor-default text-muted-foreground/40',
+          explainable && !isStreaming && !isExplaining && 'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground',
+          explainable && !isStreaming && isExplaining && 'cursor-wait text-muted-foreground animate-pulse',
         )}
       >
         <Lightbulb className="size-4" />

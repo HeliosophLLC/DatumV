@@ -7,8 +7,18 @@
 // commands/menuDefinition.ts. That's it; both surfaces pick it up.
 
 import { host } from '@/host';
-import { openTab, getFocusedLeaf, requestCloseTab, saveActiveTab } from '@/state/tabs';
+import {
+  openTab,
+  getFocusedLeaf,
+  requestCloseTab,
+  saveActiveTab,
+  panesState,
+  findLeaf,
+} from '@/state/tabs';
 import { openDialog } from '@/state/dialogs';
+import { runTab } from '@/state/execution';
+import { runFunctionTab } from '@/state/functionForm';
+import { resolveRunSql } from '@/state/activeEditor';
 
 export type CommandId =
   | 'file.newQuery'
@@ -17,6 +27,7 @@ export type CommandId =
   | 'file.newCatalog'
   | 'file.openCatalog'
   | 'file.exit'
+  | 'query.run'
   | 'help.about';
 
 // Recent-catalog rows ship as `file.openRecent:<path>` — the path is
@@ -40,6 +51,23 @@ const handlers: Record<CommandId, CommandHandler> = {
   'file.openCatalog': () => host.pickAndOpenCatalog(),
   'file.exit': () => {
     host.close();
+  },
+  'query.run': () => {
+    // Mirrors the editor's Play button: route through resolveRunSql so a
+    // non-empty selection runs just that text, full tab SQL otherwise.
+    // Bound to the menu's CmdOrCtrl+Enter accelerator, which Electron
+    // dispatches even while Monaco has focus.
+    const leafId = panesState.focusedLeafId;
+    const leaf = findLeaf(panesState.root, leafId);
+    if (!leaf || leaf.activeTabId === null) return;
+    const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
+    if (!tab) return;
+    if (tab.kind === 'models' || tab.kind === 'settings' || tab.kind === 'docs') return;
+    if (tab.kind === 'function') {
+      void runFunctionTab(leaf.activeTabId);
+      return;
+    }
+    void runTab(leaf.activeTabId, resolveRunSql(tab.sql, leafId));
   },
   'help.about': () => {
     openDialog({ kind: 'about' });

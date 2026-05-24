@@ -69,6 +69,10 @@
       "closeTab": "Close &Tab",
       "exit": "E&xit"
     },
+    "run": {
+      "label": "&Run",
+      "run": "&Run Query"
+    },
     "edit": {
       "label": "&Edit"
     },
