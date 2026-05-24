@@ -16,7 +16,7 @@ LIMIT 100
 
 ## Same input, four depth models
 
-![Depth model comparison](docs/figures/depth-comparison.png)
+![Depth model comparison](docs/figures/depth_comparison.jpg)
 
 ```sql
 SELECT
