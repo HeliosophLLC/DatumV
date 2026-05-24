@@ -56,6 +56,10 @@ interface SettingsState {
   // model fitting in the VRAM budget). The server reads this once on
   // first chat load — runtime changes apply after a restart.
   defaultLlmModel: string | null;
+  // When true and every column of a result cell is a single Image, the
+  // results pane renders a flex-wrap gallery of thumbnails instead of
+  // the table grid. When false, the table is always used.
+  imageGalleryLayout: boolean;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -72,6 +76,7 @@ export const settingsState = proxy<SettingsState>({
   openRightPanel: null,
   columnDisplayModeDefaults: {},
   defaultLlmModel: null,
+  imageGalleryLayout: true,
 });
 
 function applyDto(dto: SettingsDto): void {
@@ -94,6 +99,7 @@ function applyDto(dto: SettingsDto): void {
   // empty-object fallback keeps every read site safe to index.
   settingsState.columnDisplayModeDefaults = (dto.columnDisplayModeDefaults ?? {}) as Record<string, string>;
   settingsState.defaultLlmModel = dto.defaultLlmModel ?? null;
+  settingsState.imageGalleryLayout = dto.imageGalleryLayout ?? settingsState.imageGalleryLayout;
 }
 
 export async function refreshSettings(): Promise<void> {
@@ -134,6 +140,10 @@ export function setKeepRawDownloads(
   keepRawDownloads: KeepRawDownloadsMode,
 ): Promise<void> {
   return updateSettings({ keepRawDownloads });
+}
+
+export function setImageGalleryLayout(imageGalleryLayout: boolean): Promise<void> {
+  return updateSettings({ imageGalleryLayout });
 }
 
 // `null` reverts the chat surface to the auto-pick (largest installed

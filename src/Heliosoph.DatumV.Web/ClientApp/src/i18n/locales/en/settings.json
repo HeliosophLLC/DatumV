@@ -62,6 +62,10 @@
   "columnModes": {
     "title": "Results display",
     "description": "Default display mode for each cell kind in the results pane. The column header chip overrides these per-column.",
+    "imageGalleryLayout": "Image gallery layout",
+    "imageGalleryLayoutOn": "On",
+    "imageGalleryLayoutOff": "Off",
+    "imageGalleryLayoutHint": "When every column of a result is an image, render thumbnails as a wrapping gallery instead of a table.",
     "kinds": {
       "numericArray": "Numeric arrays"
     }

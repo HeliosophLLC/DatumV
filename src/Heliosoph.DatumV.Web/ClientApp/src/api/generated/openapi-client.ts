@@ -3228,6 +3228,7 @@ export interface SettingsDto {
     openRightPanel?: string | undefined;
     columnDisplayModeDefaults?: { [key: string]: string; };
     defaultLlmModel?: string | undefined;
+    imageGalleryLayout?: boolean;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -3254,6 +3255,7 @@ export interface SettingsPatchDto {
     columnDisplayModeDefaults?: { [key: string]: string; } | undefined;
     defaultLlmModel?: string | undefined;
     clearDefaultLlmModel?: boolean;
+    imageGalleryLayout?: boolean | undefined;
 }
 
 export interface FileResponse {

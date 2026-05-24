@@ -49,7 +49,8 @@ internal sealed class LocalSettingsService(WebHostOptions options) : ISettingsSe
         OpenLeftPanel: null,
         OpenRightPanel: null,
         ColumnDisplayModeDefaults: DefaultColumnDisplayModeDefaults,
-        DefaultLlmModel: null);
+        DefaultLlmModel: null,
+        ImageGalleryLayout: true);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -126,7 +127,8 @@ internal sealed class LocalSettingsService(WebHostOptions options) : ISettingsSe
             // the explicit clear semantically dominates.
             DefaultLlmModel: patch.ClearDefaultLlmModel
                 ? null
-                : patch.DefaultLlmModel ?? current.DefaultLlmModel);
+                : patch.DefaultLlmModel ?? current.DefaultLlmModel,
+            ImageGalleryLayout: patch.ImageGalleryLayout ?? current.ImageGalleryLayout);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

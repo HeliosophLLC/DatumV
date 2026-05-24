@@ -386,6 +386,7 @@ function CellBlock({
   cell: CellResult;
   tableMode: TableMode;
 }) {
+  const settings = useSnapshot(settingsState);
   const hasTable = cell.schema !== null && cell.rows.length > 0;
   // Single-value detection: 1 row × 1 column, and this is the only
   // table in the pane (`tableMode === 'fill'`). Function-tab runs that
@@ -398,6 +399,14 @@ function CellBlock({
     && cell.rows.length === 1
     && cell.rows[0].length === 1
     && cell.schema!.length === 1;
+  // Image-gallery fork: when every column is a single Image and the
+  // user opts in via settings, drop the table chrome and render a
+  // flex-wrap gallery of thumbnails.
+  const isImageGallery =
+    hasTable
+    && !isSingleValue
+    && settings.imageGalleryLayout
+    && isImageOnlySchema(cell.schema!);
   // Section is a flex column so the table area can `flex-1` into the
   // remaining height after errors / chunks. The section's own height
   // is constrained only when it carries a table — non-table cells
@@ -430,6 +439,8 @@ function CellBlock({
           cell={cell.rows[0][0]}
           column={cell.schema![0]}
         />
+      ) : isImageGallery ? (
+        <ImageGalleryView cell={cell} />
       ) : (
         hasTable && <CellTable cell={cell} />
       )}
@@ -652,6 +663,83 @@ function rowsContainImageOrVideo(rows: readonly JsonCell[][]): boolean {
     }
   }
   return false;
+}
+
+// True when the result is exactly one Image column (not an image array).
+// Multi-column results keep the table even if every column is an image,
+// because rows carry meaning across columns (e.g. before/after pairs).
+// The schema's `kind` field is `DataKind.ToString()` from the server,
+// i.e. PascalCase — runtime cell values use the lowercase JsonCell tag
+// set instead, which is a separate dispatch.
+function isImageOnlySchema(
+  schema: readonly { kind: string; isArray: boolean }[],
+): boolean {
+  return schema.length === 1 && schema[0].kind === 'Image' && !schema[0].isArray;
+}
+
+const GALLERY_THUMB_PX = 192;
+
+// Wrapping image gallery used when every column is an Image and the
+// user has opted in via Settings → Results display. The table chrome
+// (headers, row numbers, selection) is dropped: click a thumbnail to
+// open the existing preview modal, right-click for the download item.
+function ImageGalleryView({ cell }: { cell: CellResult }) {
+  const flat: JsonCell[] = [];
+  for (const row of cell.rows) {
+    for (const c of row) flat.push(c);
+  }
+  return (
+    <div className="bg-table-pane min-h-0 flex-1 overflow-auto p-3">
+      <div className="flex flex-wrap gap-2">
+        {flat.map((c, idx) =>
+          isImageJsonCell(c) ? (
+            <GalleryThumb key={idx} cell={c} />
+          ) : (
+            <div
+              key={idx}
+              className="border-border text-muted-foreground flex items-center justify-center rounded-xs border font-mono text-xs"
+              style={{ width: GALLERY_THUMB_PX, height: GALLERY_THUMB_PX }}
+              title={c.kind === 'null' ? 'null' : c.kind}
+            >
+              {c.kind === 'null' ? 'null' : c.kind}
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Mirrors the CellValue image dispatch: the server emits image blobs as
+// `kind: "media"` + an image/* mime today, with the legacy `"image"`
+// kind reserved as a forward-compat hook.
+function isImageJsonCell(c: JsonCell): boolean {
+  if (c.kind === 'image') return true;
+  if (c.kind === 'media') return (c.mime ?? '').startsWith('image/');
+  return false;
+}
+
+function GalleryThumb({ cell }: { cell: JsonCell }) {
+  const [open, setOpen] = useState(false);
+  const src = dataUriOf(cell);
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <>
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        onClick={() => setOpen(true)}
+        onContextMenu={(e) => showImageContextMenu(cell, e)}
+        title={`image · ${formatBytes(bytes)}`}
+        className="hover:ring-primary bg-muted w-auto cursor-zoom-in rounded-xs object-contain hover:ring-1"
+        style={{ height: GALLERY_THUMB_PX }}
+      />
+      <ImagePreviewModal cell={cell} open={open} onClose={() => setOpen(false)}>
+        <img src={src} alt="" className="mx-auto block max-h-[80vh] max-w-[80vw] object-contain" />
+      </ImagePreviewModal>
+    </>
+  );
 }
 // Bounds for content-based column sizing. Narrow integer columns can
 // shrink to 60 px (room for ~6 digits); pathologically wide columns

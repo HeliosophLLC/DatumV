@@ -8,6 +8,7 @@ import {
   setColumnDisplayModeDefault,
   setDatasetsDirectory,
   setDefaultLlmModel,
+  setImageGalleryLayout,
   setKeepRawDownloads,
   setModelsDirectory,
   type ChromeStyle,
@@ -130,6 +131,19 @@ export function SettingsView() {
         </Section>
 
         <Section title={t('columnModes.title')}>
+          <Field label={t('columnModes.imageGalleryLayout')}>
+            <ChipGroup
+              options={ANIMATIONS}
+              value={settings.imageGalleryLayout ? 'on' : 'off'}
+              onChange={(v) => void setImageGalleryLayout(v === 'on')}
+              labelFor={(v) =>
+                t(`columnModes.imageGalleryLayout${capitalize(v)}` as 'columnModes.imageGalleryLayoutOn')
+              }
+            />
+          </Field>
+          <p className="text-muted-foreground text-xs">
+            {t('columnModes.imageGalleryLayoutHint')}
+          </p>
           <p className="text-muted-foreground text-xs">
             {t('columnModes.description')}
           </p>

@@ -46,7 +46,11 @@ public sealed record SettingsDto(
     // exists. Null means "auto" — ModelSelector picks the largest model
     // that fits in the VRAM budget. The chat driver reads this once on
     // first load; runtime changes require a restart to apply.
-    string? DefaultLlmModel = null);
+    string? DefaultLlmModel = null,
+    // When true and every column in a result cell is a single Image, the
+    // results pane renders a flex-wrap gallery of thumbnails instead of
+    // the table grid. When false, the table is always used.
+    bool ImageGalleryLayout = true);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
@@ -76,4 +80,5 @@ public sealed record SettingsPatchDto(
     // Null on the patch means "don't change" — use ClearDefaultLlmModel to
     // explicitly fall back to auto-pick.
     string? DefaultLlmModel = null,
-    bool ClearDefaultLlmModel = false);
+    bool ClearDefaultLlmModel = false,
+    bool? ImageGalleryLayout = null);
