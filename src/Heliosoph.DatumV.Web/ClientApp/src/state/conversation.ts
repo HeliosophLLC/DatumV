@@ -159,8 +159,14 @@ function summarise(dto: ConversationDto): ConversationSummary {
 // next call retries from scratch — otherwise a transient 500 at boot
 // would leave the surface stuck "loaded" with no conversation id and an
 // empty list until the page reloads.
+//
+// Triggered by ConversationView's mount effect and lazily by sendMessage
+// — never at module load, so importing this module from a code path
+// where chat is disabled (e.g. SidePanelHost statically importing
+// ChatPanel even though the icon is filtered out of ALL_PANEL_IDS)
+// doesn't hit /api/conversations at boot.
 let initPromise: Promise<void> | null = null;
-function ensureInitialized(): Promise<void> {
+export function ensureInitialized(): Promise<void> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
@@ -187,7 +193,6 @@ function ensureInitialized(): Promise<void> {
   })();
   return initPromise;
 }
-void ensureInitialized();
 
 export async function refreshConversations(): Promise<void> {
   try {

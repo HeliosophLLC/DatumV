@@ -21,7 +21,9 @@ internal sealed class CatalogInitializationService : IHostedService
 {
     private readonly TableCatalog _catalog;
     private readonly IManifestStore _manifest;
+#pragma warning disable CS0414, IDE0052 // _loggerFactory unused while MigrationRunner is disabled.
     private readonly ILoggerFactory _loggerFactory;
+#pragma warning restore CS0414, IDE0052
     private readonly ILogger<CatalogInitializationService> _logger;
 
     public CatalogInitializationService(
@@ -38,8 +40,9 @@ internal sealed class CatalogInitializationService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Initialising local catalog.");
-        MigrationRunner runner = new(_catalog, _loggerFactory.CreateLogger<MigrationRunner>());
-        await runner.RunAsync(cancellationToken).ConfigureAwait(false);
+        // MigrationRunner temporarily disabled.
+        // MigrationRunner runner = new(_catalog, _loggerFactory.CreateLogger<MigrationRunner>());
+        // await runner.RunAsync(cancellationToken).ConfigureAwait(false);
 
         // Re-apply every persisted CREATE MODEL. The inference dispatcher
         // and models directory were both wired in the TableCatalog factory

@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { Loader2 } from 'lucide-react';
-import { cancelMessage, conversationState, sendMessage } from '@/state/conversation';
+import {
+  cancelMessage,
+  conversationState,
+  ensureInitialized,
+  sendMessage,
+} from '@/state/conversation';
 import { ChatInput } from './ChatInput';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +19,10 @@ export function ConversationView() {
   const { messages, streaming, status, error } = useSnapshot(conversationState);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickyRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    void ensureInitialized();
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
