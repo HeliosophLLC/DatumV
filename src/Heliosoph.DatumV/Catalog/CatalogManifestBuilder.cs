@@ -226,10 +226,10 @@ public static class CatalogManifestBuilder
                 if (catalog.CatalogVocabulary is { } vocabForRegistered
                     && vocabForRegistered.ByIdentifier.TryGetValue(entry.Value.Name, out ModelLibrary.CatalogVocabularyEntry? vocabRegEntry))
                 {
-                    tasks = vocabRegEntry.Owner.Tasks;
-                    activeVersion = pathResolver.GetActiveVersion(vocabRegEntry.Owner.Id);
-                    latestVersion = vocabRegEntry.Owner.Versions[0].Version;
-                    catalogEntryId = vocabRegEntry.Owner.Id;
+                    tasks = vocabRegEntry.OwnerEntry.Tasks;
+                    activeVersion = pathResolver.GetActiveVersion(vocabRegEntry.OwnerVariant.Id);
+                    latestVersion = vocabRegEntry.OwnerVariant.Versions[0].Version;
+                    catalogEntryId = vocabRegEntry.OwnerVariant.Id;
                 }
                 modelEntries.Add(new ModelEntry
                 {
@@ -265,12 +265,12 @@ public static class CatalogManifestBuilder
                     {
                         Name = identifier,
                         Status = ModelInstallStatus.Discovered,
-                        DisplayName = vocabEntry.Owner.DisplayName,
+                        DisplayName = vocabEntry.OwnerVariant.DisplayName,
                         Parameters = Array.Empty<ParameterSignature>(),
-                        Tasks = vocabEntry.Owner.Tasks,
-                        CatalogEntryId = vocabEntry.Owner.Id,
-                        ActiveVersion = pathResolver.GetActiveVersion(vocabEntry.Owner.Id),
-                        LatestVersion = vocabEntry.Owner.Versions[0].Version,
+                        Tasks = vocabEntry.OwnerEntry.Tasks,
+                        CatalogEntryId = vocabEntry.OwnerVariant.Id,
+                        ActiveVersion = pathResolver.GetActiveVersion(vocabEntry.OwnerVariant.Id),
+                        LatestVersion = vocabEntry.OwnerVariant.Versions[0].Version,
                     });
                 }
             }

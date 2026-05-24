@@ -260,22 +260,27 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
             InstallSql: $"sql/{modelId}/{oldVersion}.sql",
             Models: ToVersionModels(oldIdentifiers));
 
-        CatalogModel model = new(
+        CatalogVariant variant_model = new(
             Id: modelId,
             DisplayName: modelId,
+            Summary: "Test entry.",
+            Tags: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            ApproxSizeMb: 0,
+            Versions: [newer, older]);
+        CatalogEntry model = new(
+            Name: modelId,
             Summary: "Test entry.",
             Description: "Test.",
             Tasks: ["TextEmbedder"],
             Tags: [],
             LicenseIds: [],
             Attributions: [],
-            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
-            Versions: [newer, older],
-            ApproxSizeMb: 0);
+            Variants: [variant_model]);
 
         return new CatalogManifest(
-            SchemaVersion: 2,
-            Models: [model]);
+            SchemaVersion: 3,
+            Entries: [model]);
 
         static IReadOnlyList<CatalogVersionModel> ToVersionModels(string[] identifiers)
         {
@@ -301,11 +306,11 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         public List<InstallCall> Calls { get; } = [];
         public List<string> DroppedIdentifiers { get; } = [];
 
-        public ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct)
+        public ValueTask<bool> IsInstalledAsync(CatalogVariant variant, CancellationToken ct)
             => ValueTask.FromResult(true);
 
         public ValueTask<IReadOnlyList<string>> InstallAsync(
-            CatalogModel model, CatalogVersion version, bool pinnedMode, CancellationToken ct)
+            CatalogVariant variant, CatalogVersion version, bool pinnedMode, CancellationToken ct)
         {
             Calls.Add(new InstallCall(version.Version, pinnedMode));
             List<string> observed = [];
@@ -329,8 +334,19 @@ public sealed class ModelDownloadServiceVersionTests : ServiceTestBase
         public string ManifestDirectory { get; } = Path.GetTempPath();
         public ICatalogVocabulary Vocabulary { get; } = new CatalogVocabulary(manifest);
         public string? GetLicenseText(string licenseId) => null;
-        public string? GetFamilyCardMarkdown(string modelFamily) => null;
-        public string? ResolveFamilyCardAssetPath(string modelFamily, string relativePath) => null;
+        public string? GetEntryCardMarkdown(string entryName) => null;
+        public (CatalogEntry Entry, CatalogVariant Variant)? TryResolveVariant(string variantId)
+        {
+            foreach (CatalogEntry e in Manifest.Entries)
+            {
+                foreach (CatalogVariant v in e.Variants)
+                {
+                    if (v.Id == variantId) return (e, v);
+                }
+            }
+            return null;
+        }
+        public string? ResolveEntryCardAssetPath(string entryName, string relativePath) => null;
         public string? ResolveHeroImagePath(string modelId) => null;
     }
 

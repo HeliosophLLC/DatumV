@@ -60,95 +60,78 @@ public static class CatalogDrivenPythonRegistrar
         ArgumentNullException.ThrowIfNull(licenses);
         ArgumentException.ThrowIfNullOrEmpty(scriptsDirectory);
 
-        foreach (CatalogModel entry in manifest.Models)
+        foreach (CatalogEntry entry in manifest.Entries)
         {
-            if (!string.Equals(entry.Kind, "python", StringComparison.OrdinalIgnoreCase)) continue;
-            // ManifestStore.ValidateModels guarantees Python != null when
-            // Kind == "python"; defensive null-skip here keeps a corrupt
-            // in-memory manifest from crashing registration.
-            if (entry.Python is null) continue;
-            // Placeholder entries point at not-yet-uploaded repos. The
-            // download path also refuses them; skip at registration too
-            // so the entry doesn't sit in the catalog as "registered but
-            // unusable."
-            if (entry.Placeholder) continue;
-            RegisterOne(catalog, pythonEnvironments, entry, scriptsDirectory, licenses);
+            foreach (CatalogVariant variant in entry.Variants)
+            {
+                if (!string.Equals(variant.Kind, "python", StringComparison.OrdinalIgnoreCase)) continue;
+                // ManifestStore.ValidateEntries guarantees Python != null when
+                // Kind == "python"; defensive null-skip here keeps a corrupt
+                // in-memory manifest from crashing registration.
+                if (variant.Python is null) continue;
+                // Placeholder variants point at not-yet-uploaded repos. The
+                // download path also refuses them; skip at registration too
+                // so the variant doesn't sit in the catalog as "registered but
+                // unusable."
+                if (variant.Placeholder) continue;
+                RegisterOne(catalog, pythonEnvironments, entry, variant, scriptsDirectory, licenses);
+            }
         }
     }
 
     private static void RegisterOne(
         ModelCatalog catalog,
         IPythonEnvironmentManager pythonEnvironments,
-        CatalogModel entry,
+        CatalogEntry entry,
+        CatalogVariant variant,
         string scriptsDirectory,
         ILicenseRegistry licenses)
     {
-        CatalogPythonSpec spec = entry.Python!;
-        string modelName = entry.Id.Replace('-', '_');
+        CatalogPythonSpec spec = variant.Python!;
+        string modelName = variant.Id.Replace('-', '_');
         string scriptPath = Path.Combine(scriptsDirectory, spec.WorkerScript);
 
         IReadOnlyList<DataKind> inputKinds = ParseKindList(
-            spec.Signature.InputKinds, $"{entry.Id} python.signature.inputKinds");
+            spec.Signature.InputKinds, $"{variant.Id} python.signature.inputKinds");
         DataKind outputKind = ParseKind(
-            spec.Signature.OutputKind, $"{entry.Id} python.signature.outputKind");
+            spec.Signature.OutputKind, $"{variant.Id} python.signature.outputKind");
         IReadOnlyList<DataKind>? optionalArgKinds = spec.Signature.OptionalArgKinds is null
             ? null
-            : ParseKindList(spec.Signature.OptionalArgKinds, $"{entry.Id} python.signature.optionalArgKinds");
+            : ParseKindList(spec.Signature.OptionalArgKinds, $"{variant.Id} python.signature.optionalArgKinds");
 
-        // Resolve the first license to a display string. The catalog
-        // schema allows multiple LicenseIds; the engine entry's License
-        // field is a single SPDX-style label that surfaces in
-        // system.models. First wins — matches what RegisterBarkSmall
-        // etc. used to hardcode.
+        // Resolve the first license to a display string. License metadata
+        // lives at entry level (every variant shares).
         string? license = entry.LicenseIds.Count > 0
             ? licenses.GetMetadata(entry.LicenseIds[0])?.Spdx
             : null;
 
-        // Closure captures spec by reference. PythonBackedModel ctor
-        // copies the values it needs, so the closure can be invoked
-        // multiple times (after evictions) and produce equivalent
-        // model instances. The per-model directory is resolved through
-        // the load context's path resolver so the catalog substrate's
-        // future per-version layout flips through without touching this
-        // registrar.
         IModel Loader(ModelLoadContext ctx) => new PythonBackedModel(
             name: modelName,
             inputKinds: inputKinds,
             outputKind: outputKind,
             isDeterministic: spec.Signature.IsDeterministic,
             environments: pythonEnvironments,
-            // Use the catalog id (with hyphens) as the venv name. Keeps
-            // venv directories visually grouped with their catalog
-            // entries (`venvs/bark-small/`) rather than diverging into
-            // an underscore-only namespace.
-            venvName: entry.Id,
+            venvName: variant.Id,
             pythonVersion: spec.PythonVersion,
             requirements: spec.Requirements,
             scriptPath: scriptPath,
             scriptArgs: spec.ScaffoldArgs,
             readyTimeout: null,
             preferredBatchSize: 1,
-            modelDirectory: ctx.Paths.GetModelRoot(entry.Id));
+            modelDirectory: ctx.Paths.GetModelRoot(variant.Id));
 
         catalog.Register(new ModelCatalogEntry(
             Name: modelName,
             Backend: "python",
-            // No file under $DATUMV_MODELS to anchor on — the venv lives
-            // under the engine's managed Python directory (queryable
-            // via system.python_environments). Files list left empty
-            // for the same reason.
             RelativePath: null,
             InputKinds: inputKinds,
             OutputKind: outputKind,
             IsDeterministic: spec.Signature.IsDeterministic,
             Loader: Loader,
             OptionalArgKinds: optionalArgKinds,
-            DisplayName: entry.DisplayName,
+            DisplayName: variant.DisplayName,
             License: license,
             SourceUrl: null,
-            // Tasks is non-empty (manifest validation guarantees it); the
-            // first entry is by convention the model's primary use, which
-            // is the natural fit for a single-string Category.
             Category: entry.Tasks[0],
             Files: []));
     }

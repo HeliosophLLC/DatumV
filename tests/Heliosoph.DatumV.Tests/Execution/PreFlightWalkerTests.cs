@@ -28,21 +28,26 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
             Sources: [new HuggingFaceSource("repo", "main", [])],
             InstallSql: $"sql/{entryId}/{versionString}.sql",
             Models: [new CatalogVersionModel(identifier, pinnedAsOverride)]);
-        CatalogModel entry = new(
+        CatalogVariant variant_entry = new(
             Id: entryId,
             DisplayName: entryId,
+            Summary: "Test entry.",
+            Tags: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            ApproxSizeMb: 42,
+            Versions: [v]);
+        CatalogEntry entry = new(
+            Name: entryId,
             Summary: "Test entry.",
             Description: "Test.",
             Tasks: ["TextEmbedder"],
             Tags: [],
             LicenseIds: [],
             Attributions: [],
-            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
-            Versions: [v],
-            ApproxSizeMb: 42);
+            Variants: [variant_entry]);
         return new CatalogManifest(
-            SchemaVersion: 2,
-            Models: [entry]);
+            SchemaVersion: 3,
+            Entries: [entry]);
     }
 
     private static QueryExpression Parse(string sql)
@@ -238,7 +243,7 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
 
         Assert.True(vocab.ByPinnedAs.TryGetValue("foo@20260529", out CatalogPinnedReference? pin));
         Assert.Equal("foo", pin.Identifier);
-        Assert.Equal("foo-entry", pin.Entry.CatalogEntryId);
+        Assert.Equal("foo-entry", pin.Entry.VariantId);
         Assert.Equal("2026-05-29", pin.Version.VersionString);
     }
 
@@ -407,21 +412,26 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
             Sources: [new HuggingFaceSource("repo", "main", [])],
             InstallSql: "sql/x.sql",
             Models: [new CatalogVersionModel("foo", null)]);
-        CatalogModel entry = new(
+        CatalogVariant variant_entry = new(
             Id: "foo-entry",
             DisplayName: "Foo",
+            Summary: "Test entry.",
+            Tags: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            ApproxSizeMb: 42,
+            Versions: [v]);
+        CatalogEntry entry = new(
+            Name: "Foo",
             Summary: "Test entry.",
             Description: "Test.",
             Tasks: ["TextEmbedder"],
             Tags: [],
             LicenseIds: ["openrail-pp", "stability-ai-community"],
             Attributions: [],
-            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
-            Versions: [v],
-            ApproxSizeMb: 42);
+            Variants: [variant_entry]);
         CatalogManifest manifest = new(
-            SchemaVersion: 2,
-            Models: [entry]);
+            SchemaVersion: 3,
+            Entries: [entry]);
         ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
         FunctionRegistry functions = new();
 

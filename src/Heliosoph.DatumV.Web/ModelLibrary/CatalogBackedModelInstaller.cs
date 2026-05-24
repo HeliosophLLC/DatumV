@@ -39,9 +39,9 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
         _logger = logger;
     }
 
-    public ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct)
+    public ValueTask<bool> IsInstalledAsync(CatalogVariant variant, CancellationToken ct)
     {
-        string conventionalName = ToConventionalModelName(model.Id);
+        string conventionalName = ToConventionalModelName(variant.Id);
         bool registered = _catalog.DeclaredModels.TryGet(
             new QualifiedName(ModelsSchema, conventionalName),
             descriptor: out _);
@@ -49,7 +49,7 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
     }
 
     public async ValueTask<IReadOnlyList<string>> InstallAsync(
-        CatalogModel model,
+        CatalogVariant variant,
         CatalogVersion version,
         bool pinnedMode,
         CancellationToken ct)
@@ -67,13 +67,13 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
         if (!File.Exists(sqlPath))
         {
             throw new FileNotFoundException(
-                $"Install SQL for model '{model.Id}' version '{version.Version}' not found at {sqlPath}.",
+                $"Install SQL for variant '{variant.Id}' version '{version.Version}' not found at {sqlPath}.",
                 sqlPath);
         }
 
         _logger.LogInformation(
-            "Installing {ModelId} (version {Version}, pinned={Pinned}) from {SqlPath}",
-            model.Id, version.Version, pinnedMode, sqlPath);
+            "Installing {VariantId} (version {Version}, pinned={Pinned}) from {SqlPath}",
+            variant.Id, version.Version, pinnedMode, sqlPath);
 
         string sql = await File.ReadAllTextAsync(sqlPath, ct).ConfigureAwait(false);
         if (pinnedMode)
@@ -89,16 +89,16 @@ internal sealed class CatalogBackedModelInstaller : IModelInstaller
         if (statements.Count == 0)
         {
             throw new InvalidOperationException(
-                $"Install SQL for model '{model.Id}' parsed to zero statements.");
+                $"Install SQL for variant '{variant.Id}' parsed to zero statements.");
         }
 
         // Push catalog provenance onto the install context so each registered
-        // ModelDescriptor knows which catalog entry / version it came from
+        // ModelDescriptor knows which catalog variant / version it came from
         // — stamped into the persisted catalog row so rehydrate can resolve
         // the originating installSql without re-saving the verbatim source.
         string? previousCatalogId = ModelInstallContext.CurrentCatalogId;
         bool previousIsPinned = ModelInstallContext.CurrentInstallIsPinned;
-        ModelInstallContext.CurrentCatalogId = model.Id;
+        ModelInstallContext.CurrentCatalogId = variant.Id;
         ModelInstallContext.CurrentInstallIsPinned = pinnedMode;
         try
         {

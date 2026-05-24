@@ -7,7 +7,14 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { CodeBlock } from '@/components/markdown/CodeBlock';
 import { isExternalUrl, openExternalUrl } from '@/lib/openExternal';
-import { isDrifted, loadFamilyCard, modelsState, setSelectedId, type CatalogModelSnapshot } from '@/state/models';
+import {
+  isDriftedVariant,
+  loadEntryCard,
+  modelsState,
+  setSelectedVariant,
+  type CatalogEntrySnapshot,
+  type CatalogVariantSnapshot,
+} from '@/state/models';
 import { buildTaskFamilyMap } from '@/components/shared/taskStyles';
 import { TaskChipLabel } from '@/components/shared/TaskChip';
 import { cn } from '@/lib/utils';
@@ -28,149 +35,166 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 
-// Right-pane content for the Models view. Shows full info + actions for
-// one selected model. The list row on the left handles search/selection;
-// this component owns the heavy chrome (description, badges, license,
-// progress, install/uninstall buttons).
+// Right-pane content for the Models view. The entry owns chrome (hero,
+// description, tasks, license, attributions, optional card markdown); the
+// active variant owns install actions, hardware/size badges, and the
+// previous-versions disclosure. A variant tab strip flips between
+// variants without reloading the entry.
 
-export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
+export function ModelDetail({
+  entry,
+  variant,
+}: {
+  entry: CatalogEntrySnapshot;
+  variant: CatalogVariantSnapshot;
+}) {
   const { t } = useTranslation('models');
   const downloads = useSnapshot(downloadsState);
   const models = useSnapshot(modelsState);
 
-  const modelId = model.id ?? '';
-  const modelDisplayName = model.displayName ?? modelId;
-  const installState = downloads.state?.[modelId];
-  const activeDownload = downloads.active[modelId];
-  const installing = downloads.installing[modelId] === true;
-  const error = downloads.errors[modelId];
-  // Drift badge only renders when the entry is installed AND the active
-  // on-disk version trails the catalog's newest declared version. Warn-
-  // only — clicking Install on the card runs the latest cut (versions[0])
-  // and the badge clears once `<id>/active` flips.
-  const drifted = isDrifted(model, models.activeVersions);
-  const activeVersion = models.activeVersions[modelId];
-  const latestVersion = model.versions?.[0]?.version;
-  // Name → family lookup so each task badge can pick up the right
-  // family-accent left border. Memoised against the (rarely-changing)
-  // task vocabulary so we don't rebuild it on every snapshot tick.
+  const entryName = entry.name ?? '';
+  const variantId = variant.id ?? '';
+  const variantDisplayName = variant.displayName ?? variantId;
+
+  const installState = downloads.state?.[variantId];
+  const activeDownload = downloads.active[variantId];
+  const installing = downloads.installing[variantId] === true;
+  const error = downloads.errors[variantId];
+  const drifted = isDriftedVariant(variant, models.activeVersions);
+  const activeVersion = models.activeVersions[variantId];
+  const latestVersion = variant.versions?.[0]?.version;
+
   const taskFamilies = useMemo(() => buildTaskFamilyMap(models.tasks), [models.tasks]);
-  // Python install sub-step. The venv-install step is model-scoped (keyed
-  // by catalog id), so it appears only on the card that triggered it. The
-  // uv-download + python-install steps are machine-scoped — surface them
-  // alongside whichever model is currently installing, since that's what
-  // triggered the host-level work.
-  const venvStep = downloads.venvSteps[modelId];
+
+  const venvStep = downloads.venvSteps[variantId];
   const hostStep = downloads.pythonHostStep;
   const activeStep: PythonInstallStep | null = venvStep ?? (installing ? hostStep : null) ?? null;
 
-  // Sibling variants — every catalog entry sharing this model's
-  // `modelFamily`. Empty when the entry stands alone. Drives the variant
-  // picker chips at the top of the card; selecting a sibling swaps the
-  // detail pane via `setSelectedId`.
-  const modelFamily = model.modelFamily ?? null;
-  const siblings = useMemo(() => {
-    if (modelFamily === null || models.manifest === null) return [];
-    return (models.manifest.models ?? []).filter(
-      (m) => m.modelFamily === modelFamily,
-    );
-  }, [modelFamily, models.manifest]);
-
-  // Family card markdown — fetched once per family, cached in state.
-  // `loadFamilyCard` is a no-op when the family already has an entry
-  // (cached value, possibly null); we keep a local copy for rendering.
-  const [familyCard, setFamilyCard] = useState<string | null>(null);
+  // Entry card markdown — fetched once per entry, cached in state.
+  const [entryCard, setEntryCard] = useState<string | null>(null);
   useEffect(() => {
-    if (modelFamily === null) {
-      setFamilyCard(null);
-      return;
-    }
     let cancelled = false;
-    void loadFamilyCard(modelFamily).then((text) => {
-      if (!cancelled) setFamilyCard(text);
+    void loadEntryCard(entryName).then((text) => {
+      if (!cancelled) setEntryCard(text);
     });
     return () => {
       cancelled = true;
     };
-  }, [modelFamily]);
+  }, [entryName]);
+
+  const variants = entry.variants ?? [];
+  const showTabStrip = variants.length > 1;
 
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col">
-      <ModelHeroBand modelId={modelId} />
+      <ModelHeroBand entryName={entryName} />
       <div className="flex flex-col gap-4 px-6 py-5">
-      <header className="flex flex-col gap-2">
-        {siblings.length > 1 && (
-          <div className="flex flex-col gap-1">
-            <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
-              {t('card.modelFamily')} · {modelFamily}
-            </span>
-            <div className="flex flex-wrap gap-1">
-              {siblings.map((sib) => {
-                const sid = sib.id ?? '';
-                const isActive = sid === modelId;
-                return (
-                  <button
-                    key={sid}
-                    type="button"
-                    onClick={() => sid && setSelectedId(sid)}
-                    aria-pressed={isActive}
-                    disabled={isActive}
-                    className={cn(
-                      'rounded-xs px-2 py-0.5 text-xs transition-colors',
-                      isActive
-                        ? 'bg-primary/15 text-primary cursor-default'
-                        : 'text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer',
-                    )}
-                  >
-                    {sib.displayName ?? sib.id}
-                  </button>
-                );
-              })}
+        <header className="flex flex-col gap-2">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-xl font-medium">{entry.name}</h2>
+            <div className="flex shrink-0 gap-1.5">
+              {(entry.tags ?? []).slice(0, 2).map((tag) => (
+                <Badge key={tag} variant="outline">{tag}</Badge>
+              ))}
             </div>
           </div>
-        )}
-        {!model.placeholder && (
-          <div className="flex items-center justify-between gap-3">
-            {/* Install-state indicator. Only renders when the entry is
-                actually installed or downloaded — other states leave the
-                left side empty and `justify-between` keeps the action
-                button anchored on the right. */}
-            {installState === 'installed' && !installing ? (
-              <div className="flex items-center gap-1 text-xs text-primary">
-                <CircleCheck className="size-3.5" />
-                <span>{t('card.installed')}</span>
-              </div>
-            ) : installState === 'downloaded' && !installing ? (
-              <div className="flex items-center gap-1 text-xs text-primary">
-                <HardDrive className="size-3.5" />
-                <span>{t('card.downloaded')}</span>
-              </div>
-            ) : (
-              <span />
-            )}
-            <DetailActions
-              modelId={modelId}
-              modelDisplayName={modelDisplayName}
-              placeholder={!!model.placeholder}
-              installed={installState === 'installed'}
-              downloaded={installState === 'downloaded'}
-              downloading={!!activeDownload}
-              installing={installing}
-              partialBytes={downloads.partials[modelId] ?? 0}
-              installStep={activeStep}
+          {entry.summary && (
+            <p className="text-foreground text-sm leading-relaxed">{entry.summary}</p>
+          )}
+          {entry.description && (
+            <p className="text-muted-foreground text-xs leading-relaxed">{entry.description}</p>
+          )}
+        </header>
+
+        <div className="flex flex-wrap gap-1.5">
+          {(entry.tasks ?? []).map((task) => (
+            <TaskChipLabel
+              key={task}
+              task={task}
+              family={taskFamilies.get(task.toLowerCase()) ?? ''}
+              label={t(`tasks.${task}` as 'tasks.TextEmbedder', { defaultValue: task })}
             />
+          ))}
+          {(entry.licenseIds ?? []).map((id) => (
+            <Badge key={id} variant="outline">{id}</Badge>
+          ))}
+        </div>
+
+        {(entry.attributions?.length ?? 0) > 0 && (
+          <p className="text-muted-foreground text-xs">
+            <span className="font-medium">{t('card.attributions')}</span>{' '}
+            {entry.attributions!.join(' · ')}
+          </p>
+        )}
+
+        {showTabStrip && (
+          <div className="border-border flex overflow-x-auto overflow-y-hidden border-b">
+            {variants.map((v) => {
+              const vid = v.id ?? '';
+              const isActive = vid === variantId;
+              return (
+                <button
+                  key={vid}
+                  type="button"
+                  onClick={() => vid && setSelectedVariant(vid)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors',
+                    isActive
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground cursor-pointer',
+                  )}
+                >
+                  {v.displayName ?? vid}
+                </button>
+              );
+            })}
           </div>
         )}
-        <div className="flex items-start justify-between gap-3">
-          <h2 className="text-xl font-medium">{modelDisplayName}</h2>
-          <div className="flex shrink-0 gap-1.5">
-            {model.placeholder && (
+
+        <section className="border-border flex flex-col gap-3 rounded-xs border p-4">
+          <header className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-medium">{variantDisplayName}</h2>
+              {variant.summary && (
+                <p className="text-muted-foreground mt-1 text-sm">{variant.summary}</p>
+              )}
+            </div>
+            {!variant.placeholder && (
+              <DetailActions
+                variantId={variantId}
+                variantDisplayName={variantDisplayName}
+                placeholder={!!variant.placeholder}
+                installed={installState === 'installed'}
+                downloaded={installState === 'downloaded'}
+                downloading={!!activeDownload}
+                installing={installing}
+                partialBytes={downloads.partials[variantId] ?? 0}
+                installStep={activeStep}
+              />
+            )}
+          </header>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!variant.placeholder && installState === 'installed' && !installing && (
+              <span className="flex items-center gap-1 text-xs text-primary">
+                <CircleCheck className="size-3.5" />
+                {t('card.installed')}
+              </span>
+            )}
+            {!variant.placeholder && installState === 'downloaded' && !installing && (
+              <span className="flex items-center gap-1 text-xs text-primary">
+                <HardDrive className="size-3.5" />
+                {t('card.downloaded')}
+              </span>
+            )}
+            {variant.placeholder && (
               <Badge variant="muted">{t('card.comingSoon')}</Badge>
             )}
-            {!model.placeholder && installing && (
+            {!variant.placeholder && installing && (
               <Badge variant="muted">{t('card.installing')}</Badge>
             )}
-            {!model.placeholder && installState === 'partial' && !activeDownload && (
+            {!variant.placeholder && installState === 'partial' && !activeDownload && (
               <Badge variant="muted">{t('card.partial')}</Badge>
             )}
             {drifted && !installing && !activeDownload && (
@@ -184,125 +208,90 @@ export function ModelDetail({ model }: { model: CatalogModelSnapshot }) {
                 {t('card.updateAvailable')}
               </Badge>
             )}
-            {model.requiresHfLogin && (
+            {variant.requiresHfLogin && (
               <Badge variant="outline">{t('card.gated')}</Badge>
             )}
+            {(variant.tags ?? []).map((tag) => (
+              <Badge key={tag} variant="outline">{tag}</Badge>
+            ))}
+            {typeof variant.approxSizeMb === 'number' && (
+              <Badge variant="outline">
+                {t('card.size', { size: variant.approxSizeMb })}
+              </Badge>
+            )}
+            {variant.hardware?.preferred && (
+              <Badge variant="outline">{hardwareLabel(t, variant.hardware.preferred)}</Badge>
+            )}
           </div>
-        </div>
-        {model.summary && (
-          <p className="text-foreground text-sm leading-relaxed">{model.summary}</p>
-        )}
-        {model.description && (
-          <p className="text-muted-foreground text-xs leading-relaxed">{model.description}</p>
-        )}
-        <p className="text-muted-foreground text-xs font-mono">{modelId}</p>
-      </header>
 
-      <div className="flex flex-wrap gap-1.5">
-        {(model.tasks ?? []).map((task) => (
-          <TaskChipLabel
-            key={task}
-            task={task}
-            family={taskFamilies.get(task.toLowerCase()) ?? ''}
-            label={t(`tasks.${task}` as 'tasks.TextEmbedder', { defaultValue: task })}
+          <p className="text-muted-foreground text-xs font-mono">{variantId}</p>
+
+          {activeDownload && <DownloadProgress download={activeDownload} />}
+
+          {error && !activeDownload && (
+            <p className="text-destructive text-xs" role="alert">
+              {error}
+            </p>
+          )}
+
+          <PreviousVersionsDisclosure
+            variant={variant}
+            variantId={variantId}
+            variantDisplayName={variantDisplayName}
+            activeVersion={activeVersion}
+            versionsOnDisk={models.versionsOnDisk[variantId] ?? []}
+            busy={!!activeDownload || installing}
           />
-        ))}
-        {typeof model.approxSizeMb === 'number' && (
-          <Badge variant="outline">
-            {t('card.size', { size: model.approxSizeMb })}
-          </Badge>
+        </section>
+        
+        {entryCard && (
+          <div className="markdown-body">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+              // Rewrite relative URLs to the entry-card-asset endpoint.
+              urlTransform={(url) => {
+                if (/^https?:|^data:|^mailto:|^#|^\//i.test(url)) return url;
+                const clean = url.replace(/^\.\//, '');
+                return `/api/model-catalog/entries/${encodeURIComponent(entryName)}/card/assets/${clean}`;
+              }}
+              components={{
+                pre: ({ children, ...rest }) => (
+                  <CodeBlock {...rest}>{children}</CodeBlock>
+                ),
+                a: ({ href, children, ...rest }) => (
+                  <a
+                    {...rest}
+                    href={href}
+                    onClick={(e) => {
+                      if (isExternalUrl(href)) {
+                        e.preventDefault();
+                        openExternalUrl(href);
+                      }
+                    }}
+                  >
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {entryCard}
+            </ReactMarkdown>
+          </div>
         )}
-        {model.hardware?.preferred && (
-          <Badge variant="outline">{hardwareLabel(t, model.hardware.preferred)}</Badge>
-        )}
-        {(model.licenseIds ?? []).map((id) => (
-          <Badge key={id} variant="outline">
-            {id}
-          </Badge>
-        ))}
-      </div>
 
-      {(model.attributions?.length ?? 0) > 0 && (
-        <p className="text-muted-foreground text-xs">
-          <span className="font-medium">{t('card.attributions')}</span>{' '}
-          {model.attributions!.join(' · ')}
-        </p>
-      )}
-
-      {activeDownload && <DownloadProgress download={activeDownload} />}
-
-      {error && !activeDownload && (
-        <p className="text-destructive text-xs" role="alert">
-          {error}
-        </p>
-      )}
-
-      {familyCard && (
-        <div className="markdown-body">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[[rehypeHighlight, { detect: true }]]}
-            // Rewrite relative URLs to the family-card-asset endpoint so
-            // `![alt](yolox/street-detections.png)` resolves to the file
-            // served from `models/cards/yolox/street-detections.png`.
-            // Absolute URLs / data: / mailto: / anchors / SPA-routes
-            // pass through unchanged.
-            urlTransform={(url) => {
-              if (modelFamily === null) return url;
-              if (/^https?:|^data:|^mailto:|^#|^\//i.test(url)) return url;
-              const clean = url.replace(/^\.\//, '');
-              return `/api/model-catalog/family-cards/${encodeURIComponent(modelFamily)}/assets/${clean}`;
-            }}
-            components={{
-              pre: ({ children, ...rest }) => (
-                <CodeBlock {...rest}>{children}</CodeBlock>
-              ),
-              a: ({ href, children, ...rest }) => (
-                <a
-                  {...rest}
-                  href={href}
-                  onClick={(e) => {
-                    if (isExternalUrl(href)) {
-                      e.preventDefault();
-                      openExternalUrl(href);
-                    }
-                  }}
-                >
-                  {children}
-                </a>
-              ),
-            }}
-          >
-            {familyCard}
-          </ReactMarkdown>
-        </div>
-      )}
-
-      <PreviousVersionsDisclosure
-        model={model}
-        modelId={modelId}
-        modelDisplayName={modelDisplayName}
-        activeVersion={activeVersion}
-        versionsOnDisk={models.versionsOnDisk[modelId] ?? []}
-        busy={!!activeDownload || installing}
-      />
       </div>
     </article>
   );
 }
 
-// Hero band at the top of the model detail card. Matches the dataset
-// side's HeroBand: height-clamped, centered, with a bottom gradient
-// fade into the page background. Hides on 404 / load error so entries
-// without a declared HeroImageFile (or with a missing file on disk)
-// just don't render a band.
-function ModelHeroBand({ modelId }: { modelId: string }) {
+function ModelHeroBand({ entryName }: { entryName: string }) {
   const [visible, setVisible] = useState(true);
   if (!visible) return null;
   return (
     <div className="relative w-full overflow-hidden">
       <img
-        src={`/api/model-catalog/models/${encodeURIComponent(modelId)}/hero`}
+        src={`/api/model-catalog/entries/${encodeURIComponent(entryName)}/hero`}
         alt=""
         className="object-cover h-60 m-auto"
         onError={() => setVisible(false)}
@@ -338,9 +327,6 @@ function DownloadProgress({ download }: { download: ActiveDownload }) {
 function InstallingIndicator({ step }: { step: PythonInstallStep | null }) {
   const { t } = useTranslation('models');
 
-  // No Python sub-step: just the generic SQL-install spinner. Either
-  // we're past the venv stage (catalog INSTALL SQL is running) or the
-  // catalog entry is an ONNX model that has no venv work at all.
   if (!step) {
     return (
       <p className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -357,18 +343,12 @@ function InstallingIndicator({ step }: { step: PythonInstallStep | null }) {
       ? t('card.pythonStep.pythonInstall')
       : t('card.pythonStep.venvInstall');
 
-  // Prefer the most specific text we have: detail (wheel name, version)
-  // over stage label ("downloading", "extracting"). Both are free-form
-  // from the install backend.
   const subline = step.detail
     ? t('card.pythonStepWithDetail', { step: stepLabel, detail: step.detail })
     : step.stage
     ? t('card.pythonStepWithStage', { step: stepLabel, stage: step.stage })
     : stepLabel;
 
-  // Determinate progress when the backend reports totals (uv download),
-  // indeterminate otherwise (venv install — uv pip doesn't expose
-  // per-package byte totals).
   const showBar =
     typeof step.bytesProcessed === 'number'
     && typeof step.totalBytes === 'number'
@@ -389,8 +369,8 @@ function InstallingIndicator({ step }: { step: PythonInstallStep | null }) {
 }
 
 function DetailActions({
-  modelId,
-  modelDisplayName,
+  variantId,
+  variantDisplayName,
   placeholder,
   installed,
   downloaded,
@@ -399,8 +379,8 @@ function DetailActions({
   partialBytes,
   installStep,
 }: {
-  modelId: string;
-  modelDisplayName: string;
+  variantId: string;
+  variantDisplayName: string;
   placeholder: boolean;
   installed: boolean;
   downloaded: boolean;
@@ -429,7 +409,7 @@ function DetailActions({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => void uninstallModel(modelId)}
+          onClick={() => void uninstallModel(variantId)}
         >
           <Trash2 />
           {t('card.remove')}
@@ -438,19 +418,13 @@ function DetailActions({
     );
   }
 
-  // Files-are-there-but-install-didn't-run path. Most common after a
-  // process restart (ModelRegistry is in-memory and resets) — the user
-  // has the bytes but needs to re-register the model. Holds for both
-  // SQL-defined models (re-runs installSql) and built-in IModel entries
-  // (re-runs the catalog-driven registrar) — either way the bytes-only
-  // state needs an "Install" affordance, not "Download".
   if (downloaded) {
     return (
       <div className="flex justify-end gap-2">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => void uninstallModel(modelId)}
+          onClick={() => void uninstallModel(variantId)}
         >
           <Trash2 />
           {t('card.remove')}
@@ -458,7 +432,7 @@ function DetailActions({
         <Button
           variant="default"
           size="sm"
-          onClick={() => void installModel(modelId, modelDisplayName)}
+          onClick={() => void installModel(variantId, variantDisplayName)}
         >
           {t('card.install')}
         </Button>
@@ -466,14 +440,13 @@ function DetailActions({
     );
   }
 
-  // Bytes from a prior interrupted attempt are sitting on disk.
   if (partialBytes > 0) {
     return (
       <div className="flex justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void restartDownload(modelId, modelDisplayName)}
+          onClick={() => void restartDownload(variantId, variantDisplayName)}
         >
           <RotateCcw />
           {t('card.restart')}
@@ -481,7 +454,7 @@ function DetailActions({
         <Button
           variant="default"
           size="sm"
-          onClick={() => void installModel(modelId, modelDisplayName)}
+          onClick={() => void installModel(variantId, variantDisplayName)}
         >
           <Download />
           {t('card.resume', { size: formatPartialSize(partialBytes) })}
@@ -495,7 +468,7 @@ function DetailActions({
       <Button
         variant="default"
         size="sm"
-        onClick={() => void installModel(modelId, modelDisplayName)}
+        onClick={() => void installModel(variantId, variantDisplayName)}
       >
         <Download />
         {t('card.download')}
@@ -503,12 +476,6 @@ function DetailActions({
     </div>
   );
 }
-
-// Bytes/sec, formatDuration, and shortenPath have moved to
-// `@/lib/formatDownload` so the shared <DownloadProgressBar> can reuse
-// them — this file imports `shortenPath` above for the status-line
-// label. `formatPartialSize` stays local since it's only used by the
-// model card's resume affordance below.
 
 function formatPartialSize(bytes: number): string {
   const MB = 1024 * 1024;
@@ -520,16 +487,16 @@ function formatPartialSize(bytes: number): string {
 }
 
 function PreviousVersionsDisclosure({
-  model,
-  modelId,
-  modelDisplayName,
+  variant,
+  variantId,
+  variantDisplayName,
   activeVersion,
   versionsOnDisk,
   busy,
 }: {
-  model: CatalogModelSnapshot;
-  modelId: string;
-  modelDisplayName: string;
+  variant: CatalogVariantSnapshot;
+  variantId: string;
+  variantDisplayName: string;
   activeVersion: string | undefined;
   versionsOnDisk: readonly string[];
   busy: boolean;
@@ -537,12 +504,7 @@ function PreviousVersionsDisclosure({
   const { t } = useTranslation('models');
   const [open, setOpen] = useState(false);
 
-  const versions = model.versions ?? [];
-  // Hide entirely when there are no previous versions to act on. v1
-  // catalog entries only have versions[0] today; a 1-version entry has
-  // nothing for this disclosure to show beyond the active version
-  // itself (which is already actionable via the top-level Remove
-  // button), so we keep the card uncluttered.
+  const versions = variant.versions ?? [];
   if (versions.length <= 1) return null;
 
   const onDiskSet = new Set(versionsOnDisk);
@@ -574,8 +536,8 @@ function PreviousVersionsDisclosure({
             return (
               <PreviousVersionRow
                 key={versionString}
-                modelId={modelId}
-                modelDisplayName={modelDisplayName}
+                variantId={variantId}
+                variantDisplayName={variantDisplayName}
                 versionString={versionString}
                 identifiers={v.models ?? []}
                 deprecated={!!v.deprecated}
@@ -591,17 +553,13 @@ function PreviousVersionsDisclosure({
   );
 }
 
-// Strip non-digit characters from a version string to derive the
-// suffix used by pinned identifiers ("2026-05-29" → "20260529"). Mirrors
-// CatalogVersionModel.EffectivePinnedAs on the engine side so the
-// hint text matches what the parser actually accepts at query time.
 function pinnedDigits(version: string): string {
   return version.replace(/\D/g, '');
 }
 
 function PreviousVersionRow({
-  modelId,
-  modelDisplayName,
+  variantId,
+  variantDisplayName,
   versionString,
   identifiers,
   deprecated,
@@ -609,8 +567,8 @@ function PreviousVersionRow({
   state,
   busy,
 }: {
-  modelId: string;
-  modelDisplayName: string;
+  variantId: string;
+  variantDisplayName: string;
   versionString: string;
   identifiers: readonly { identifier?: string; pinnedAs?: string }[];
   deprecated: boolean;
@@ -620,27 +578,20 @@ function PreviousVersionRow({
 }) {
   const { t } = useTranslation('models');
   const digits = pinnedDigits(versionString);
-  // First identifier is representative for the "callable as" hint —
-  // most catalog entries declare one identifier per version, and when
-  // they declare several they share the version-suffix convention so
-  // showing one example reads cleaner than a full list.
   const firstIdentifier = identifiers[0]?.identifier ?? '';
 
   const onInstall = () => {
-    void installPinnedVersion(modelId, versionString, modelDisplayName);
+    void installPinnedVersion(variantId, versionString, variantDisplayName);
   };
   const onActivate = () => {
-    void activateVersion(modelId, versionString);
+    void activateVersion(variantId, versionString);
   };
   const onDelete = () => {
     const message = state === 'active'
       ? t('previousVersions.deleteActiveConfirm')
       : t('previousVersions.deleteConfirm', { version: versionString, digits });
-    // window.confirm is a stopgap — fine for v1 since the action is
-    // recoverable (re-install). Promoting to a typed Electron dialog
-    // belongs with the rest of the catalog dialogs if the UX needs it.
     if (!window.confirm(message)) return;
-    void deleteVersion(modelId, versionString);
+    void deleteVersion(variantId, versionString);
   };
 
   return (

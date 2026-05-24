@@ -361,7 +361,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         // active_version is whatever the path resolver reports for the
         // catalog id (NULL when the resolver doesn't know).
         string? catalogId = vocabulary?.ByIdentifier.TryGetValue(entry.Name, out CatalogVocabularyEntry? vocab) == true
-            ? vocab.CatalogEntryId
+            ? vocab.VariantId
             : null;
         cells[19] = WriteOptionalString(catalogId, arena);
         cells[20] = DataValue.FromString(ModelResidency.Callable, arena);
@@ -429,7 +429,7 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         // declared row mid-install. catalog_id and active_version
         // surface when present; residency is always callable.
         string? catalogId = vocabulary?.ByIdentifier.TryGetValue(descriptor.Name, out CatalogVocabularyEntry? vocab) == true
-            ? vocab.CatalogEntryId
+            ? vocab.VariantId
             : null;
         cells[19] = WriteOptionalString(catalogId, arena);
         cells[20] = DataValue.FromString(ModelResidency.Callable, arena);
@@ -452,20 +452,21 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
     private static void FillDiscoveredRow(
         DataValue[] cells, CatalogVocabularyEntry vocab, Heliosoph.DatumV.ModelLibrary.IModelPathResolver pathResolver, Arena arena)
     {
-        CatalogModel owner = vocab.Owner;
+        CatalogEntry ownerEntry = vocab.OwnerEntry;
+        CatalogVariant ownerVariant = vocab.OwnerVariant;
 
         cells[0]  = DataValue.FromString(vocab.Identifier, arena);
-        cells[1]  = WriteOptionalString(owner.DisplayName, arena);
+        cells[1]  = WriteOptionalString(ownerVariant.DisplayName, arena);
         cells[2]  = DataValue.Null(DataKind.String);          // category — not on catalog entry today
         cells[3]  = DataValue.NullArrayOf(DataKind.String);   // modalities — derived at registration time
-        cells[4]  = DataValue.FromString(owner.Kind, arena);  // catalog Kind ("onnx" / "python" / …) is the closest analogue to backend
+        cells[4]  = DataValue.FromString(ownerVariant.Kind, arena);  // catalog Kind ("onnx" / "python" / …) is the closest analogue to backend
         cells[5]  = DataValue.Null(DataKind.String);          // parameters
         cells[6]  = DataValue.Null(DataKind.String);          // file_name — version-dependent, deferred to install time
         cells[7]  = DataValue.NullArrayOf(DataKind.String);   // file_names
         cells[8]  = DataValue.Null(DataKind.Int64);           // file_size_bytes
         // Surface license from the catalog entry's first licenseId when
         // present so SQL queries against `license` work pre-install.
-        cells[9]  = WriteOptionalString(owner.LicenseIds is { Count: > 0 } lic ? lic[0] : null, arena);
+        cells[9]  = WriteOptionalString(ownerEntry.LicenseIds is { Count: > 0 } lic ? lic[0] : null, arena);
         cells[10] = DataValue.Null(DataKind.String);          // license_holder — derived from CatalogLicense table at registration
         cells[11] = DataValue.Null(DataKind.String);          // source_url
         cells[12] = DataValue.FromString("discovered", arena);
@@ -473,10 +474,10 @@ public sealed class ModelsTableProvider : NonSeekableTableProviderBase
         // task surfaces the entry's primary contract so users can find
         // discovered models via WHERE task = 'X'. Multi-task entries
         // expose their primary; the rest is in `system.tasks`.
-        cells[14] = WriteOptionalString(owner.Tasks is { Count: > 0 } t ? t[0] : null, arena);
+        cells[14] = WriteOptionalString(ownerEntry.Tasks is { Count: > 0 } t ? t[0] : null, arena);
         cells[15] = DataValue.FromBoolean(false);              // batchable — unknowable until registered
         // calibration cells filled by FillCalibrationCells after this.
-        cells[19] = DataValue.FromString(owner.Id, arena);
+        cells[19] = DataValue.FromString(ownerVariant.Id, arena);
         cells[20] = DataValue.FromString(ModelResidency.Discovered, arena);
         // For a discovered row, active_version is NULL by definition —
         // the catalog hasn't been installed yet so `<id>/active` doesn't

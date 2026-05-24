@@ -1677,11 +1677,11 @@ export class ModelCatalogClient {
         return Promise.resolve<string>(null as any);
     }
 
-    getFamilyCard(family: string, signal?: AbortSignal): Promise<string> {
-        let url_ = this.baseUrl + "/api/model-catalog/family-cards/{family}";
-        if (family === undefined || family === null)
-            throw new Error("The parameter 'family' must be defined.");
-        url_ = url_.replace("{family}", encodeURIComponent("" + family));
+    getEntryCard(name: string, signal?: AbortSignal): Promise<string> {
+        let url_ = this.baseUrl + "/api/model-catalog/entries/{name}/card";
+        if (name === undefined || name === null)
+            throw new Error("The parameter 'name' must be defined.");
+        url_ = url_.replace("{name}", encodeURIComponent("" + name));
         url_ = url_.replace(/[?&]$/, "");
 
         let options_: RequestInit = {
@@ -1693,11 +1693,11 @@ export class ModelCatalogClient {
         };
 
         return this.http.fetch(url_, options_).then((_response: Response) => {
-            return this.processGetFamilyCard(_response);
+            return this.processGetEntryCard(_response);
         });
     }
 
-    protected processGetFamilyCard(response: Response): Promise<string> {
+    protected processGetEntryCard(response: Response): Promise<string> {
         const status = response.status;
         let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
         if (status === 200) {
@@ -1714,11 +1714,11 @@ export class ModelCatalogClient {
         return Promise.resolve<string>(null as any);
     }
 
-    getFamilyCardAsset(family: string, path: string, signal?: AbortSignal): Promise<FileResponse> {
-        let url_ = this.baseUrl + "/api/model-catalog/family-cards/{family}/assets/{path}";
-        if (family === undefined || family === null)
-            throw new Error("The parameter 'family' must be defined.");
-        url_ = url_.replace("{family}", encodeURIComponent("" + family));
+    getEntryCardAsset(name: string, path: string, signal?: AbortSignal): Promise<FileResponse> {
+        let url_ = this.baseUrl + "/api/model-catalog/entries/{name}/card/assets/{path}";
+        if (name === undefined || name === null)
+            throw new Error("The parameter 'name' must be defined.");
+        url_ = url_.replace("{name}", encodeURIComponent("" + name));
         if (path === undefined || path === null)
             throw new Error("The parameter 'path' must be defined.");
         url_ = url_.replace("{path}", encodeURIComponent("" + path));
@@ -1733,11 +1733,11 @@ export class ModelCatalogClient {
         };
 
         return this.http.fetch(url_, options_).then((_response: Response) => {
-            return this.processGetFamilyCardAsset(_response);
+            return this.processGetEntryCardAsset(_response);
         });
     }
 
-    protected processGetFamilyCardAsset(response: Response): Promise<FileResponse> {
+    protected processGetEntryCardAsset(response: Response): Promise<FileResponse> {
         const status = response.status;
         let _headers: any = {}; if (response.headers && response.headers.forEach) { response.headers.forEach((v: any, k: any) => _headers[k] = v); };
         if (status === 200 || status === 206) {
@@ -1759,11 +1759,11 @@ export class ModelCatalogClient {
         return Promise.resolve<FileResponse>(null as any);
     }
 
-    getHeroImage(id: string, signal?: AbortSignal): Promise<FileResponse> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/hero";
-        if (id === undefined || id === null)
-            throw new Error("The parameter 'id' must be defined.");
-        url_ = url_.replace("{id}", encodeURIComponent("" + id));
+    getHeroImage(name: string, signal?: AbortSignal): Promise<FileResponse> {
+        let url_ = this.baseUrl + "/api/model-catalog/entries/{name}/hero";
+        if (name === undefined || name === null)
+            throw new Error("The parameter 'name' must be defined.");
+        url_ = url_.replace("{name}", encodeURIComponent("" + name));
         url_ = url_.replace(/[?&]$/, "");
 
         let options_: RequestInit = {
@@ -1878,7 +1878,7 @@ export class ModelCatalogClient {
     }
 
     getState(id: string, signal?: AbortSignal): Promise<ModelInstallState> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/state";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/state";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -1949,7 +1949,7 @@ export class ModelCatalogClient {
     }
 
     install(id: string, signal?: AbortSignal): Promise<void> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/install";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/install";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -2001,7 +2001,7 @@ export class ModelCatalogClient {
     }
 
     uninstall(id: string, signal?: AbortSignal): Promise<FileResponse> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -2043,7 +2043,7 @@ export class ModelCatalogClient {
     }
 
     installPinned(id: string, version: string, signal?: AbortSignal): Promise<void> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/install/{version}";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/install/{version}";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -2098,7 +2098,7 @@ export class ModelCatalogClient {
     }
 
     activateVersion(id: string, version: string, signal?: AbortSignal): Promise<void> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/activate/{version}";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/activate/{version}";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -2147,7 +2147,7 @@ export class ModelCatalogClient {
     }
 
     deleteVersion(id: string, version: string, signal?: AbortSignal): Promise<void> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/versions/{version}";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/versions/{version}";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -2298,7 +2298,7 @@ export class ModelCatalogClient {
     }
 
     deletePartials(id: string, signal?: AbortSignal): Promise<FileResponse> {
-        let url_ = this.baseUrl + "/api/model-catalog/models/{id}/partials";
+        let url_ = this.baseUrl + "/api/model-catalog/variants/{id}/partials";
         if (id === undefined || id === null)
             throw new Error("The parameter 'id' must be defined.");
         url_ = url_.replace("{id}", encodeURIComponent("" + id));
@@ -3084,30 +3084,36 @@ export interface InstalledLlm {
 
 export interface CatalogManifest {
     schemaVersion?: number;
-    models?: CatalogModel[];
+    entries?: CatalogEntry[];
 }
 
-export interface CatalogModel {
-    id?: string;
-    displayName?: string;
+export interface CatalogEntry {
+    name?: string;
     summary?: string;
     description?: string;
     tasks?: string[];
     tags?: string[];
     licenseIds?: string[];
     attributions?: string[];
+    variants?: CatalogVariant[];
+    cardFile?: string | undefined;
+    heroImageFile?: string | undefined;
+}
+
+export interface CatalogVariant {
+    id?: string;
+    displayName?: string;
+    summary?: string | undefined;
+    tags?: string[];
     hardware?: CatalogHardware;
-    versions?: CatalogVersion[];
     approxSizeMb?: number;
+    versions?: CatalogVersion[];
     placeholder?: boolean;
     requiresHfLogin?: boolean;
     kind?: string;
     python?: CatalogPythonSpec | undefined;
     deprecated?: boolean;
     supersededBy?: string | undefined;
-    modelFamily?: string | undefined;
-    familyCardFile?: string | undefined;
-    heroImageFile?: string | undefined;
 }
 
 export interface CatalogHardware {

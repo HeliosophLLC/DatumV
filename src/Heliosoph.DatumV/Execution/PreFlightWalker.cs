@@ -469,21 +469,22 @@ internal static class PreFlightWalker
             }
 
             CatalogVocabularyVersion recommended = entry.Versions[0];
-            CatalogModel owner = entry.Owner;
+            CatalogVariant ownerVariant = entry.OwnerVariant;
+            CatalogEntry ownerEntry = entry.OwnerEntry;
             _reqs.Add(new PreFlightModelRequirement(
                 TypedReference: $"models.{identifier}",
                 Identifier: identifier,
-                CatalogEntryId: entry.CatalogEntryId,
+                CatalogEntryId: entry.VariantId,
                 Version: recommended.VersionString,
                 VersionPinned: false,
                 Reason: PreFlightReason.ModelNotInstalled,
-                ApproxSizeMb: owner.ApproxSizeMb,
+                ApproxSizeMb: ownerVariant.ApproxSizeMb,
                 SiblingIdentifiers: SiblingsOf(entry, recommended, exclude: identifier),
-                EntryDeprecated: owner.Deprecated,
-                SupersededBy: owner.SupersededBy,
+                EntryDeprecated: ownerVariant.Deprecated,
+                SupersededBy: ownerVariant.SupersededBy,
                 VersionDeprecated: recommended.Version.Deprecated,
                 VersionDeprecationReason: recommended.Version.DeprecationReason,
-                LicenseIds: owner.LicenseIds));
+                LicenseIds: ownerEntry.LicenseIds));
         }
 
         private void EmitPinned(string typed, string bareName)
@@ -498,17 +499,17 @@ internal static class PreFlightWalker
                 _reqs.Add(new PreFlightModelRequirement(
                     TypedReference: $"models.{typed}",
                     Identifier: bareName,
-                    CatalogEntryId: pinEntry.CatalogEntryId,
+                    CatalogEntryId: pinEntry.VariantId,
                     Version: vv.VersionString,
                     VersionPinned: true,
                     Reason: PreFlightReason.PinnedVersionNotInstalled,
-                    ApproxSizeMb: pinEntry.Owner.ApproxSizeMb,
+                    ApproxSizeMb: pinEntry.OwnerVariant.ApproxSizeMb,
                     SiblingIdentifiers: SiblingsOf(pinEntry, vv, exclude: bareName),
-                    EntryDeprecated: pinEntry.Owner.Deprecated,
-                    SupersededBy: pinEntry.Owner.SupersededBy,
+                    EntryDeprecated: pinEntry.OwnerVariant.Deprecated,
+                    SupersededBy: pinEntry.OwnerVariant.SupersededBy,
                     VersionDeprecated: vv.Version.Deprecated,
                     VersionDeprecationReason: vv.Version.DeprecationReason,
-                    LicenseIds: pinEntry.Owner.LicenseIds));
+                    LicenseIds: pinEntry.OwnerEntry.LicenseIds));
                 return;
             }
 
@@ -535,17 +536,17 @@ internal static class PreFlightWalker
                 _reqs.Add(new PreFlightModelRequirement(
                     TypedReference: $"models.{typed}",
                     Identifier: bareName,
-                    CatalogEntryId: bareEntry.CatalogEntryId,
+                    CatalogEntryId: bareEntry.VariantId,
                     Version: null,
                     VersionPinned: true,
                     Reason: PreFlightReason.PinnedVersionUnknown,
-                    ApproxSizeMb: bareEntry.Owner.ApproxSizeMb,
+                    ApproxSizeMb: bareEntry.OwnerVariant.ApproxSizeMb,
                     SiblingIdentifiers: SiblingsOf(bareEntry, recommended, exclude: bareName),
-                    EntryDeprecated: bareEntry.Owner.Deprecated,
-                    SupersededBy: bareEntry.Owner.SupersededBy,
+                    EntryDeprecated: bareEntry.OwnerVariant.Deprecated,
+                    SupersededBy: bareEntry.OwnerVariant.SupersededBy,
                     VersionDeprecated: false,
                     VersionDeprecationReason: null,
-                    LicenseIds: bareEntry.Owner.LicenseIds));
+                    LicenseIds: bareEntry.OwnerEntry.LicenseIds));
                 return;
             }
 

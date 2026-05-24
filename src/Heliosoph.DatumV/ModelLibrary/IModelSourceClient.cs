@@ -9,7 +9,7 @@ namespace Heliosoph.DatumV.ModelLibrary;
 /// per <see cref="CatalogSource"/> subtype — they're routed by
 /// <see cref="SupportedType"/> string-matching the manifest's <c>type</c>
 /// discriminator. <see cref="ModelDownloadService"/> walks a model's
-/// <see cref="CatalogModel.Sources"/> list in order; each source's client
+/// <see cref="CatalogVariant.Sources"/> list in order; each source's client
 /// gets a shot at listing and downloading the file set before falling
 /// through to the next.
 /// </summary>

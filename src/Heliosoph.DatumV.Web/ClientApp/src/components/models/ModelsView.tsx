@@ -11,26 +11,25 @@ import {
   X,
 } from 'lucide-react';
 import {
+  aggregateEntryStatus,
   clearFilters,
   driftedCount,
-  filterModels,
-  groupByModelFamily,
+  filterEntries,
   groupTasksByFamily,
   installStateCounts,
-  isDrifted,
+  isDriftedEntry,
   loadModelsCatalog,
   modelsState,
   setQuery,
-  setSelectedId,
+  setSelectedEntry,
   setUpdatesOnly,
   tasksWithAssignedModels,
   toggleInstallState,
   toggleTask,
+  type CatalogEntrySnapshot,
   type CatalogTaskInfoSnapshot,
-  type ModelGroup,
 } from '@/state/models';
 import type { ModelInstallState } from '@/api/generated/openapi-client';
-import type { CatalogModelSnapshot } from '@/state/models';
 import { downloadsState, refreshDownloads } from '@/state/downloads';
 import { ModelDetail } from '@/components/models/ModelDetail';
 import {
@@ -48,11 +47,6 @@ import {
 } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 
-// VS Code Extensions–style layout: search box + a single "Updates" toggle
-// in the header (visible only when something is drifted), then a three-
-// pane resizable body — task filter on the far left, list of matches in
-// the middle, full detail pane on the right.
-
 export function ModelsView() {
   const { t } = useTranslation('models');
   const {
@@ -65,7 +59,8 @@ export function ModelsView() {
     installStates,
     query,
     selectedTasks,
-    selectedId,
+    selectedEntryName,
+    selectedVariantId,
   } = useSnapshot(modelsState);
   const downloads = useSnapshot(downloadsState);
   const driftCount = useMemo(
@@ -82,22 +77,17 @@ export function ModelsView() {
     void refreshDownloads();
   }, []);
 
-  // Only surface tasks that at least one model actually claims — an
-  // unassigned task in the sidebar would empty the list when clicked.
   const visibleTasks = useMemo(
     () => (tasks && manifest ? tasksWithAssignedModels(tasks, manifest) : []),
     [tasks, manifest],
   );
 
-  // Name → family lookup so each row's chips can pick up the family-
-  // accent left border. Built once over the task vocabulary so we don't
-  // walk it per row.
   const taskFamilies = useMemo(() => buildTaskFamilyMap(tasks), [tasks]);
 
   const filtered = useMemo(
     () =>
       manifest
-        ? filterModels(
+        ? filterEntries(
             manifest,
             updatesOnly,
             installStates,
@@ -110,27 +100,26 @@ export function ModelsView() {
     [manifest, updatesOnly, installStates, downloads.state, query, selectedTasks, activeVersions],
   );
 
-  // Group filtered entries by model family. Singletons and 1-of-1
-  // family survivors render as plain rows; multi-entry families collapse
-  // into a single "X variants" row that expands into a picker in the
-  // detail pane when selected.
-  const grouped = useMemo(() => groupByModelFamily(filtered), [filtered]);
-
-  // Auto-select the first match once the manifest lands. Don't override an
-  // existing selection — even if it falls outside the current filter, the
-  // user's last-clicked model stays in the detail pane (matches VS Code's
-  // behavior, where typing in the search box doesn't unmount the detail).
+  // Auto-select the first match once the manifest lands.
   useEffect(() => {
-    if (selectedId !== null) return;
+    if (selectedEntryName !== null) return;
     if (filtered.length === 0) return;
-    const firstId = filtered[0].id;
-    if (firstId) setSelectedId(firstId);
-  }, [filtered, selectedId]);
+    const first = filtered[0];
+    const firstName = first.name;
+    const firstVariantId = first.variants?.[0]?.id;
+    if (firstName) setSelectedEntry(firstName, firstVariantId ?? null);
+  }, [filtered, selectedEntryName]);
 
-  const selectedModel = useMemo(() => {
-    if (!manifest || !selectedId) return null;
-    return (manifest.models ?? []).find((m) => m.id === selectedId) ?? null;
-  }, [manifest, selectedId]);
+  const selectedEntry = useMemo(() => {
+    if (!manifest || !selectedEntryName) return null;
+    return (manifest.entries ?? []).find((e) => e.name === selectedEntryName) ?? null;
+  }, [manifest, selectedEntryName]);
+
+  const selectedVariant = useMemo(() => {
+    if (!selectedEntry) return null;
+    const vs = selectedEntry.variants ?? [];
+    return vs.find((v) => v.id === selectedVariantId) ?? vs[0] ?? null;
+  }, [selectedEntry, selectedVariantId]);
 
   if (loading && !manifest) {
     return (
@@ -176,8 +165,6 @@ export function ModelsView() {
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Updates toggle: always rendered so the row's layout
-              stays stable, but disabled when nothing is drifted. */}
           <UpdatesToggle
             active={updatesOnly}
             disabled={driftCount === 0}
@@ -196,8 +183,6 @@ export function ModelsView() {
             count={stateCounts.downloaded}
             label={t('filters.downloadedWithCount', { count: stateCounts.downloaded })}
           />
-          {/* Partial is uncommon — collapse it out of the row entirely
-              when no model is in that state so the strip stays tidy. */}
           {stateCounts.partial > 0 && (
             <InstallStateToggle
               state="partial"
@@ -236,27 +221,19 @@ export function ModelsView() {
               </p>
             ) : (
               <ul className="flex flex-col">
-                {grouped.map((group) =>
-                  group.kind === 'single' ? (
-                    <ModelListItem
-                      key={group.entry.id}
-                      model={group.entry}
-                      active={group.entry.id === selectedId}
-                      drifted={isDrifted(group.entry, activeVersions)}
-                      taskFamilies={taskFamilies}
-                      onSelect={() => group.entry.id && setSelectedId(group.entry.id)}
-                    />
-                  ) : (
-                    <FamilyListItem
-                      key={group.family}
-                      group={group}
-                      selectedId={selectedId}
-                      activeVersions={activeVersions}
-                      taskFamilies={taskFamilies}
-                      onSelect={setSelectedId}
-                    />
-                  ),
-                )}
+                {filtered.map((entry) => (
+                  <EntryListItem
+                    key={entry.name}
+                    entry={entry}
+                    active={entry.name === selectedEntryName}
+                    drifted={isDriftedEntry(entry, activeVersions)}
+                    taskFamilies={taskFamilies}
+                    onSelect={() => {
+                      const variantId = entry.variants?.[0]?.id ?? null;
+                      if (entry.name) setSelectedEntry(entry.name, variantId);
+                    }}
+                  />
+                ))}
               </ul>
             )}
           </div>
@@ -269,8 +246,8 @@ export function ModelsView() {
           className="flex flex-col overflow-hidden"
         >
           <div className="flex-1 overflow-y-auto">
-            {selectedModel ? (
-              <ModelDetail model={selectedModel} />
+            {selectedEntry && selectedVariant ? (
+              <ModelDetail entry={selectedEntry} variant={selectedVariant} />
             ) : (
               <p className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm">
                 {t('selectPrompt')}
@@ -365,10 +342,6 @@ function InstallStateToggle({
   count: number;
   label: string;
 }) {
-  // Same shape as UpdatesToggle, with the disabled-when-zero pattern so
-  // the toggle row's layout stays stable as the user installs / removes
-  // models. The Partial toggle is hidden by the caller when count === 0
-  // (uncommon state) so it doesn't follow this disabled-shell pattern.
   const disabled = count === 0;
   const Icon =
     state === 'installed' ? CircleCheck
@@ -466,10 +439,6 @@ function familyLabel(
   t: ReturnType<typeof useTranslation<'models'>>['t'],
   family: string,
 ): string {
-  // PascalCase family strings (from TaskFamily enum) map to localized
-  // section headers via the `filters.family.*` namespace. Unknown families
-  // (server added a new one before the front-end caught up) fall through
-  // to the raw string so nothing disappears silently.
   return t(`filters.family.${family}` as 'filters.family.ComputerVision', {
     defaultValue: family,
   });
@@ -479,20 +448,17 @@ function taskLabel(
   t: ReturnType<typeof useTranslation<'models'>>['t'],
   name: string,
 ): string {
-  // Same shape as familyLabel: PascalCase contract name → human-friendly
-  // localized label; unknown task names trail back to the raw identifier
-  // so a newly-added contract still shows up in the UI.
   return t(`tasks.${name}` as 'tasks.TextEmbedder', { defaultValue: name });
 }
 
-function ModelListItem({
-  model,
+function EntryListItem({
+  entry,
   active,
   drifted,
   taskFamilies,
   onSelect,
 }: {
-  model: CatalogModelSnapshot;
+  entry: CatalogEntrySnapshot;
   active: boolean;
   drifted: boolean;
   taskFamilies: ReadonlyMap<string, string>;
@@ -500,23 +466,25 @@ function ModelListItem({
 }) {
   const { t } = useTranslation('models');
   const downloads = useSnapshot(downloadsState);
-  const modelId = model.id ?? '';
-  const installState = downloads.state?.[modelId];
-  const activeDownload = downloads.active[modelId];
-  const installing = downloads.installing[modelId] === true;
+  const models = useSnapshot(modelsState);
+  const variantCount = entry.variants?.length ?? 0;
 
-  // Status indicator: a small icon whose silhouette encodes install
-  // state. Colored install dots competed with the family-accent colors
-  // on the task chips, so we read state by shape and keep all icons in
-  // a muted hue.
+  const aggregate = aggregateEntryStatus(
+    entry,
+    downloads.state,
+    downloads.active,
+    downloads.installing,
+    models.activeVersions,
+  );
+
   const status: { Icon: typeof Loader2; label: string; spin: boolean } | null =
-    activeDownload || installing
+    aggregate.anyDownloading || aggregate.anyInstalling
       ? { Icon: Loader2, label: t('card.installing'), spin: true }
-      : installState === 'installed'
+      : aggregate.anyInstalled
       ? { Icon: CircleCheck, label: t('card.installed'), spin: false }
-      : installState === 'downloaded'
+      : aggregate.anyDownloaded
       ? { Icon: HardDrive, label: t('card.downloaded'), spin: false }
-      : installState === 'partial'
+      : aggregate.anyPartial
       ? { Icon: CircleDashed, label: t('card.partial'), spin: false }
       : null;
 
@@ -548,8 +516,16 @@ function ModelListItem({
             <span className="size-3 shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium">
-            {model.displayName}
+            {entry.name}
           </span>
+          {variantCount > 1 && (
+            <span
+              className="text-muted-foreground shrink-0 text-[10px]"
+              title={t('list.variantCount', { count: variantCount })}
+            >
+              {t('list.variantCount', { count: variantCount })}
+            </span>
+          )}
           {drifted && (
             <ArrowUpCircle
               className="text-muted-foreground size-3 shrink-0"
@@ -560,11 +536,11 @@ function ModelListItem({
           )}
         </div>
         <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-5 text-xs">
-          {model.summary ?? model.description}
+          {entry.summary ?? entry.description}
         </span>
-        {(model.tasks ?? []).length > 0 && (
+        {(entry.tasks ?? []).length > 0 && (
           <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
-            {(model.tasks ?? []).map((task) => (
+            {(entry.tasks ?? []).map((task) => (
               <TaskChipIcon
                 key={task}
                 task={task}
@@ -578,132 +554,3 @@ function ModelListItem({
     </li>
   );
 }
-
-function FamilyListItem({
-  group,
-  selectedId,
-  activeVersions,
-  taskFamilies,
-  onSelect,
-}: {
-  group: Extract<ModelGroup, { kind: 'family' }>;
-  selectedId: string | null;
-  activeVersions: Readonly<Record<string, string>>;
-  taskFamilies: ReadonlyMap<string, string>;
-  onSelect: (id: string) => void;
-}) {
-  const { t } = useTranslation('models');
-  const downloads = useSnapshot(downloadsState);
-
-  const variantIds = group.entries.map((e) => e.id ?? '');
-  // The row is "active" when the user has any of this family's variants
-  // selected — switching variants inside the family stays on the same
-  // row visually.
-  const active = selectedId !== null && variantIds.includes(selectedId);
-
-  // Aggregate install state across variants. Priority mirrors the
-  // single-row icon precedence: in-flight > installed > downloaded >
-  // partial > nothing. The icon represents "the most useful thing this
-  // family currently is on disk".
-  let anyDownloading = false;
-  let anyInstalling = false;
-  let anyInstalled = false;
-  let anyDownloaded = false;
-  let anyPartial = false;
-  let anyDrifted = false;
-  for (const e of group.entries) {
-    const id = e.id ?? '';
-    if (downloads.active[id]) anyDownloading = true;
-    if (downloads.installing[id] === true) anyInstalling = true;
-    const s = downloads.state?.[id];
-    if (s === 'installed') anyInstalled = true;
-    else if (s === 'downloaded') anyDownloaded = true;
-    else if (s === 'partial') anyPartial = true;
-    if (isDrifted(e, activeVersions)) anyDrifted = true;
-  }
-  const status: { Icon: typeof Loader2; label: string; spin: boolean } | null =
-    anyDownloading || anyInstalling
-      ? { Icon: Loader2, label: t('card.installing'), spin: true }
-      : anyInstalled
-      ? { Icon: CircleCheck, label: t('card.installed'), spin: false }
-      : anyDownloaded
-      ? { Icon: HardDrive, label: t('card.downloaded'), spin: false }
-      : anyPartial
-      ? { Icon: CircleDashed, label: t('card.partial'), spin: false }
-      : null;
-
-  const handleClick = () => {
-    // Stay on whichever variant the user already had selected when the
-    // family was active; otherwise jump to the lead variant.
-    const targetId =
-      selectedId !== null && variantIds.includes(selectedId)
-        ? selectedId
-        : group.lead.id ?? '';
-    if (targetId) onSelect(targetId);
-  };
-
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={handleClick}
-        aria-current={active ? 'true' : undefined}
-        className={cn(
-          'flex w-full min-w-0 flex-col gap-0.5 border-b px-3 py-2 text-left transition-colors',
-          active
-            ? 'cursor-default bg-primary/15 text-foreground'
-            : 'cursor-pointer text-foreground hover:bg-muted/60',
-        )}
-      >
-        <div className="flex w-full min-w-0 items-center gap-2">
-          {status ? (
-            <status.Icon
-              className={cn(
-                'text-muted-foreground size-3 shrink-0',
-                status.spin && 'animate-spin',
-              )}
-              aria-label={status.label}
-            >
-              <title>{status.label}</title>
-            </status.Icon>
-          ) : (
-            <span className="size-3 shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">
-            {group.family}
-          </span>
-          <span
-            className="text-muted-foreground shrink-0 text-[10px]"
-            title={t('list.variantCount', { count: group.entries.length })}
-          >
-            {t('list.variantCount', { count: group.entries.length })}
-          </span>
-          {anyDrifted && (
-            <ArrowUpCircle
-              className="text-muted-foreground size-3 shrink-0"
-              aria-label={t('card.updateAvailable')}
-            >
-              <title>{t('card.updateAvailable')}</title>
-            </ArrowUpCircle>
-          )}
-        </div>
-        <span className="text-muted-foreground line-clamp-2 w-full min-w-0 break-words pl-5 text-xs">
-          {group.lead.summary ?? group.lead.description}
-        </span>
-        {(group.lead.tasks ?? []).length > 0 && (
-          <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden pl-5">
-            {(group.lead.tasks ?? []).map((task) => (
-              <TaskChipIcon
-                key={task}
-                task={task}
-                family={taskFamilies.get(task.toLowerCase()) ?? ''}
-                label={taskLabel(t, task)}
-              />
-            ))}
-          </div>
-        )}
-      </button>
-    </li>
-  );
-}
-

@@ -1,9 +1,10 @@
 import { proxy, ref, type Snapshot } from 'valtio';
 import { api } from '@/api';
 import type {
+  CatalogEntry,
   CatalogManifest,
-  CatalogModel,
   CatalogTaskInfo,
+  CatalogVariant,
   ModelInstallState,
 } from '@/api/generated/openapi-client';
 
@@ -12,22 +13,11 @@ import type {
 // from `useSnapshot(modelsState).manifest`. The filter helpers below are
 // pure reads, so we type them against the snapshot view explicitly.
 export type CatalogManifestSnapshot = Snapshot<CatalogManifest>;
-export type CatalogModelSnapshot = Snapshot<CatalogModel>;
+export type CatalogEntrySnapshot = Snapshot<CatalogEntry>;
+export type CatalogVariantSnapshot = Snapshot<CatalogVariant>;
 export type CatalogTaskInfoSnapshot = Snapshot<CatalogTaskInfo>;
 
-// State for the Models surface. The manifest is fetched once per app
-// session (small JSON, doesn't change without a redeploy); install state
-// per model is fetched lazily as cards render. Filters live here so the
-// view can be a pure function of state.
-//
-// `ref(manifest)` wraps the deserialised manifest in a Valtio ref so
-// nested arrays/objects don't get proxied (cheaper and avoids "you can't
-// mutate this readonly array" gotchas on the generated DTOs).
-
-// Family ordering for the faceted task filter UI. The server-side enum
-// values arrive as PascalCase strings ("Text" / "Image" / …); the list
-// here drives display order on the filter panel so the section headers
-// stay stable across catalog reshuffles.
+// Family ordering for the faceted task filter UI.
 export const TASK_FAMILY_ORDER: readonly string[] = [
   'Multimodal',
   'ComputerVision',
@@ -38,46 +28,27 @@ export const TASK_FAMILY_ORDER: readonly string[] = [
 
 interface ModelsState {
   manifest: CatalogManifest | null;
-  // TaskTypeRegistry mirror, fetched alongside the manifest. Used by the
-  // filter panel to (a) group task chips by family and (b) translate
-  // task-name strings on model cards into family-coloured badges.
   tasks: readonly CatalogTaskInfo[] | null;
-  // catalog id → version string currently active on disk (from
-  // <DATUMV_MODELS>/<id>/active). Models without an entry here are not
-  // installed; treat absence as "no drift to surface". Compared against
-  // `manifest.models[i].versions[0].version` to compute drift.
+  // variantId → version string currently active on disk. Compared
+  // against variant.versions[0].version to compute drift.
   activeVersions: Readonly<Record<string, string>>;
-  // catalog id → list of version folders present under <DATUMV_MODELS>/<id>/.
-  // Drives per-version Install / Activate / Delete affordances in the
-  // model card's "Previous versions" disclosure. Absence (no entry, or
-  // empty array) means no version folders on disk. Refreshed alongside
-  // activeVersions after install / uninstall / activate / delete.
+  // variantId → list of version folders present under <DATUMV_MODELS>/<variantId>/.
   versionsOnDisk: Readonly<Record<string, readonly string[]>>;
   loading: boolean;
   error: string | null;
-  // When true, only show models with an installed-but-outdated active
-  // version (drift). Driven by the standalone "Updates" toggle next to
-  // the search box; auto-resets when the toggle is hidden (no drifts).
   updatesOnly: boolean;
-  // Multi-select install-state filter. When non-empty, only models whose
-  // current install state appears here match (OR semantics). Driven by
-  // the Installed / Downloaded / Partial toggles in the header.
   installStates: ReadonlySet<ModelInstallState>;
-  // Free-text search term; matched against id + displayName + summary +
-  // description. Empty string = no search filter.
   query: string;
-  // Multi-select task chip filter. Each entry is a task name from
-  // TaskTypeRegistry (e.g. "TextEmbedder"). When non-empty, a model
-  // matches if any of its tasks appear here (OR semantics — picking
-  // "ImageCaptioner" and "TextEmbedder" widens the result set).
   selectedTasks: ReadonlySet<string>;
-  // Id of the model whose detail pane is showing in the right column.
-  // Null = no selection (show the empty/prompt state).
-  selectedId: string | null;
-  // modelFamily → markdown card body (or null when probed and not
-  // present on the server). Populated lazily by `loadFamilyCard`.
-  // Absence of a key = not fetched yet; null value = fetched, no card.
-  familyCards: Readonly<Record<string, string | null>>;
+  // Name of the entry whose detail pane is showing in the right column.
+  selectedEntryName: string | null;
+  // Variant id of the variant active within the selected entry's detail
+  // pane. When the entry has multiple variants, this drives the variant
+  // tab strip; for singleton entries this is just `entry.variants[0].id`.
+  selectedVariantId: string | null;
+  // entryName → markdown card body (or null when probed and not present
+  // on the server). Populated lazily by `loadEntryCard`.
+  entryCards: Readonly<Record<string, string | null>>;
 }
 
 export const modelsState = proxy<ModelsState>({
@@ -91,17 +62,17 @@ export const modelsState = proxy<ModelsState>({
   installStates: new Set<ModelInstallState>(),
   query: '',
   selectedTasks: new Set<string>(),
-  selectedId: null,
-  familyCards: {},
+  selectedEntryName: null,
+  selectedVariantId: null,
+  entryCards: {},
 });
 
 export async function loadModelsCatalog(): Promise<void> {
   if (modelsState.loading) return;
-  if (modelsState.manifest !== null && modelsState.tasks !== null) return; // already cached
+  if (modelsState.manifest !== null && modelsState.tasks !== null) return;
   modelsState.loading = true;
   modelsState.error = null;
   try {
-    // Parallel fetch — the four endpoints are independent and small.
     const [manifest, tasks, activeVersions, versionsOnDisk] = await Promise.all([
       api.modelCatalog.getManifest(),
       api.modelCatalog.getTasks(),
@@ -119,23 +90,14 @@ export async function loadModelsCatalog(): Promise<void> {
   }
 }
 
-// Refresh the active-version map. Called after an install completes or
-// an uninstall lands so the drift badges flip without a manual reload.
-// Bypasses the `loading` guard — the manifest + task vocabulary don't
-// need re-fetching, only the per-id active pointer changed.
 export async function refreshActiveVersions(): Promise<void> {
   try {
     modelsState.activeVersions = await api.modelCatalog.getActiveVersions();
   } catch (err) {
-    // Non-fatal: a refresh failure leaves the previous map in place, so
-    // the worst case is a stale drift badge until the next reload.
     console.error('[models] refreshActiveVersions failed', err);
   }
 }
 
-// Refresh the on-disk-versions map. Called after install / uninstall /
-// activate / delete-version so the model card's previous-versions
-// disclosure reflects which folders exist without a manual reload.
 export async function refreshVersionsOnDisk(): Promise<void> {
   try {
     modelsState.versionsOnDisk = await api.modelCatalog.getOnDiskVersions();
@@ -159,8 +121,38 @@ export function setQuery(query: string): void {
   modelsState.query = query;
 }
 
-export function setSelectedId(id: string | null): void {
-  modelsState.selectedId = id;
+export function setSelectedEntry(
+  entryName: string | null,
+  variantId: string | null = null,
+): void {
+  modelsState.selectedEntryName = entryName;
+  modelsState.selectedVariantId = variantId;
+}
+
+export function setSelectedVariant(variantId: string): void {
+  modelsState.selectedVariantId = variantId;
+}
+
+// Look up an entry/variant by a SQL identifier (e.g. `yolox_s`,
+// `florence2_caption`). Used by the LS hover "open in Models tab" jump:
+// the LS knows the bare identifier; we walk the manifest to find which
+// variant declared it. Selects nothing when the identifier isn't in the
+// catalog (e.g. user-defined model).
+export function selectEntryByIdentifier(identifier: string): void {
+  const m = modelsState.manifest;
+  if (m === null) return;
+  for (const entry of m.entries ?? []) {
+    for (const variant of entry.variants ?? []) {
+      for (const version of variant.versions ?? []) {
+        for (const decl of version.models ?? []) {
+          if (decl.identifier === identifier) {
+            setSelectedEntry(entry.name ?? null, variant.id ?? null);
+            return;
+          }
+        }
+      }
+    }
+  }
 }
 
 export function toggleTask(taskName: string): void {
@@ -182,25 +174,35 @@ export function clearFilters(): void {
   modelsState.selectedTasks = new Set<string>();
 }
 
-// Drift = the entry is installed (active pointer exists) AND the active
-// version is older than the catalog's newest declared version
-// (versions[0]). Warn-only signal — drift never blocks. Models with no
-// `versions[]` (defensive null guard for future-proofing) or no active
-// entry simply don't surface a badge.
-export function isDrifted(
-  model: CatalogModelSnapshot,
+// Drift on a single variant: the variant is installed (active pointer
+// exists) AND active version trails versions[0]. Same semantics as the
+// pre-fold drift check but keyed on variant.id.
+export function isDriftedVariant(
+  variant: CatalogVariantSnapshot,
   activeVersions: Readonly<Record<string, string>>,
 ): boolean {
-  const id = model.id;
+  const id = variant.id;
   if (!id) return false;
   const active = activeVersions[id];
-  if (!active) return false; // not installed → nothing to surface
-  const latest = model.versions?.[0]?.version;
+  if (!active) return false;
+  const latest = variant.versions?.[0]?.version;
   if (!latest) return false;
   return active !== latest;
 }
 
-// Count of drifted installs across the whole manifest. Drives the small
+// An entry drifts when any of its variants is drifted. Powers the row-
+// level "update available" badge.
+export function isDriftedEntry(
+  entry: CatalogEntrySnapshot,
+  activeVersions: Readonly<Record<string, string>>,
+): boolean {
+  for (const v of entry.variants ?? []) {
+    if (isDriftedVariant(v, activeVersions)) return true;
+  }
+  return false;
+}
+
+// Count drifted variants across the whole manifest. Drives the small
 // numeric pill on the Models tab chip.
 export function driftedCount(
   manifest: CatalogManifestSnapshot | null,
@@ -208,16 +210,18 @@ export function driftedCount(
 ): number {
   if (manifest === null) return 0;
   let count = 0;
-  for (const model of manifest.models ?? []) {
-    if (isDrifted(model, activeVersions)) count++;
+  for (const entry of manifest.entries ?? []) {
+    for (const v of entry.variants ?? []) {
+      if (isDriftedVariant(v, activeVersions)) count++;
+    }
   }
   return count;
 }
 
-// Pure filter — applied at render time. Doesn't mutate state. Caller passes
-// the manifest snapshot from useSnapshot. `updatesOnly` is a runtime drift
-// comparison against `activeVersions` (not a manifest field).
-export function filterModels(
+// Pure filter — applied at render time. An entry passes when it matches
+// the entry-level criteria (tasks, query) AND at least one of its
+// variants matches the variant-level criteria (install state, drift).
+export function filterEntries(
   manifest: CatalogManifestSnapshot,
   updatesOnly: boolean,
   installStates: ReadonlySet<ModelInstallState>,
@@ -225,120 +229,75 @@ export function filterModels(
   query: string,
   selectedTasks: ReadonlySet<string>,
   activeVersions: Readonly<Record<string, string>>,
-): readonly CatalogModelSnapshot[] {
-  const models = manifest.models ?? [];
+): readonly CatalogEntrySnapshot[] {
+  const entries = manifest.entries ?? [];
   const needle = query.trim().toLowerCase();
-  // Case-insensitive task match so manifest typo-mixing (e.g. "textembedder"
-  // vs "TextEmbedder") doesn't drop matches. The TS Set is case-sensitive
-  // so we lower-case both sides.
   const taskNeedles = selectedTasks.size === 0
     ? null
     : new Set([...selectedTasks].map((t) => t.toLowerCase()));
 
-  return models.filter((m) => {
-    if (updatesOnly && !isDrifted(m, activeVersions)) return false;
-    if (installStates.size > 0) {
-      const id = m.id ?? '';
-      const state = installStateMap?.[id];
-      if (!state || !installStates.has(state)) return false;
+  return entries.filter((e) => {
+    if (taskNeedles) {
+      const entryTasks = e.tasks ?? [];
+      const hit = entryTasks.some((t) => taskNeedles.has(t.toLowerCase()));
+      if (!hit) return false;
     }
     if (needle.length > 0) {
       const hay = [
-        m.id ?? '',
-        m.displayName ?? '',
-        m.summary ?? '',
-        m.description ?? '',
+        e.name ?? '',
+        e.summary ?? '',
+        e.description ?? '',
+        ...((e.variants ?? []).map((v) => v.id ?? '')),
+        ...((e.variants ?? []).map((v) => v.displayName ?? '')),
       ].join(' ').toLowerCase();
       if (!hay.includes(needle)) return false;
     }
-    if (taskNeedles) {
-      const modelTasks = m.tasks ?? [];
-      const hit = modelTasks.some((t) => taskNeedles.has(t.toLowerCase()));
-      if (!hit) return false;
+    // Variant-level filters: at least one variant must match.
+    if (updatesOnly) {
+      const anyDrifted = (e.variants ?? []).some(
+        (v) => isDriftedVariant(v, activeVersions),
+      );
+      if (!anyDrifted) return false;
+    }
+    if (installStates.size > 0) {
+      const anyMatch = (e.variants ?? []).some((v) => {
+        const s = installStateMap?.[v.id ?? ''];
+        return s && installStates.has(s);
+      });
+      if (!anyMatch) return false;
     }
     return true;
   });
 }
 
-// One row in the model browser's list pane. Either a single catalog
-// entry (`single`) or a multi-variant family (`family`) — the list
-// renders the same way for both, but family rows expand into a variant
-// picker inside the detail pane.
-export type ModelGroup =
-  | { readonly kind: 'single'; readonly entry: CatalogModelSnapshot }
-  | {
-      readonly kind: 'family';
-      readonly family: string;
-      readonly entries: readonly CatalogModelSnapshot[];
-      readonly lead: CatalogModelSnapshot;
-    };
-
-// Buckets the filtered model list by `modelFamily`. Family buckets that
-// end up with exactly one surviving entry collapse back to `single`
-// rows so the user doesn't see a meaningless "1 variant" pill when a
-// filter trims a family down. Each bucket appears at the position of
-// its first member so the catalog's authoring order is preserved.
-export function groupByModelFamily(
-  models: readonly CatalogModelSnapshot[],
-): readonly ModelGroup[] {
-  type Bucket = { family: string | null; entries: CatalogModelSnapshot[] };
-  const ordered: Bucket[] = [];
-  const byFamily = new Map<string, Bucket>();
-  for (const m of models) {
-    const f = m.modelFamily ?? null;
-    if (f === null) {
-      ordered.push({ family: null, entries: [m] });
-      continue;
-    }
-    let bucket = byFamily.get(f);
-    if (!bucket) {
-      bucket = { family: f, entries: [m] };
-      byFamily.set(f, bucket);
-      ordered.push(bucket);
-    } else {
-      bucket.entries.push(m);
-    }
-  }
-  return ordered.map((b): ModelGroup => {
-    if (b.family === null || b.entries.length === 1) {
-      return { kind: 'single', entry: b.entries[0] };
-    }
-    return { kind: 'family', family: b.family, entries: b.entries, lead: b.entries[0] };
-  });
-}
-
-// Fetch the family card markdown for `family`. Cached in modelsState
-// after the first call — the card body doesn't change without a server
-// restart. Returns null when the server has no card for this family
-// (no entry declared a familyCardFile) or the request failed.
-export async function loadFamilyCard(family: string): Promise<string | null> {
-  if (family in modelsState.familyCards) {
-    return modelsState.familyCards[family];
+// Fetch the entry card markdown for `entryName`. Cached after the first
+// call. Returns null when the server has no card for this entry.
+export async function loadEntryCard(entryName: string): Promise<string | null> {
+  if (entryName in modelsState.entryCards) {
+    return modelsState.entryCards[entryName];
   }
   try {
     const response = await window.fetch(
-      `/api/model-catalog/family-cards/${encodeURIComponent(family)}`,
+      `/api/model-catalog/entries/${encodeURIComponent(entryName)}/card`,
       { credentials: 'include' },
     );
     if (response.status === 404) {
-      modelsState.familyCards = { ...modelsState.familyCards, [family]: null };
+      modelsState.entryCards = { ...modelsState.entryCards, [entryName]: null };
       return null;
     }
     if (!response.ok) {
-      throw new Error(`family-card fetch failed: ${response.status}`);
+      throw new Error(`entry-card fetch failed: ${response.status}`);
     }
     const text = await response.text();
-    modelsState.familyCards = { ...modelsState.familyCards, [family]: text };
+    modelsState.entryCards = { ...modelsState.entryCards, [entryName]: text };
     return text;
   } catch (err) {
-    console.error('[models] loadFamilyCard failed', err);
+    console.error('[models] loadEntryCard failed', err);
     return null;
   }
 }
 
-// Per-state counts across the manifest — drives the `Installed (N)` etc.
-// toggle labels and the "hide Partial when 0" rule. Unknown / missing
-// install states (model not yet probed) don't contribute to any bucket.
+// Per-state counts across the manifest, summed over all variants.
 export function installStateCounts(
   manifest: CatalogManifestSnapshot | null,
   installStateMap: Readonly<Record<string, ModelInstallState>> | null,
@@ -350,27 +309,27 @@ export function installStateCounts(
     installed: 0,
   };
   if (manifest === null || installStateMap === null) return counts;
-  for (const m of manifest.models ?? []) {
-    const id = m.id;
-    if (!id) continue;
-    const state = installStateMap[id];
-    if (state) counts[state]++;
+  for (const e of manifest.entries ?? []) {
+    for (const v of e.variants ?? []) {
+      const id = v.id;
+      if (!id) continue;
+      const state = installStateMap[id];
+      if (state) counts[state]++;
+    }
   }
   return counts;
 }
 
 // Filter the task vocabulary to entries that are actually referenced by
-// at least one model in the manifest. The sidebar uses this so users
-// don't see filter chips that would empty the model list when clicked.
-// Comparison is case-insensitive to match `filterModels`.
+// at least one entry in the manifest. Tasks live at entry level now.
 export function tasksWithAssignedModels(
   tasks: readonly CatalogTaskInfoSnapshot[],
   manifest: CatalogManifestSnapshot | null,
 ): readonly CatalogTaskInfoSnapshot[] {
   if (manifest === null) return [];
   const assigned = new Set<string>();
-  for (const m of manifest.models ?? []) {
-    for (const name of m.tasks ?? []) assigned.add(name.toLowerCase());
+  for (const e of manifest.entries ?? []) {
+    for (const name of e.tasks ?? []) assigned.add(name.toLowerCase());
   }
   return tasks.filter((t) => {
     const name = t.name;
@@ -379,10 +338,7 @@ export function tasksWithAssignedModels(
   });
 }
 
-// Groups the task vocabulary into family → ordered-task-list buckets for
-// the filter panel. Families appear in TASK_FAMILY_ORDER; unknown families
-// (added server-side before the front-end catches up) trail at the end so
-// nothing is silently dropped.
+// Groups the task vocabulary into family → ordered-task-list buckets.
 export function groupTasksByFamily(
   tasks: readonly CatalogTaskInfoSnapshot[],
 ): readonly { family: string; tasks: readonly CatalogTaskInfoSnapshot[] }[] {
@@ -404,10 +360,48 @@ export function groupTasksByFamily(
       buckets.delete(family);
     }
   }
-  // Any leftover families (server added new ones) tail-appended in
-  // insertion order so nothing disappears silently.
   for (const [family, bucket] of buckets) {
     ordered.push({ family, tasks: bucket });
   }
   return ordered;
+}
+
+// Aggregate install state across an entry's variants. Priority mirrors
+// the single-row icon precedence used previously: in-flight > installed
+// > downloaded > partial > nothing.
+export interface EntryAggregateStatus {
+  anyInstalling: boolean;
+  anyDownloading: boolean;
+  anyInstalled: boolean;
+  anyDownloaded: boolean;
+  anyPartial: boolean;
+  anyDrifted: boolean;
+}
+
+export function aggregateEntryStatus(
+  entry: CatalogEntrySnapshot,
+  installStateMap: Readonly<Record<string, ModelInstallState>> | null,
+  activeDownloads: Readonly<Record<string, unknown>>,
+  installing: Readonly<Record<string, true>>,
+  activeVersions: Readonly<Record<string, string>>,
+): EntryAggregateStatus {
+  const out: EntryAggregateStatus = {
+    anyInstalling: false,
+    anyDownloading: false,
+    anyInstalled: false,
+    anyDownloaded: false,
+    anyPartial: false,
+    anyDrifted: false,
+  };
+  for (const v of entry.variants ?? []) {
+    const id = v.id ?? '';
+    if (activeDownloads[id]) out.anyDownloading = true;
+    if (installing[id] === true) out.anyInstalling = true;
+    const s = installStateMap?.[id];
+    if (s === 'installed') out.anyInstalled = true;
+    else if (s === 'downloaded') out.anyDownloaded = true;
+    else if (s === 'partial') out.anyPartial = true;
+    if (isDriftedVariant(v, activeVersions)) out.anyDrifted = true;
+  }
+  return out;
 }

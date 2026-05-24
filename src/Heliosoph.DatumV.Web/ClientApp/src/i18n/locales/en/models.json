@@ -133,7 +133,7 @@
     "acceptAndDownload": "Accept & download",
     "updateAvailable": "Update available",
     "driftTooltip": "Active: {active} · Latest: {latest}",
-    "modelFamily": "Model family"
+    "variantTabsLabel": "Variants"
   },
   "previousVersions": {
     "title": "Previous versions",

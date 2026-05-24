@@ -31,12 +31,12 @@ namespace Heliosoph.DatumV.ModelLibrary;
 public interface IModelInstaller
 {
     /// <summary>
-    /// True when the model is already registered in the running catalog —
+    /// True when the variant is already registered in the running catalog —
     /// i.e. its CREATE MODEL statement has been executed and the
     /// SQL-defined model is present in ModelRegistry. Probe-time call;
     /// expected to be a cheap in-memory lookup, not an I/O round trip.
     /// </summary>
-    ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct);
+    ValueTask<bool> IsInstalledAsync(CatalogVariant variant, CancellationToken ct);
 
     /// <summary>
     /// Reads the SQL file referenced by <paramref name="version"/>'s
@@ -48,10 +48,10 @@ public interface IModelInstaller
     /// CREATE MODEL statements. Throws if execution fails; callers
     /// translate to <see cref="ModelDownloadFailed"/> events.
     /// </summary>
-    /// <param name="model">The catalog entry being installed.</param>
+    /// <param name="variant">The catalog variant being installed.</param>
     /// <param name="version">
     /// The version cut to install. The active-install path passes
-    /// <c>model.Versions[0]</c>; the pinned-install path passes the
+    /// <c>variant.Versions[0]</c>; the pinned-install path passes the
     /// specific version the caller requested.
     /// </param>
     /// <param name="pinnedMode">
@@ -59,9 +59,7 @@ public interface IModelInstaller
     /// <c>CREATE [OR REPLACE] MODEL &lt;Identifier&gt;</c> to the
     /// materialised <see cref="CatalogVersionModel.PinnedAs"/> name and
     /// pre-resolves <c>USING</c> paths to absolute <c>file://</c> URIs
-    /// rooted at the pinned version's folder. Active installs keep the
-    /// authored identifier + relative USING path and rely on the
-    /// <c>&lt;id&gt;/active</c> indirection.
+    /// rooted at the pinned version's folder.
     /// </param>
     /// <param name="ct">Cancellation token for the install.</param>
     /// <returns>
@@ -70,7 +68,7 @@ public interface IModelInstaller
     /// true, otherwise the authored bare names).
     /// </returns>
     ValueTask<IReadOnlyList<string>> InstallAsync(
-        CatalogModel model,
+        CatalogVariant variant,
         CatalogVersion version,
         bool pinnedMode,
         CancellationToken ct);
@@ -78,11 +76,7 @@ public interface IModelInstaller
     /// <summary>
     /// Drops the supplied registered model identifiers from the host's
     /// catalog. Used by <see cref="ModelDownloadService"/> when the
-    /// install-time cross-check finds a declared/observed mismatch — the
-    /// service issues <c>DROP MODEL</c> for every identifier the partial
-    /// install registered before reverting the active pointer so the
-    /// substrate's invariant "active pointer reflects a fully-registered
-    /// version or no version at all" is preserved.
+    /// install-time cross-check finds a declared/observed mismatch.
     /// </summary>
     /// <remarks>
     /// Implementations should treat missing identifiers as no-ops
@@ -106,11 +100,11 @@ public sealed class NullModelInstaller : IModelInstaller
     public static NullModelInstaller Instance { get; } = new();
     private NullModelInstaller() { }
 
-    public ValueTask<bool> IsInstalledAsync(CatalogModel model, CancellationToken ct)
+    public ValueTask<bool> IsInstalledAsync(CatalogVariant variant, CancellationToken ct)
         => ValueTask.FromResult(true);
 
     public ValueTask<IReadOnlyList<string>> InstallAsync(
-        CatalogModel model,
+        CatalogVariant variant,
         CatalogVersion version,
         bool pinnedMode,
         CancellationToken ct)

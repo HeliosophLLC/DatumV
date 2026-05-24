@@ -665,11 +665,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             return;
         }
 
-        CatalogModel? model = manifest.Manifest.Models.FirstOrDefault(
-            m => string.Equals(m.Id, catalogId, StringComparison.Ordinal));
-        CatalogVersion? version = model?.Versions.FirstOrDefault(
+        // `catalogId` is the variant id (install handle). Resolve to
+        // (entry, variant) via the manifest's variant index, then find the
+        // specific version cut.
+        (CatalogEntry Entry, CatalogVariant Variant)? hit = manifest.TryResolveVariant(catalogId);
+        CatalogVariant? variant = hit?.Variant;
+        CatalogVersion? version = variant?.Versions.FirstOrDefault(
             v => string.Equals(v.Version, catalogVersion, StringComparison.Ordinal));
-        if (model is null || version is null)
+        if (variant is null || version is null)
         {
             // Catalog entry dropped or the specific version cut removed.
             // The persisted row points at a hole; skip + warn so the user

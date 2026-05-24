@@ -6,7 +6,7 @@ import type {
 } from '@/api/generated/openapi-client';
 import { RETOKENIZE_DUMMY_LANGUAGE_ID } from './setup';
 import { DOCS_TAB_ID, MODELS_TAB_ID, selectTab } from '@/state/tabs';
-import { setSelectedId } from '@/state/models';
+import { selectEntryByIdentifier } from '@/state/models';
 
 // SQL language wiring against the Heliosoph.DatumV LSP REST endpoints. Each
 // Monaco provider translates a (model, position) call into a server
@@ -85,7 +85,7 @@ function registerHoverCommands(): void {
   monaco.editor.registerCommand('datum.openModelInTab', (_accessor, id: string) => {
     if (typeof id !== 'string' || id.length === 0) return;
     selectTab(MODELS_TAB_ID);
-    setSelectedId(id);
+    selectEntryByIdentifier(id);
   });
 
   // The hover "See more" links the LS appends to function and keyword

@@ -205,21 +205,26 @@ public sealed class CatalogManifestBuilderTests : ServiceTestBase
             Models: [
                 new CatalogVersionModel("registered_llm"),
                 new CatalogVersionModel("discovered_llm")]);
-        CatalogModel entry = new(
+        CatalogVariant variant_entry = new(
             Id: "entry-a",
             DisplayName: "Entry A",
+            Summary: "test.",
+            Tags: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            ApproxSizeMb: 100,
+            Versions: [v]);
+        CatalogEntry entry = new(
+            Name: "Entry A",
             Summary: "test.",
             Description: "test.",
             Tasks: ["TextEmbedder"],
             Tags: [],
             LicenseIds: [],
             Attributions: [],
-            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
-            Versions: [v],
-            ApproxSizeMb: 100);
+            Variants: [variant_entry]);
         CatalogManifest manifest = new(
-            SchemaVersion: 2,
-            Models: [entry]);
+            SchemaVersion: 3,
+            Entries: [entry]);
         catalog.CatalogVocabulary = new CatalogVocabulary(manifest);
 
         LanguageServerManifest result = CatalogManifestBuilder.Build(catalog, new FunctionRegistry());

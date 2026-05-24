@@ -54,7 +54,7 @@ public sealed class MobileNetV2SqlE2ETests : ServiceTestBase
     private string LoadCanonicalSql()
     {
         IManifestStore store = GetService<IManifestStore>();
-        CatalogModel model = store.Manifest.Models.First(m => m.Id == ModelId);
+        CatalogVariant model = store.Manifest.Entries.SelectMany(e => e.Variants).First(v => v.Id == ModelId);
         if (string.IsNullOrEmpty(model.InstallSql))
         {
             throw new InvalidOperationException(

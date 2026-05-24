@@ -24,7 +24,7 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     private string LoadCanonicalSql(string modelId)
     {
         IManifestStore store = GetService<IManifestStore>();
-        CatalogModel model = store.Manifest.Models.First(m => m.Id == modelId);
+        CatalogVariant model = store.Manifest.Entries.SelectMany(e => e.Variants).First(v => v.Id == modelId);
         if (string.IsNullOrEmpty(model.InstallSql))
         {
             throw new InvalidOperationException(

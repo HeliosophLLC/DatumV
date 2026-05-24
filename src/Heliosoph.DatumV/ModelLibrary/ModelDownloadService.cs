@@ -23,7 +23,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
     private readonly IModelPathResolver _paths;
     private readonly ILogger<ModelDownloadService> _logger;
 
-    // Prevents two concurrent installs of the same modelId. The value is a
+    // Prevents two concurrent installs of the same variantId. The value is a
     // CancellationTokenSource so a future "cancel download" RPC can flip
     // it; today we only block re-entry.
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
@@ -48,9 +48,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
         _logger = logger;
         _paths = paths;
 
-        // Build the per-type dispatch table once. Multiple clients with the
-        // same SupportedType is a DI misconfig — let it surface immediately
-        // instead of silently picking one.
+        // Build the per-type dispatch table once.
         Dictionary<string, IModelSourceClient> map = new(StringComparer.Ordinal);
         foreach (IModelSourceClient client in sourceClients)
         {
@@ -64,33 +62,18 @@ internal sealed class ModelDownloadService : IModelDownloadService
         _sources = map;
     }
 
-    public async Task<ModelInstallState> ProbeAsync(string modelId, CancellationToken ct = default)
+    public async Task<ModelInstallState> ProbeAsync(string variantId, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
+        (CatalogEntry entry, CatalogVariant variant) = ResolveVariant(variantId);
 
-        // Placeholders short-circuit before any I/O. Their primary source
-        // doesn't exist yet (Heliosoph.DatumV/* not uploaded), so a list probe
-        // would 404 and waste a network call. A local directory with the
-        // same name — empty leftover, prior failed download — doesn't
-        // change the fact that there's nothing to compare against.
-        if (model.Placeholder) return ModelInstallState.NotDownloaded;
+        // Placeholders short-circuit before any I/O.
+        if (variant.Placeholder) return ModelInstallState.NotDownloaded;
 
-        // Probe the recommended version's folder explicitly — pinning the
-        // version means the probe is "is the catalog's current cut
-        // installed?" rather than "is something installed?" When the
-        // user reverts to an older version through the model card, that
-        // version's folder gets its own state transition.
-        string recommendedVersion = model.Versions[0].Version;
-        string modelDir = _paths.GetModelRoot(model.Id, recommendedVersion);
-        if (!Directory.Exists(modelDir)) return ModelInstallState.NotDownloaded;
+        string recommendedVersion = variant.Versions[0].Version;
+        string variantDir = _paths.GetModelRoot(variant.Id, recommendedVersion);
+        if (!Directory.Exists(variantDir)) return ModelInstallState.NotDownloaded;
 
-        // Probe uses the first source's inventory as authoritative — for
-        // the on-disk presence check, we don't need to walk every source.
-        // If the first source can't list (network, gated repo without a
-        // token, deleted revision), we surface Partial rather than chasing
-        // the fallback list: probe is informational, the user can hit
-        // Install to trigger the real multi-source attempt.
-        CatalogSource primary = model.Sources[0];
+        CatalogSource primary = variant.Sources[0];
         IModelSourceClient client = ResolveClient(primary);
 
         IReadOnlyList<SourceFile> inventory;
@@ -101,56 +84,46 @@ internal sealed class ModelDownloadService : IModelDownloadService
         catch (Exception ex)
         {
             _logger.LogWarning(
-                ex, "Probe of {ModelId} could not list files from primary source ({Type})",
-                modelId, client.SupportedType);
+                ex, "Probe of {VariantId} could not list files from primary source ({Type})",
+                variantId, client.SupportedType);
             return ModelInstallState.Partial;
         }
 
         int present = 0;
-        foreach (SourceFile entry in inventory)
+        foreach (SourceFile sf in inventory)
         {
-            string localPath = Path.Combine(modelDir, entry.Path);
+            string localPath = Path.Combine(variantDir, sf.Path);
             if (!File.Exists(localPath)) continue;
-            // Size-of-zero in the inventory means "source didn't report a
-            // size" (github-release / https). We can't compare against
-            // anything, so trust the file's existence as proof of presence.
-            if (entry.Size == 0) { present++; continue; }
-            if (new FileInfo(localPath).Length == entry.Size) present++;
+            if (sf.Size == 0) { present++; continue; }
+            if (new FileInfo(localPath).Length == sf.Size) present++;
         }
 
         if (present == 0) return ModelInstallState.NotDownloaded;
         if (present < inventory.Count) return ModelInstallState.Partial;
 
-        // All files present on disk. For entries with no InstallSql,
-        // NullModelInstaller answers true and we land at Installed — the
-        // UI treats that as terminal ready-to-use. For entries with
-        // InstallSql, the Web-side installer asks the SQL catalog whether
-        // the conventional model name (id with '-' → '_', schema "models")
-        // is registered. Missing registration means files-are-there-but-
-        // install-hasn't-been-run; we surface that as Downloaded so the UI
-        // can offer an Install affordance.
-        bool registered = await _installer.IsInstalledAsync(model, ct).ConfigureAwait(false);
+        bool registered = await _installer.IsInstalledAsync(variant, ct).ConfigureAwait(false);
         return registered ? ModelInstallState.Installed : ModelInstallState.Downloaded;
     }
 
-    public async Task InstallAsync(string modelId, CancellationToken ct = default)
+    public async Task InstallAsync(string variantId, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
+        (CatalogEntry entry, CatalogVariant variant) = ResolveVariant(variantId);
 
-        if (model.Placeholder)
+        if (variant.Placeholder)
         {
             throw new InvalidOperationException(
-                $"Model {modelId} is a placeholder — its source repo has not been uploaded yet.");
+                $"Variant {variantId} is a placeholder — its source repo has not been uploaded yet.");
         }
 
         // Gate: every license that requiresAcceptance must be accepted.
-        foreach (string licenseId in model.LicenseIds)
+        // License terms live at entry level (every variant shares).
+        foreach (string licenseId in entry.LicenseIds)
         {
             CatalogLicense? license = _licenseRegistry.GetMetadata(licenseId);
             if (license is null)
             {
                 throw new InvalidOperationException(
-                    $"Model {modelId} references unknown license {licenseId}.");
+                    $"Entry '{entry.Name}' references unknown license {licenseId}.");
             }
             if (license.RequiresAcceptance &&
                 !await _licenses.IsAcceptedAsync(licenseId, ct).ConfigureAwait(false))
@@ -159,33 +132,28 @@ internal sealed class ModelDownloadService : IModelDownloadService
             }
         }
 
-        // Single-flight guard.
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (!_active.TryAdd(modelId, cts))
+        if (!_active.TryAdd(variantId, cts))
         {
-            throw new InvalidOperationException($"Model {modelId} is already downloading.");
+            throw new InvalidOperationException($"Variant {variantId} is already downloading.");
         }
 
-        // Don't await — run in background. The caller's HTTP request returns
-        // immediately; progress is pushed over SignalR. Failures are reported
-        // via OnModelDownloadFailed; we don't surface them through the HTTP
-        // response since by the time the upload finishes the request is gone.
         _ = Task.Run(
-            () => RunDownloadAsync(model, model.Versions[0], pinnedMode: false, cts.Token),
+            () => RunDownloadAsync(variant, variant.Versions[0], pinnedMode: false, cts.Token),
             CancellationToken.None);
     }
 
-    public async Task InstallPinnedAsync(string modelId, string version, CancellationToken ct = default)
+    public async Task InstallPinnedAsync(string variantId, string version, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
-        if (model.Placeholder)
+        (CatalogEntry entry, CatalogVariant variant) = ResolveVariant(variantId);
+        if (variant.Placeholder)
         {
             throw new InvalidOperationException(
-                $"Model {modelId} is a placeholder — its source repo has not been uploaded yet.");
+                $"Variant {variantId} is a placeholder — its source repo has not been uploaded yet.");
         }
 
         CatalogVersion? pinned = null;
-        foreach (CatalogVersion v in model.Versions)
+        foreach (CatalogVersion v in variant.Versions)
         {
             if (string.Equals(v.Version, version, StringComparison.Ordinal))
             {
@@ -196,20 +164,17 @@ internal sealed class ModelDownloadService : IModelDownloadService
         if (pinned is null)
         {
             throw new InvalidOperationException(
-                $"Model {modelId} has no version '{version}'. Available versions: " +
-                string.Join(", ", model.Versions.Select(v => v.Version)));
+                $"Variant {variantId} has no version '{version}'. Available versions: " +
+                string.Join(", ", variant.Versions.Select(v => v.Version)));
         }
 
-        // License gating mirrors the bare install path. License terms
-        // don't vary across versions — same model, same licenses — so we
-        // reuse the entry-level license set without per-version lookups.
-        foreach (string licenseId in model.LicenseIds)
+        foreach (string licenseId in entry.LicenseIds)
         {
             CatalogLicense? license = _licenseRegistry.GetMetadata(licenseId);
             if (license is null)
             {
                 throw new InvalidOperationException(
-                    $"Model {modelId} references unknown license {licenseId}.");
+                    $"Entry '{entry.Name}' references unknown license {licenseId}.");
             }
             if (license.RequiresAcceptance &&
                 !await _licenses.IsAcceptedAsync(licenseId, ct).ConfigureAwait(false))
@@ -218,77 +183,56 @@ internal sealed class ModelDownloadService : IModelDownloadService
             }
         }
 
-        // Single-flight guard keyed on `<modelId>@<version>` so a pinned
-        // install + a concurrent active install (or a different pinned
-        // version) don't collide. Bare installs key on the plain modelId
-        // — same model, same key, mutual exclusion holds.
-        string key = $"{modelId}@{version}";
+        string key = $"{variantId}@{version}";
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (!_active.TryAdd(key, cts))
         {
-            throw new InvalidOperationException($"Model {modelId} version '{version}' is already downloading.");
+            throw new InvalidOperationException($"Variant {variantId} version '{version}' is already downloading.");
         }
 
         _ = Task.Run(
-            () => RunDownloadAsync(model, pinned, pinnedMode: true, cts.Token),
+            () => RunDownloadAsync(variant, pinned, pinnedMode: true, cts.Token),
             CancellationToken.None);
     }
 
-    public Task UninstallAsync(string modelId, CancellationToken ct = default)
+    public Task UninstallAsync(string variantId, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
-        // Wipe the whole <id>/ tree — every version folder + the active
-        // pointer. Per-version uninstall lives on the model card's
-        // "Previous versions" disclosure, not on this top-level
-        // surface.
-        string idRoot = Path.Combine(_paths.ModelsRoot, model.Id);
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
+        string idRoot = Path.Combine(_paths.ModelsRoot, variant.Id);
         if (Directory.Exists(idRoot)) Directory.Delete(idRoot, recursive: true);
-        // No active pointer to invalidate — the catalog row registration
-        // (which the installer torn down during the SQL DROP MODEL path)
-        // was the active-version signal, and it's already gone.
         return Task.CompletedTask;
     }
 
     public async Task ActivateVersionAsync(
-        string modelId, string version, CancellationToken ct = default)
+        string variantId, string version, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
-        CatalogVersion target = FindVersion(model, version);
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
+        CatalogVersion target = FindVersion(variant, version);
 
-        if (!_paths.IsVersionOnDisk(modelId, version))
+        if (!_paths.IsVersionOnDisk(variantId, version))
         {
             throw new InvalidOperationException(
-                $"Model {modelId} version '{version}' is not on disk. Install it first.");
+                $"Variant {variantId} version '{version}' is not on disk. Install it first.");
         }
 
-        string? currentActive = _paths.GetActiveVersion(modelId);
+        string? currentActive = _paths.GetActiveVersion(variantId);
         if (string.Equals(currentActive, version, StringComparison.Ordinal))
         {
             return;
         }
 
-        // Single-flight lock — concurrent activate / install / delete on
-        // the same model id would race against the install-context
-        // ambient pin and the cross-check.
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (!_active.TryAdd(modelId, cts))
+        if (!_active.TryAdd(variantId, cts))
         {
             throw new InvalidOperationException(
-                $"Model {modelId} has an install in flight; try again shortly.");
+                $"Variant {variantId} has an install in flight; try again shortly.");
         }
 
         try
         {
-            // Outgoing version: drop its bare identifiers so they stop
-            // routing through the active pointer, and re-register them in
-            // pinned form (best-effort) so callers can still reach them via
-            // `models.<bare>@<digits-of-outgoing>` syntax. The pinned
-            // re-register requires the outgoing version's files on disk;
-            // if they're not (rare — would mean a manual filesystem edit),
-            // skip the pinned step and only drop bare.
             if (currentActive is not null)
             {
-                CatalogVersion? outgoing = TryFindVersion(model, currentActive);
+                CatalogVersion? outgoing = TryFindVersion(variant, currentActive);
                 if (outgoing?.Models is { Count: > 0 } outgoingModels)
                 {
                     List<string> outgoingBare = new(outgoingModels.Count);
@@ -302,25 +246,20 @@ internal sealed class ModelDownloadService : IModelDownloadService
 
                 if (outgoing is not null
                     && !string.IsNullOrEmpty(outgoing.InstallSql)
-                    && _paths.IsVersionOnDisk(modelId, currentActive))
+                    && _paths.IsVersionOnDisk(variantId, currentActive))
                 {
                     string? previousPin = ModelInstallContext.CurrentVersionPin;
                     ModelInstallContext.CurrentVersionPin = currentActive;
                     try
                     {
                         await _installer.InstallAsync(
-                            model, outgoing, pinnedMode: true, cts.Token).ConfigureAwait(false);
+                            variant, outgoing, pinnedMode: true, cts.Token).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        // Pinned re-register is best-effort: failure leaves
-                        // the outgoing version unreachable via pinned
-                        // syntax, but the user can recover by hitting
-                        // Install on that version's row (which re-runs the
-                        // same path). Don't fail the whole activate.
                         _logger.LogWarning(ex,
-                            "Activate {ModelId} {Version}: pinned re-register of outgoing {Outgoing} failed",
-                            modelId, version, currentActive);
+                            "Activate {VariantId} {Version}: pinned re-register of outgoing {Outgoing} failed",
+                            variantId, version, currentActive);
                     }
                     finally
                     {
@@ -329,10 +268,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 }
             }
 
-            // Incoming version: run its installSql in bare mode. Shared
-            // identifiers with the outgoing version that survived the drop
-            // (none — we dropped them all) come back via CREATE statements;
-            // CREATE OR REPLACE in the installSql handles either case.
             if (!string.IsNullOrEmpty(target.InstallSql))
             {
                 string? previousPin = ModelInstallContext.CurrentVersionPin;
@@ -341,7 +276,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 try
                 {
                     observed = await _installer.InstallAsync(
-                        model, target, pinnedMode: false, cts.Token).ConfigureAwait(false);
+                        variant, target, pinnedMode: false, cts.Token).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -360,52 +295,39 @@ internal sealed class ModelDownloadService : IModelDownloadService
                     }
                 }
             }
-
-            // No active pointer to flip — registering the incoming version's
-            // bare identifiers (which happened during the installer call
-            // above) is itself the activation. The lookup picks up the new
-            // CatalogVersion from the freshly-registered descriptor.
         }
         finally
         {
-            _active.TryRemove(modelId, out _);
+            _active.TryRemove(variantId, out _);
         }
     }
 
     public async Task DeleteVersionAsync(
-        string modelId, string version, CancellationToken ct = default)
+        string variantId, string version, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
 
-        // Idempotent: a version that isn't on disk has no folder to wipe
-        // and (for non-active versions) no registered identifiers to
-        // drop. Active-pointer-without-folder is a rare manual-edit
-        // case; the pointer gets cleared anyway via the active-version
-        // branch below if the user happens to point at it.
-        if (!_paths.IsVersionOnDisk(modelId, version)
-            && !string.Equals(_paths.GetActiveVersion(modelId), version, StringComparison.Ordinal))
+        if (!_paths.IsVersionOnDisk(variantId, version)
+            && !string.Equals(_paths.GetActiveVersion(variantId), version, StringComparison.Ordinal))
         {
             return;
         }
 
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (!_active.TryAdd(modelId, cts))
+        if (!_active.TryAdd(variantId, cts))
         {
             throw new InvalidOperationException(
-                $"Model {modelId} has an install in flight; try again shortly.");
+                $"Variant {variantId} has an install in flight; try again shortly.");
         }
 
         try
         {
-            CatalogVersion? versionEntry = TryFindVersion(model, version);
+            CatalogVersion? versionEntry = TryFindVersion(variant, version);
             bool isActive = string.Equals(
-                _paths.GetActiveVersion(modelId), version, StringComparison.Ordinal);
+                _paths.GetActiveVersion(variantId), version, StringComparison.Ordinal);
 
             if (versionEntry?.Models is { Count: > 0 } declaredModels)
             {
-                // Active version's identifiers live under bare names;
-                // non-active on-disk versions' identifiers (if previously
-                // installed via pinned) live under the suffixed form.
                 List<string> toDrop = new(declaredModels.Count);
                 foreach (CatalogVersionModel vm in declaredModels)
                 {
@@ -415,34 +337,27 @@ internal sealed class ModelDownloadService : IModelDownloadService
                     .ConfigureAwait(false);
             }
 
-            string versionDir = Path.Combine(_paths.ModelsRoot, modelId, version);
+            string versionDir = Path.Combine(_paths.ModelsRoot, variantId, version);
             if (Directory.Exists(versionDir))
             {
                 Directory.Delete(versionDir, recursive: true);
             }
-
-            // No auto-flip to a sibling version — that would be a
-            // surprise. The entry returns to a "no active" state via
-            // the installer's DROP MODEL above removing the catalog row
-            // (or the pinned row for non-active deletes), and ProbeAsync
-            // surfaces it as NotDownloaded once the recommended-version
-            // folder is gone. No filesystem active pointer to maintain.
         }
         finally
         {
-            _active.TryRemove(modelId, out _);
+            _active.TryRemove(variantId, out _);
         }
     }
 
-    private static CatalogVersion FindVersion(CatalogModel model, string version)
-        => TryFindVersion(model, version)
+    private static CatalogVersion FindVersion(CatalogVariant variant, string version)
+        => TryFindVersion(variant, version)
             ?? throw new InvalidOperationException(
-                $"Model {model.Id} has no version '{version}'. Available versions: " +
-                string.Join(", ", model.Versions.Select(v => v.Version)));
+                $"Variant {variant.Id} has no version '{version}'. Available versions: " +
+                string.Join(", ", variant.Versions.Select(v => v.Version)));
 
-    private static CatalogVersion? TryFindVersion(CatalogModel model, string version)
+    private static CatalogVersion? TryFindVersion(CatalogVariant variant, string version)
     {
-        foreach (CatalogVersion v in model.Versions)
+        foreach (CatalogVersion v in variant.Versions)
         {
             if (string.Equals(v.Version, version, StringComparison.Ordinal)) return v;
         }
@@ -452,16 +367,17 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public async Task<IReadOnlyDictionary<string, ModelInstallState>> ProbeAllAsync(
         CancellationToken ct = default)
     {
-        // Parallel probe. ProbeAsync short-circuits to NotDownloaded when
-        // the model directory doesn't exist (no list call), so for a fresh
-        // host with no installed models this is essentially N directory
-        // existence checks — fast.
-        IReadOnlyList<CatalogModel> models = _store.Manifest.Models;
-        Task<(string Id, ModelInstallState State)>[] tasks = new Task<(string, ModelInstallState)>[models.Count];
-        for (int i = 0; i < models.Count; i++)
+        List<CatalogVariant> variants = [];
+        foreach (CatalogEntry e in _store.Manifest.Entries)
         {
-            CatalogModel m = models[i];
-            tasks[i] = ProbeOne(m.Id, ct);
+            foreach (CatalogVariant v in e.Variants) variants.Add(v);
+        }
+        Task<(string Id, ModelInstallState State)>[] tasks =
+            new Task<(string, ModelInstallState)>[variants.Count];
+        for (int i = 0; i < variants.Count; i++)
+        {
+            CatalogVariant v = variants[i];
+            tasks[i] = ProbeOne(v.Id, ct);
         }
         (string Id, ModelInstallState State)[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
 
@@ -476,22 +392,17 @@ internal sealed class ModelDownloadService : IModelDownloadService
             => (id, await ProbeAsync(id, token).ConfigureAwait(false));
     }
 
-    public Task<long> GetPartialBytesAsync(string modelId, CancellationToken ct = default)
+    public Task<long> GetPartialBytesAsync(string variantId, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
-        // Walk the whole <id>/ tree (every version folder) — partial
-        // downloads live in whichever version is currently being
-        // installed, which may not be the active one yet.
-        string modelDir = Path.Combine(_paths.ModelsRoot, model.Id);
-        if (!Directory.Exists(modelDir)) return Task.FromResult(0L);
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
+        string variantDir = Path.Combine(_paths.ModelsRoot, variant.Id);
+        if (!Directory.Exists(variantDir)) return Task.FromResult(0L);
 
         long total = 0;
-        // Recursive — some manifests include nested paths like `onnx/model.onnx`,
-        // so .part files can live below the model root.
-        foreach (string file in Directory.EnumerateFiles(modelDir, "*.part", SearchOption.AllDirectories))
+        foreach (string file in Directory.EnumerateFiles(variantDir, "*.part", SearchOption.AllDirectories))
         {
             try { total += new FileInfo(file).Length; }
-            catch (IOException) { /* file vanished between enumerate and stat; ignore */ }
+            catch (IOException) { /* file vanished; ignore */ }
         }
         return Task.FromResult(total);
     }
@@ -499,90 +410,53 @@ internal sealed class ModelDownloadService : IModelDownloadService
     public async Task<IReadOnlyDictionary<string, long>> GetAllPartialBytesAsync(
         CancellationToken ct = default)
     {
-        IReadOnlyList<CatalogModel> models = _store.Manifest.Models;
         Dictionary<string, long> map = new(StringComparer.Ordinal);
-        // Sequential — pure filesystem reads, no benefit from parallelism for
-        // dozens of models, and the order is bounded so we keep this simple.
-        foreach (CatalogModel m in models)
+        foreach (CatalogEntry e in _store.Manifest.Entries)
         {
-            long bytes = await GetPartialBytesAsync(m.Id, ct).ConfigureAwait(false);
-            if (bytes > 0) map[m.Id] = bytes;
+            foreach (CatalogVariant v in e.Variants)
+            {
+                long bytes = await GetPartialBytesAsync(v.Id, ct).ConfigureAwait(false);
+                if (bytes > 0) map[v.Id] = bytes;
+            }
         }
         return map;
     }
 
-    public Task DeletePartialsAsync(string modelId, CancellationToken ct = default)
+    public Task DeletePartialsAsync(string variantId, CancellationToken ct = default)
     {
-        CatalogModel model = ResolveModel(modelId);
-        // Walk the whole <id>/ tree; see GetPartialBytesAsync for the rationale.
-        string modelDir = Path.Combine(_paths.ModelsRoot, model.Id);
-        if (!Directory.Exists(modelDir)) return Task.CompletedTask;
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
+        string variantDir = Path.Combine(_paths.ModelsRoot, variant.Id);
+        if (!Directory.Exists(variantDir)) return Task.CompletedTask;
 
-        foreach (string file in Directory.EnumerateFiles(modelDir, "*.part", SearchOption.AllDirectories))
+        foreach (string file in Directory.EnumerateFiles(variantDir, "*.part", SearchOption.AllDirectories))
         {
             try { File.Delete(file); }
             catch (IOException ex)
             {
-                // Don't fail the whole operation if one file is locked; the
-                // caller's intent is "wipe partials," and a subsequent
-                // Install will overwrite anything left behind. Log and move on.
                 _logger.LogWarning(ex, "Could not delete partial {File}", file);
             }
         }
         return Task.CompletedTask;
     }
 
-    // Sequential source-fallback loop. For each source in order:
-    //   1. Ask the client to list the file inventory.
-    //   2. Emit OnStarted with that inventory's totals (resets the UI's
-    //      progress bar for any prior failed-source attempt).
-    //   3. Download every file with per-file progress; verify sha256 if
-    //      the source surfaced one (HuggingFace LFS only today).
-    //   4. On any failure (list, download, hash mismatch) — log the
-    //      reason, append to the aggregate error, advance to the next
-    //      source. On final source's failure, emit OnFailed with the
-    //      collected reasons.
-    //   5. On success, emit OnComplete and (if InstallSql is set) the
-    //      OnInstalling / OnInstalled lifecycle around the SQL apply.
-    //
-    // Cancellation aborts the whole loop — no point trying the next source
-    // when the user pulled the plug.
     private async Task RunDownloadAsync(
-        CatalogModel model,
+        CatalogVariant variant,
         CatalogVersion target,
         bool pinnedMode,
         CancellationToken ct)
     {
-        // Bare installs target versions[0]; pinned installs target a
-        // specific older cut. Either way the bytes land in
-        // <root>/<id>/<version>/ — the per-version folder is the unit of
-        // atomicity; partials never get promoted, and a pinned install
-        // doesn't disturb the active one.
         string version = target.Version;
-        string modelDir = _paths.GetModelRoot(model.Id, version);
-        Directory.CreateDirectory(modelDir);
-        string activeKey = pinnedMode ? $"{model.Id}@{version}" : model.Id;
+        string variantDir = _paths.GetModelRoot(variant.Id, version);
+        Directory.CreateDirectory(variantDir);
+        string activeKey = pinnedMode ? $"{variant.Id}@{version}" : variant.Id;
 
         StringBuilder failureLog = new();
-        // Models with no file sources are valid for kind="python" entries
-        // whose weights live in an external cache (HF cache for
-        // transformers / diffusers pipelines) rather than under
-        // $DATUMV_MODELS. The download phase is then a no-op success;
-        // the venv-install phase below does the real work. Seed
-        // `anySourceSucceeded` true when there are no sources so the
-        // post-loop "no sources, treat as failure" branch doesn't fire
-        // for these intentionally file-less entries.
         bool anySourceSucceeded = target.Sources.Count == 0;
 
-        // Always emit OnStarted so the UI's install dialog opens, even
-        // when there's nothing to download (kind="python" with no
-        // files). FileCount + TotalBytes are zero in that case; the
-        // install dialog renders a determinate-but-instantly-complete
-        // download bar and proceeds to the venv-install phase.
         if (target.Sources.Count == 0)
         {
             await _reporter.OnStartedAsync(
-                new ModelDownloadStarted(model.Id, FileCount: 0, TotalBytes: 0),
+                new ModelDownloadStarted(variant.Id, FileCount: 0, TotalBytes: 0),
                 ct).ConfigureAwait(false);
         }
 
@@ -607,7 +481,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 try
                 {
                     await TryDownloadFromSourceAsync(
-                        model, modelDir, source, client, sourceIndex, ct).ConfigureAwait(false);
+                        variant, variantDir, source, client, sourceIndex, ct).ConfigureAwait(false);
                     anySourceSucceeded = true;
                     break;
                 }
@@ -618,7 +492,7 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 catch (Exception ex)
                 {
                     string label = $"source[{sourceIndex}] ({client.SupportedType})";
-                    _logger.LogWarning(ex, "{ModelId}: {Label} failed; advancing to next source", model.Id, label);
+                    _logger.LogWarning(ex, "{VariantId}: {Label} failed; advancing to next source", variant.Id, label);
                     failureLog.AppendLine($"{label}: {ex.Message}");
                 }
             }
@@ -629,76 +503,45 @@ internal sealed class ModelDownloadService : IModelDownloadService
                     ? "no sources configured"
                     : "all sources failed: " + failureLog.ToString().TrimEnd();
                 await _reporter.OnFailedAsync(
-                    new ModelDownloadFailed(model.Id, aggregate), CancellationToken.None)
+                    new ModelDownloadFailed(variant.Id, aggregate), CancellationToken.None)
                     .ConfigureAwait(false);
                 return;
             }
 
             await _reporter.OnCompleteAsync(
-                new ModelDownloadComplete(model.Id), CancellationToken.None)
+                new ModelDownloadComplete(variant.Id), CancellationToken.None)
                 .ConfigureAwait(false);
 
-            // The `<id>/active` pointer is left untouched until both
-            // installSql and the declared/observed cross-check succeed.
-            // Mid-install USING-path resolution flows through
-            // `ModelInstallContext.CurrentVersionPin` instead, which
-            // names the version-being-installed independently of the
-            // active pointer. Effect: in-flight queries observe one
-            // consistent active pointer throughout the install (either
-            // the prior version's pointer or — on success — the new
-            // one); a cross-check failure has nothing to revert.
-
-            // Python venv install step. Runs for kind="python" entries
-            // after the file download completes — sets up the engine-
-            // managed Python interpreter + per-model venv + declared
-            // requirements. Wrapped in OnInstalling/OnInstalled events
-            // so the UI's install dialog shows "installing Python
-            // environment" alongside the download. Granular per-stage
-            // progress (uv download, python install, deps) flows
-            // separately through IPythonEnvironmentReporter to the
-            // status-bar chip surface when that lands.
-            if (model.Python is { } pythonSpec)
+            if (variant.Python is { } pythonSpec)
             {
                 await _reporter.OnInstallingAsync(
-                    new ModelInstalling(model.Id), CancellationToken.None)
+                    new ModelInstalling(variant.Id), CancellationToken.None)
                     .ConfigureAwait(false);
 
                 await _python.EnsureVenvAsync(
-                    venvName: model.Id,
+                    venvName: variant.Id,
                     pythonVersion: pythonSpec.PythonVersion,
                     requirements: pythonSpec.Requirements,
                     cancellationToken: ct).ConfigureAwait(false);
 
                 await _reporter.OnInstalledAsync(
-                    new ModelInstalled(model.Id), CancellationToken.None)
+                    new ModelInstalled(variant.Id), CancellationToken.None)
                     .ConfigureAwait(false);
             }
 
-            // Run the SQL install glue, if any. Failures here surface as
-            // ModelDownloadFailed so the UI shows a single "this didn't
-            // work" path — from the user's perspective the model isn't
-            // usable until both halves succeed. We deliberately don't
-            // delete the downloaded files on install failure: the bytes
-            // are valid and re-trying install is cheaper than re-downloading.
             if (!string.IsNullOrEmpty(target.InstallSql))
             {
                 await _reporter.OnInstallingAsync(
-                    new ModelInstalling(model.Id), CancellationToken.None)
+                    new ModelInstalling(variant.Id), CancellationToken.None)
                     .ConfigureAwait(false);
 
-                // Ambient version pin steers `ModelCatalog.ResolveFilePath`
-                // at every `USING` resolution that runs inside the
-                // installer's parsed CREATE MODEL statements. Cleared in
-                // the finally so it never leaks past this install. Pinned
-                // installs need the same pin so id-prefixed USING paths
-                // resolve to the pinned version's folder, not active.
                 string? previousPin = ModelInstallContext.CurrentVersionPin;
                 IReadOnlyList<string> observed;
                 ModelInstallContext.CurrentVersionPin = version;
                 try
                 {
                     observed = await _installer.InstallAsync(
-                        model, target, pinnedMode, ct).ConfigureAwait(false);
+                        variant, target, pinnedMode, ct).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -711,10 +554,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
                         expectedDeclarations, observed, target.Version, pinnedMode);
                     if (mismatch.Length > 0)
                     {
-                        // Partial install: drop everything the installer
-                        // actually registered so the catalog matches its
-                        // pre-install state. Active pointer was never
-                        // flipped, so there's nothing to revert.
                         await _installer.DropModelsAsync(observed, CancellationToken.None)
                             .ConfigureAwait(false);
                         throw new InvalidOperationException(mismatch);
@@ -722,30 +561,21 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 }
 
                 await _reporter.OnInstalledAsync(
-                    new ModelInstalled(model.Id), CancellationToken.None)
+                    new ModelInstalled(variant.Id), CancellationToken.None)
                     .ConfigureAwait(false);
             }
-
-            // Cross-check passed (or there was no installSql). No active
-            // pointer to flip — the catalog row registered by installSql
-            // (bare for !pinnedMode, suffixed otherwise) is itself the
-            // active-version signal. ICatalogActiveVersionLookup walks
-            // those rows to answer "what version is active for <id>?"
         }
         catch (OperationCanceledException)
         {
             await _reporter.OnFailedAsync(
-                new ModelDownloadFailed(model.Id, "cancelled"), CancellationToken.None)
+                new ModelDownloadFailed(variant.Id, "cancelled"), CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Reaches here only for failures AFTER a source succeeded — i.e.
-            // install-SQL errors. Pre-success per-source errors are caught
-            // by the inner try and routed into failureLog above.
-            _logger.LogError(ex, "Post-download step failed for {ModelId}", model.Id);
+            _logger.LogError(ex, "Post-download step failed for {VariantId}", variant.Id);
             await _reporter.OnFailedAsync(
-                new ModelDownloadFailed(model.Id, ex.Message), CancellationToken.None)
+                new ModelDownloadFailed(variant.Id, ex.Message), CancellationToken.None)
                 .ConfigureAwait(false);
         }
         finally
@@ -754,12 +584,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
         }
     }
 
-    // Cross-check declared identifiers from catalog.json against the
-    // identifiers the installer actually registered. Returns an empty
-    // string when the sets match; otherwise a one-line error message
-    // identifying the missing / extra identifiers. Used by both the
-    // active and pinned install paths — the only difference is the
-    // expected identifier form (bare vs `<bare>@<digits>`).
     private static string CrossCheckObservedIdentifiers(
         IReadOnlyList<CatalogVersionModel> declared,
         IReadOnlyList<string> observed,
@@ -792,12 +616,9 @@ internal sealed class ModelDownloadService : IModelDownloadService
         return $"installSql identifier set does not match catalog.json declaration: {string.Join("; ", parts)}.";
     }
 
-
-    // Single-source download attempt. Throws on any failure — the outer
-    // loop catches and advances to the next source.
     private async Task TryDownloadFromSourceAsync(
-        CatalogModel model,
-        string modelDir,
+        CatalogVariant variant,
+        string variantDir,
         CatalogSource source,
         IModelSourceClient client,
         int sourceIndex,
@@ -810,31 +631,18 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 $"source[{sourceIndex}] returned an empty file inventory");
         }
 
-        // Total bytes may be unknown for github-release / https sources
-        // (Size=0). The UI handles missing totals — leaves the percentage
-        // empty and shows elapsed-only. HF entries always have real sizes.
         long totalBytes = files.Sum(f => f.Size);
 
         await _reporter.OnStartedAsync(
-            new ModelDownloadStarted(model.Id, files.Count, totalBytes), ct)
+            new ModelDownloadStarted(variant.Id, files.Count, totalBytes), ct)
             .ConfigureAwait(false);
 
         long bytesAcrossModel = 0;
         for (int i = 0; i < files.Count; i++)
         {
             SourceFile file = files[i];
-            string destPath = Path.Combine(modelDir, file.Path);
+            string destPath = Path.Combine(variantDir, file.Path);
 
-            // Skip files already present at the expected size — the user
-            // hit Install on a `Downloaded` model whose bytes are already
-            // on disk; re-fetching from the source would burn bandwidth
-            // and time for no gain. Mirrors the heuristic ProbeAsync uses
-            // when classifying a model as `Downloaded`: a file is present
-            // iff it exists and (when the inventory reports a size) the
-            // on-disk length matches. Hash verification is intentionally
-            // skipped on the skip-path — re-hashing multi-GB GGUF files
-            // on every Install click would defeat the purpose; the
-            // hash check below still runs on freshly-downloaded files.
             if (File.Exists(destPath))
             {
                 bool sizeMatches = file.Size == 0 ||
@@ -843,13 +651,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 {
                     long countedSize = file.Size > 0 ? file.Size : 0;
                     bytesAcrossModel += countedSize;
-                    // Emit a synthetic per-file progress event so the UI's
-                    // overall progress bar advances to reflect the skipped
-                    // file as already-complete. Without this, an Install on
-                    // a fully-downloaded model would jump from 0 → 100 only
-                    // at the very end of the loop.
                     _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
-                        ModelId: model.Id,
+                        ModelId: variant.Id,
                         CurrentFile: file.Path,
                         FileIndex: i + 1,
                         FileCount: files.Count,
@@ -867,12 +670,8 @@ internal sealed class ModelDownloadService : IModelDownloadService
             CancellationToken progressCt = ct;
             var progress = new Progress<DownloadByteProgress>(p =>
             {
-                // Fire-and-forget: convert to Task so a ValueTask backed
-                // by IValueTaskSource (some custom reporter impls) isn't
-                // discarded improperly. The Progress<T> callback is sync;
-                // we don't want to block the download loop per emit.
                 _ = _reporter.OnProgressAsync(new ModelDownloadProgress(
-                    ModelId: model.Id,
+                    ModelId: variant.Id,
                     CurrentFile: file.Path,
                     FileIndex: index + 1,
                     FileCount: files.Count,
@@ -885,9 +684,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
             string actualSha = await client.DownloadFileAsync(
                 source, file, destPath, progress, ct).ConfigureAwait(false);
 
-            // Verify only when the source advertised an expected hash.
-            // Null = source has no checksum API (github-release / https,
-            // and HF non-LFS files like config.json) — trust HTTPS.
             if (file.Sha256 is { } expected &&
                 !string.Equals(expected, actualSha, StringComparison.OrdinalIgnoreCase))
             {
@@ -895,9 +691,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
                     $"sha256 mismatch on {file.Path}: expected {expected}, got {actualSha}");
             }
 
-            // Accumulate using the known size from the inventory if present,
-            // otherwise approximate from observed bytes (the OnComplete will
-            // settle this; the bytesAcrossModel tracker is best-effort).
             bytesAcrossModel += file.Size > 0 ? file.Size : 0;
         }
     }
@@ -923,10 +716,14 @@ internal sealed class ModelDownloadService : IModelDownloadService
         return client;
     }
 
-    private CatalogModel ResolveModel(string modelId)
+    private (CatalogEntry Entry, CatalogVariant Variant) ResolveVariant(string variantId)
     {
-        CatalogModel? match = _store.Manifest.Models.FirstOrDefault(m => m.Id == modelId);
-        return match ?? throw new KeyNotFoundException($"Unknown model id: {modelId}");
+        (CatalogEntry Entry, CatalogVariant Variant)? hit = _store.TryResolveVariant(variantId);
+        if (hit is null)
+        {
+            throw new KeyNotFoundException($"Unknown variant id: {variantId}");
+        }
+        return hit.Value;
     }
 }
 

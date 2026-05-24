@@ -23,7 +23,7 @@ public sealed class MobileSamSqlParseTests : ServiceTestBase
     private string LoadCanonicalSql()
     {
         IManifestStore store = GetService<IManifestStore>();
-        CatalogModel model = store.Manifest.Models.First(m => m.Id == "mobile-sam");
+        CatalogVariant model = store.Manifest.Entries.SelectMany(e => e.Variants).First(v => v.Id == "mobile-sam");
         if (string.IsNullOrEmpty(model.InstallSql))
         {
             throw new InvalidOperationException("Catalog entry 'mobile-sam' has no installSql.");
