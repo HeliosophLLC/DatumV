@@ -8,12 +8,18 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 
 /// <summary>
 /// Overlays bounding-box rectangles (with optional labels) on an image.
-/// <c>image_draw_bounding_boxes(image, boxes)</c> — <c>boxes</c> is an
-/// <c>Array&lt;Struct&gt;</c> whose element struct exposes <c>x</c>, <c>y</c>, <c>w</c>,
-/// <c>h</c> (numeric, in source-image pixel coordinates, top-left origin) plus
-/// optional <c>label</c> (String) and <c>score</c> (numeric, 0–1) fields.
-/// Field names are resolved via the per-query <see cref="TypeRegistry"/>; any
-/// box-producing model that exposes its <c>OutputFields</c> drops in directly.
+/// Two call shapes:
+/// <list type="bullet">
+///   <item><c>image_draw_bounding_boxes(image, boxes)</c> — <c>boxes</c> is an
+///   <c>Array&lt;Struct&gt;</c>.</item>
+///   <item><c>image_draw_bounding_boxes(image, box)</c> — <c>box</c> is a single
+///   <c>Struct</c>, drawn as one rectangle.</item>
+/// </list>
+/// The element struct exposes <c>x</c>, <c>y</c>, <c>w</c>, <c>h</c> (numeric,
+/// in source-image pixel coordinates, top-left origin) plus optional
+/// <c>label</c> (String) and <c>score</c> (numeric, 0–1) fields. Field names
+/// are resolved via the per-query <see cref="TypeRegistry"/>; any box-producing
+/// model that exposes its <c>OutputFields</c> drops in directly.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -40,8 +46,9 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "Overlays bounding-box rectangles (with optional labels) on an image. "
-        + "The boxes argument is an Array<Struct> with x, y, w, h fields plus "
-        + "optional label and score; field names are resolved via the per-query type registry.";
+        + "The second argument is either an Array<Struct> of boxes or a single Struct "
+        + "with x, y, w, h fields plus optional label and score; field names are resolved "
+        + "via the per-query type registry.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -51,6 +58,14 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
             [
                 new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("boxes", DataKindMatcher.Exact(DataKind.Struct), IsOptional: false, IsArray: ArrayMatch.FlatArray),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("box",   DataKindMatcher.Exact(DataKind.Struct), IsOptional: false, IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
@@ -75,26 +90,30 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Image));
         }
 
-        if (!boxesArg.IsArray)
-        {
-            throw new FunctionArgumentException(Name,
-                $"second argument must be an Array<Struct>; got Kind={boxesArg.Kind}, IsArray=false.");
-        }
-
         SKBitmap source = imgArg.AsImage();
 
-        // Null array or empty array — pass the source through unchanged. We
-        // still re-encode so the result is owned by this function (consumers
-        // may mutate the SKBitmap downstream).
+        // Null array, empty array, or null single struct — pass the source
+        // through unchanged. We still re-encode so the result is owned by this
+        // function (consumers may mutate the SKBitmap downstream).
         if (boxesArg.IsNull)
         {
             return new ValueTask<ValueRef>(EncodePassThrough(source));
         }
 
-        ReadOnlySpan<ValueRef> elements = boxesArg.GetArrayElements();
-        if (elements.Length == 0)
+        ReadOnlySpan<ValueRef> elements;
+        ValueRef[]? singleElementBuffer = null;
+        if (boxesArg.IsArray)
         {
-            return new ValueTask<ValueRef>(EncodePassThrough(source));
+            elements = boxesArg.GetArrayElements();
+            if (elements.Length == 0)
+            {
+                return new ValueTask<ValueRef>(EncodePassThrough(source));
+            }
+        }
+        else
+        {
+            singleElementBuffer = [boxesArg];
+            elements = singleElementBuffer;
         }
 
         // Resolve field indices from the first non-null element's TypeId. Per

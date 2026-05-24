@@ -163,6 +163,21 @@ SELECT resize(mask, 512, 512, 'nearest') AS mask FROM segmentation
 
 Crop rectangular region. Three call shapes: explicit pixel coordinates, a single rect struct (field names case-insensitive), or an array of rect structs (returns one cropped Image per rect in input order). All numeric kinds are accepted for the coordinate values; floats truncate to integer pixel offsets.
 
+### image_draw_bounding_boxes
+
+`image_draw_bounding_boxes(img, boxes Array<Struct>)` → Image
+`image_draw_bounding_boxes(img, box Struct)` → Image
+
+Overlay bounding-box rectangles (with optional labels) on an image. The element struct exposes `x`, `y`, `w`, `h` (numeric, in source-image pixel coordinates, top-left origin) plus optional `label` (String) and `score` (numeric, 0–1) fields. Two element shapes are accepted: flat `{x, y, w, h, ...}`, or a nested `{bbox: BoundingBox, label?, score?}` where the inner `BoundingBox` carries `x/y/w/h` — the named-type detection shapes (`ScoredDetection`, `FaceDetection`, `OcrLine`, `RegionScore`, ...) use the nested form. Field names are resolved via the per-query type registry, so any box-producing model that declares its `OutputFields` drops in directly. When `label` and/or `score` are present, a red label chip is drawn at the box's top-left corner showing `"<label> <score>"` (or whichever fields are non-null). A null or empty `boxes` argument returns the source image unchanged.
+
+```sql
+-- Array of detections from a YOLO-style model
+SELECT image_draw_bounding_boxes(img, models.yolov8n(img)) AS annotated FROM photos
+
+-- Single bounding box (e.g. one face from a face detector)
+SELECT image_draw_bounding_boxes(img, models.scrfd(img)[0]) AS annotated FROM portraits
+```
+
 ### grayscale
 
 `grayscale(img)` → Image
