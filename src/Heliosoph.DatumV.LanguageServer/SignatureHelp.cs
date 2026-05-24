@@ -1,3 +1,5 @@
+using Heliosoph.DatumV.Manifest;
+
 namespace Heliosoph.DatumV.LanguageServer;
 
 /// <summary>
@@ -8,9 +10,13 @@ namespace Heliosoph.DatumV.LanguageServer;
 /// </summary>
 /// <remarks>
 /// Per LSP, the editor uses <see cref="ActiveSignature"/> to select which
-/// overload to display (irrelevant today — we don't expose overloads to the
-/// completion layer, so this is always 0) and <see cref="ActiveParameter"/>
-/// to bold the current parameter in the floating tooltip.
+/// overload to display in the "N of M" carousel and
+/// <see cref="ActiveParameter"/> to bold the current parameter in the
+/// floating tooltip. Built-in functions with multiple call shapes (the
+/// manifest's <see cref="FunctionSignature.AdditionalParameterShapes"/>)
+/// surface every variant; the provider's default pick favours the shape
+/// whose slot at the cursor matches the first token of the current
+/// argument so the user doesn't have to cycle for the common case.
 /// </remarks>
 public sealed class SignatureHelp
 {

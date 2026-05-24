@@ -35,6 +35,28 @@ public sealed class HoverProviderTests : ServiceTestBase
                 },
                 new FunctionSignature
                 {
+                    // Overload stand-in patterned on image_draw_bounding_boxes:
+                    // primary takes Array<Struct>, alternate takes a single
+                    // Struct. Lets the overload-hover test confirm both
+                    // shapes render on the same hover card.
+                    Name = "draw_boxes",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "image", Kind = "Image" },
+                        new ParameterSignature { Name = "boxes", Kind = "Array<Struct>" },
+                    ],
+                    ReturnType = "Image",
+                    Description = "Overlays bounding-box rectangles on an image.",
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "image", Kind = "Image" },
+                            new ParameterSignature { Name = "box", Kind = "Struct" },
+                        ],
+                    ],
+                },
+                new FunctionSignature
+                {
                     SchemaName = "system",
                     Name = "video_unnest_frames",
                     Parameters =
@@ -120,6 +142,22 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.NotNull(result);
         Assert.Contains("abs", result.Contents);
         Assert.Contains("Absolute value", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_OverloadedFunction_RendersEveryVariant()
+    {
+        HoverProvider provider = CreateProvider();
+
+        // Cursor on `draw_boxes` — the hover card should list both call
+        // shapes (primary Array<Struct> + AdditionalParameterShapes single
+        // Struct) so the reader doesn't have to invoke the function to see
+        // the alternates.
+        HoverResult? result = provider.GetHover("SELECT draw_boxes(img, b) FROM t", 7);
+
+        Assert.NotNull(result);
+        Assert.Contains("boxes: `Array<Struct>`", result!.Contents);
+        Assert.Contains("box: `Struct`", result.Contents);
     }
 
     [Fact]

@@ -21,9 +21,17 @@ namespace Heliosoph.DatumV.LanguageServer;
 /// call's depth between the paren and the cursor.
 /// </para>
 /// <para>
-/// <strong>What it doesn't do.</strong> It doesn't pick between overloads
-/// (we don't surface multi-signature variants today; ValidateArguments
-/// resolves overloads at runtime). It doesn't recover gracefully from
+/// <strong>Overloads.</strong> Built-in functions with multiple call shapes
+/// (the manifest's <see cref="FunctionSignature.AdditionalParameterShapes"/>)
+/// surface every variant; the editor renders them as a "1 of N" carousel
+/// via LSP <c>ActiveSignature</c>. The default pick prefers the variant
+/// whose parameter at the cursor slot matches the first token of the
+/// current argument — <c>{…}</c> picks the scalar <c>Struct</c> shape,
+/// <c>[…]</c> picks the <c>Array&lt;…&gt;</c> shape — with arity as the
+/// tiebreaker.
+/// </para>
+/// <para>
+/// <strong>What it doesn't do.</strong> It doesn't recover gracefully from
 /// deeply malformed SQL — the token stream is what it is, and a missing
 /// left paren just means no signature help fires.
 /// </para>
@@ -56,12 +64,12 @@ public sealed class SignatureHelpProvider
             return null;
         }
 
-        if (!TryFindEnclosingCall(tokens, out string functionName, out int activeParameter))
+        if (!TryFindEnclosingCall(tokens, out string functionName, out int activeParameter, out SqlToken? activeArgFirstToken))
         {
             return null;
         }
 
-        return ResolveSignature(functionName, activeParameter);
+        return ResolveSignature(functionName, activeParameter, activeArgFirstToken);
     }
 
     /// <summary>
@@ -106,27 +114,51 @@ public sealed class SignatureHelpProvider
 
     /// <summary>
     /// Walks the token stream backward from the end, balancing paren depth.
-    /// Returns the function name and zero-based active parameter index when
-    /// the unmatched left paren is preceded by a callable identifier
-    /// (optionally namespace-qualified with <c>udf.</c> or <c>models.</c>).
+    /// Returns the function name, zero-based active parameter index, and
+    /// the first token of the active argument (or <see langword="null"/>
+    /// when the argument is empty so far) when the unmatched left paren is
+    /// preceded by a callable identifier (optionally namespace-qualified
+    /// with <c>udf.</c> or <c>models.</c>).
     /// </summary>
+    /// <remarks>
+    /// The active-argument first token feeds overload disambiguation: a
+    /// <c>{</c> signals a struct literal and biases toward
+    /// <c>Struct</c>-shaped slots, <c>[</c> signals an array literal and
+    /// biases toward <c>Array&lt;…&gt;</c> slots. Without it, two variants
+    /// with the same arity (e.g. <c>image_draw_bounding_boxes(image, boxes)</c>
+    /// where <c>boxes</c> is either a single <c>Struct</c> or
+    /// <c>Array&lt;Struct&gt;</c>) would tie and always render the primary
+    /// variant first.
+    /// </remarks>
     private static bool TryFindEnclosingCall(
         IReadOnlyList<Token<SqlToken>> tokens,
         out string functionName,
-        out int activeParameter)
+        out int activeParameter,
+        out SqlToken? activeArgFirstToken)
     {
         functionName = "";
         activeParameter = 0;
+        activeArgFirstToken = null;
 
         int depth = 0;
         int commaCount = 0;
+        // Index of the first token belonging to the current (active) argument.
+        // Walking back, this is the token after the most recent depth-0 comma
+        // (or after the unmatched left paren when no comma was seen).
+        int activeArgStart = tokens.Count;
         for (int i = tokens.Count - 1; i >= 0; i--)
         {
             SqlToken kind = tokens[i].Kind;
             switch (kind)
             {
                 case SqlToken.RightParen:
+                case SqlToken.RightBracket:
+                case SqlToken.RightBrace:
                     depth++;
+                    continue;
+                case SqlToken.LeftBracket:
+                case SqlToken.LeftBrace:
+                    if (depth > 0) depth--;
                     continue;
                 case SqlToken.LeftParen:
                     if (depth > 0)
@@ -135,9 +167,26 @@ public sealed class SignatureHelpProvider
                         continue;
                     }
                     // Unmatched left paren — this is the enclosing argument list.
+                    if (activeArgStart > i + 1 && activeArgStart < tokens.Count)
+                    {
+                        activeArgFirstToken = tokens[activeArgStart].Kind;
+                    }
+                    else if (i + 1 < tokens.Count && commaCount == 0)
+                    {
+                        activeArgFirstToken = tokens[i + 1].Kind;
+                    }
                     return TryReadFunctionName(tokens, i, out functionName, commaCount, out activeParameter);
                 case SqlToken.Comma:
-                    if (depth == 0) commaCount++;
+                    if (depth == 0)
+                    {
+                        // The comma we just walked past closes the current
+                        // arg from the back; everything after this index is
+                        // a *later* arg, everything from i+1 onward up to
+                        // the next depth-0 comma is the active arg if no
+                        // earlier depth-0 comma was seen first.
+                        if (commaCount == 0) activeArgStart = i + 1;
+                        commaCount++;
+                    }
                     continue;
                 default:
                     continue;
@@ -204,7 +253,7 @@ public sealed class SignatureHelpProvider
     /// Returns <see langword="null"/> when nothing matches — the editor then
     /// hides the tooltip.
     /// </summary>
-    private SignatureHelp? ResolveSignature(string functionName, int activeParameter)
+    private SignatureHelp? ResolveSignature(string functionName, int activeParameter, SqlToken? activeArgFirstToken)
     {
         if (functionName.StartsWith("models.", StringComparison.OrdinalIgnoreCase))
         {
@@ -224,7 +273,7 @@ public sealed class SignatureHelpProvider
         // Built-ins live in many schemas (system, inference, tokenizer,
         // templates, …) and TVFs do too. Search the explicit schema when
         // qualified; walk search_path when not.
-        return BuildBuiltinSignature(explicitSchema, bareName, activeParameter);
+        return BuildBuiltinSignature(explicitSchema, bareName, activeParameter, activeArgFirstToken);
     }
 
     private SignatureHelp? BuildRoutineSignature(string? explicitSchema, string name, int activeParameter)
@@ -374,12 +423,11 @@ public sealed class SignatureHelpProvider
         };
     }
 
-    private SignatureHelp? BuildBuiltinSignature(string? explicitSchema, string name, int activeParameter)
+    private SignatureHelp? BuildBuiltinSignature(string? explicitSchema, string name, int activeParameter, SqlToken? activeArgFirstToken)
     {
         FunctionSignature? entry = ResolveBuiltin(explicitSchema, name);
         if (entry is null) return null;
 
-        IReadOnlyList<ParameterSignature> parameters = entry.Parameters;
         // Render qualified label when the function lives outside `system`,
         // so the popup matches what the user typed (inference.devices(...)
         // rather than just devices(...)).
@@ -387,25 +435,89 @@ public sealed class SignatureHelpProvider
             || string.Equals(entry.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
             ? entry.Name
             : $"{entry.SchemaName}.{entry.Name}";
-        (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
-            callableName, parameters, entry.ReturnType);
 
-        string? doc = entry.Description;
+        // Assemble every declared call shape: the primary Parameters list
+        // plus any AdditionalParameterShapes (overload variants — e.g.
+        // image_draw_bounding_boxes' single-Struct vs Array<Struct>).
+        int variantCount = 1 + (entry.AdditionalParameterShapes?.Count ?? 0);
+        List<IReadOnlyList<ParameterSignature>> variants = new(variantCount)
+        {
+            entry.Parameters,
+        };
+        if (entry.AdditionalParameterShapes is { } extras)
+        {
+            foreach (IReadOnlyList<ParameterSignature> v in extras) variants.Add(v);
+        }
+
+        SignatureInfo[] signatures = new SignatureInfo[variants.Count];
+        for (int i = 0; i < variants.Count; i++)
+        {
+            (string label, IReadOnlyList<ParameterInfo> paramInfos) = BuildLabel(
+                callableName, variants[i], entry.ReturnType);
+            signatures[i] = new SignatureInfo
+            {
+                Label = label,
+                Documentation = entry.Description,
+                Parameters = paramInfos,
+            };
+        }
+
+        int activeSig = variants.Count == 1
+            ? 0
+            : PickActiveSignature(variants, activeParameter, activeArgFirstToken);
 
         return new SignatureHelp
         {
-            Signatures =
-            [
-                new SignatureInfo
-                {
-                    Label = label,
-                    Documentation = doc,
-                    Parameters = paramInfos,
-                },
-            ],
-            ActiveSignature = 0,
-            ActiveParameter = ClampActiveParameter(activeParameter, parameters.Count),
+            Signatures = signatures,
+            ActiveSignature = activeSig,
+            ActiveParameter = ClampActiveParameter(activeParameter, variants[activeSig].Count),
         };
+    }
+
+    /// <summary>
+    /// Picks the most plausible overload to highlight by default. Scoring
+    /// favours variants whose slot at the cursor position exists and whose
+    /// declared kind matches the first token of the current argument
+    /// (<c>{</c> → scalar <c>Struct</c>, <c>[</c> → <c>Array&lt;…&gt;</c>);
+    /// arity proximity to the typed-argument count is the tiebreaker.
+    /// Primary variant wins ties — preserves prior behaviour when the
+    /// cursor sits on the function name with no arguments typed yet.
+    /// </summary>
+    private static int PickActiveSignature(
+        IReadOnlyList<IReadOnlyList<ParameterSignature>> variants,
+        int activeParameter,
+        SqlToken? activeArgFirstToken)
+    {
+        int typedArgs = activeParameter + 1;
+        int bestIndex = 0;
+        int bestScore = int.MinValue;
+        for (int i = 0; i < variants.Count; i++)
+        {
+            IReadOnlyList<ParameterSignature> v = variants[i];
+            int score = 0;
+            if (activeParameter >= 0 && activeParameter < v.Count)
+            {
+                score += 100;
+                string kind = v[activeParameter].Kind;
+                bool kindIsArray = kind.StartsWith("Array<", StringComparison.OrdinalIgnoreCase)
+                    || kind.EndsWith("[]", StringComparison.Ordinal);
+                if (activeArgFirstToken == SqlToken.LeftBrace)
+                {
+                    score += kindIsArray ? -25 : 50;
+                }
+                else if (activeArgFirstToken == SqlToken.LeftBracket)
+                {
+                    score += kindIsArray ? 50 : -25;
+                }
+            }
+            score -= Math.Abs(v.Count - typedArgs);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 
     /// <summary>

@@ -54,6 +54,26 @@ public sealed class CompletionProviderTests : ServiceTestBase
                 },
                 new FunctionSignature
                 {
+                    // Overload stand-in patterned on image_draw_bounding_boxes
+                    // so completion-doc tests can confirm every variant
+                    // surfaces in the Documentation panel.
+                    Name = "draw_boxes",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "image", Kind = "Image" },
+                        new ParameterSignature { Name = "boxes", Kind = "Array<Struct>" },
+                    ],
+                    ReturnType = "Image",
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "image", Kind = "Image" },
+                            new ParameterSignature { Name = "box", Kind = "Struct" },
+                        ],
+                    ],
+                },
+                new FunctionSignature
+                {
                     SchemaName = "system",
                     Name = "video_unnest_frames",
                     Parameters =
@@ -108,6 +128,24 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, item => item.Label == "name" && item.Kind == CompletionItemKind.Column);
         Assert.Contains(items, item => item.Label == "abs" && item.Kind == CompletionItemKind.Function);
         Assert.Contains(items, item => item.Label == "FROM" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_OverloadedFunction_DocumentationListsEveryVariant()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT  FROM users", 7);
+
+        CompletionItem? draw = items.FirstOrDefault(item =>
+            item.Label == "draw_boxes" && item.Kind == CompletionItemKind.Function);
+        Assert.NotNull(draw);
+        Assert.NotNull(draw!.Documentation);
+        // Both call shapes should appear in the docs panel so the user can
+        // see the alternates without invoking the function first.
+        Assert.Contains("boxes: Array<Struct>", draw.Documentation!);
+        Assert.Contains("box: Struct", draw.Documentation);
+        Assert.Contains("Overloads", draw.Documentation);
     }
 
     [Fact]

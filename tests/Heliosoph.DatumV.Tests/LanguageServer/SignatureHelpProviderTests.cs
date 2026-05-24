@@ -36,6 +36,27 @@ public sealed class SignatureHelpProviderTests
                     Parameters = [new ParameterSignature { Name = "value", Kind = "STRING" }],
                     ReturnType = "STRING",
                 },
+                new FunctionSignature
+                {
+                    // Overload stand-in patterned on image_draw_bounding_boxes:
+                    // primary takes Array<Struct>, alternate takes a single
+                    // Struct. Lets the overload-picker tests exercise the
+                    // {…} vs […] disambiguation.
+                    Name = "draw_boxes",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "image", Kind = "Image" },
+                        new ParameterSignature { Name = "boxes", Kind = "Array<Struct>" },
+                    ],
+                    ReturnType = "Image",
+                    AdditionalParameterShapes =
+                    [
+                        [
+                            new ParameterSignature { Name = "image", Kind = "Image" },
+                            new ParameterSignature { Name = "box", Kind = "Struct" },
+                        ],
+                    ],
+                },
             ],
             Models =
             [
@@ -220,6 +241,63 @@ public sealed class SignatureHelpProviderTests
         Assert.NotNull(sig);
         Assert.Contains("concat", sig!.Signatures[0].Label);
         Assert.Equal(1, sig.ActiveParameter);
+    }
+
+    // ───────────────────── Overload disambiguation ─────────────────────
+
+    [Fact]
+    public void Overloaded_SurfacesAllVariants()
+    {
+        // Both shapes of draw_boxes should appear in Signatures so Monaco
+        // can render the "1 of N" carousel and let the user cycle.
+        SignatureHelp? sig = NewProvider().GetSignatureHelp(
+            "SELECT draw_boxes(img, ", 23);
+
+        Assert.NotNull(sig);
+        Assert.Equal(2, sig!.Signatures.Count);
+        Assert.Contains(sig.Signatures, s => s.Label.Contains("boxes: Array<Struct>"));
+        Assert.Contains(sig.Signatures, s => s.Label.Contains("box: Struct"));
+    }
+
+    [Fact]
+    public void Overloaded_BraceLiteral_PicksScalarStructVariant()
+    {
+        // `draw_boxes(img, {` — the open brace says struct literal, so the
+        // single-Struct variant should be the active signature.
+        SignatureHelp? sig = NewProvider().GetSignatureHelp(
+            "SELECT draw_boxes(img, {", 24);
+
+        Assert.NotNull(sig);
+        Assert.Equal(2, sig!.Signatures.Count);
+        string activeLabel = sig.Signatures[sig.ActiveSignature].Label;
+        Assert.Contains("box: Struct", activeLabel);
+        Assert.DoesNotContain("Array<Struct>", activeLabel);
+    }
+
+    [Fact]
+    public void Overloaded_BracketLiteral_PicksArrayVariant()
+    {
+        // `draw_boxes(img, [` — the open bracket says array literal, so the
+        // Array<Struct> variant should be the active signature.
+        SignatureHelp? sig = NewProvider().GetSignatureHelp(
+            "SELECT draw_boxes(img, [", 24);
+
+        Assert.NotNull(sig);
+        Assert.Equal(2, sig!.Signatures.Count);
+        string activeLabel = sig.Signatures[sig.ActiveSignature].Label;
+        Assert.Contains("boxes: Array<Struct>", activeLabel);
+    }
+
+    [Fact]
+    public void Overloaded_NoLiteralYet_DefaultsToPrimary()
+    {
+        // Cursor right after the comma with no argument yet — no signal to
+        // pick a non-primary variant, so the carousel sits on index 0.
+        SignatureHelp? sig = NewProvider().GetSignatureHelp(
+            "SELECT draw_boxes(img, ", 23);
+
+        Assert.NotNull(sig);
+        Assert.Equal(0, sig!.ActiveSignature);
     }
 
     [Fact]

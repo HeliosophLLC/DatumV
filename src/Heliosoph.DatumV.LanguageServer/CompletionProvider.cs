@@ -1553,7 +1553,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = EnrichFunctionDoc(function.Name),
+                Documentation = EnrichFunctionDoc(function),
                 SortOrder = 2,
             });
         }
@@ -1584,7 +1584,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] Table function: {signature}",
                 InsertText = $"{function.Name}(",
-                Documentation = EnrichFunctionDoc(function.Name),
+                Documentation = EnrichFunctionDoc(function),
                 SortOrder = 1,
             });
         }
@@ -1939,6 +1939,7 @@ public sealed class CompletionProvider
             Kind = CompletionItemKind.Function,
             Detail = $"{function.SchemaName}.{function.Name}({parameters}){returnInfo}",
             InsertText = $"{function.Name}(",
+            Documentation = EnrichFunctionDoc(function),
             SortOrder = 1,
         };
     }
@@ -1962,7 +1963,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = EnrichFunctionDoc(function.Name),
+                Documentation = EnrichFunctionDoc(function),
                 SortOrder = 2,
             });
         }
@@ -1987,7 +1988,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = EnrichFunctionDoc(function.Name),
+                Documentation = EnrichFunctionDoc(function),
                 SortOrder = 2,
             });
         }
@@ -2440,22 +2441,71 @@ public sealed class CompletionProvider
     }
 
     /// <summary>
-    /// Returns a documentation excerpt and "See more" link from the embedded docs
-    /// for the given function name, or null if no matching section exists.
+    /// Returns the documentation-panel markdown for a completion item.
+    /// Combines two pieces:
+    /// <list type="number">
+    ///   <item>The full overload list (every shape from
+    ///     <see cref="FunctionSignature.AdditionalParameterShapes"/>) so a
+    ///     reader hovering an overloaded function in the completion
+    ///     dropdown sees all call shapes, not just the one
+    ///     <see cref="CompletionItem.Detail"/> happened to render.</item>
+    ///   <item>The embedded docs excerpt + "See more" link, when the
+    ///     function has a matching section.</item>
+    /// </list>
+    /// Returns <see langword="null"/> when the function has neither
+    /// overloads nor docs.
     /// </summary>
-    private static string? EnrichFunctionDoc(string functionName)
+    private static string? EnrichFunctionDoc(FunctionSignature function)
+    {
+        string? overloads = FormatOverloadList(function);
+        string? excerpt = TryGetDocsExcerpt(function.Name);
+        return (overloads, excerpt) switch
+        {
+            (null, null) => null,
+            (not null, null) => overloads,
+            (null, not null) => excerpt,
+            (not null, not null) => $"{overloads}\n\n{excerpt}",
+        };
+    }
+
+    /// <summary>
+    /// Renders the function's call shapes (primary + every additional
+    /// variant) as a markdown bullet list. Returns <see langword="null"/>
+    /// when the function has only the primary shape — no point listing one
+    /// signature you can already see in <see cref="CompletionItem.Detail"/>.
+    /// </summary>
+    private static string? FormatOverloadList(FunctionSignature function)
+    {
+        if (function.AdditionalParameterShapes is not { Count: > 0 } extras)
+        {
+            return null;
+        }
+        string returnInfo = function.ReturnType is not null ? $" → {function.ReturnType}" : "";
+        System.Text.StringBuilder sb = new();
+        sb.Append("**Overloads:**\n\n");
+        sb.Append("- `").Append(function.Name).Append('(')
+          .Append(string.Join(", ", function.Parameters.Select(FormatParameter)))
+          .Append(')').Append(returnInfo).Append('`');
+        foreach (IReadOnlyList<ParameterSignature> variant in extras)
+        {
+            sb.Append("\n- `").Append(function.Name).Append('(')
+              .Append(string.Join(", ", variant.Select(FormatParameter)))
+              .Append(')').Append(returnInfo).Append('`');
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Returns the embedded docs excerpt + "See more" link for the given
+    /// function name, or <see langword="null"/> when no section matches.
+    /// </summary>
+    private static string? TryGetDocsExcerpt(string functionName)
     {
         string? sectionKey = DocumentationIndex.Instance.FindFunctionSection(functionName);
-        if (sectionKey is null)
-        {
-            return null;
-        }
+        if (sectionKey is null) return null;
 
         DocumentationSection? section = DocumentationIndex.Instance.TryGetSection(sectionKey);
-        if (section is null)
-        {
-            return null;
-        }
+        if (section is null) return null;
 
         string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
         return string.IsNullOrEmpty(section.Excerpt)

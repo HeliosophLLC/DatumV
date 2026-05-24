@@ -463,6 +463,14 @@ export function LeafPaneView({ leafId }: { leafId: string }) {
                 // results-pane container) that would otherwise clip
                 // them.
                 fixedOverflowWidgets: true,
+                // Reserve a strip of whitespace above the first line
+                // so Monaco's signature-help widget has room to render
+                // ABOVE the cursor on line 1. Without it the widget
+                // drops below the cursor (no space above), landing on
+                // top of the suggest widget that's also rendering
+                // below — the two popups overlap and the variable
+                // list obscures the signature.
+                padding: { top: 12 },
               }}
               onChange={(value) => {
                 if (activeTabId !== null && value !== undefined) {

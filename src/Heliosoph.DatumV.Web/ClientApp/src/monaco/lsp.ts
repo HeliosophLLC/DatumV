@@ -146,27 +146,42 @@ function registerCompletionProvider(): void {
       );
 
       return {
-        suggestions: items.map<monaco.languages.CompletionItem>((item) => ({
-          // When the server emits a LabelSuffix, render it as Monaco's
-          // structured label so the muted suffix shows inline in the row
-          // (e.g. "depth_anything_v3_large (not installed)") without the
-          // user having to highlight the item. Filter matching still
-          // targets the bare name — Monaco indexes on the `label.label`
-          // field, not the suffix.
-          label: item.labelSuffix
-            ? { label: item.label ?? '', detail: ` ${item.labelSuffix}` }
-            : item.label ?? '',
-          kind: completionKindToMonaco(item.kind),
-          insertText: item.insertText ?? item.label ?? '',
-          detail: item.detail,
-          documentation: item.documentation
-            ? { value: item.documentation, isTrusted: false }
-            : undefined,
-          sortText: item.sortOrder !== undefined
-            ? item.sortOrder.toString().padStart(6, '0')
-            : undefined,
-          range,
-        })),
+        suggestions: items.map<monaco.languages.CompletionItem>((item) => {
+          const insertText = item.insertText ?? item.label ?? '';
+          // When the inserted text ends with `(` (function/UDF/procedure
+          // completions all do — InsertText = `${name}(`), fire Monaco's
+          // built-in parameter-hints action right after the insert.
+          // Without this, accepting a function completion swallows the
+          // `(` signature-help trigger character (Monaco only fires
+          // trigger chars on user keystrokes, not programmatic inserts),
+          // and the user has to Ctrl+Space — which surfaces named-arg /
+          // variable suggestions, not the signature popup.
+          const triggerSignatureHelp = insertText.endsWith('(');
+          return {
+            // When the server emits a LabelSuffix, render it as Monaco's
+            // structured label so the muted suffix shows inline in the row
+            // (e.g. "depth_anything_v3_large (not installed)") without the
+            // user having to highlight the item. Filter matching still
+            // targets the bare name — Monaco indexes on the `label.label`
+            // field, not the suffix.
+            label: item.labelSuffix
+              ? { label: item.label ?? '', detail: ` ${item.labelSuffix}` }
+              : item.label ?? '',
+            kind: completionKindToMonaco(item.kind),
+            insertText,
+            detail: item.detail,
+            documentation: item.documentation
+              ? { value: item.documentation, isTrusted: false }
+              : undefined,
+            sortText: item.sortOrder !== undefined
+              ? item.sortOrder.toString().padStart(6, '0')
+              : undefined,
+            range,
+            command: triggerSignatureHelp
+              ? { id: 'editor.action.triggerParameterHints', title: 'Trigger Parameter Hints' }
+              : undefined,
+          };
+        }),
       };
     },
   });

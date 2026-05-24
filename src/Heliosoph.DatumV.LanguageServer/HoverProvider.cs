@@ -1637,18 +1637,30 @@ public sealed class HoverProvider
             return null;
         }
 
-        string parameters = string.Join(", ", function.Parameters.Select(parameter =>
-        {
-            string optional = parameter.IsOptional ? "?" : "";
-            return $"{parameter.Name}: `{parameter.Kind}`{optional}";
-        }));
-
-        string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → `{function.ReturnType}`" : "";
         string qualifiedName = string.IsNullOrEmpty(function.SchemaName)
             || string.Equals(function.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
             ? function.Name
             : $"{function.SchemaName}.{function.Name}";
-        string signature = $"**{qualifiedName}**({parameters}){returnInfo}";
+        string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → `{function.ReturnType}`" : "";
+
+        string signature = $"**{qualifiedName}**({FormatHoverParameters(function.Parameters)}){returnInfo}";
+
+        // Append every additional overload shape on its own bold line so a
+        // reader hovering image_draw_bounding_boxes sees both the
+        // Array<Struct> and the single-Struct call shapes — not just the
+        // primary the signature-help picker happened to surface.
+        if (function.AdditionalParameterShapes is { Count: > 0 } extras)
+        {
+            System.Text.StringBuilder sb = new(signature);
+            foreach (IReadOnlyList<ParameterSignature> variant in extras)
+            {
+                sb.Append("  \n");
+                sb.Append("**").Append(qualifiedName).Append("**(");
+                sb.Append(FormatHoverParameters(variant));
+                sb.Append(')').Append(returnInfo);
+            }
+            signature = sb.ToString();
+        }
 
         if (function.IsTableValued)
         {
@@ -1709,6 +1721,22 @@ public sealed class HoverProvider
             return $"{activeLine} · [{updateLabel}](command:datum.openModelInTab?{encodedId})";
         }
         return null;
+    }
+
+    /// <summary>
+    /// Renders a parameter list as a comma-separated markdown fragment —
+    /// <c>name: `Kind`</c> for required, <c>name: `Kind`?</c> for optional.
+    /// Factored out so the primary shape and every
+    /// <see cref="FunctionSignature.AdditionalParameterShapes"/> variant
+    /// share one renderer.
+    /// </summary>
+    private static string FormatHoverParameters(IReadOnlyList<ParameterSignature> parameters)
+    {
+        return string.Join(", ", parameters.Select(parameter =>
+        {
+            string optional = parameter.IsOptional ? "?" : "";
+            return $"{parameter.Name}: `{parameter.Kind}`{optional}";
+        }));
     }
 
     private FunctionSignature? ResolveFunctionEntry(string? explicitSchema, string name)
