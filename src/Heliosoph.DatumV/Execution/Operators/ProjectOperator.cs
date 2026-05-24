@@ -322,7 +322,27 @@ public sealed class ProjectOperator : QueryOperator
                     letExpressions[index] = letBindings[index].Expression;
                 }
 
-                augmentedLookup = new ColumnLookup(augmentedNames);
+                // Carry forward the source row's NameIndex so unqualified
+                // shortcuts an upstream AliasOperator / JoinSchema added
+                // (e.g. `csv` aliased over physical `t.csv`) survive into
+                // the augmented row. Rebuilding from physical ColumnNames
+                // alone drops those shortcuts and breaks unqualified column
+                // refs inside projection expressions like
+                // `concat(csv, '|', value)` whenever a LET binding forces
+                // the augmented-row path.
+                Dictionary<string, int> augmentedIndex = new(
+                    firstRow.ColumnLookup.NameIndex.Count + letCount,
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (KeyValuePair<string, int> entry in firstRow.ColumnLookup.NameIndex)
+                {
+                    augmentedIndex[entry.Key] = entry.Value;
+                }
+                for (int index = 0; index < letCount; index++)
+                {
+                    augmentedIndex[letBindings![index].Name] = firstRow.FieldCount + index;
+                }
+
+                augmentedLookup = new ColumnLookup(augmentedNames, augmentedIndex);
             }
 
             // Build output column layout.
