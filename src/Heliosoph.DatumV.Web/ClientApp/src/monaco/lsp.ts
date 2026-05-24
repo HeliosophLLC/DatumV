@@ -32,8 +32,9 @@ export async function initLsp(): Promise<void> {
   // shaped exactly like what `setMonarchTokensProvider` accepts. The
   // generated client types it as a FileResponse (NSwag can't statically
   // see the JSON shape from an IActionResult return); plain fetch is
-  // simpler than re-typing it. Best-effort: failures fall back to
-  // Monaco's built-in `sql` tokenizer (registered by sql.contribution).
+  // simpler than re-typing it. Best-effort: on failure, the SQL language
+  // stays registered (see setup.ts) but with no tokenizer, so editor
+  // text renders without syntax highlighting until the next reload.
   try {
     const res = await fetch(GRAMMAR_URL, {
       headers: { Accept: 'application/json' },
@@ -42,42 +43,23 @@ export async function initLsp(): Promise<void> {
     if (res.ok) {
       const grammar = (await res.json()) as monaco.languages.IMonarchLanguage;
       monaco.languages.setMonarchTokensProvider('sql', grammar);
-      // Force-retokenise every existing SQL model AND any model created
-      // during the brief window where the contribution's lazy loader
-      // might still resolve and re-override our provider. Two complementary
-      // techniques:
-      //
-      //   1. A double `setMonarchTokensProvider` with a delay — re-registers
-      //      our grammar on the next macrotask so it runs AFTER any
-      //      in-flight async override from sql.contribution's lazy loader
-      //      (which is a local dynamic import and resolves in <10ms; 50ms
-      //      is a safe upper bound).
-      //   2. Per-model retokenisation via the dummy-language flip + a
-      //      private `resetTokenization()` call (when available). The flip
-      //      alone has been observed to not retokenise in some Monaco
-      //      versions; `resetTokenization` is private but stable.
-      const grammarSnapshot = grammar;
-      const forceRetokenize = (): void => {
-        monaco.languages.setMonarchTokensProvider('sql', grammarSnapshot);
-        for (const model of monaco.editor.getModels()) {
-          if (model.getLanguageId() === 'sql') {
-            // Private API path: directly invalidate cached tokens.
-            const m = model as unknown as { resetTokenization?: () => void };
-            if (typeof m.resetTokenization === 'function') {
-              m.resetTokenization();
-              continue;
-            }
-            // Fallback: language flip through the registered dummy.
-            monaco.editor.setModelLanguage(model, RETOKENIZE_DUMMY_LANGUAGE_ID);
-            monaco.editor.setModelLanguage(model, 'sql');
+      // Retokenise every existing SQL model so the new grammar takes
+      // effect on already-loaded content. `resetTokenization` is a
+      // private API but stable across Monaco versions; we fall back to
+      // a language flip through the dummy registered in setup.ts when
+      // it isn't available (`setModelLanguage(model, sameId)` is a
+      // no-op, so a same-id call wouldn't trigger re-tokenisation).
+      for (const model of monaco.editor.getModels()) {
+        if (model.getLanguageId() === 'sql') {
+          const m = model as unknown as { resetTokenization?: () => void };
+          if (typeof m.resetTokenization === 'function') {
+            m.resetTokenization();
+            continue;
           }
+          monaco.editor.setModelLanguage(model, RETOKENIZE_DUMMY_LANGUAGE_ID);
+          monaco.editor.setModelLanguage(model, 'sql');
         }
-      };
-      forceRetokenize();
-      // Second pass past any pending sql.contribution async load.
-      setTimeout(forceRetokenize, 50);
-      // Forensic log so we can tell at a glance whether the custom grammar
-      // landed.
+      }
       console.info('[lsp] custom SQL grammar registered');
     } else {
       console.warn(`[lsp] grammar fetch failed: ${res.status} ${res.statusText}`);

@@ -8,16 +8,16 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { loader } from '@monaco-editor/react';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import { initLsp } from './lsp';
-// Re-imported deliberately: the contribution registers the `sql` language
-// with Monaco's language registry and provides the bracket / autoclose /
-// comment configuration that other parts of the editor stack (and
-// `@monaco-editor/react`) expect to find. WITHOUT it, completion + hover
-// providers stop firing reliably. The contribution's tokenizer (which
-// includes T-SQL's `bracketedIdentifier` state that breaks array literal
-// highlighting) is overridden by the placeholder grammar registered via
-// the `onLanguage` callback below — that callback runs immediately after
-// the contribution's lazy loader fires, ensuring our placeholder wins.
-import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js';
+// `_.contribution.js` is the side-effect bundle that wires up Monaco's
+// editor UI for suggestions, hover popups, parameter hints, bracket
+// matching, find/replace, multicursor, etc. It is normally pulled in
+// transitively by importing any basic-language contribution (e.g.
+// `sql.contribution.js`). We bypass the SQL contribution to avoid its
+// lazy-loaded T-SQL tokenizer racing with ours, so we have to import
+// the underlying contributions bundle directly — otherwise Ctrl+Space,
+// hover, and signature-help UI stop rendering even though the
+// providers are registered.
+import 'monaco-editor/esm/vs/basic-languages/_.contribution.js';
 
 // Monaco bootstrap. `@monaco-editor/react` defaults to loading Monaco from a
 // CDN at runtime — fine for a public web app, broken for an Electron app
@@ -79,6 +79,43 @@ export function initMonaco(): void {
     { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, command: null },
   ]);
 
+  // Register the SQL language directly instead of importing Monaco's
+  // basic-languages `sql.contribution`. The contribution's loader is a
+  // lazy dynamic import that races with our LSP grammar registration —
+  // when it lands AFTER our `setMonarchTokensProvider` call, it silently
+  // overrides our grammar with Monaco's generic T-SQL tokenizer. The
+  // generic tokenizer knows standard keywords (SELECT, FROM, …) so
+  // surface keywords still colorise, but dialect-specific keywords
+  // (LET, SCAN, PIVOT, …) fall through to default and render uncolored.
+  // Registering the language ourselves eliminates the race entirely.
+  monaco.languages.register({
+    id: 'sql',
+    extensions: ['.sql'],
+    aliases: ['SQL'],
+  });
+  monaco.languages.setLanguageConfiguration('sql', {
+    comments: { lineComment: '--', blockComment: ['/*', '*/'] },
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+    surroundingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+  });
+
   // Register a dummy "no-op" language whose only purpose is to be the
   // intermediate target of the retokenization flip in initLsp. Monaco's
   // `setModelLanguage(model, sameId)` is a no-op (short-circuits when the
@@ -91,8 +128,6 @@ export function initMonaco(): void {
 
   // Fire-and-forget LSP wiring: fetches the full Monarch grammar +
   // registers completion / hover / signature / diagnostics providers.
-  // The fetched grammar replaces Monaco's built-in T-SQL tokenizer
-  // (loaded lazily by sql.contribution) once it lands.
   void initLsp();
 }
 
