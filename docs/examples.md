@@ -47,3 +47,22 @@ SELECT frames_to_gif(
 ```
 
 See [`draw_particles`](functions/drawing.md#draw_particles), [`animate_frames`](functions/drawing.md#animate_frames), and [`frames_to_gif`](functions/drawing.md#frames_to_gif) for the building blocks.
+
+## Model comparisons
+
+### Depth model comparison
+
+<!-- COMPARISON IMAGE — 2×2 (or 1×4) grid: one input image processed through DAv2, DAv3, MiDaS, and DPT. Each panel labeled with the model name. -->
+
+![Depth Anything v2, Depth Anything v3, MiDaS, and DPT depth estimates of the same input](figures/depth-comparison.png)
+
+<!-- DISCUSSION — short prose on what differs between the four outputs: which model is sharpest at edges, which handles thin structures, which is most stable in low-texture regions, which is fastest, etc. Frame as observations, not benchmarks. -->
+
+The same input run through four depth estimators in a single query — the only thing that changes between the four projections is the model name. Swapping models is a column-level concern, not a pipeline-level one.
+
+```sql
+-- COMPARISON QUERY — single SELECT that loads one image and projects four depth columns,
+-- one per model (DAv2, DAv3, MiDaS, DPT). Keep it short enough to read in one screen.
+```
+
+See the [Models reference](models.md) for the full catalog of depth estimators and their characteristics.

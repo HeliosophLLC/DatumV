@@ -27,47 +27,42 @@ detection quality (not latency) is the bottleneck.
 
 ## Example SQL
 
-Detect objects in every image of a folder:
+Detect objects in the coco 2017 validation dataset:
 
 ```sql
 SELECT
-  path,
-  models.yolox_s(image_read(path)) AS detections
-FROM file_glob('photos/*.jpg');
+    LET classes = models.yolox_s(a.file),
+    file AS baseline,
+    image_draw_bounding_boxes(file, classes)
+FROM datasets.coco_val2017 a
+LIMIT 100
 ```
 
 Unnest detections into rows (one per box):
 
 ```sql
 SELECT
-  f.path,
-  d.label,
-  d.score,
-  d.box
-FROM file_glob('photos/*.jpg') AS f
-CROSS JOIN UNNEST(models.yolox_s(image_read(f.path))) AS d
-WHERE d.score > 0.5
-ORDER BY f.path, d.score DESC;
+    LET classes = models.yolox_s(a.file),
+    file AS baseline,
+    image_draw_bounding_boxes(file, c.value),
+    image_crop(file, c.value.bbox)
+FROM datasets.coco_val2017 a
+CROSS JOIN unnest(classes) c
+LIMIT 100
 ```
 
 Filter to a single class (people):
 
 ```sql
-SELECT path, COUNT(*) AS people
-FROM file_glob('photos/*.jpg') AS f
-CROSS JOIN UNNEST(models.yolox_s(image_read(f.path))) AS d
-WHERE d.label = 'person' AND d.score > 0.4
-GROUP BY path
-ORDER BY people DESC;
-```
-
-Draw boxes onto the source image for spot-checking:
-
-```sql
 SELECT
-  path,
-  draw_boxes(image_read(path), models.yolox_s(image_read(path))) AS annotated
-FROM file_glob('photos/*.jpg');
+    LET classes = models.yolox_s(a.file),
+    file AS baseline,
+    image_draw_bounding_boxes(file, c.value),
+    image_crop(file, c.value.bbox)
+FROM datasets.coco_val2017 a
+CROSS JOIN unnest(classes) c
+WHERE c.value.label = 'person'
+LIMIT 100
 ```
 
 ## Output shape
@@ -105,7 +100,7 @@ relative path. Example:
 ## License & attribution
 
 Apache-2.0. Original implementation by Megvii (the YOLOX team). ONNX
-export and re-host on HuggingFace under `Heliosoph/`.
+export and re-host on HuggingFace under `Heliosoph`.
 
 - Paper: [YOLOX: Exceeding YOLO Series in 2021](https://arxiv.org/abs/2107.08430)
 - Source: [Megvii-BaseDetection/YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
