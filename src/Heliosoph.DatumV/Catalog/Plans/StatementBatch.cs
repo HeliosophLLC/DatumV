@@ -43,6 +43,7 @@ public sealed class StatementBatch : PreparedSql
 {
     private readonly IReadOnlyList<(Statement Statement, string? SourceText)> _entries;
     private readonly TableCatalog _catalog;
+    private readonly HashSet<string>? _batchProceduralVariables;
 
     /// <summary>
     /// Constructs a batch over <paramref name="entries"/>. Each entry is
@@ -63,6 +64,23 @@ public sealed class StatementBatch : PreparedSql
         }
         _catalog = catalog;
         _entries = entries;
+
+        // Collect every procedural-variable name reachable from any
+        // statement in the batch so per-child planning sees the
+        // batch-wide variable set. Without this, a script like
+        // `DECLARE counter INT = 5; CALL p(counter)` plans the CALL
+        // in isolation and the validator false-positives on
+        // `counter` (which the runtime resolves via the variable
+        // scope populated by the prior DECLARE).
+        HashSet<string> batchVariables = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((Statement statement, _) in entries)
+        {
+            foreach (string name in Execution.ProceduralVariableCollector.Collect(statement))
+            {
+                batchVariables.Add(name);
+            }
+        }
+        _batchProceduralVariables = batchVariables.Count > 0 ? batchVariables : null;
 
         ExplainPlanNode tree = new()
         {
@@ -108,11 +126,28 @@ public sealed class StatementBatch : PreparedSql
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        // Push the batch-wide procedural-variable set onto the
+        // ambient async-local around each per-child plan call. The
+        // push happens inside each iteration (not once around the
+        // foreach) because AsyncLocal flow across `yield return` /
+        // async-iterator suspension is unreliable — the consumer's
+        // ExecutionContext supplants the iterator's between MoveNext
+        // calls. Per-call push is the safe form: each PlanAsync sees
+        // the batch's set on the same logical call frame.
         foreach ((Statement statement, string? sourceText) in _entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return await _catalog.PlanAsync(statement, sourceText).ConfigureAwait(false);
+            yield return await PlanChildAsync(statement, sourceText).ConfigureAwait(false);
         }
+    }
+
+    private async Task<StatementPlan> PlanChildAsync(Statement statement, string? sourceText)
+    {
+        using IDisposable? frame = _batchProceduralVariables is not null
+            ? TableCatalog.PushAmbientProceduralVariables(_batchProceduralVariables)
+            : null;
+        _ = frame;
+        return await _catalog.PlanAsync(statement, sourceText).ConfigureAwait(false);
     }
 
     private static string OperatorLabel(Statement statement)

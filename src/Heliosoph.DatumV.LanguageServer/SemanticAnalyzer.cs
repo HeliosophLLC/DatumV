@@ -25,6 +25,22 @@ internal sealed class SemanticAnalyzer
     private HashSet<string> _currentStatementLetNames = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// TVF aliases in the current statement whose output column names
+    /// we resolved statically (either from the manifest's
+    /// <see cref="FunctionSignature.OutputColumns"/> or via the
+    /// per-TVF hardcoded fallback in <see cref="TryGetTvfOutputColumns"/>).
+    /// Save/restore'd around <see cref="AnalyzeStatement"/>. Walked by
+    /// the unknown-column check so bare references like <c>filex</c>
+    /// fail even when an <c>unnest(...) c</c> source is in scope —
+    /// previously the TVF's mere presence (opaque) suppressed every
+    /// unknown-column warning; resolving its output column names
+    /// keeps the suppression scoped to TVFs whose output we really
+    /// can't pin down.
+    /// </summary>
+    private Dictionary<string, HashSet<string>> _currentStatementTvfColumns =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Index of table names → (column name → DataKind string) for O(1) lookup.
     /// Keys are case-insensitive because Heliosoph.DatumV SQL is case-insensitive.
     /// </summary>
@@ -154,11 +170,13 @@ internal sealed class SemanticAnalyzer
     /// </summary>
     private void AnalyzeStatement(SelectStatement statement, List<Diagnostic> diagnostics)
     {
-        // Save the enclosing statement's LET-name set so recursive
-        // subquery analysis doesn't clobber it. Restored in the finally
+        // Save the enclosing statement's per-statement maps so recursive
+        // subquery analysis doesn't clobber them. Restored in the finally
         // at the end of this method.
         HashSet<string> previousLetNames = _currentStatementLetNames;
+        Dictionary<string, HashSet<string>> previousTvfColumns = _currentStatementTvfColumns;
         _currentStatementLetNames = new(StringComparer.OrdinalIgnoreCase);
+        _currentStatementTvfColumns = new(StringComparer.OrdinalIgnoreCase);
         try
         {
             AnalyzeStatementCore(statement, diagnostics);
@@ -166,6 +184,7 @@ internal sealed class SemanticAnalyzer
         finally
         {
             _currentStatementLetNames = previousLetNames;
+            _currentStatementTvfColumns = previousTvfColumns;
         }
     }
 
@@ -188,14 +207,22 @@ internal sealed class SemanticAnalyzer
             }
         }
 
-        // Register LET binding names (scalar and destructured) as opaque aliases so that
-        // references to them anywhere in the statement — SELECT columns, WHERE, ORDER BY,
-        // QUALIFY, ASSERT, and lateral function-source arguments — do not produce false
-        // "Unknown column" warnings. LET names are virtual row fields computed at runtime
-        // and are never present in table schemas. Registered before FROM/JOIN walking so
-        // FunctionSource argument analysis (CollectTableSources → AnalyzeExpression) sees
-        // them — the planner lifts LET refs in lateral args into a staircase above the
-        // driving source.
+        // Register LET binding names (scalar and destructured) in the
+        // per-statement LET set so references to them anywhere in the
+        // statement — SELECT columns, WHERE, ORDER BY, QUALIFY, ASSERT,
+        // and lateral function-source arguments — resolve as values.
+        // LET names are virtual row fields computed at runtime and
+        // are never present in table schemas. Registered before
+        // FROM/JOIN walking so FunctionSource argument analysis
+        // (CollectTableSources → AnalyzeExpression) sees them — the
+        // planner lifts LET refs in lateral args into a staircase
+        // above the driving source.
+        //
+        // Deliberately NOT added to opaqueAliases — that set is for
+        // sources whose column shape we can't introspect, and its
+        // mere non-emptiness suppresses every unknown-column warning.
+        // Mixing LETs in would let a typo like `filex` slip past
+        // whenever any LET is declared in the same SELECT.
         if (statement.LetBindings is { Count: > 0 })
         {
             foreach (LetBinding letBinding in statement.LetBindings)
@@ -204,13 +231,11 @@ internal sealed class SemanticAnalyzer
                 {
                     foreach (string name in letBinding.Destructure.Names)
                     {
-                        opaqueAliases.Add(name);
                         _currentStatementLetNames.Add(name);
                     }
                 }
                 else
                 {
-                    opaqueAliases.Add(letBinding.Name);
                     _currentStatementLetNames.Add(letBinding.Name);
                 }
             }
@@ -380,10 +405,26 @@ internal sealed class SemanticAnalyzer
                         $"Unknown function '{functionSource.CallName}'.");
                 }
 
-                // Function sources are opaque — we cannot know their output columns
-                // statically. Mark the alias (or the call name as a sentinel)
-                // so that column validation suppresses unknown-column warnings.
-                opaqueAliases.Add(functionSource.Alias ?? functionSource.CallName);
+                // Try to resolve the TVF's known output column NAMES.
+                // When successful (manifest carries OutputColumns, or
+                // the TVF is one of the per-name hardcoded fallbacks
+                // like `unnest`), register the column set so unknown-
+                // column checks fail on bare refs the TVF doesn't
+                // produce (catches typos like `filex` instead of
+                // `file` in queries that join a TVF). When the
+                // resolver returns null (truly dynamic-shape TVFs we
+                // can't introspect), fall back to opaque registration —
+                // the historical behaviour.
+                string functionAliasKey = functionSource.Alias ?? functionSource.CallName;
+                HashSet<string>? tvfColumns = TryGetTvfOutputColumns(functionSource);
+                if (tvfColumns is not null)
+                {
+                    _currentStatementTvfColumns[functionAliasKey] = tvfColumns;
+                }
+                else
+                {
+                    opaqueAliases.Add(functionAliasKey);
+                }
 
                 // Analyze the function's argument expressions.
                 foreach (Expression argument in functionSource.Arguments)
@@ -1100,7 +1141,9 @@ internal sealed class SemanticAnalyzer
             // ColumnInfo.Fields), so false-positives on real struct accesses
             // would outweigh the rare miss on a typo'd 3-part qualifier.
             if (column.SchemaName is not null
-                && (aliasToTable.ContainsKey(column.SchemaName) || opaqueAliases.Contains(column.SchemaName)))
+                && (aliasToTable.ContainsKey(column.SchemaName)
+                    || opaqueAliases.Contains(column.SchemaName)
+                    || _currentStatementTvfColumns.ContainsKey(column.SchemaName)))
             {
                 return;
             }
@@ -1111,6 +1154,19 @@ internal sealed class SemanticAnalyzer
             string qualifier = column.SchemaName is not null
                 ? $"{column.SchemaName}.{column.TableName}"
                 : column.TableName;
+
+            // Known-TVF qualified reference (`c.value` where `c` is
+            // `unnest(...) c` with statically-known output columns):
+            // validate the column NAME against the known set.
+            if (_currentStatementTvfColumns.TryGetValue(qualifier, out HashSet<string>? tvfCols))
+            {
+                if (!tvfCols.Contains(column.ColumnName))
+                {
+                    EmitWarning(diagnostics, column.Span,
+                        $"Unknown column '{column.ColumnName}' produced by '{qualifier}'.");
+                }
+                return;
+            }
 
             ValidateTableQualifier(qualifier, column.Span, aliasToTable, opaqueAliases, diagnostics);
 
@@ -1145,7 +1201,9 @@ internal sealed class SemanticAnalyzer
         // rare in practice). LET binding names are excluded — they're
         // virtual row values and referencing them bare is the intended
         // use (e.g. `unnest(classes)` where `classes` is a LET).
-        if ((aliasToTable.ContainsKey(column.ColumnName) || opaqueAliases.Contains(column.ColumnName))
+        if ((aliasToTable.ContainsKey(column.ColumnName)
+                || opaqueAliases.Contains(column.ColumnName)
+                || _currentStatementTvfColumns.ContainsKey(column.ColumnName))
             && !_currentStatementLetNames.Contains(column.ColumnName))
         {
             EmitWarning(diagnostics, column.Span,
@@ -1164,6 +1222,32 @@ internal sealed class SemanticAnalyzer
                 found = true;
                 break;
             }
+        }
+
+        // Also walk TVF aliases whose output column NAMES we resolved
+        // statically — refs to `value` after `unnest(...) c` succeed
+        // even though `value` isn't on the driving table.
+        if (!found)
+        {
+            foreach (KeyValuePair<string, HashSet<string>> entry in _currentStatementTvfColumns)
+            {
+                if (entry.Value.Contains(column.ColumnName))
+                {
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        // LET binding names are valid bare references throughout the
+        // statement — they're virtual row values, not row columns.
+        // Tracked separately from opaqueAliases so their presence
+        // doesn't blanket-suppress unknown-column warnings (the old
+        // behaviour swallowed typos like `filex` whenever any LET was
+        // declared in the same SELECT).
+        if (!found && _currentStatementLetNames.Contains(column.ColumnName))
+        {
+            found = true;
         }
 
         // If any source is opaque, we cannot be sure the column is missing.
@@ -1298,6 +1382,41 @@ internal sealed class SemanticAnalyzer
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Best-effort lookup of a TVF source's static output column names.
+    /// Pulls from the manifest's
+    /// <see cref="FunctionSignature.OutputColumns"/> when populated;
+    /// falls back to per-TVF hardcoded knowledge for dynamic-schema
+    /// TVFs whose column names are still constant (today: <c>unnest</c>
+    /// always emits a single column named <c>value</c>). Returns
+    /// <see langword="null"/> for TVFs whose output we genuinely can't
+    /// introspect — the caller treats those as opaque.
+    /// </summary>
+    private HashSet<string>? TryGetTvfOutputColumns(FunctionSource source)
+    {
+        if (_functionSignatures.TryGetValue(source.FunctionName, out FunctionSignature? sig)
+            && sig.OutputColumns is { Count: > 0 } outputColumns)
+        {
+            HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+            foreach (TableColumnEntry col in outputColumns)
+            {
+                columns.Add(col.Name);
+            }
+            return columns;
+        }
+
+        // Hardcoded fallback for TVFs whose schema is dynamic in the
+        // manifest but whose column NAMES are constant. `unnest(arr)`
+        // always produces `{ value }`; the value's kind follows the
+        // array element, but the validator only needs the name here.
+        if (string.Equals(source.FunctionName, "unnest", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "value" };
+        }
+
+        return null;
     }
 
     /// <summary>

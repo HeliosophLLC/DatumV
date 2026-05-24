@@ -1711,23 +1711,20 @@ public sealed class ProceduralBatchTests : ServiceTestBase
     // ————————————————————— Top-level var without batch context —————————————————————
 
     [Fact]
-    public async Task BareSelect_OutsideBatch_UndeclaredName_Throws()
+    public void BareSelect_OutsideBatch_UndeclaredName_Throws()
     {
         // A SELECT against a bare name with no batch context attached and
-        // no row source must throw at evaluation time: the name doesn't
-        // match a declared variable (no scope) and it doesn't match a column
-        // (no row schema). The evaluator wraps the failure in
-        // ExpressionEvaluationException with source-span context.
+        // no row source throws at plan time now: the name doesn't match
+        // a declared variable, a LET binding, a lambda parameter, a
+        // projection alias, or any in-scope column, and the scope chain
+        // contains no opaque source — exactly the case QueryScopeValidator
+        // is meant to catch. Prior behaviour deferred the throw to
+        // expression-evaluation time; the plan-time gate is the
+        // upgrade.
         TableCatalog catalog = CreateCatalog();
-        StatementPlan plan = catalog.Plan("SELECT x");
 
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
-        {
-            await foreach (RowBatch batch in ExecutePlanAsync(plan))
-            {
-                _ = batch;
-            }
-        });
+        ExecutionException ex = Assert.Throws<ExecutionException>(() => catalog.Plan("SELECT x"));
+        Assert.Contains("Unknown column 'x'", ex.Message);
     }
 
     // ————————————————————— Catalog dispatch alignment —————————————————————

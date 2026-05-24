@@ -41,6 +41,21 @@ internal static class ProceduralEvaluator
         QueryStatement synthetic = new(
             new SelectQueryExpression(
                 new SelectStatement(Columns: [new SelectColumn(rewritten)])));
+
+        // Surface the live runtime variable scope's names to the
+        // catalog's plan-time validator so a synthetic-SELECT around
+        // a procedural expression doesn't false-positive on bare
+        // references like `counter` (a DECLARE'd variable in the
+        // caller's scope). The validator otherwise only knows about
+        // names statically reachable from the parsed Statement, but
+        // procedural argument evaluation borrows runtime-bound names.
+        HashSet<string> runtimeVariableNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, ValueRef> entry in context.VariableScope.EnumerateVisible())
+        {
+            runtimeVariableNames.Add(entry.Key);
+        }
+        using IDisposable proceduralScopeFrame =
+            Catalog.TableCatalog.PushAmbientProceduralVariables(runtimeVariableNames);
         StatementPlan plan = await context.Catalog
             .PlanAsync(synthetic, sourceText: null)
             .ConfigureAwait(false);
@@ -337,6 +352,19 @@ internal static class ProceduralEvaluator
         SubqueryExpression subquery, ExecutionContext context, CancellationToken ct)
     {
         QueryStatement innerStatement = new(new SelectQueryExpression(subquery.Query));
+
+        // Same runtime-variable surfacing as EvaluateScalarAsync —
+        // the folded subquery can reference DECLARE'd variables in
+        // the caller's runtime scope (`WHERE v <= cap` where `cap`
+        // is a prior DECLARE), which the plan-time validator
+        // otherwise wouldn't know about.
+        HashSet<string> runtimeVariableNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, ValueRef> entry in context.VariableScope.EnumerateVisible())
+        {
+            runtimeVariableNames.Add(entry.Key);
+        }
+        using IDisposable proceduralScopeFrame =
+            Catalog.TableCatalog.PushAmbientProceduralVariables(runtimeVariableNames);
         StatementPlan innerPlan = await context.Catalog
             .PlanAsync(innerStatement, sourceText: null)
             .ConfigureAwait(false);

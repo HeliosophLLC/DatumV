@@ -1,6 +1,6 @@
 using Heliosoph.DatumV.Catalog;
-using Heliosoph.DatumV.Catalog.Registries;
 using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing.Ast;
 
 namespace Heliosoph.DatumV.Execution;
@@ -8,72 +8,70 @@ namespace Heliosoph.DatumV.Execution;
 /// <summary>
 /// Plan-time scope-aware validator that walks every <see cref="ColumnReference"/>
 /// in a <see cref="QueryExpression"/> and throws
-/// <see cref="ExecutionException"/> when a reference can't possibly resolve
-/// at execution time. Catches three failure classes that previously only
-/// surfaced as runtime <c>InvalidOperationException</c>s from
+/// <see cref="ExecutionException"/> when a reference cannot resolve at
+/// execution time. Catches failure classes that previously surfaced only
+/// as runtime <c>InvalidOperationException</c>s from
 /// <see cref="ExpressionEvaluator.EvaluateColumn"/>:
 /// <list type="bullet">
-///   <item><description><strong>Alias used as value</strong> — bare
-///   <c>c</c> where <c>c</c> is a FROM/JOIN alias (table or TVF
-///   output). The runtime would throw "Name 'c' is not a declared
-///   variable in scope and is not a column in the current row." after
-///   producing the first row, which can take seconds-to-minutes for
-///   queries with expensive upstream operators (model invocation,
-///   large joins). Surfacing the misuse here makes the error visible
-///   the moment the user runs the query.</description></item>
-///   <item><description><strong>Unknown alias in 2-part reference</strong>
-///   — <c>x.y</c> where <c>x</c> is not a FROM/JOIN alias and not an
-///   outer-scope alias.</description></item>
-///   <item><description><strong>Unknown unqualified column</strong> —
-///   <c>x</c> where no source in scope claims a column named <c>x</c>
-///   and no opaque source masks the check (TVFs and subqueries are
-///   opaque — their column sets aren't statically knowable from this
-///   layer).</description></item>
+///   <item>Bare alias used as a value (<c>image_draw_bounding_boxes(file, c)</c>
+///   where <c>c</c> is a TVF / table / subquery alias).</item>
+///   <item>Qualified <c>x.y</c> where <c>x</c> is not an alias in any
+///   reachable scope.</item>
+///   <item>Bare unqualified column that no source in scope claims AND
+///   no opaque source / procedural variable / lambda parameter /
+///   projection alias / LET name can plausibly supply.</item>
 /// </list>
 /// </summary>
 /// <remarks>
 /// <para>
 /// Runs in <see cref="TableCatalog.PlanQuery"/> after
-/// <see cref="PreFlightWalker"/> and before <see cref="UdfInliner"/>. Sits
-/// pre-inliner so UDF bodies (authored separately from the current
-/// caller) stay opaque — a UDF that references a column the caller's
-/// schema doesn't expose only fails when the caller's query directly
-/// references the column.
+/// <see cref="PreFlightWalker"/> and before <see cref="UdfInliner"/>. Pre-
+/// inliner so UDF bodies stay opaque — a UDF that references a column
+/// the caller's schema doesn't expose only fails when the caller's
+/// query directly references the column.
 /// </para>
 /// <para>
 /// <strong>Conservative defaults.</strong> When the validator can't
-/// confidently determine that a reference is wrong, it accepts. False
-/// positives would block valid queries; missed catches just defer the
-/// error to runtime (the historical behaviour). Specifically:
+/// confidently determine that a reference is wrong, it accepts.
+/// Suppressors:
 /// <list type="bullet">
 ///   <item>Any scope containing an opaque source (TVF, subquery,
-///   CTE without resolved projection) suppresses the "unknown column"
-///   check for unqualified references — the column might come from the
-///   opaque source.</item>
-///   <item>References that fail in the local scope walk parent scopes
-///   (correlated subquery support) before failing.</item>
-///   <item>Unknown table/alias check skips when the qualifier matches
-///   any catalog table name in the search path — the planner may resolve
-///   it after UDF inlining.</item>
+///   CTE without resolved projection) suppresses unqualified-column
+///   existence checks — the column might come from the opaque source.</item>
+///   <item>Procedural variables known to the script (DECLARE,
+///   FOR-counter, FOR-IN, CATCH, procedure / UDF parameters)
+///   collected up-front via <see cref="ProceduralVariableCollector"/>
+///   are always accepted as bare references.</item>
+///   <item>Lambda parameter names are pushed onto a scope stack when
+///   the walker enters a <see cref="LambdaExpression"/> body.</item>
+///   <item>Projection aliases (<c>SELECT expr AS name</c>) are visible
+///   to ORDER BY / HAVING / QUALIFY in the same statement.</item>
 /// </list>
 /// </para>
 /// <para>
-/// <strong>Out of scope (for this slice).</strong> GROUP BY column
-/// restriction, aliased-projection visibility, window function frame
-/// scope rules, struct-field correctness (handled by the runtime's
-/// existing precise error). INSERT / UPDATE / DELETE column references
-/// aren't validated here — those go through their own planner paths.
+/// <strong>Out of scope.</strong> GROUP BY column restriction, struct
+/// field correctness (the runtime's <c>Struct '...' has no field</c>
+/// path is precise), per-statement procedural scope precision (the
+/// collector returns every variable name anywhere in the batch, not
+/// just the names actually in scope at the reference site).
 /// </para>
 /// </remarks>
 internal sealed class QueryScopeValidator
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functions;
+    private readonly HashSet<string> _knownProceduralVariables;
+    private readonly Stack<HashSet<string>> _lambdaParameterStack = new();
 
-    public QueryScopeValidator(TableCatalog catalog, FunctionRegistry functions)
+    public QueryScopeValidator(
+        TableCatalog catalog,
+        FunctionRegistry functions,
+        HashSet<string>? knownProceduralVariables = null)
     {
         _catalog = catalog;
         _functions = functions;
+        _knownProceduralVariables = knownProceduralVariables
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -103,24 +101,50 @@ internal sealed class QueryScopeValidator
 
     private void VisitSelect(SelectStatement statement, Scope? outer)
     {
-        // 1. Build the FROM/JOIN scope first, walking sources left-to-right
-        //    so each source's argument expressions can be validated against
-        //    earlier-bound aliases (lateral semantics — conservative).
         Scope localScope = new() { Parent = outer };
 
-        // Register CTEs declared in this statement's WITH clause so
-        // FROM references can resolve against them.
+        // CTE bodies: walk first so name-resolution sees their projected
+        // columns. Each CTE name is registered as an opaque-but-named
+        // alias; columns from the body's projection get added as a
+        // column set the validator can check `cte_name.col` against.
         if (statement.CommonTableExpressions is not null)
         {
             foreach (CommonTableExpression cte in statement.CommonTableExpressions)
             {
-                // CTE projection schema is opaque to the validator (the
-                // exact column set requires a recursive resolve). Register
-                // the name so FROM references don't false-positive as
-                // "unknown alias", and walk the body with this statement's
-                // outer scope so the body's own validations run.
-                localScope.RegisterCteName(cte.Name);
                 VisitQuery(cte.Body, outer);
+                HashSet<string>? cteColumns = TryCollectCteProjectionColumns(cte);
+                if (cteColumns is not null)
+                {
+                    localScope.RegisterTableAlias(cte.Name, cteColumns);
+                }
+                else
+                {
+                    localScope.RegisterCteName(cte.Name);
+                }
+            }
+        }
+
+        // Register LET binding names BEFORE walking FROM/JOIN sources
+        // so lateral TVF arguments (`CROSS JOIN unnest(classes) c`
+        // where `classes` is declared via `LET classes = …` in the
+        // same SELECT) resolve cleanly. The engine's planner lifts
+        // LET refs in lateral args into a staircase above the driving
+        // source — the validator just needs the names visible. RHS
+        // validation is deferred until after FROM/JOIN walks (LET
+        // RHS commonly references the driving source's columns like
+        // `LET classes = models.X(a.file)`).
+        if (statement.LetBindings is { Count: > 0 })
+        {
+            foreach (LetBinding binding in statement.LetBindings)
+            {
+                localScope.RegisterLetBinding(binding.Name);
+                if (binding.Destructure is not null)
+                {
+                    foreach (string destructured in binding.Destructure.Names)
+                    {
+                        localScope.RegisterLetBinding(destructured);
+                    }
+                }
             }
         }
 
@@ -140,20 +164,41 @@ internal sealed class QueryScopeValidator
             }
         }
 
-        // 2. LET bindings — register names AND validate their RHS against
-        //    the scope built so far. LETs can reference each other in
-        //    declaration order; we add each name after validating its
-        //    expression.
+        // LET RHS validation runs after FROM/JOIN — LET expressions
+        // commonly reference the driving source's columns
+        // (`LET classes = models.X(a.file)`). Names are already
+        // registered above; this pass just checks the RHS for any
+        // bad refs.
         if (statement.LetBindings is { Count: > 0 })
         {
             foreach (LetBinding binding in statement.LetBindings)
             {
                 ValidateExpression(binding.Expression, localScope);
-                localScope.RegisterLetBinding(binding.Name);
             }
         }
 
-        // 3. SELECT projection expressions.
+        // Projection alias collection — capture every SELECT AS name so
+        // ORDER BY / HAVING / QUALIFY refs to those names don't trip
+        // the unknown-column check. PG allows projection-alias refs in
+        // ORDER BY but not WHERE; we accept them anywhere (the runtime
+        // resolves correctly either way — over-acceptance is safer
+        // than over-rejection).
+        if (statement.Columns is not null)
+        {
+            foreach (SelectColumn col in statement.Columns)
+            {
+                if (!string.IsNullOrEmpty(col.Alias))
+                {
+                    localScope.RegisterProjectionAlias(col.Alias);
+                }
+                if (!string.IsNullOrEmpty(col.AssignedVariableName))
+                {
+                    localScope.RegisterProjectionAlias(col.AssignedVariableName);
+                }
+            }
+        }
+
+        // SELECT projection expressions.
         if (statement.Columns is not null)
         {
             foreach (SelectColumn col in statement.Columns)
@@ -165,36 +210,19 @@ internal sealed class QueryScopeValidator
             }
         }
 
-        // 4. WHERE / GROUP BY / HAVING / ORDER BY — all share the FROM/JOIN
-        //    scope. Aliased-projection visibility (PG-style ORDER BY by alias)
-        //    is intentionally not modelled; the runtime accepts it via the
-        //    same row-lookup path and we err on the side of acceptance.
         if (statement.Where is not null) ValidateExpression(statement.Where, localScope);
         if (statement.Having is not null) ValidateExpression(statement.Having, localScope);
         if (statement.GroupBy is { Expressions: { } groupByExprs })
         {
-            foreach (Expression e in groupByExprs)
-            {
-                ValidateExpression(e, localScope);
-            }
+            foreach (Expression e in groupByExprs) ValidateExpression(e, localScope);
         }
         if (statement.OrderBy is { Items: { } orderByItems })
         {
-            foreach (OrderByItem o in orderByItems)
-            {
-                ValidateExpression(o.Expression, localScope);
-            }
+            foreach (OrderByItem o in orderByItems) ValidateExpression(o.Expression, localScope);
         }
+        if (statement.Qualify is not null) ValidateExpression(statement.Qualify, localScope);
     }
 
-    /// <summary>
-    /// Resolves a <see cref="TableSource"/> against the catalog and
-    /// registers it in <paramref name="scope"/>. Plain table references
-    /// contribute their column names (when the table resolves in the
-    /// catalog); TVF and subquery sources register as opaque aliases.
-    /// Subquery bodies are recursively validated with the current scope
-    /// as their outer (correlation support).
-    /// </summary>
     private void AddSourceToScope(TableSource source, Scope scope)
     {
         switch (source)
@@ -203,28 +231,33 @@ internal sealed class QueryScopeValidator
                 AddTableReferenceToScope(tableRef, scope);
                 break;
             case FunctionSource functionSource:
-                // TVF argument expressions are validated against the
-                // already-built scope (lateral semantics — they can
-                // reference earlier FROM sources).
                 foreach (Expression arg in functionSource.Arguments)
                 {
                     ValidateExpression(arg, scope);
                 }
-                // The TVF's output column set is opaque to this validator
-                // (static OutputColumns aren't reliably available across
-                // every TVF, and call-site synthesis like unnest needs the
-                // arg's type which we don't track here). Register the
-                // alias name so qualified `c.value` doesn't false-positive
-                // as "unknown alias", and mark the scope as containing an
-                // opaque source so unqualified-column checks soften.
                 string functionAlias = functionSource.Alias ?? functionSource.FunctionName;
-                scope.RegisterOpaqueAlias(functionAlias);
+                // Best-effort: call the TVF's ValidateArguments with
+                // placeholder arg kinds to discover its output column
+                // names. The names alone are enough for the validator —
+                // we don't care about the kinds at this layer. When the
+                // TVF accepts the call we register the names as a
+                // concrete column set so unknown-column checks fire
+                // correctly for refs the TVF doesn't produce (catches
+                // typos like `filex` instead of `file` in queries that
+                // join a TVF). On any failure (file-peeking TVFs that
+                // need real paths, signature rejection, etc.) we fall
+                // back to opaque registration — the historical posture.
+                HashSet<string>? tvfColumns = TryResolveTvfColumnNames(functionSource);
+                if (tvfColumns is not null)
+                {
+                    scope.RegisterTableAlias(functionAlias, tvfColumns);
+                }
+                else
+                {
+                    scope.RegisterOpaqueAlias(functionAlias);
+                }
                 break;
             case SubquerySource subquery:
-                // Recurse into the subquery with the current scope as its
-                // outer — this is what makes correlated subqueries
-                // validate correctly. The subquery's own validation runs
-                // against its own FROM/JOIN sources plus the outer scope.
                 VisitSelect(subquery.Query, scope);
                 scope.RegisterOpaqueAlias(subquery.Alias);
                 break;
@@ -235,17 +268,15 @@ internal sealed class QueryScopeValidator
     {
         string aliasName = tableRef.Alias ?? tableRef.Name;
 
-        // CTE name lookup first — bare unqualified references against the
-        // current WITH-clause shadow catalog tables.
         if (tableRef.SchemaName is null && scope.IsCteInScope(tableRef.Name))
         {
+            // CTE that we couldn't statically project — opaque. The
+            // walking-CTE-body branch above would've registered a
+            // concrete column set when it could.
             scope.RegisterOpaqueAlias(aliasName);
             return;
         }
 
-        // Resolve through the catalog. If the table doesn't resolve, the
-        // planner will throw a precise error later — we just register the
-        // alias as opaque so later expressions don't double-fail.
         if (!TryResolveTableColumns(tableRef.SchemaName, tableRef.Name, out HashSet<string>? columns)
             || columns is null)
         {
@@ -256,12 +287,57 @@ internal sealed class QueryScopeValidator
     }
 
     /// <summary>
-    /// Looks up <paramref name="explicitSchema"/>.<paramref name="tableName"/>
-    /// (or a search-path walk when the schema is null) in the catalog and
-    /// returns its column names. Returns <see langword="false"/> when the
-    /// table doesn't resolve through any reachable schema — the caller
-    /// registers an opaque alias instead of failing the whole validation.
+    /// Best-effort static resolver for a TVF source's output column
+    /// names. Looks the TVF up in the function registry and calls
+    /// <see cref="Functions.ITableValuedFunction.ValidateArguments"/>
+    /// with placeholder argument kinds — for column-name validation
+    /// we don't need accurate types, only the output schema's names.
+    /// Returns <see langword="null"/> when the registry doesn't know
+    /// the function, when the TVF's validate hook throws (file-peek
+    /// TVFs that need real paths, signature rejection), or when the
+    /// returned schema is empty.
     /// </summary>
+    private HashSet<string>? TryResolveTvfColumnNames(FunctionSource source)
+    {
+        Functions.ITableValuedFunction? tvf = _functions.TryGetTableValued(source.CallName);
+        if (tvf is null) return null;
+
+        try
+        {
+            DataKind[] argumentKinds = new DataKind[source.Arguments.Count];
+            DataValue?[] constantArguments = new DataValue?[source.Arguments.Count];
+            for (int i = 0; i < source.Arguments.Count; i++)
+            {
+                // DataKind.Float32 is a defensive placeholder — it matches
+                // DataKindMatcher.Any (the matcher used by every TVF whose
+                // output names don't depend on input types) and never
+                // triggers a kind-mismatch throw. TVFs that DO inspect
+                // arg kinds (and reject) fail the call and we fall back
+                // to opaque registration.
+                argumentKinds[i] = DataKind.Float32;
+                constantArguments[i] = null;
+            }
+            ByteArrayValueStore constantStore = new();
+            Model.Schema outputSchema = tvf.ValidateArguments(
+                argumentKinds, constantArguments, constantStore, cancellationToken: default);
+            if (outputSchema.Columns.Count == 0) return null;
+
+            HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+            foreach (Model.ColumnInfo col in outputSchema.Columns)
+            {
+                columns.Add(col.Name);
+            }
+            return columns;
+        }
+        catch
+        {
+            // Any failure — signature rejection, file-peek failure on a
+            // path-typed TVF, internal validation error — falls through
+            // to the opaque-alias registration the caller does next.
+            return null;
+        }
+    }
+
     private bool TryResolveTableColumns(
         string? explicitSchema,
         string tableName,
@@ -270,13 +346,8 @@ internal sealed class QueryScopeValidator
         columns = null;
         try
         {
-            // Views resolve through the catalog like tables; their projected
-            // schema flows back through the same indexer surface so the
-            // table-by-name path handles both. The indexer throws on miss
-            // — wrap in a try so a missing table never blocks validation.
             string qualified = explicitSchema is null ? tableName : $"{explicitSchema}.{tableName}";
             Model.Schema schema = _catalog[qualified].GetSchema();
-
             columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (Model.ColumnInfo col in schema.Columns)
             {
@@ -286,23 +357,70 @@ internal sealed class QueryScopeValidator
         }
         catch
         {
-            // Catalog lookup failures (KeyNotFoundException for missing
-            // table / view, race with concurrent DDL, missing virtual-
-            // schema provider, …) all collapse to "unknown" so the
-            // validator never blocks plan-time on a transient catalog miss.
             columns = null;
             return false;
         }
     }
 
     /// <summary>
-    /// Walks <paramref name="expression"/> and validates every
-    /// <see cref="ColumnReference"/> against <paramref name="scope"/>.
-    /// Recurses into every sub-expression shape so nested calls
-    /// (<c>image_draw_bounding_boxes(file, c)</c>) and compound
-    /// expressions (<c>WHERE c.value.label = 'person'</c>) all get
-    /// visited.
+    /// Best-effort static projection-column extractor for a CTE body.
+    /// Walks the leftmost SELECT and pulls AS names + bare column-ref
+    /// passthroughs. Returns <see langword="null"/> when the projection
+    /// shape isn't statically nameable (SELECT *, table.*, compound
+    /// query, missing body) — the caller treats those as opaque.
     /// </summary>
+    private static HashSet<string>? TryCollectCteProjectionColumns(CommonTableExpression cte)
+    {
+        SelectStatement? leftmost = ExtractLeftmostSelect(cte.Body);
+        if (leftmost?.Columns is null) return null;
+
+        HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SelectColumn col in leftmost.Columns)
+        {
+            if (col is SelectAllColumns || col is SelectTableColumns)
+            {
+                // Wildcard expansion — we don't statically know what
+                // columns flow through. Mark the CTE as opaque.
+                return null;
+            }
+            if (!string.IsNullOrEmpty(col.Alias))
+            {
+                columns.Add(col.Alias);
+                continue;
+            }
+            if (col.Expression is ColumnReference colRef && colRef.ColumnName != "*")
+            {
+                columns.Add(colRef.ColumnName);
+                continue;
+            }
+            // Expression with no alias — the engine names these via
+            // ColumnNameResolver but we don't replicate that here.
+            // Skip so the CTE doesn't appear to have a column we
+            // can't validate against.
+        }
+
+        // Explicit `WITH cte(a, b) AS (...)` column-name list wins over
+        // the inferred projection: the rename happens at the CTE
+        // boundary, so downstream references must use the explicit names.
+        if (cte.ColumnNames is { Count: > 0 } explicitNames)
+        {
+            columns.Clear();
+            foreach (string name in explicitNames) columns.Add(name);
+        }
+
+        return columns;
+    }
+
+    private static SelectStatement? ExtractLeftmostSelect(QueryExpression query)
+    {
+        return query switch
+        {
+            SelectQueryExpression sel => sel.Statement,
+            CompoundQueryExpression compound => ExtractLeftmostSelect(compound.Left),
+            _ => null,
+        };
+    }
+
     private void ValidateExpression(Expression expression, Scope scope)
     {
         switch (expression)
@@ -319,16 +437,12 @@ internal sealed class QueryScopeValidator
                 if (fnCall.OrderBy is not null)
                 {
                     foreach (OrderByItem o in fnCall.OrderBy)
-                    {
                         ValidateExpression(o.Expression, scope);
-                    }
                 }
                 if (fnCall.WithinGroupOrderBy is not null)
                 {
                     foreach (OrderByItem o in fnCall.WithinGroupOrderBy)
-                    {
                         ValidateExpression(o.Expression, scope);
-                    }
                 }
                 return;
 
@@ -337,8 +451,6 @@ internal sealed class QueryScopeValidator
                 {
                     ValidateExpression(arg, scope);
                 }
-                // Window partition / order expressions can reference scope
-                // columns too; walk them via the WindowSpecification.
                 if (windowCall.Window.PartitionBy is not null)
                 {
                     foreach (Expression p in windowCall.Window.PartitionBy)
@@ -409,11 +521,22 @@ internal sealed class QueryScopeValidator
                 VisitSelect(exists.Query, scope);
                 return;
             case LambdaExpression lambda:
-                // Lambda parameters bind names locally. Skip body
-                // validation rather than over-permit or false-positive:
-                // lambda bodies use the row scope plus the lambda's own
-                // parameters, which we don't currently track precisely.
-                _ = lambda;
+                // Push lambda parameter names onto the stack so
+                // references in the body resolve cleanly. Pop on exit
+                // — try/finally to keep the stack balanced if a body
+                // expression throws (typo inside the body) so the next
+                // walker call doesn't see stale parameters.
+                HashSet<string> paramSet = new(StringComparer.OrdinalIgnoreCase);
+                foreach (string p in lambda.Parameters) paramSet.Add(p);
+                _lambdaParameterStack.Push(paramSet);
+                try
+                {
+                    ValidateExpression(lambda.Body, scope);
+                }
+                finally
+                {
+                    _lambdaParameterStack.Pop();
+                }
                 return;
         }
         // LiteralExpression, ParameterExpression, DefaultValueExpression,
@@ -421,61 +544,126 @@ internal sealed class QueryScopeValidator
         // and other non-column shapes have nothing to validate.
     }
 
-    private static void ValidateColumnReference(ColumnReference colRef, Scope scope)
+    private void ValidateColumnReference(ColumnReference colRef, Scope scope)
     {
         // Wildcard `*` survives as a ColumnReference in some shapes; skip
         // — wildcards are validated by SelectAllColumns / SelectTableColumns.
         if (colRef.ColumnName == "*") return;
 
-        // Qualified references (2-part and 3-part) defer to the runtime's
-        // existing accessor — the validator doesn't track every name
-        // surface that the row-evaluator does (procedural FOR-row
-        // variables, CALL bindings, struct-field walks, etc.) so an
-        // over-eager "unknown alias" check would false-positive on valid
-        // code. The LSP's SemanticAnalyzer covers the edit-time signal.
-        if (colRef.TableName is not null) return;
+        // 3-part `schema.table.column` — accept. Either a real schema-
+        // qualified table reference (the runtime accessor handles via
+        // row lookup) or alias.column.structField (the SemanticAnalyzer
+        // disambiguates at edit time). Don't false-positive.
+        if (colRef.SchemaName is not null) return;
 
-        // Bare unqualified reference. Only one check fires here: a name
-        // that matches a FROM/JOIN alias in the *local* scope is the
-        // "alias used as value" misuse. The runtime would otherwise
-        // emit "Name 'X' is not a declared variable in scope and is
-        // not a column in the current row." after the upstream
-        // operator produces its first row — which can take seconds-to-
-        // minutes for queries with model invocations or large joins.
-        // Surfacing the misuse at plan time saves that wait.
-        //
-        // Skipped fallbacks:
-        //   - LET bindings, DECLARE'd variables, lambda parameters,
-        //     FOR-loop counters, projection aliases, aggregate results,
-        //     CALL block bindings — the runtime row-lookup path resolves
-        //     all of these, and they aren't tracked here. The runtime's
-        //     existing "Name 'X' is not …" error still fires for genuine
-        //     typos. Catching those at plan time would require threading
-        //     every variable scope through this walker — out of scope
-        //     for this slice.
+        if (colRef.TableName is not null)
+        {
+            // 2-part `alias.column`. Walk local + parent scope for
+            // correlation. Only fail when the alias is truly unknown
+            // and not a procedural variable, lambda parameter, or
+            // projection alias (any of which can shadow at runtime).
+            if (ScopeKnowsAlias(scope, colRef.TableName)) return;
+            if (_knownProceduralVariables.Contains(colRef.TableName)) return;
+            if (LambdaParameterInScope(colRef.TableName)) return;
+            // Bare projection alias used as a struct qualifier doesn't
+            // happen in practice; if it did the runtime would resolve.
+            // No throw — accept to keep the conservative posture.
+            throw new ExecutionException(
+                $"Unknown table or alias '{colRef.TableName}' in reference "
+                + $"'{colRef.TableName}.{colRef.ColumnName}'.");
+        }
+
         string name = colRef.ColumnName;
-        if (ScopeAliasUsedAsValue(scope, name))
+
+        // Alias-as-value (the headline check) — bare name matches a
+        // local FROM/JOIN alias. LET names live in scope.LetBindings,
+        // not in the alias map, so they don't trip this.
+        if (scope.HasAlias(name))
         {
             throw new ExecutionException(
                 $"'{name}' is a table or subquery alias, not a column. "
                 + $"Use '{name}.<column>' to reference one of its columns.");
         }
+
+        // Accept paths — in any of these the runtime row-evaluator
+        // will resolve the name and the validator should not block.
+        if (ScopeKnowsValueBinding(scope, name)) return;
+        if (ScopeKnowsProjectionAlias(scope, name)) return;
+        if (_knownProceduralVariables.Contains(name)) return;
+        if (LambdaParameterInScope(name)) return;
+        if (ScopeKnowsColumn(scope, name)) return;
+        if (ScopeChainContainsOpaqueSource(scope)) return;
+
+        throw new ExecutionException($"Unknown column '{name}'.");
     }
 
-    private static bool ScopeAliasUsedAsValue(Scope? scope, string name)
+    private bool LambdaParameterInScope(string name)
     {
-        // Only check the *local* scope. Outer-scope aliases are visible
-        // to correlated subqueries only through qualification — bare
-        // unqualified references in a subquery have always meant
-        // "row column", never "outer alias". So we don't walk parents.
-        return scope is not null && scope.HasAlias(name);
+        foreach (HashSet<string> frame in _lambdaParameterStack)
+        {
+            if (frame.Contains(name)) return true;
+        }
+        return false;
+    }
+
+    private static bool ScopeKnowsAlias(Scope? scope, string aliasName)
+    {
+        while (scope is not null)
+        {
+            if (scope.HasAlias(aliasName)) return true;
+            scope = scope.Parent;
+        }
+        return false;
+    }
+
+    private static bool ScopeKnowsValueBinding(Scope? scope, string name)
+    {
+        while (scope is not null)
+        {
+            if (scope.LetBindings.Contains(name)) return true;
+            scope = scope.Parent;
+        }
+        return false;
+    }
+
+    private static bool ScopeKnowsProjectionAlias(Scope? scope, string name)
+    {
+        while (scope is not null)
+        {
+            if (scope.ProjectionAliases.Contains(name)) return true;
+            scope = scope.Parent;
+        }
+        return false;
+    }
+
+    private static bool ScopeKnowsColumn(Scope? scope, string name)
+    {
+        while (scope is not null)
+        {
+            foreach (HashSet<string> cols in scope.AllNonOpaqueColumnSets)
+            {
+                if (cols.Contains(name)) return true;
+            }
+            scope = scope.Parent;
+        }
+        return false;
+    }
+
+    private static bool ScopeChainContainsOpaqueSource(Scope? scope)
+    {
+        while (scope is not null)
+        {
+            if (scope.HasOpaqueSource) return true;
+            scope = scope.Parent;
+        }
+        return false;
     }
 
     /// <summary>
-    /// Per-statement validation scope. Carries the aliases bound by this
-    /// statement's FROM/JOIN, the column sets for non-opaque sources,
-    /// LET binding names, and a pointer to the enclosing scope for
-    /// outer-correlation walks.
+    /// Per-statement validation scope: aliases, column sets for non-
+    /// opaque sources, LET bindings, projection aliases (visible to
+    /// ORDER BY / HAVING / QUALIFY), CTE names, parent-scope pointer
+    /// for outer-correlation walks.
     /// </summary>
     private sealed class Scope
     {
@@ -486,6 +674,7 @@ internal sealed class QueryScopeValidator
         private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
 
         public HashSet<string> LetBindings { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> ProjectionAliases { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public bool HasOpaqueSource { get; private set; }
 
@@ -501,13 +690,6 @@ internal sealed class QueryScopeValidator
         }
 
         public bool HasAlias(string aliasName) => _aliasColumns.ContainsKey(aliasName);
-
-        public bool TryGetAliasColumns(string aliasName, out HashSet<string>? cols)
-        {
-            if (_aliasColumns.TryGetValue(aliasName, out cols)) return true;
-            cols = null;
-            return false;
-        }
 
         public bool IsCteInScope(string cteName)
         {
@@ -534,6 +716,11 @@ internal sealed class QueryScopeValidator
         public void RegisterLetBinding(string name)
         {
             LetBindings.Add(name);
+        }
+
+        public void RegisterProjectionAlias(string name)
+        {
+            ProjectionAliases.Add(name);
         }
     }
 }

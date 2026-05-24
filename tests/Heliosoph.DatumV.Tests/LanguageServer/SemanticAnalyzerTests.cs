@@ -429,6 +429,83 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_TypoColumn_InQueryWithLet_StillWarns()
+    {
+        // Regression: previously, any LET in the SELECT registered the
+        // LET name into opaqueAliases as a side effect of suppressing
+        // unknown-column warnings for the LET ref itself. That
+        // suppression was scope-blind — `filex` (a typo for `file`)
+        // slipped past whenever any LET existed in the same SELECT.
+        // LET names now live in a separate set so their presence
+        // doesn't blanket-suppress unknown-column checks.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file", "id")],
+            functions: [Function("yolox", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET classes = yolox(a.file), filex FROM items a",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'filex'"));
+    }
+
+    [Fact]
+    public void Analyze_LetBindingBareReference_DoesNotWarn_AsUnknownColumn()
+    {
+        // Companion: the LET name itself still resolves as a value
+        // (no false-positive unknown-column warning).
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file", "id")],
+            functions: [Function("yolox", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET classes = yolox(a.file), classes FROM items a",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'classes'"));
+    }
+
+    [Fact]
+    public void Analyze_TypoColumn_InQueryWithUnnest_Warns()
+    {
+        // Regression: previously, a bare typo like `filex` instead of
+        // `file` in a SELECT slipped past the analyzer because the
+        // `unnest(...) c` source was registered as opaque, blanket-
+        // suppressing every unknown-column warning. The TVF's known
+        // output column names are now resolved (`unnest` → `value`),
+        // so refs to names the TVF doesn't produce fail correctly.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file", "id")],
+            functions: [Function("unnest", "array")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT filex FROM items a CROSS JOIN unnest(a.id) c",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'filex'"));
+    }
+
+    [Fact]
+    public void Analyze_UnnestValueColumn_DoesNotWarn()
+    {
+        // Companion: bare `value` after `unnest(...) c` is the TVF's
+        // actual output column name, so it resolves cleanly.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file", "id")],
+            functions: [Function("unnest", "array")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT value FROM items a CROSS JOIN unnest(a.id) c",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'value'"));
+    }
+
+    [Fact]
     public void Analyze_LetBindingInTvfArg_DoesNotWarn()
     {
         // Regression: `unnest(classes)` where `classes` is a LET binding

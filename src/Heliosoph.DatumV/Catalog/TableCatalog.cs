@@ -25,6 +25,45 @@ namespace Heliosoph.DatumV.Catalog;
 public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICatalogActiveVersionLookup
 {
     /// <summary>
+    /// Procedural-variable names visible to the script currently being
+    /// planned, populated by <see cref="PrepareAsync"/> and
+    /// <see cref="PlanAsync(Statement, string?)"/> before they recurse
+    /// into per-statement planning. Read by
+    /// <see cref="QueryScopeValidator"/> in <see cref="PlanQuery"/> so
+    /// the unknown-column check doesn't false-positive on bare
+    /// references to <c>DECLARE</c> / <c>FOR</c>-counter /
+    /// <c>FOR-IN</c> / <c>CATCH</c> / procedure / UDF parameter names.
+    /// <see cref="AsyncLocal{T}"/> rather than a plain field so
+    /// parallel callers don't race; null when the entry point is
+    /// <see cref="PlanQuery"/> directly (raw planning surface — the
+    /// validator falls back to its own scope tracking).
+    /// </summary>
+    private static readonly AsyncLocal<HashSet<string>?> _ambientProceduralVariables = new();
+
+    /// <summary>
+    /// Push <paramref name="scope"/> onto the ambient procedural-
+    /// variable slot for the duration of the returned disposable.
+    /// Used by <see cref="PrepareAsync"/> /
+    /// <see cref="PlanAsync(Statement, string?)"/> to surface the
+    /// script's DECLARE / FOR / CATCH / parameter names to nested
+    /// <see cref="PlanQuery"/> calls (which run inside the same async
+    /// flow) without changing every PlanQuery call site to take an
+    /// extra parameter. Restores the previous value on disposal so
+    /// nested planning calls don't see each other's scopes.
+    /// </summary>
+    internal static IDisposable PushAmbientProceduralVariables(HashSet<string>? scope)
+    {
+        HashSet<string>? prior = _ambientProceduralVariables.Value;
+        _ambientProceduralVariables.Value = scope;
+        return new ProceduralScopeReleaser(prior);
+    }
+
+    private sealed class ProceduralScopeReleaser(HashSet<string>? prior) : IDisposable
+    {
+        public void Dispose() => _ambientProceduralVariables.Value = prior;
+    }
+
+    /// <summary>
     /// <see cref="ICatalogActiveVersionLookup.GetActiveVersion"/>: returns
     /// the catalog version of the currently-installed bare-form row for
     /// <paramref name="catalogId"/>, or <see langword="null"/> when no
@@ -890,6 +929,35 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// </remarks>
     public async Task<StatementPlan> PlanAsync(Statement statement, string? sourceText)
     {
+        // Surface every procedural-variable name reachable from this
+        // statement to the ambient async-local slot so nested PlanQuery
+        // calls (one per inner SELECT in BlockStatement / ForStatement /
+        // CreateProcedure etc.) flow the names into QueryScopeValidator's
+        // suppression list. Only push when we're at the top of the
+        // statement walk — recursive PlanAsync calls within the same
+        // batch keep the outer push.
+        IDisposable? proceduralScopeFrame = null;
+        if (_ambientProceduralVariables.Value is null)
+        {
+            HashSet<string> proceduralVars = ProceduralVariableCollector.Collect(statement);
+            if (proceduralVars.Count > 0)
+            {
+                proceduralScopeFrame = PushAmbientProceduralVariables(proceduralVars);
+            }
+        }
+
+        try
+        {
+            return await PlanAsyncCore(statement, sourceText).ConfigureAwait(false);
+        }
+        finally
+        {
+            proceduralScopeFrame?.Dispose();
+        }
+    }
+
+    private async Task<StatementPlan> PlanAsyncCore(Statement statement, string? sourceText)
+    {
         // Pure queries: plan eagerly (the planner has no side effects, just builds an operator tree).
         if (statement is QueryStatement queryStatement)
         {
@@ -1216,16 +1284,19 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             throw new PreFlightRequiredException(preflight);
         }
 
-        // Plan-time scope-aware column-reference validation: catches the
-        // "alias used as value", "unknown alias in qualifier", and
-        // "unknown unqualified column" failure classes before any
-        // operator is built. Pre-inliner so UDF bodies stay opaque
-        // (their column references are visible to the UDF's own
-        // validation, not the caller's). Conservative — when a scope
-        // contains an opaque source (TVF, subquery) the validator
-        // skips unqualified-column existence checks rather than risk
-        // a false positive.
-        new QueryScopeValidator(this, Functions).Validate(permuted);
+        // Plan-time scope-aware column-reference validation: catches
+        // alias-as-value misuse, unknown qualifier aliases, and
+        // unknown unqualified columns before any operator is built.
+        // Pre-inliner so UDF bodies stay opaque. The ambient
+        // procedural-variable set carries DECLARE / FOR-counter /
+        // FOR-IN / CATCH / proc-or-UDF-param names collected up-front
+        // by the script-level planner (see PrepareAsync) so the
+        // unknown-column check doesn't false-positive on procedural-
+        // variable references. Null when the query is planned outside
+        // a known procedural batch context (raw PlanQuery callers);
+        // the validator falls back to its own scope.
+        new QueryScopeValidator(this, Functions, _ambientProceduralVariables.Value)
+            .Validate(permuted);
 
         QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
