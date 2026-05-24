@@ -202,7 +202,7 @@ SELECT fields[1] AS clip_id, fields[2] AS transcript FROM read_csv(...)
 
 `delimiter` is an optional single-character STRING (`,` by default). Common values: `','` for CSV, `'\t'` for TSV, `'|'` for LJSpeech-style pipe-delimited manifests. Multi-character delimiters throw — composite separators aren't supported in v1.
 
-**Parser scope (v1).** Simple split by delimiter — no RFC 4180 quoting, no embedded-newline support inside quoted fields, no escape handling. Most flat manifests (LJSpeech `metadata.csv`, Common Voice `train.tsv`, AudioSet TSVs) work fine. CSV payloads with `"`-quoted fields containing embedded delimiters won't split correctly until a richer parser lands; route those through the file-path CSV ingest path instead.
+**Parser scope.** RFC 4180 quoted fields are honoured: wrapping `"..."` is stripped, embedded `""` collapses to a single `"`, and delimiters inside quotes are preserved (`"a,b","c"` → `["a,b", "c"]`). Embedded newlines inside quoted fields are **not** supported — the surrounding loop breaks the payload on bare `\n` before quote state is considered, so a multi-line cell arrives broken into parts. For multi-line CSV cells, reach for the typed file-path ingest path.
 
 Line endings: `\n` is the separator; trailing `\r` on each line is stripped (`\r\n` payloads parse cleanly). Empty fields between delimiters are preserved (`a,,c` yields `["a", "", "c"]`). NULL bytes input yields no rows.
 
@@ -215,6 +215,63 @@ FROM read_csv(:manifest_bytes, delimiter := '|')
 SELECT fields[1] AS client_id, fields[2] AS path, fields[3] AS sentence
 FROM read_csv(:tsv_bytes, delimiter := '\t')
 WHERE fields[1] != 'client_id'
+```
+
+### open_csv
+
+`open_csv(path [, delimiter])` -> Rows | QU: 1
+
+Streams a CSV file from disk and yields one row per line, each row carrying a single `fields Array<String>` column. The file-path analogue of `read_csv` — same single-column output, same positional projection pattern, same line-splitter — for the case where the manifest is a loose file rather than bytes inside an archive. Avoids the byte-materialisation hop and stays bounded regardless of file size.
+
+Output column: `fields Array<String>`. Project named columns positionally — `fields[1]` is the first field, `fields[2]` the second, etc. — combine with `AS` aliases for readable downstream SQL.
+
+`delimiter` is an optional single-character STRING (`,` by default). Multi-character delimiters throw.
+
+**Parser scope.** Same as `read_csv`: RFC 4180 quoting handled, embedded newlines inside quoted fields not. Recipes that work against `read_csv` swap to `open_csv` without touching downstream projections.
+
+Line endings: `\n` is the separator; trailing `\r` is stripped (`\r\n` payloads parse cleanly). Empty interior fields are preserved. UTF-8 decoding is assumed; non-UTF-8 payloads come through with garbled characters rather than throwing.
+
+The file is opened with `FileShare.ReadWrite | FileShare.Delete` so the reader coexists with a manifest being appended to or rotated.
+
+```sql
+-- Pipe-delimited LJSpeech manifest sitting next to an extracted dataset
+SELECT fields[1] AS clip_id, fields[2] AS transcript
+FROM open_csv('D:\corpora\LJSpeech-1.1\metadata.csv', delimiter := '|')
+
+-- TSV with header (caller filters the header line via WHERE)
+SELECT fields[1] AS client_id, fields[2] AS path
+FROM open_csv('C:\datasets\common_voice\train.tsv', delimiter := '\t')
+WHERE fields[1] != 'client_id'
+```
+
+### open_csv_typed
+
+`open_csv_typed(path)` -> Rows
+
+Opens a CSV file with **plan-time type inference** and yields typed, named rows — the schema-bearing sibling of `open_csv`. Where `open_csv` returns a single `fields Array<String>` column and leaves projection positional, `open_csv_typed` runs the ingest-grade CSV scanner at plan time, builds a real per-column schema (narrowed integers, dates, leading-zero codes preserved as strings, etc.), and surfaces the columns by their CSV header names.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time (literal in source, or a `$parameter` reference the parameter binder has substituted). The validator runs a full file pass — the same authoritative inference path the dataset ingest pipeline uses — and builds a real `Schema`, so `SELECT date, primary_type FROM open_csv_typed(...)` type-checks against the actual CSV columns. Calling with a non-constant argument throws — recipe writers must inline the path or pass it as a bound parameter.
+
+The scan result is cached for the subsequent execute pass so the actual query doesn't pay twice. For interactive `LIMIT 5` exploration on multi-GB CSVs the scan still dominates wall time — reach for `open_csv` instead if you only want a quick look without per-column types.
+
+**Uncompressed only.** Compressed CSVs (`.csv.gz`, `.csv.bz2`) are not supported: scanning a compressed file at plan time would require full decompression-to-temp on the planner thread, which doesn't match the cheap-plan-time contract `ValidateArguments` is expected to honour. Decompress to a `.csv` first and pass the uncompressed path.
+
+```sql
+-- Real typed columns, no positional indexing
+SELECT clip_id, transcript
+FROM open_csv_typed('D:\corpora\LJSpeech-1.1\metadata.csv');
+
+-- Chicago crimes: the typed schema includes a real TIMESTAMPTZ for the date column,
+-- so date arithmetic works without per-row casting
+SELECT "Primary Type", COUNT(*) AS n
+FROM open_csv_typed('D:\datasets\chicago\Crimes_-_2001_to_Present.csv')
+WHERE EXTRACT(year FROM "Date") = 2024
+GROUP BY "Primary Type"
+ORDER BY n DESC;
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_csv_typed($manifest_path);
 ```
 
 ### open_fits_hdus

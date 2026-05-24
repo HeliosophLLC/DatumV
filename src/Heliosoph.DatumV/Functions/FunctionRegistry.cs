@@ -1114,6 +1114,8 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenFolderFunction>();
         registry.RegisterTableValued<TableValued.ListFolderFunction>();
         registry.RegisterTableValued<TableValued.ReadCsvFunction>();
+        registry.RegisterTableValued<TableValued.OpenCsvFunction>();
+        registry.RegisterTableValued<TableValued.OpenCsvTypedFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxImagesFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxLabelsFunction>();
         registry.RegisterTableValued<TableValued.OpenCifar10Function>();

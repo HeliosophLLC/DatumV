@@ -30,11 +30,14 @@ namespace Heliosoph.DatumV.Functions.TableValued;
 /// recipes.
 /// </para>
 /// <para>
-/// <strong>Parser scope (v1).</strong> Simple split by delimiter — no RFC 4180
-/// quoting, no embedded-newline support inside quoted fields, no escape
-/// handling. Most flat manifests (LJSpeech metadata.csv, Common Voice TSV,
-/// AudioSet TSV) work fine. Recipes hitting RFC 4180 payloads should fall
-/// back to the file-path CSV ingest path or wait for a v2 parser.
+/// <strong>Parser scope.</strong> RFC 4180 quoted fields are honoured via
+/// <see cref="CsvLineSplitter"/> — wrapping <c>"..."</c> stripped, embedded
+/// <c>""</c> collapsed to a single <c>"</c>, delimiters inside quotes
+/// preserved. Embedded newlines inside quoted fields are <em>not</em>
+/// supported: the splitter operates one line at a time, and the surrounding
+/// loop breaks the payload on bare <c>\n</c> before quote state is
+/// considered. Recipes that need multi-line CSV cells should reach for the
+/// file-path ingest path.
 /// </para>
 /// <para>
 /// Line endings: <c>\n</c> is the line separator; a trailing <c>\r</c> on each
@@ -57,7 +60,8 @@ public sealed class ReadCsvFunction : ITableValuedFunctionMetadata, ITableValued
         "Parses CSV bytes into rows of Array<String>: read_csv(bytes [, delimiter]). " +
         "Each line becomes one row whose 'fields' column carries the split values. " +
         "Project columns positionally: fields[0], fields[1], etc. Default delimiter is " +
-        "comma. No RFC 4180 quote handling in v1 — flat manifests only.";
+        "comma. RFC 4180 quoting handled (wrapping quotes stripped, \"\" collapsed); " +
+        "embedded newlines inside quoted fields are not.";
 
     /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
     public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
@@ -164,7 +168,7 @@ public sealed class ReadCsvFunction : ITableValuedFunctionMetadata, ITableValued
             }
 
             string line = content[lineStart..lineEnd];
-            string[] fields = line.Split(delimiter);
+            string[] fields = CsvLineSplitter.Split(line, delimiter);
 
             batch ??= context.RentRowBatch(OutputColumnLookup);
             DataValue fieldsValue = DataValue.FromStringArray(fields, batch.Arena);
