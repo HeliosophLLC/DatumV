@@ -133,6 +133,14 @@ public sealed class CalibrationCoordinator
     /// Honoured for the calling query's wait only — does not cancel an
     /// in-flight ramp that other queries are awaiting.
     /// </param>
+    /// <param name="discoverMaxBatchSize">
+    /// Optional probe invoked after each ramp step's dispatch to ask the
+    /// model what its declared maximum batch size is. Returning a non-null
+    /// value &lt;= the current ramp batch halts the ramp immediately and
+    /// marks the calibration complete — used to short-circuit fixed-batch
+    /// ONNX sessions whose dim[0] is a concrete constant, so the ramp
+    /// doesn't burn evict-reload cycles on steps the session can't honour.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// No catalog entry exists for <paramref name="modelName"/>, or the
     /// entry has no <see cref="ModelCatalogEntry.RelativePath"/> (synthetic
@@ -141,7 +149,8 @@ public sealed class CalibrationCoordinator
     public Task EnsureCalibratedAsync(
         string modelName,
         Func<int, Task> dispatch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<int?>? discoverMaxBatchSize = null)
     {
         // Fast path: already calibrated. No lock, no allocation.
         ModelCalibration? existing = _catalog.CalibrationRegistry.Get(modelName);
@@ -157,7 +166,7 @@ public sealed class CalibrationCoordinator
                 // Detach from any specific caller's CancellationToken —
                 // see class remarks. Wraps in Task.Run so the actual ramp
                 // work happens off the caller's continuation chain.
-                () => Task.Run(() => RunCalibrationAsync(name, dispatch)),
+                () => Task.Run(() => RunCalibrationAsync(name, dispatch, discoverMaxBatchSize)),
                 LazyThreadSafetyMode.ExecutionAndPublication));
 
         return WaitWithCancellationAsync(ramp.Value, cancellationToken);
@@ -170,7 +179,10 @@ public sealed class CalibrationCoordinator
         await ramp.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task RunCalibrationAsync(string modelName, Func<int, Task> dispatch)
+    private async Task RunCalibrationAsync(
+        string modelName,
+        Func<int, Task> dispatch,
+        Func<int?>? discoverMaxBatchSize)
     {
         // Serial gate: only one ramp anywhere in flight. Cleared in
         // finally so a thrown ramp doesn't block future calibrations.
@@ -303,6 +315,21 @@ public sealed class CalibrationCoordinator
                     DatumActivity.Calibration.Trace(
                         $"ramp-step '{modelName}' batch={batchSize} total-peak={total}B dispatchMs={dispatchMs:F1}");
                     _catalog.NotifyRampStep(modelName, batchSize, total, dispatchMs);
+
+                    // Declared max-batch cap: the model knows it can't go
+                    // higher than this (typically an ONNX session with a
+                    // concrete leading input dim). The first dispatch loads
+                    // any lazy sessions, so the probe returns a meaningful
+                    // value from step 1 onward for procedural models. Halt
+                    // the ramp here instead of running redundant steps that
+                    // all measure the same internal-batch dispatch.
+                    if (discoverMaxBatchSize?.Invoke() is int declaredMax
+                        && batchSize >= declaredMax)
+                    {
+                        DatumActivity.Calibration.Trace(
+                            $"ramp-cap '{modelName}' batch={batchSize} hit declared max={declaredMax}");
+                        break;
+                    }
 
                     // Spill detection by duration: if per-row time jumped
                     // non-linearly past 2× the best observed, the cliff is

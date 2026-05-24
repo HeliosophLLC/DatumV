@@ -275,4 +275,23 @@ public interface IModel
     /// loaded lazily — this flag covers only the body-shape half.
     /// </remarks>
     bool IsBatchable => false;
+
+    /// <summary>
+    /// Upper bound on the number of rows this model can dispatch in a
+    /// single <c>InferBatchAsync</c> call, or <see langword="null"/>
+    /// when no static bound applies. Surfaces the constraint imposed by the
+    /// underlying graph — most commonly an ONNX session whose input shape
+    /// is exported with a concrete leading dim (e.g. <c>[1, 3, 640, 640]</c>)
+    /// rather than a dynamic one.
+    /// </summary>
+    /// <remarks>
+    /// Used by <c>CalibrationCoordinator</c> to halt the doubling ramp once
+    /// the cap is reached. Without this signal, fixed-batch-1 models still
+    /// walk 1 → 32 and every step beyond 1 measures the same per-row
+    /// dispatch, producing a flat curve and burning the per-step
+    /// evict-and-reload cost for no information. <see langword="null"/> is
+    /// the safe default — calibration walks the full ramp and discovers the
+    /// ceiling empirically (the existing spill / look-ahead logic).
+    /// </remarks>
+    int? MaxBatchSize => null;
 }

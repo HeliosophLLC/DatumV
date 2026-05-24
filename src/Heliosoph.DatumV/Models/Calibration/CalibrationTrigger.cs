@@ -129,6 +129,27 @@ public static class CalibrationTrigger
         await models.CalibrationCoordinator.EnsureCalibratedAsync(
             modelName,
             cancellationToken: cancellationToken,
+            // Discover the model's declared max batch size via a brief
+            // lease — by the time the coordinator invokes this (after each
+            // ramp step's dispatch) any lazy ONNX sessions have been
+            // loaded, so a procedural model wrapping a fixed-batch session
+            // (e.g. yolox_x.onnx exported with shape [1, 3, 640, 640])
+            // surfaces MaxBatchSize=1 from step 1 and the ramp halts
+            // instead of redundantly walking 2 → 32. Holding the lease
+            // only for the property read keeps the coordinator's per-step
+            // evict-reload semantics intact.
+            discoverMaxBatchSize: () =>
+            {
+                try
+                {
+                    using ModelLease lease = models.ResolveLeaseSynchronously(modelName);
+                    return lease.Model.MaxBatchSize;
+                }
+                catch
+                {
+                    return null;
+                }
+            },
             dispatch: async batchSize =>
             {
                 // Replicate the sample row N times. Same ValueRefs reused

@@ -48,6 +48,9 @@ public abstract class OnnxModel : IModel, IDisposable
     /// <inheritdoc />
     public virtual IReadOnlyList<ColumnInfo>? OutputFields => null;
 
+    /// <inheritdoc />
+    public int? MaxBatchSize { get; }
+
     /// <summary>
     /// Loads the ONNX file at <paramref name="modelFilePath"/> via
     /// <see cref="InferenceSession"/>. Subclasses pass through their declared
@@ -77,6 +80,26 @@ public abstract class OnnxModel : IModel, IDisposable
         // consistently. Without this, ONNX models silently run on CPU
         // even when the machine has a capable GPU.
         Session = OnnxSessionFactory.Create(modelFilePath);
+        MaxBatchSize = ResolveMaxBatchSize(Session);
+    }
+
+    // Walk the session's declared inputs; any input whose leading dim is a
+    // concrete positive integer constrains the dispatch. Take the min so a
+    // mixed signature (one dynamic-batch input + one fixed-batch input) is
+    // capped by the fixed one. All-dynamic leading dims (every input has
+    // dim[0] < 0) yields null — no static ceiling, calibration ramps freely.
+    private static int? ResolveMaxBatchSize(InferenceSession session)
+    {
+        int? cap = null;
+        foreach (KeyValuePair<string, NodeMetadata> kv in session.InputMetadata)
+        {
+            int[] dims = kv.Value.Dimensions;
+            if (dims.Length == 0) continue;
+            int dim0 = dims[0];
+            if (dim0 < 0) continue;
+            if (cap is null || dim0 < cap) cap = dim0;
+        }
+        return cap;
     }
 
     /// <summary>

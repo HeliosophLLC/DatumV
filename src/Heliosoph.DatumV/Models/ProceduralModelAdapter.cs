@@ -5,6 +5,7 @@ using Heliosoph.DatumV.Catalog.Registries;
 using Heliosoph.DatumV.Diagnostics;
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Functions;
+using Heliosoph.DatumV.Inference;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing.Ast;
 
@@ -166,6 +167,39 @@ public sealed class ProceduralModelAdapter : IModel, IDisposable
     /// adapter's lifetime.
     /// </remarks>
     public bool IsBatchable => _isBatchable;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Walks every already-loaded bound session; returns the minimum
+    /// concrete leading dim observed across their inputs, or
+    /// <see langword="null"/> when no session has loaded yet or every
+    /// loaded session's leading dims are dynamic. Sessions are not forced
+    /// to load — calibration's first ramp step does that as a side effect
+    /// of dispatching, and subsequent checks see the populated value.
+    /// </remarks>
+    public int? MaxBatchSize
+    {
+        get
+        {
+            int? cap = null;
+            foreach (string alias in _descriptor.BoundSessions.Keys)
+            {
+                if (!_descriptor.BoundSessions.IsLoaded(alias)) continue;
+                IModelSession session = _descriptor.BoundSessions
+                    .ResolveAsync(alias, CancellationToken.None)
+                    .AsTask().GetAwaiter().GetResult();
+                if (session is not IInferenceSession inf) continue;
+                foreach (TensorSpec spec in inf.Inputs)
+                {
+                    if (spec.Shape.Count == 0) continue;
+                    int? dim0 = spec.Shape[0];
+                    if (dim0 is null) continue;
+                    if (cap is null || dim0 < cap) cap = dim0;
+                }
+            }
+            return cap;
+        }
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<DataKind> InputKinds => _inputKinds;

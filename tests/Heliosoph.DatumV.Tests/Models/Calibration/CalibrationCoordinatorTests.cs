@@ -90,6 +90,34 @@ public sealed class CalibrationCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureCalibratedAsync_DiscoverMaxBatchSizeReturnsOne_HaltsAfterFirstStep()
+    {
+        // Mirrors a fixed-batch-1 ONNX model (e.g. yolox_x with input
+        // shape [1, 3, 640, 640]): the body can technically be invoked
+        // for N rows but the underlying session can only dispatch one,
+        // so the doubling ramp at 2..32 measures the same internal-
+        // batch=1 cost over and over. The discovery callback returns
+        // 1 from step 1 onward; the coordinator must halt the ramp.
+        using ModelCatalog catalog = new(_tempModelDir);
+        catalog.Register(MakeEntry("alpha-fixed1"));
+
+        List<int> seenBatchSizes = [];
+        await catalog.CalibrationCoordinator.EnsureCalibratedAsync(
+            "alpha-fixed1",
+            batch => { seenBatchSizes.Add(batch); return Task.CompletedTask; },
+            CancellationToken.None,
+            discoverMaxBatchSize: () => 1);
+
+        Assert.Equal([1], seenBatchSizes);
+
+        ModelCalibration? cal = catalog.CalibrationRegistry.Get("alpha-fixed1");
+        Assert.NotNull(cal);
+        Assert.Equal(ModelCalibration.State.Calibrated, cal.Status);
+        Assert.Single(cal.Curve);
+        Assert.True(cal.Curve.ContainsKey(1));
+    }
+
+    [Fact]
     public async Task EnsureCalibratedAsync_AlreadyCalibrated_SkipsDispatch()
     {
         using ModelCatalog catalog = new(_tempModelDir);
