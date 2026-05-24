@@ -243,14 +243,15 @@ public static class WebHostExtensions
             // Settings-side override (set via the Settings UI, persisted to
             // settings.json) beats the host-config value. If neither is
             // set, the cascade falls through to $DATUMV_DATASETS and the
-            // per-catalog default. Datasets stay catalog-relative (raw
-            // archives + extracted trees can be huge per project), unlike
-            // models which are shared per-machine.
+            // per-machine default under the global data path. The raw cache
+            // is shared across catalogs (same dataset id pulled into two
+            // workspaces shouldn't download twice) — ingested .datum output
+            // is what lives under the catalog root, not the raw archives.
             string? effectiveDatasetsDir =
                 StartupSettingsLoader.LoadDatasetsDirectory(options)
                 ?? options.DatasetsCacheDirectory
                 ?? Environment.GetEnvironmentVariable("DATUMV_DATASETS")
-                ?? Path.Combine(datasetCatalogRoot, "datasets-cache");
+                ?? Path.Combine(globalDataPath, "datasets-cache");
             DatasetLibraryOptions datasetLibraryOptions = new(
                 CatalogRootPath: datasetCatalogRoot,
                 DatasetsCacheDirectory: effectiveDatasetsDir);
