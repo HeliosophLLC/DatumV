@@ -30,6 +30,9 @@ export type MenuLabelKey =
   | 'menu.run.run'
   | 'menu.edit.label'
   | 'menu.view.label'
+  | 'menu.view.resetZoom'
+  | 'menu.view.zoomIn'
+  | 'menu.view.zoomOut'
   | 'menu.window.label'
   | 'menu.help.label'
   | 'menu.help.about';
@@ -51,9 +54,6 @@ export type ElectronRole =
   | 'forceReload'
   | 'toggleDevTools'
   | 'togglefullscreen'
-  | 'resetZoom'
-  | 'zoomIn'
-  | 'zoomOut'
   | 'about';
 
 export type MenuNode =
@@ -183,9 +183,13 @@ export function buildMenu(opts: {
       role('forceReload'),
       role('toggleDevTools'),
       sep,
-      role('resetZoom'),
-      role('zoomIn'),
-      role('zoomOut'),
+      // Renderer-owned zoom — routes through state/zoom.ts so a change
+      // in one window propagates to every other via localStorage. The
+      // Electron role variants are per-WebContents only, which would
+      // desync torn-out tabs and dialog children from the main SPA.
+      item('menu.view.resetZoom', 'view.zoomReset', 'CmdOrCtrl+0'),
+      item('menu.view.zoomIn', 'view.zoomIn', 'CmdOrCtrl+Plus'),
+      item('menu.view.zoomOut', 'view.zoomOut', 'CmdOrCtrl+-'),
       sep,
       role('togglefullscreen'),
     ]),

@@ -19,6 +19,7 @@ import { openDialog } from '@/state/dialogs';
 import { runTab } from '@/state/execution';
 import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
+import { resetZoom, zoomIn, zoomOut } from '@/state/zoom';
 
 export type CommandId =
   | 'file.newQuery'
@@ -28,6 +29,9 @@ export type CommandId =
   | 'file.openCatalog'
   | 'file.exit'
   | 'query.run'
+  | 'view.zoomIn'
+  | 'view.zoomOut'
+  | 'view.zoomReset'
   | 'help.about';
 
 // Recent-catalog rows ship as `file.openRecent:<path>` — the path is
@@ -69,6 +73,9 @@ const handlers: Record<CommandId, CommandHandler> = {
     }
     void runTab(leaf.activeTabId, resolveRunSql(tab.sql, leafId));
   },
+  'view.zoomIn': () => zoomIn(),
+  'view.zoomOut': () => zoomOut(),
+  'view.zoomReset': () => resetZoom(),
   'help.about': () => {
     openDialog({ kind: 'about' });
   },

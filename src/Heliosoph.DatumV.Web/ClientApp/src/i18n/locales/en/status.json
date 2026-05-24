@@ -31,6 +31,13 @@
     "idleBadge": "idle",
     "busyBadge": "busy"
   },
+  "zoomChip": {
+    "label": "Zoom",
+    "percent": "{percent}%",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "reset": "Reset zoom"
+  },
   "calibrationChip": {
     "label": "Calibration",
     "ramping": "Calibrating {model}",

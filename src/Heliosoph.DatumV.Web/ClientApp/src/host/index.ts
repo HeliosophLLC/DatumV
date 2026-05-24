@@ -48,6 +48,12 @@ export interface HostBridge {
   // URL (splash / welcome paint in the user's scheme rather than OS
   // preference). Called by state/theme.ts on every change.
   setHostTheme(theme: 'light' | 'dark'): void;
+  // Per-window zoom controls. App-wide consistency is layered on top
+  // by state/zoom.ts via a same-origin localStorage key that every
+  // window (main, torn-out, dialog) observes through 'storage'
+  // events.
+  setZoomLevel(level: number): void;
+  getZoomLevel(): number;
 }
 
 declare global {
@@ -117,6 +123,8 @@ declare global {
       catalogOpenPath(path: string): Promise<{ canceled: boolean; path?: string }>;
       setHostStrings(strings: unknown): Promise<void>;
       setHostTheme(theme: 'light' | 'dark'): Promise<void>;
+      setZoomLevel(level: number): void;
+      getZoomLevel(): number;
       onSplashStatus(cb: (text: string) => void): () => void;
 
       // Tab tear-out IPC. See electron/preload.ts for the protocol
@@ -231,6 +239,10 @@ function createHostBridge(): HostBridge {
     setHostTheme: (theme) => {
       void eh.setHostTheme(theme);
     },
+    setZoomLevel: (level) => {
+      eh.setZoomLevel(level);
+    },
+    getZoomLevel: () => eh.getZoomLevel(),
   };
 }
 

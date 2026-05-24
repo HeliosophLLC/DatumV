@@ -77,7 +77,10 @@
       "label": "&Edit"
     },
     "view": {
-      "label": "&View"
+      "label": "&View",
+      "resetZoom": "&Actual Size",
+      "zoomIn": "Zoom &In",
+      "zoomOut": "Zoom &Out"
     },
     "window": {
       "label": "&Window"

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
 // Surface exposed to every renderer (main window + dialog windows). All
 // callers go through this; the renderer's React code never touches
@@ -94,6 +94,17 @@ contextBridge.exposeInMainWorld('electronHost', {
   // for the catalog-swap UX.
   setHostStrings: (strings: unknown) =>
     ipcRenderer.invoke('host.strings.set', strings),
+
+  // Zoom level for this renderer's WebContents. `webFrame` lives in
+  // the renderer process, so the preload can call it directly without
+  // an IPC hop. App-wide sync is the renderer's job — state/zoom.ts
+  // broadcasts via a same-origin localStorage key that every
+  // BrowserWindow (main, torn-out, dialog) picks up via 'storage'
+  // events.
+  setZoomLevel: (level: number) => {
+    webFrame.setZoomLevel(level);
+  },
+  getZoomLevel: () => webFrame.getZoomLevel(),
 
   // Last-resolved theme ('light' | 'dark'); renderer republishes on
   // every change. Main persists it to disk and passes it on the

@@ -11,6 +11,11 @@ import './state/locale';
 // the <html>.dark class. Must be imported in both roots so dialog windows
 // pick up the resolved theme the same way the main window does.
 import './state/theme';
+// Zoom is also a side-effect module: it reads the stored level on
+// import and applies it via webFrame so every window — main, torn-out,
+// dialog — picks up the user's last zoom on the first frame. Cross-
+// window updates flow over localStorage 'storage' events.
+import './state/zoom';
 // Loads the dialog-message subscriber so openDialog promises resolve.
 // Side-effect only; safe to import in both roots.
 import './state/dialogs';

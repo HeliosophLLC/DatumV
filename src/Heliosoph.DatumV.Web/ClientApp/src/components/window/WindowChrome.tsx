@@ -3,6 +3,7 @@ import { CalibrationChip } from '@/components/status/CalibrationChip';
 import { DownloadsChip } from '@/components/status/DownloadsChip';
 import { GlobalStatusBar } from '@/components/status/GlobalStatusBar';
 import { ResidencyChip } from '@/components/status/ResidencyChip';
+import { ZoomChip } from '@/components/status/ZoomChip';
 
 // Discriminated chrome kinds. The titlebar and surrounding shell
 // derive every visibility flag (favicon, MenuBar, min/max, status
@@ -60,6 +61,7 @@ export function WindowChrome({
             <>
               <CalibrationChip />
               <ResidencyChip />
+              <ZoomChip />
             </>
           }
         />
