@@ -80,6 +80,52 @@ public sealed class UnnestFunctionTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task Unnest_PreservesStructElementTypeId_AndNestedFieldTypeId()
+    {
+        // Models like yolox_postprocess emit Array<Struct> whose elements carry
+        // a named-type TypeId (LabeledDetection); the outer struct's bbox field
+        // in turn carries its own TypeId (BoundingBox). When the array flows
+        // through `CROSS JOIN unnest(model(...))`, each unnested row's value
+        // must retain those TypeIds — otherwise the renderer can't look up
+        // field names and falls back to f0/f1/f2.
+
+        ExecutionContext ctx = CreateExecutionContext();
+        ushort labeledDetectionTypeId = (ushort)ctx.Types.GetTypeIdByName("LabeledDetection");
+        ushort boundingBoxTypeId = (ushort)ctx.Types.GetTypeIdByName("BoundingBox");
+        Assert.NotEqual((ushort)0, labeledDetectionTypeId);
+        Assert.NotEqual((ushort)0, boundingBoxTypeId);
+
+        ValueRef bbox = ValueRef.FromStruct(
+            [
+                ValueRef.FromFloat32(1f),
+                ValueRef.FromFloat32(2f),
+                ValueRef.FromFloat32(3f),
+                ValueRef.FromFloat32(4f),
+            ],
+            boundingBoxTypeId);
+        ValueRef element = ValueRef.FromStruct(
+            [
+                bbox,
+                ValueRef.FromString("carrot"),
+                ValueRef.FromFloat32(0.9f),
+            ],
+            labeledDetectionTypeId);
+        ValueRef arr = ValueRef.FromArray(DataKind.Struct, [element]);
+
+        UnnestFunction fn = new();
+        List<Row> rows = await CollectAsync(((ITableValuedFunction)fn).ExecuteAsync([arr], ctx));
+
+        Row row = Assert.Single(rows);
+        DataValue value = row["value"];
+        Assert.Equal(DataKind.Struct, value.Kind);
+        Assert.Equal(labeledDetectionTypeId, value.TypeId);
+
+        DataValue[] fields = value.AsStruct(ctx.Store);
+        Assert.Equal(3, fields.Length);
+        Assert.Equal(boundingBoxTypeId, fields[0].TypeId);
+    }
+
+    [Fact]
     public async Task Unnest_OnNullArray_YieldsNoRows()
     {
         // PG semantics: NULL array → empty result.

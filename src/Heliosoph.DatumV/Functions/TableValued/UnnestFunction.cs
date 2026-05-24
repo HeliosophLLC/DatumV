@@ -183,7 +183,12 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
             // Materialise the element ValueRef into a DataValue. For
             // reference-backed elements (Image, Drawing, etc.) this lands
             // their payload in the row batch's arena/sidecar as appropriate.
-            DataValue value = elements[i].ToDataValue(batch.Arena);
+            // Forward the element's own TypeId + the per-query TypeRegistry so
+            // struct elements keep their named-type stamp (LabeledDetection,
+            // BoundingBox, …) and nested struct fields stay self-describing —
+            // without this the row's struct DataValue lands with TypeId=0 and
+            // the renderer falls back to f0/f1/f2 field names.
+            DataValue value = elements[i].ToDataValue(batch.Arena, elements[i].TypeId, context.Types);
             batch.Add([value]);
             if (batch.IsFull)
             {

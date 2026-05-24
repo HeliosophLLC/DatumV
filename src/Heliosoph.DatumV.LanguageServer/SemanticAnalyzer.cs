@@ -14,6 +14,17 @@ internal sealed class SemanticAnalyzer
     private readonly LanguageServerManifest _manifest;
 
     /// <summary>
+    /// LET binding names visible in the SELECT statement currently being
+    /// analyzed. Save/restore'd around <see cref="AnalyzeStatement"/> so
+    /// recursive subquery analysis doesn't clobber the enclosing
+    /// statement's set. Consulted by <see cref="ValidateColumnReference"/>
+    /// to exclude LET names from the "alias used as value" warning —
+    /// LET refs like <c>unnest(classes)</c> are the intended use, not
+    /// a misuse like referencing a FROM/JOIN alias bare.
+    /// </summary>
+    private HashSet<string> _currentStatementLetNames = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Index of table names → (column name → DataKind string) for O(1) lookup.
     /// Keys are case-insensitive because Heliosoph.DatumV SQL is case-insensitive.
     /// </summary>
@@ -143,6 +154,23 @@ internal sealed class SemanticAnalyzer
     /// </summary>
     private void AnalyzeStatement(SelectStatement statement, List<Diagnostic> diagnostics)
     {
+        // Save the enclosing statement's LET-name set so recursive
+        // subquery analysis doesn't clobber it. Restored in the finally
+        // at the end of this method.
+        HashSet<string> previousLetNames = _currentStatementLetNames;
+        _currentStatementLetNames = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            AnalyzeStatementCore(statement, diagnostics);
+        }
+        finally
+        {
+            _currentStatementLetNames = previousLetNames;
+        }
+    }
+
+    private void AnalyzeStatementCore(SelectStatement statement, List<Diagnostic> diagnostics)
+    {
 
         // Collect all table sources to build the scope of available columns.
         // Aliases map to the underlying table's columns; subqueries and
@@ -160,6 +188,34 @@ internal sealed class SemanticAnalyzer
             }
         }
 
+        // Register LET binding names (scalar and destructured) as opaque aliases so that
+        // references to them anywhere in the statement — SELECT columns, WHERE, ORDER BY,
+        // QUALIFY, ASSERT, and lateral function-source arguments — do not produce false
+        // "Unknown column" warnings. LET names are virtual row fields computed at runtime
+        // and are never present in table schemas. Registered before FROM/JOIN walking so
+        // FunctionSource argument analysis (CollectTableSources → AnalyzeExpression) sees
+        // them — the planner lifts LET refs in lateral args into a staircase above the
+        // driving source.
+        if (statement.LetBindings is { Count: > 0 })
+        {
+            foreach (LetBinding letBinding in statement.LetBindings)
+            {
+                if (letBinding.Destructure is not null)
+                {
+                    foreach (string name in letBinding.Destructure.Names)
+                    {
+                        opaqueAliases.Add(name);
+                        _currentStatementLetNames.Add(name);
+                    }
+                }
+                else
+                {
+                    opaqueAliases.Add(letBinding.Name);
+                    _currentStatementLetNames.Add(letBinding.Name);
+                }
+            }
+        }
+
         if (statement.From is not null)
         {
             CollectTableSources(statement.From.Source, aliasToTable, opaqueAliases, diagnostics);
@@ -170,26 +226,6 @@ internal sealed class SemanticAnalyzer
             foreach (JoinClause join in statement.Joins)
             {
                 CollectTableSources(join.Source, aliasToTable, opaqueAliases, diagnostics);
-            }
-        }
-
-        // Register LET binding names (scalar and destructured) as opaque aliases so that
-        // references to them anywhere in the statement — SELECT columns, WHERE, ORDER BY,
-        // QUALIFY, ASSERT — do not produce false "Unknown column" warnings. LET names are
-        // virtual row fields computed at runtime and are never present in table schemas.
-        if (statement.LetBindings is { Count: > 0 })
-        {
-            foreach (LetBinding letBinding in statement.LetBindings)
-            {
-                if (letBinding.Destructure is not null)
-                {
-                    foreach (string name in letBinding.Destructure.Names)
-                        opaqueAliases.Add(name);
-                }
-                else
-                {
-                    opaqueAliases.Add(letBinding.Name);
-                }
             }
         }
 
@@ -1055,6 +1091,20 @@ internal sealed class SemanticAnalyzer
 
         if (column.TableName is not null)
         {
+            // A 3-part dot chain `a.b.c` is ambiguous: it can mean
+            // `schema.table.column` OR `alias.column.structField`. The parser
+            // hands us the first reading by default. When the first segment is
+            // a known alias in scope, prefer the struct-field reading and skip
+            // qualifier/column validation — static struct-field metadata
+            // doesn't flow through here today (TVF output schemas don't carry
+            // ColumnInfo.Fields), so false-positives on real struct accesses
+            // would outweigh the rare miss on a typo'd 3-part qualifier.
+            if (column.SchemaName is not null
+                && (aliasToTable.ContainsKey(column.SchemaName) || opaqueAliases.Contains(column.SchemaName)))
+            {
+                return;
+            }
+
             // Three-part `schema.table.column` uses the fully-qualified
             // form as its alias-map key (registered by CollectTableSources
             // when the table reference had no alias).
@@ -1080,6 +1130,27 @@ internal sealed class SemanticAnalyzer
                 }
             }
 
+            return;
+        }
+
+        // Bare reference to a FROM/JOIN alias used as a value (e.g.
+        // `image_draw_bounding_boxes(file, c)` where `c` was meant to be
+        // `c.value`). The engine treats an alias as a qualifier only —
+        // referencing it as a scalar throws at runtime with "Name 'c' is
+        // not a declared variable in scope and is not a column in the
+        // current row." Surface the misuse here with a more actionable
+        // message so the user fixes it before execution. Runs before the
+        // unknown-column scan so a column happening to share a name with
+        // an alias still goes through normal column resolution (extremely
+        // rare in practice). LET binding names are excluded — they're
+        // virtual row values and referencing them bare is the intended
+        // use (e.g. `unnest(classes)` where `classes` is a LET).
+        if ((aliasToTable.ContainsKey(column.ColumnName) || opaqueAliases.Contains(column.ColumnName))
+            && !_currentStatementLetNames.Contains(column.ColumnName))
+        {
+            EmitWarning(diagnostics, column.Span,
+                $"'{column.ColumnName}' is a table or subquery alias, not a column. " +
+                $"Use '{column.ColumnName}.<column>' to reference one of its columns.");
             return;
         }
 

@@ -1086,6 +1086,233 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("LET", result.Contents);
     }
 
+    // ───────────────────── unnest output synthesis ─────────────────────
+
+    [Fact]
+    public void GetHover_UnnestValue_OfModelArrayReturn_SynthesisesElementKind()
+    {
+        // `unnest(models.X(file))` has no static OutputColumns in the
+        // manifest, but its `value` column kind follows the array element
+        // type of arg[0]. Hover on `c.value` should surface the
+        // `Struct<…>` annotation stripped from `Array<Struct<…>>`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<Struct<bbox: Struct<x: Float32, y: Float32, w: Float32, h: Float32>, label: String, score: Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value", StringComparison.Ordinal) + "c.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Struct<bbox", result.Contents);
+        Assert.Contains("label: String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StructFieldChain_ThroughUnnestOfModelCall_ResolvesField()
+    {
+        // Full 3-segment chain: `c.value.label` where `c` is `unnest(models.X(file))`.
+        // The deepest segment (cursor on `label`) drives the new 3-segment
+        // branch, which resolves `c.value` to the synthesized struct kind
+        // and looks `label` up among its fields.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<Struct<bbox: Struct<x: Float32, y: Float32, w: Float32, h: Float32>, label: String, score: Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value.label FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.label", StringComparison.Ordinal) + "c.value.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("c.value.label", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StructFieldChain_ThroughUnnestOfLetBinding_ResolvesField()
+    {
+        // Same end shape, but unnest's arg is a LET name rather than a
+        // direct function call. The resolver should follow
+        // cteSchemas.LetBindingKinds to the LET's declared kind, strip
+        // the Array<…> wrapper, and surface the field hover.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<Struct<bbox: Struct<x: Float32, y: Float32, w: Float32, h: Float32>, label: String, score: Float32>>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT LET classes = models.yolox_darknet(a.file), c.value.label "
+            + "FROM items a CROSS JOIN unnest(classes) c";
+        int offset = sql.IndexOf("c.value.label", StringComparison.Ordinal) + "c.value.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("c.value.label", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StructFieldChain_ThroughUnnestOfNamedTypeReturn_ResolvesField()
+    {
+        // End-to-end tier C: the model's return type is `Array<LabeledDetection>`
+        // (named-type, not inline struct). The manifest ships the named-type
+        // vocabulary so the hover resolver can expand `LabeledDetection` into
+        // its constituent fields and surface `label` as `String`. Without the
+        // NamedTypes section the deepest hover would fail (StructTypeAnnotation
+        // can't parse a bare named-type reference).
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "BoundingBox",
+                    Description = "Struct<x: Float32, y: Float32, w: Float32, h: Float32>",
+                },
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value.label FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.label", StringComparison.Ordinal) + "c.value.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("c.value.label", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_UnnestValue_OfNamedTypeArrayReturn_SurfacesNamedType()
+    {
+        // Cascade check: with the function's ReturnType preserved as
+        // `Array<LabeledDetection>`, hovering on `c.value` should strip
+        // the array wrapper and surface `LabeledDetection` — keeping the
+        // named-type identity intact rather than flattening to `Struct`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            Keywords = [],
+        };
+        HoverProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value", StringComparison.Ordinal) + "c.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("LabeledDetection", result.Contents);
+    }
+
     // ───────────────────── Markdown-safe kind rendering ─────────────────────
 
     [Fact]

@@ -129,8 +129,15 @@ public static class CompletionContext
         string? tableQualifier = ExtractTableQualifier(tokens, prefix);
         if (tableQualifier is not null)
         {
+            // Also try collecting the full dot chain when 3+ segments
+            // precede the cursor (`a.b.c.[partial]`) so the AfterDot
+            // dispatch can walk nested struct fields end-to-end. Stays
+            // null for the common 2-segment shape and falls back to the
+            // existing schema / table / TVF column completion path.
+            IReadOnlyList<string>? dotChain = ExtractDotChainSegments(tokens, prefix);
             return new CompletionZone(
-                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope);
+                CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope,
+                DotChainSegments: dotChain);
         }
 
         // Walk backwards through tokens to find the governing keyword.
@@ -582,6 +589,44 @@ public static class CompletionContext
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Collects every dot-separated identifier preceding the cursor's
+    /// trailing dot (or the dot before the prefix). Walks back through
+    /// alternating <c>Identifier-Dot</c> pairs until the pattern breaks,
+    /// returning the segments in document order. Returns
+    /// <see langword="null"/> when fewer than two segments precede the
+    /// cursor — the AfterDot dispatch keeps its existing 2-segment
+    /// (schema / table / alias) routing for that shape and only enters
+    /// the struct-field-walk path when three or more total segments are
+    /// in play (i.e., at least two precede the trailing dot).
+    /// </summary>
+    private static IReadOnlyList<string>? ExtractDotChainSegments(List<TokenInfo> tokens, string? prefix)
+    {
+        // Start position depends on whether the prefix is the last token:
+        // with prefix `a.b.par`, the chain segments end at ^3 (the dot
+        // before `par`); without prefix `a.b.`, the chain segments end
+        // at ^2 (the segment before the trailing dot).
+        int idx = prefix is not null ? tokens.Count - 3 : tokens.Count - 2;
+
+        List<string> segments = new();
+        while (idx >= 0)
+        {
+            TokenInfo segmentToken = tokens[idx];
+            if (segmentToken.Kind != SqlToken.Identifier && !IsKeywordToken(segmentToken.Kind)) break;
+            segments.Add(segmentToken.Text);
+
+            int dotIdx = idx - 1;
+            if (dotIdx < 0 || tokens[dotIdx].Kind != SqlToken.Dot) break;
+            idx -= 2;
+        }
+
+        if (segments.Count < 2) return null;
+
+        // Walked right-to-left; reverse so callers see document order.
+        segments.Reverse();
+        return segments;
     }
 
     /// <summary>
@@ -1715,6 +1760,17 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// without dragging alias-name lookups through the manifest. TVF aliases are
 /// kept in <see cref="TvfAliasesInScope"/> instead.
 /// </param>
+/// <param name="DotChainSegments">
+/// Full segment list of a 3+ part dot chain (<c>a.b.c.…</c>) — every
+/// identifier before the cursor's trailing dot, in document order.
+/// Populated when at least two segments precede the cursor; the last
+/// segment also surfaces as <see cref="TableQualifier"/>. Lets the
+/// AfterDot dispatch walk the chain through nested struct fields
+/// (<c>c.value.bbox.</c> resolves <c>c.value</c>, then <c>bbox</c> as
+/// a field of the prior kind, surfacing the deepest struct's fields).
+/// <see langword="null"/> for 2-segment <c>alias.</c> chains and any
+/// non-AfterDot zone.
+/// </param>
 public sealed record CompletionZone(
     CompletionZoneKind Kind,
     string? Prefix,
@@ -1722,7 +1778,8 @@ public sealed record CompletionZone(
     IReadOnlyList<string>? VariablesInScope = null,
     IReadOnlyList<string>? TablesInScope = null,
     IReadOnlyDictionary<string, string>? TvfAliasesInScope = null,
-    IReadOnlyDictionary<string, string>? TableAliasesInScope = null);
+    IReadOnlyDictionary<string, string>? TableAliasesInScope = null,
+    IReadOnlyList<string>? DotChainSegments = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.

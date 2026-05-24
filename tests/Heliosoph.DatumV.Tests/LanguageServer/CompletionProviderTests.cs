@@ -385,6 +385,246 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, item => item.Label == "frame");
     }
 
+    // ───────────────────── 3-part struct field completion ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterThreePartDot_OnUnnestOfNamedTypeArray_OffersStructFields()
+    {
+        // `c.value.` where `c` is `unnest(models.X(file))` whose ReturnType
+        // is `Array<LabeledDetection>` — the dot-completion path should
+        // strip the array wrapper, expand the named type, and surface the
+        // struct's field names (bbox / label / score).
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "BoundingBox",
+                    Description = "Struct<x: Float32, y: Float32, w: Float32, h: Float32>",
+                },
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value. FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.", StringComparison.Ordinal) + "c.value.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "bbox" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "label" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "score" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterThreePartDot_OnUnnestOfLetBinding_OffersStructFields()
+    {
+        // Same end shape, but the unnest argument is a LET name rather
+        // than a direct function call. The resolver should chase
+        // cteSchemas.LetBindingKinds → the model's annotated return type
+        // → strip Array<> → expand named type → fields.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT LET classes = models.yolox_darknet(a.file), c.value. "
+            + "FROM items a CROSS JOIN unnest(classes) c";
+        int offset = sql.IndexOf("c.value.", StringComparison.Ordinal) + "c.value.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "label");
+        Assert.Contains(items, item => item.Label == "score");
+    }
+
+    [Fact]
+    public void Classify_AfterFourPartDot_ExtractsThreeChainSegments()
+    {
+        // Sanity: verify the context classifier collects all 3 preceding
+        // identifiers for `c.value.bbox.` so the provider has the full
+        // walk path. Failure here means extraction is wrong, not the
+        // downstream walk.
+        const string sql =
+            "SELECT c.value.bbox. FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.bbox.", StringComparison.Ordinal) + "c.value.bbox.".Length;
+        CompletionZone zone = CompletionContext.Classify(sql, offset);
+
+        Assert.Equal(CompletionZoneKind.AfterDot, zone.Kind);
+        Assert.Equal("bbox", zone.TableQualifier);
+        Assert.NotNull(zone.DotChainSegments);
+        Assert.Equal(new[] { "c", "value", "bbox" }, zone.DotChainSegments);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterFourPartDot_WalksNestedStructFields()
+    {
+        // `c.value.bbox.` — the deepest segment's struct fields should
+        // surface. Walk: resolve `c.value` → `LabeledDetection` → look
+        // up `bbox` → `BoundingBox` → surface its `x` / `y` / `w` / `h`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "BoundingBox",
+                    Description = "Struct<x: Float32, y: Float32, w: Float32, h: Float32>",
+                },
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value.bbox. FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.bbox.", StringComparison.Ordinal) + "c.value.bbox.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "x" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "y");
+        Assert.Contains(items, item => item.Label == "w");
+        Assert.Contains(items, item => item.Label == "h");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterThreePartDot_WithPartialPrefix_FiltersStructFields()
+    {
+        // `c.value.la` — the partial prefix `la` should still surface
+        // matching field names (Monaco applies its own filter, but the
+        // provider must at least produce the candidate set so the filter
+        // has something to work on).
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "yolox_darknet",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "Array<LabeledDetection>",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT c.value.la FROM items a CROSS JOIN unnest(models.yolox_darknet(a.file)) c";
+        int offset = sql.IndexOf("c.value.la", StringComparison.Ordinal) + "c.value.la".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "label");
+    }
+
     // ───────────────────── CTE AS-position keywords ─────────────────────
 
     [Fact]

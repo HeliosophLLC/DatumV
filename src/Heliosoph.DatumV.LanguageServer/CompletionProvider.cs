@@ -1,6 +1,8 @@
 namespace Heliosoph.DatumV.LanguageServer;
 
 using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 using Heliosoph.DatumV.Parsing.Tokens;
 
 /// <summary>
@@ -12,11 +14,53 @@ public sealed class CompletionProvider
     private readonly LanguageServerManifest _manifest;
 
     /// <summary>
+    /// Named-type vocabulary indexed by canonical name (case-insensitive)
+    /// from <see cref="LanguageServerManifest.NamedTypes"/>. Lets the dot
+    /// completion path expand a bare named-type reference like
+    /// <c>LabeledDetection</c> into its constituent struct fields when
+    /// suggesting members of a 3-part <c>alias.column.</c> chain.
+    /// </summary>
+    private readonly Dictionary<string, IReadOnlyList<StructFieldShape>> _namedTypeFields;
+
+    /// <summary>
     /// Creates a completion provider backed by the given manifest.
     /// </summary>
     public CompletionProvider(LanguageServerManifest manifest)
     {
         _manifest = manifest;
+        _namedTypeFields = new(StringComparer.OrdinalIgnoreCase);
+        if (manifest.NamedTypes is { Count: > 0 } namedTypes)
+        {
+            foreach (NamedTypeEntry entry in namedTypes)
+            {
+                if (StructTypeAnnotation.TryParse(entry.Description, out IReadOnlyList<StructFieldShape> fields))
+                {
+                    _namedTypeFields[entry.Name] = fields;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves a kind annotation to a struct's field list. Handles both
+    /// inline <c>Struct&lt;…&gt;</c> annotations (delegated to
+    /// <see cref="StructTypeAnnotation.TryParse"/>) and bare named-type
+    /// references that resolve through <see cref="_namedTypeFields"/>.
+    /// Returns <see langword="null"/> for non-struct kinds and for unknown
+    /// named types.
+    /// </summary>
+    private IReadOnlyList<StructFieldShape>? TryResolveStructFields(string? kind)
+    {
+        if (string.IsNullOrEmpty(kind)) return null;
+        if (StructTypeAnnotation.TryParse(kind, out IReadOnlyList<StructFieldShape> inline))
+        {
+            return inline;
+        }
+        if (_namedTypeFields.TryGetValue(kind, out IReadOnlyList<StructFieldShape>? named))
+        {
+            return named;
+        }
+        return null;
     }
 
     /// <summary>
@@ -204,6 +248,20 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterDot:
+                if (zone.DotChainSegments is { Count: >= 2 } chainSegments)
+                {
+                    // 3+ part dot chain `a.b.c…` — walk left-to-right,
+                    // resolving `a.b` to a struct kind and then chasing
+                    // each subsequent segment as a field of the prior
+                    // kind. Surfaces the final struct's fields at the
+                    // cursor. Skips the schema / routine fall-through
+                    // because a deep segment matching a schema is not a
+                    // meaningful suggestion at this nesting.
+                    AddStructFieldsForChain(
+                        items, chainSegments,
+                        zone.TvfAliasesInScope, zone.TableAliasesInScope, cteSchemas, sql, cursorOffset);
+                    break;
+                }
                 if (zone.TableQualifier is not null)
                 {
                     // The <c>models.</c> call namespace is still a special
@@ -634,6 +692,367 @@ public sealed class CompletionProvider
                 });
             }
         }
+    }
+
+    /// <summary>
+    /// Surfaces the struct fields of an N-part dot chain
+    /// (<c>seg[0].seg[1].…seg[N-1].</c>) as completion items. Resolves
+    /// <c>seg[0].seg[1]</c>'s kind through the same surfaces a column
+    /// reference can come from — TVF outputs (with <c>unnest</c>
+    /// per-call synthesis), CTE schemas, plain-table aliases — then
+    /// walks each subsequent segment as a struct field of the prior
+    /// kind, expanding named-type references along the way. Emits
+    /// nothing when any link in the chain doesn't resolve to a struct.
+    /// </summary>
+    private void AddStructFieldsForChain(
+        List<CompletionItem> items,
+        IReadOnlyList<string> chainSegments,
+        IReadOnlyDictionary<string, string>? tvfAliasesInScope,
+        IReadOnlyDictionary<string, string>? tableAliasesInScope,
+        CteSchemaResult cteSchemas,
+        string sql,
+        int cursorOffset)
+    {
+        if (chainSegments.Count < 2) return;
+
+        // Seed: resolve `alias.column` (the first two segments) through
+        // the manifest / scope surfaces. This is the only step that has
+        // multiple lookup paths; everything after is straight struct-
+        // field-on-prior-kind chasing.
+        string? currentKind = TryResolveAliasColumnKind(
+            chainSegments[0], chainSegments[1],
+            tvfAliasesInScope, tableAliasesInScope, cteSchemas, sql, cursorOffset);
+
+        // Walk every subsequent segment as a struct field of the prior
+        // kind. Each hop expands the kind (inline or named) into fields,
+        // looks up the next segment by name, and replaces currentKind
+        // with the field's declared kind for the next iteration.
+        for (int i = 2; i < chainSegments.Count; i++)
+        {
+            IReadOnlyList<StructFieldShape>? nextFields = TryResolveStructFields(currentKind);
+            if (nextFields is null) return;
+
+            string segmentName = chainSegments[i];
+            string? hopKind = null;
+            foreach (StructFieldShape field in nextFields)
+            {
+                if (string.Equals(field.Name, segmentName, StringComparison.OrdinalIgnoreCase))
+                {
+                    hopKind = field.Kind;
+                    break;
+                }
+            }
+            if (hopKind is null) return;
+            currentKind = hopKind;
+        }
+
+        // Final hop: surface the deepest kind's struct fields as the
+        // completion items.
+        IReadOnlyList<StructFieldShape>? finalFields = TryResolveStructFields(currentKind);
+        if (finalFields is null) return;
+
+        string detailPath = string.Join('.', chainSegments);
+        foreach (StructFieldShape field in finalFields)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = field.Name,
+                Kind = CompletionItemKind.Column,
+                Detail = $"{field.Kind} — field of {detailPath}",
+                SortOrder = 1,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Looks up the kind annotation for <paramref name="alias"/>.<paramref name="columnName"/>
+    /// across the surfaces a column reference can come from. First match
+    /// wins. Mirrors the hover-side equivalent — the duplication is
+    /// intentional, since both layers need independent resolution paths
+    /// and the per-surface lookups are short.
+    /// </summary>
+    private string? TryResolveAliasColumnKind(
+        string alias,
+        string columnName,
+        IReadOnlyDictionary<string, string>? tvfAliasesInScope,
+        IReadOnlyDictionary<string, string>? tableAliasesInScope,
+        CteSchemaResult cteSchemas,
+        string sql,
+        int cursorOffset)
+    {
+        // TVF static output schema first, then per-call synthesis (unnest)
+        // when the static schema doesn't list the column.
+        if (tvfAliasesInScope is not null
+            && tvfAliasesInScope.TryGetValue(alias, out string? functionName))
+        {
+            FunctionSignature? signature = LookupTvfSignature(functionName);
+            if (signature?.OutputColumns is not null)
+            {
+                foreach (TableColumnEntry column in signature.OutputColumns)
+                {
+                    if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                        return column.Kind;
+                }
+            }
+
+            // unnest(arg) — the output `value` column's kind follows the
+            // array element kind of arg[0]. Re-parse the SQL to recover
+            // the FunctionSource AST; cheap relative to keystroke
+            // cadence and avoids carrying a parallel source map through
+            // the zone / context records.
+            if (string.Equals(functionName, "unnest", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(columnName, "value", StringComparison.OrdinalIgnoreCase))
+            {
+                FunctionSource? unnestSource = FindFunctionSourceByAlias(sql, cursorOffset, alias);
+                if (unnestSource is { Arguments: { Count: 1 } args })
+                {
+                    string? argKind = TryResolveManifestExpressionKind(args[0], cteSchemas);
+                    string? inner = TryStripArrayWrapper(argKind);
+                    if (inner is not null) return inner;
+                }
+            }
+        }
+
+        // CTE direct name, then FROM-alias → CTE.
+        if (TryGetCteColumns(alias, cteSchemas, out _, out IReadOnlyList<TableColumnEntry>? cteColumns))
+        {
+            foreach (TableColumnEntry column in cteColumns)
+            {
+                if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                    return column.Kind;
+            }
+        }
+
+        // Plain-table alias (or unaliased name) → manifest table.
+        string resolvedTable = tableAliasesInScope is not null
+            && tableAliasesInScope.TryGetValue(alias, out string? aliased)
+                ? aliased
+                : alias;
+        foreach (TableSchemaEntry table in _manifest.Tables)
+        {
+            if (!string.Equals(table.Name, resolvedTable, StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (TableColumnEntry column in table.Columns)
+            {
+                if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                    return column.Kind;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Re-parses <paramref name="sql"/> and returns the first
+    /// <see cref="FunctionSource"/> whose alias (or unaliased call name)
+    /// matches <paramref name="alias"/>. Used by the dot-completion path
+    /// to recover argument expressions for TVFs whose output column kinds
+    /// follow the call site (today: <c>unnest</c>). Returns
+    /// <see langword="null"/> when the parse fails or no match is found.
+    /// </summary>
+    private static FunctionSource? FindFunctionSourceByAlias(string sql, int cursorOffset, string alias)
+    {
+        // The recovering parser doesn't produce a usable AST when the
+        // cursor lands right after a trailing dot — the dangling dot
+        // leaves the SELECT-list expression unfinished and FROM-clause
+        // recovery drops with it. Replace the *entire* dot-chain
+        // immediately preceding the cursor with a single placeholder
+        // identifier so the parser sees a complete reference. Replacing
+        // just the trailing dot would leave a 4+-part identifier that
+        // ColumnReference (max 3 parts) can't represent and the parser
+        // would still fail. Only fires when the cursor sits right after
+        // a dot; non-dot positions parse fine as-is.
+        string parseSql = ReplaceTrailingDotChainWithPlaceholder(sql, cursorOffset);
+
+        ParseResult parseResult;
+        try
+        {
+            parseResult = SqlParser.TryParseRecovering(parseSql);
+        }
+        catch
+        {
+            return null;
+        }
+        if (parseResult.Statements is null && parseResult.Query is null) return null;
+
+        IEnumerable<QueryExpression> queries = parseResult.Statements is not null
+            ? parseResult.Statements.OfType<QueryStatement>().Select(q => q.Query)
+            : new[] { parseResult.Query! };
+
+        foreach (QueryExpression query in queries)
+        {
+            foreach (FunctionSource source in EnumerateFunctionSources(query))
+            {
+                string aliasKey = source.Alias ?? source.FunctionName;
+                if (string.Equals(aliasKey, alias, StringComparison.OrdinalIgnoreCase))
+                {
+                    return source;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// If the cursor sits right after a dot, walks backward through the
+    /// preceding identifier-dot chain (<c>c.value.bbox.</c>) and replaces
+    /// the whole chain with a single placeholder identifier in the
+    /// returned SQL. Lets the recovering parser see a finished
+    /// expression at the cursor while keeping the rest of the statement
+    /// intact for FROM-clause recovery. Returns the original SQL when
+    /// the cursor isn't on a trailing dot.
+    /// </summary>
+    private static string ReplaceTrailingDotChainWithPlaceholder(string sql, int cursorOffset)
+    {
+        if (cursorOffset <= 0 || cursorOffset > sql.Length) return sql;
+        if (sql[cursorOffset - 1] != '.') return sql;
+
+        // Walk back through valid identifier-or-dot characters. The chain
+        // ends as soon as we hit something else (whitespace, comma, paren,
+        // etc.). Identifier chars: letter, digit, underscore. Dot is its
+        // own delimiter — both count.
+        int chainStart = cursorOffset;
+        while (chainStart > 0)
+        {
+            char c = sql[chainStart - 1];
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '.') break;
+            chainStart--;
+        }
+        if (chainStart >= cursorOffset) return sql;
+
+        return string.Concat(
+            sql.AsSpan(0, chainStart),
+            "_ls_dot_completion_placeholder",
+            sql.AsSpan(cursorOffset));
+    }
+
+    /// <summary>
+    /// Yields every <see cref="FunctionSource"/> reachable from
+    /// <paramref name="query"/>'s FROM / JOIN tree, including the
+    /// right-hand side of CROSS / LEFT JOIN clauses where the lateral
+    /// <c>unnest(...)</c> form lives. Subqueries are walked recursively
+    /// so a TVF source nested inside a subquery still surfaces.
+    /// </summary>
+    private static IEnumerable<FunctionSource> EnumerateFunctionSources(QueryExpression query)
+    {
+        if (query is SelectQueryExpression select)
+        {
+            foreach (FunctionSource source in EnumerateFunctionSourcesIn(select.Statement))
+            {
+                yield return source;
+            }
+        }
+        else if (query is CompoundQueryExpression compound)
+        {
+            foreach (FunctionSource source in EnumerateFunctionSources(compound.Left)) yield return source;
+            foreach (FunctionSource source in EnumerateFunctionSources(compound.Right)) yield return source;
+        }
+    }
+
+    private static IEnumerable<FunctionSource> EnumerateFunctionSourcesIn(SelectStatement statement)
+    {
+        if (statement.From is not null)
+        {
+            foreach (FunctionSource source in EnumerateFunctionSourcesIn(statement.From.Source)) yield return source;
+        }
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                foreach (FunctionSource source in EnumerateFunctionSourcesIn(join.Source)) yield return source;
+            }
+        }
+    }
+
+    private static IEnumerable<FunctionSource> EnumerateFunctionSourcesIn(TableSource source)
+    {
+        if (source is FunctionSource fnSource)
+        {
+            yield return fnSource;
+        }
+        else if (source is SubquerySource subquery)
+        {
+            foreach (FunctionSource nested in EnumerateFunctionSourcesIn(subquery.Query)) yield return nested;
+        }
+    }
+
+    /// <summary>
+    /// Narrow expression-kind resolver scoped to the shapes a TVF argument
+    /// commonly takes: a bare LET reference (<c>unnest(classes)</c>), a
+    /// qualified CTE column (<c>unnest(a.classes)</c>), or a function call
+    /// whose return type is declared in the manifest (<c>unnest(models.X(file))</c>).
+    /// Mirrors the hover-side helper without taking a dependency on
+    /// <see cref="CteSchemaResolver"/>'s private <c>InnerScope</c>; anything
+    /// more exotic stays unresolved.
+    /// </summary>
+    private string? TryResolveManifestExpressionKind(Expression expression, CteSchemaResult cteSchemas)
+    {
+        switch (expression)
+        {
+            case ColumnReference colRef when colRef.TableName is null && colRef.SchemaName is null:
+                if (cteSchemas.LetBindingKinds.TryGetValue(colRef.ColumnName, out string? letKind))
+                    return letKind;
+                foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+                {
+                    foreach (TableColumnEntry column in cte.Value)
+                    {
+                        if (string.Equals(column.Name, colRef.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            return column.Kind;
+                    }
+                }
+                return null;
+
+            case ColumnReference colRef when colRef.TableName is not null:
+                if (cteSchemas.Schemas.TryGetValue(colRef.TableName, out IReadOnlyList<TableColumnEntry>? direct))
+                {
+                    foreach (TableColumnEntry column in direct)
+                    {
+                        if (string.Equals(column.Name, colRef.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            return column.Kind;
+                    }
+                }
+                if (cteSchemas.FromAliasToCteName.TryGetValue(colRef.TableName, out string? cteName)
+                    && cteSchemas.Schemas.TryGetValue(cteName, out IReadOnlyList<TableColumnEntry>? aliased))
+                {
+                    foreach (TableColumnEntry column in aliased)
+                    {
+                        if (string.Equals(column.Name, colRef.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            return column.Kind;
+                    }
+                }
+                return null;
+
+            case FunctionCallExpression fnCall:
+                foreach (FunctionSignature sig in _manifest.Functions)
+                {
+                    if (!string.Equals(sig.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (fnCall.SchemaName is not null
+                        && !string.Equals(sig.SchemaName, fnCall.SchemaName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(sig.ReturnType)) return sig.ReturnType;
+                }
+                return null;
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Strips a single <c>Array&lt;…&gt;</c> wrapper off a manifest kind
+    /// annotation, returning the inner element kind. Returns
+    /// <see langword="null"/> for non-array annotations and malformed
+    /// strings.
+    /// </summary>
+    private static string? TryStripArrayWrapper(string? kind)
+    {
+        if (kind is null) return null;
+        const string prefix = "Array<";
+        if (kind.Length <= prefix.Length + 1) return null;
+        if (!kind.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        if (kind[^1] != '>') return null;
+        return kind[prefix.Length..^1].Trim();
     }
 
     /// <summary>

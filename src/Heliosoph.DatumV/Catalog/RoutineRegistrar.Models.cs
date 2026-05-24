@@ -552,7 +552,13 @@ internal sealed partial class RoutineRegistrar
             // `model_call().depth` to its actual `Array<Float32>` kind
             // instead of the opaque `Struct` placeholder. Bare
             // `RETURNS Struct` returns null and the LS treats it as opaque.
-            OutputStructFields: BuildModelOutputStructFields(descriptor));
+            OutputStructFields: BuildModelOutputStructFields(descriptor),
+            // Preserve the user-written annotation verbatim so the manifest
+            // renderer can surface `Array<LabeledDetection>` instead of the
+            // flattened `Array<Struct>` it would synthesise from OutputKind
+            // alone. Named-type identity dies at the StaticHint = Struct
+            // collapse otherwise.
+            OutputKindLabel: descriptor.ReturnTypeName);
 
         if (replace)
         {
@@ -672,6 +678,21 @@ internal sealed partial class RoutineRegistrar
         return infos;
     }
 
+    /// <summary>
+    /// Local helper for <see cref="BuildModelOutputStructFields"/>: strips
+    /// a single <c>Array&lt;…&gt;</c> wrapper off an annotation so the
+    /// inner kind can be looked up in <see cref="NamedTypeRegistry"/>.
+    /// Returns the annotation unchanged when it isn't an array wrapper.
+    /// </summary>
+    private static string StripArrayWrapperForLookup(string annotation)
+    {
+        const string prefix = "Array<";
+        if (annotation.Length <= prefix.Length + 1) return annotation;
+        if (!annotation.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return annotation;
+        if (annotation[^1] != '>') return annotation;
+        return annotation[prefix.Length..^1].Trim();
+    }
+
     private static ModelStructFieldInfo[] ToModelStructFields(IReadOnlyList<StructFieldShape> fields)
     {
         ModelStructFieldInfo[] result = new ModelStructFieldInfo[fields.Count];
@@ -702,9 +723,29 @@ internal sealed partial class RoutineRegistrar
     private static IReadOnlyList<ModelStructFieldInfo>? BuildModelOutputStructFields(ModelDescriptor model)
     {
         if (model.ReturnTypeName is null) return null;
+
+        // Two ways the annotation may carry struct shape: an inline
+        // `Struct<…>` literal (StructTypeAnnotation.TryParse handles it
+        // directly), or a named-type reference (`LabeledDetection`, or
+        // `Array<LabeledDetection>`) that resolves through the engine's
+        // NamedTypeRegistry to a canonical `Struct<…>` description we then
+        // parse the same way. Without the named-type branch, every
+        // `RETURNS Array<LabeledDetection>` model would surface as opaque
+        // `Array<Struct>` in hover and lose its field map downstream.
         if (!StructTypeAnnotation.TryParse(model.ReturnTypeName, out IReadOnlyList<StructFieldShape> fields))
         {
-            return null;
+            string inner = StripArrayWrapperForLookup(model.ReturnTypeName);
+            NamedTypeRegistry.NamedTypeDefinition? namedDef = null;
+            foreach (NamedTypeRegistry.NamedTypeDefinition def in NamedTypeRegistry.Entries)
+            {
+                if (string.Equals(def.Name, inner, StringComparison.OrdinalIgnoreCase))
+                {
+                    namedDef = def;
+                    break;
+                }
+            }
+            if (namedDef is null) return null;
+            if (!StructTypeAnnotation.TryParse(namedDef.Description, out fields)) return null;
         }
 
         ModelStructFieldInfo[] infos = new ModelStructFieldInfo[fields.Count];

@@ -329,6 +329,13 @@ public static class CatalogManifestBuilder
             Udfs = udfEntries,
             Procedures = procedureEntries,
             Datasets = datasetEntries,
+            // Engine-side named-type vocabulary shipped to the LS so
+            // hover / completion paths can resolve `LabeledDetection` /
+            // `BoundingBox` / etc. into their struct field maps without
+            // the LSP assembly taking a reference on the engine. Snapshot
+            // — entries are static, so this list is effectively constant
+            // across builds.
+            NamedTypes = BuildNamedTypeEntries(),
             // Capture the catalog's current search_path so the LSP can
             // resolve unqualified names against the same precedence the
             // engine uses at execution time. Snapshot — subsequent
@@ -704,8 +711,36 @@ public static class CatalogManifestBuilder
             : ModelInstallStatus.Available;
     }
 
+    /// <summary>
+    /// Snapshots the engine's <see cref="NamedTypeRegistry"/> as a list of
+    /// manifest <see cref="NamedTypeEntry"/> records — name + canonical
+    /// <c>Struct&lt;…&gt;</c> description. Ships through the manifest so
+    /// the language server can resolve named-type references encountered
+    /// in function return types and column kinds without taking an
+    /// engine-assembly reference.
+    /// </summary>
+    private static IReadOnlyList<NamedTypeEntry> BuildNamedTypeEntries()
+    {
+        NamedTypeEntry[] result = new NamedTypeEntry[NamedTypeRegistry.Entries.Count];
+        for (int i = 0; i < NamedTypeRegistry.Entries.Count; i++)
+        {
+            NamedTypeRegistry.NamedTypeDefinition def = NamedTypeRegistry.Entries[i];
+            result[i] = new NamedTypeEntry { Name = def.Name, Description = def.Description };
+        }
+        return result;
+    }
+
     private static string BuildModelOutputKindLabel(Models.ModelCatalogEntry entry)
     {
+        // User-written annotation wins when present — preserves named-type
+        // identity (`Array<LabeledDetection>`) that the OutputKind + IsArray
+        // pair below would flatten to `Array<Struct>`. Built-in models leave
+        // OutputKindLabel null and fall through to the structured path.
+        if (!string.IsNullOrEmpty(entry.OutputKindLabel))
+        {
+            return entry.OutputKindLabel;
+        }
+
         if (entry.OutputStructFields is { Count: > 0 } structFields)
         {
             System.Text.StringBuilder sb = new();
@@ -809,11 +844,28 @@ public static class CatalogManifestBuilder
                     modelOutput.Select(f => new StructFieldShape(f.Name, f.Kind)).ToArray());
             }
 
+            // Always prefer the model's resolved OutputKind label over the
+            // descriptor-derived ReturnType when it carries richer info — a
+            // SQL-defined model with `RETURNS Array<LabeledDetection>` keeps
+            // its named-type identity in the model entry's OutputKind, and
+            // the descriptor's StaticHint path would otherwise flatten it
+            // to `Array<Struct>` here. Order is intentional: when both the
+            // struct-field rebuild AND a named-type label are available,
+            // the label wins because it preserves the source-text identity
+            // (`LabeledDetection`) that the struct-field render path
+            // expands to (`Struct<bbox: …, label: …, score: …>`).
+            if (!string.IsNullOrEmpty(model.OutputKind)
+                && !string.Equals(model.OutputKind, returnType, StringComparison.Ordinal))
+            {
+                returnType = model.OutputKind;
+            }
+
             // Skip the rewrite when nothing changed — keeps the original
             // FunctionSignature object identity for the vast majority of
             // non-struct models.
             if (ReferenceEquals(parameters, sig.Parameters)
-                && ReferenceEquals(outputFields, sig.OutputStructFields))
+                && ReferenceEquals(outputFields, sig.OutputStructFields)
+                && string.Equals(returnType, sig.ReturnType, StringComparison.Ordinal))
             {
                 continue;
             }

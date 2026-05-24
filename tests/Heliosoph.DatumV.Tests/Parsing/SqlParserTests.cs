@@ -2474,6 +2474,62 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
+    public void PostfixDot_FourthSegment_LowersToIndexAccessWithStringLiteral()
+    {
+        // `c.value.bbox.h` — the 3-part ColumnReference consumes `c.value.bbox`,
+        // and the postfix-dot layer takes the 4th segment as a struct-field
+        // accessor, lowered to IndexAccess(ColumnRef, [Literal('h')]). Without
+        // this, the parser would stop after the ColumnReference and treat
+        // `.h` as a trailing-tokens error.
+        SelectStatement result = Parse("SELECT c.value.bbox.h FROM t");
+
+        IndexAccessExpression access =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        ColumnReference source = Assert.IsType<ColumnReference>(access.Source);
+        Assert.Equal("c", source.SchemaName);
+        Assert.Equal("value", source.TableName);
+        Assert.Equal("bbox", source.ColumnName);
+        LiteralExpression idx = Assert.IsType<LiteralExpression>(access.Indices[0]);
+        Assert.Equal("h", idx.Value);
+    }
+
+    [Fact]
+    public void PostfixDot_DeepChain_LowersToNestedIndexAccess()
+    {
+        // `a.b.c.d.e` — 3-part ColumnReference + two postfix `.field` hops.
+        // Each hop wraps the prior expression in another IndexAccess so the
+        // runtime's struct-by-name accessor can walk the chain.
+        SelectStatement result = Parse("SELECT a.b.c.d.e FROM t");
+
+        IndexAccessExpression outer =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        Assert.Equal("e", Assert.IsType<LiteralExpression>(outer.Indices[0]).Value);
+
+        IndexAccessExpression inner = Assert.IsType<IndexAccessExpression>(outer.Source);
+        Assert.Equal("d", Assert.IsType<LiteralExpression>(inner.Indices[0]).Value);
+
+        ColumnReference column = Assert.IsType<ColumnReference>(inner.Source);
+        Assert.Equal("a", column.SchemaName);
+        Assert.Equal("b", column.TableName);
+        Assert.Equal("c", column.ColumnName);
+    }
+
+    [Fact]
+    public void PostfixDot_InWhereClause_ParsesAsBooleanCondition()
+    {
+        // The original report: `WHERE c.value.bbox.h = 1` was producing
+        // "Unexpected tokens after end of statement" because the parser
+        // stopped at the 3-part ColumnReference. The postfix-dot fix
+        // turns the 4th segment into a struct-field access and the
+        // `= 1` continues normally as a binary comparison.
+        SelectStatement result = Parse("SELECT * FROM t WHERE c.value.bbox.h = 1");
+
+        BinaryExpression where = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Equal, where.Operator);
+        Assert.IsType<IndexAccessExpression>(where.Left);
+    }
+
+    [Fact]
     public void IndexAccess_HasSourceSpan()
     {
         SelectStatement result = Parse("SELECT arr[1] FROM t");

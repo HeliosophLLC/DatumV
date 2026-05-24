@@ -370,6 +370,120 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             diagnostic.Message.Contains("Unknown column"));
     }
 
+    [Fact]
+    public void Analyze_StructFieldAccess_OnFunctionSourceAlias_DoesNotWarn()
+    {
+        // `c.value.label` parses as a 3-part `schema.table.column` reference
+        // (SchemaName=c, TableName=value, ColumnName=label). When the first
+        // segment matches a known alias — here `c`, an opaque TVF output —
+        // it's a struct-field access, not a fully-qualified table reference,
+        // so the analyzer must not emit "Unknown table or alias 'c.value'".
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "payload")],
+            functions: [Function("unnest", "array")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT c.value.label FROM items a CROSS JOIN unnest(a.payload) c",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 'c.value'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnTableAlias_DoesNotWarn()
+    {
+        // Same disambiguation for a real-table alias: `t.col.field` must not
+        // warn even when `t` is a non-opaque table — there's no struct-field
+        // metadata to validate against statically, so we under-warn rather
+        // than false-positive.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("things", "props")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT t.props.label FROM things t", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 't.props'"));
+    }
+
+    [Fact]
+    public void Analyze_BareTvfAlias_AsValue_Warns()
+    {
+        // The exact reproduction: `image_draw_bounding_boxes(file, c)`
+        // where `c` is a TVF alias — meant to be `c.value`. The runtime
+        // throws "Name 'c' is not a declared variable in scope and is
+        // not a column in the current row." The analyzer should surface
+        // a clearer "use c.<column>" warning so the bug is caught at
+        // edit time rather than after a 20-second query setup.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file")],
+            functions: [Function("unnest", "array"), Function("image_draw_bounding_boxes", "img", "detections")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT image_draw_bounding_boxes(file, c) FROM items a CROSS JOIN unnest(a.file) c",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("'c' is a table or subquery alias"));
+    }
+
+    [Fact]
+    public void Analyze_LetBindingInTvfArg_DoesNotWarn()
+    {
+        // Regression: `unnest(classes)` where `classes` is a LET binding
+        // declared in the same SELECT. LET names are tracked in the
+        // analyzer's opaque-aliases set (for the "Unknown column"
+        // suppression), but they're values — referencing them bare is
+        // the intended use, not an alias-as-value misuse. The
+        // alias-as-value warning must skip them.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "file")],
+            functions: [Function("unnest", "array"), Function("yolox", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET classes = yolox(a.file), c.value "
+            + "FROM items a CROSS JOIN unnest(classes) c",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("'classes' is a table or subquery alias"));
+    }
+
+    [Fact]
+    public void Analyze_BareTableAlias_AsValue_Warns()
+    {
+        // Same disambiguation for a non-opaque (regular table) alias:
+        // `SELECT t FROM users t` references `t` as a value, which
+        // engines that don't support row-as-composite reject. Warning
+        // mirrors the TVF case.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT t FROM users t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("'t' is a table or subquery alias"));
+    }
+
+    [Fact]
+    public void Analyze_ThreePartReference_UnknownFirstSegment_StillWarns()
+    {
+        // Unrelated: when the first segment is not a known alias, the
+        // 3-part form keeps its `schema.table.column` reading and the
+        // qualifier check still fires. Guards against the disambiguation
+        // accidentally swallowing real typos.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT bogus.users.id FROM users", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 'bogus.users'"));
+    }
+
     /// <summary>
     /// An unaliased function source (e.g. <c>FROM RANGE(0, 100)</c>) must also
     /// suppress unknown-column warnings for its output columns.

@@ -11,7 +11,7 @@ The first is handled by [`CommonSubexpressionEliminator`](../../src/DatumV/Execu
 
 ## Why It's Worth Doing
 
-A SQL writer may legitimately repeat an expression — once in `WHERE`, once in `SELECT`, once in `ORDER BY` — because the language doesn't offer a clean way to bind a per-row value across clauses. ([`LET` bindings](../sql/let-bindings.md) work inside a single `SELECT` projection, but `WHERE` runs before they exist.) Without CSE, the expression evaluates once per clause per row.
+A SQL writer may legitimately repeat an expression — once in `WHERE`, once in `SELECT`, once in `ORDER BY` — because the language doesn't always offer a clean way to bind a per-row value across clauses. [`LET` bindings](../sql/let-bindings.md) live in the `SELECT` projection but the planner lifts referenced LETs into upstream rungs so they're visible to `WHERE` predicates and to lateral function-source arguments (e.g. `CROSS JOIN unnest(classes)` where `classes` is a LET). Outside those lifted sites the LET name doesn't exist as a column, so CSE remains the answer for genuine cross-clause sharing. Without CSE, the expression evaluates once per clause per row.
 
 For pure scalar work this is a constant-factor cost. For model invocations it's a correctness concern: the engine guarantees *same call site → one evaluation per row*, even for nondeterministic models, because users naturally treat `models.phi3('test')` as a referentially transparent reference rather than a fresh dispatch.
 

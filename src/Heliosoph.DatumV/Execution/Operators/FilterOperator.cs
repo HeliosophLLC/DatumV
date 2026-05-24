@@ -57,6 +57,17 @@ public sealed class FilterOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
+        // Filter is non-monotonic: it drops rows. A downstream LimitOperator
+        // sets context.RowLimit so expensive producers can short-circuit, but
+        // that's a 1:1 contract — if Filter forwards RowLimit=N to its child
+        // and then drops half the rows, the limit consumer sees ~N/2 rows
+        // instead of N. Strip the hint so child producers pump until they're
+        // genuinely exhausted; the downstream Limit still cuts at N.
+        if (context.RowLimit is not null)
+        {
+            context = context.WithRowLimit(null);
+        }
+
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         RowCopyOutputWriter writer = new(context);
 

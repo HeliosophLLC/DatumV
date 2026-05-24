@@ -80,6 +80,40 @@ public sealed class LanguageServerManifest
     /// rows). <see langword="null"/> when no dataset catalog is attached.
     /// </summary>
     public IReadOnlyList<DatasetEntry>? Datasets { get; init; }
+
+    /// <summary>
+    /// Named composite types from the engine's
+    /// <c>NamedTypeRegistry</c> — the reusable struct shapes (e.g.
+    /// <c>LabeledDetection</c>, <c>BoundingBox</c>) that model contracts
+    /// reference by name. Each entry pairs the canonical name with the
+    /// fully-expanded <c>Struct&lt;…&gt;</c> annotation string so the
+    /// language server can resolve named-type references encountered in
+    /// function return types and column kinds into their constituent
+    /// fields without taking a reference on the engine assembly.
+    /// <see langword="null"/> when the manifest is built without the
+    /// engine-side registry attached (offline JSON manifests today carry
+    /// this section so cross-build editor tooling keeps working).
+    /// </summary>
+    public IReadOnlyList<NamedTypeEntry>? NamedTypes { get; init; }
+}
+
+/// <summary>
+/// A single named composite type surfaced through the manifest. Mirrors
+/// the engine-side <c>NamedTypeDefinition</c> stripped down to what the
+/// language server needs: a canonical name (case-insensitive on lookup)
+/// and the fully-expanded <c>Struct&lt;…&gt;</c> annotation that
+/// <see cref="StructTypeAnnotation.TryParse"/> can crack into field
+/// shapes. Field types that are themselves named types appear as bare
+/// names in <see cref="Description"/> and resolve through another lookup
+/// against the same list.
+/// </summary>
+public sealed class NamedTypeEntry
+{
+    /// <summary>Canonical name (e.g. <c>"LabeledDetection"</c>).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Fully-expanded <c>Struct&lt;name: Kind, …&gt;</c> annotation.</summary>
+    public required string Description { get; init; }
 }
 
 /// <summary>

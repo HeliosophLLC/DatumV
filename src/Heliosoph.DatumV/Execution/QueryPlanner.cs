@@ -460,6 +460,14 @@ public sealed class QueryPlanner
             SourceAliases.CollectSourceAliases(statement.From.Source, leftAliases);
         }
 
+        // Hoisted above the join loop because LiftLetBindingsForLateral may
+        // mutate it: lifting a LET to feed a lateral function source turns
+        // the binding's body into a pass-through ColumnReference so the
+        // downstream projection still resolves the name. Subsequent passes
+        // (LET-from-WHERE, projection-side LET handling) consume the
+        // post-lateral version.
+        IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
+
         // 2. Apply JOINs with predicate pushdown.
         List<Expression>? pendingPredicates = null;
 
@@ -508,11 +516,30 @@ public sealed class QueryPlanner
             // Pre-plan all join sources so we can inspect estimated row counts.
             List<(JoinClause Join, QueryOperator Operator, HashSet<string> Aliases)> plannedJoins = new(statement.Joins.Count);
 
-            foreach (JoinClause join in statement.Joins)
+            foreach (JoinClause originalJoin in statement.Joins)
             {
-                QueryOperator rightSide = _sourcePlanner.PlanSource(join.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
+                JoinClause currentJoin = originalJoin;
+
+                // LET-name lifting for lateral function sources. A query like
+                // `SELECT LET classes = models.foo(file), ... FROM t CROSS JOIN
+                // unnest(classes) c` needs the LET evaluated per driving row so
+                // the unnest's `classes` argument can resolve. We wrap `source`
+                // in a staircase of MIO/RowEnricher rungs and rewrite the
+                // function source's arguments to point at the synthetic
+                // columns. Without this the source planner sees `classes` as
+                // an unknown column at runtime.
+                if (currentJoin.IsLateral
+                    && currentJoin.Source is FunctionSource lateralFn
+                    && userLetBindings is { Count: > 0 })
+                {
+                    (source, FunctionSource rewrittenSource, userLetBindings) =
+                        LiftLetBindingsForLateral(source, lateralFn, userLetBindings);
+                    currentJoin = currentJoin with { Source = rewrittenSource };
+                }
+
+                QueryOperator rightSide = _sourcePlanner.PlanSource(currentJoin.Source, allReferencedColumns, hasJoins, commonTableExpressionOperators);
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
-                SourceAliases.CollectSourceAliases(join.Source, rightAliases);
+                SourceAliases.CollectSourceAliases(currentJoin.Source, rightAliases);
                 // Demote implicit-LATERAL when the FunctionSource has no column
                 // references in its arguments — semantically identical to a
                 // non-lateral join, but a regular hash join is O(N+M) where the
@@ -520,7 +547,7 @@ public sealed class QueryPlanner
                 // The parser conservatively flags every `JOIN <fn>(...)` as
                 // lateral; this strips the flag for genuinely uncorrelated TVF
                 // calls so JoinReorderer + the hash/merge join planner kick in.
-                plannedJoins.Add((DemoteUncorrelatedLateral(join), rightSide, rightAliases));
+                plannedJoins.Add((DemoteUncorrelatedLateral(currentJoin), rightSide, rightAliases));
             }
 
             // When ORDER BY has a single qualified column reference, check whether
@@ -678,7 +705,8 @@ public sealed class QueryPlanner
         }
 
         // 3. Apply remaining WHERE predicates that could not be pushed down.
-        IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
+        // userLetBindings was declared above the join loop so LiftLetBindingsForLateral
+        // could mutate it; we pick up whatever the lateral pass produced.
         if (pendingPredicates is not null && pendingPredicates.Count > 0)
         {
             Expression remaining = PredicateUtilities.CombineWithAnd(pendingPredicates);
@@ -1560,6 +1588,183 @@ public sealed class QueryPlanner
         }
 
         return (source, rewrittenPredicate, updatedBindings);
+    }
+
+    /// <summary>
+    /// Lifts SELECT-clause LET bindings referenced by a lateral function source's
+    /// argument expressions. Mirrors <see cref="LiftLetBindingsForWhere"/> but for
+    /// the FROM/JOIN side: lets a writer say
+    /// <c>CROSS JOIN unnest(classes) c</c> where <c>classes</c> is a LET binding
+    /// in the projection, producing one ModelInvocation per driving row that
+    /// both the unnest source and the projection-side LET can share.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Returns a wrapped left side (with a staircase of MIO/RowEnricher rungs for
+    /// each lifted LET, in topo-order) plus a rewritten <see cref="FunctionSource"/>
+    /// whose argument expressions reference the synthetic columns the staircase
+    /// emits. The lifted LET bindings become pass-through ColumnReferences so the
+    /// downstream projection still resolves them by name (but the "evaluation" is
+    /// just a column read).
+    /// </para>
+    /// <para>
+    /// Synthetic prefix is <c>__let_{n}_lat</c> — distinct from the WHERE pass's
+    /// <c>__let_{n}_pre</c> so the two passes can stack on the same binding
+    /// without name collisions.
+    /// </para>
+    /// </remarks>
+    private (QueryOperator Left, FunctionSource RewrittenSource, IReadOnlyList<LetBinding>? LetBindings)
+        LiftLetBindingsForLateral(
+            QueryOperator left,
+            FunctionSource lateralSource,
+            IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null || letBindings.Count == 0)
+        {
+            return (left, lateralSource, letBindings);
+        }
+
+        // Step 1: which LET names do the lateral source's arguments reference?
+        // Destructured LETs are skipped — their names live on the destructure
+        // pattern, not Name; lateral lifting of destructured LETs isn't
+        // supported today.
+        HashSet<string> allLetNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, LetBinding> bindingByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (LetBinding b in letBindings)
+        {
+            if (b.Destructure is not null) continue;
+            allLetNames.Add(b.Name);
+            bindingByName[b.Name] = b;
+        }
+
+        HashSet<string> liftedNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Expression arg in lateralSource.Arguments)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(arg))
+            {
+                if (tableName is null && allLetNames.Contains(columnName))
+                {
+                    liftedNames.Add(columnName);
+                }
+            }
+        }
+
+        if (liftedNames.Count == 0)
+        {
+            return (left, lateralSource, letBindings);
+        }
+
+        // Step 2: transitive closure on LET-references-LET.
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (string n in liftedNames.ToArray())
+            {
+                LetBinding b = bindingByName[n];
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(b.Expression))
+                {
+                    if (tableName is null && allLetNames.Contains(columnName)
+                        && liftedNames.Add(columnName))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Step 3: validate. Aggregate/window bodies can't feed a lateral
+        // source — they're computed after the join.
+        foreach (string n in liftedNames)
+        {
+            LetBinding b = bindingByName[n];
+            if (PredicateUtilities.ExpressionContainsAggregate(b.Expression, _functionRegistry))
+            {
+                throw new InvalidOperationException(
+                    $"LET binding '{n}' is referenced from a LATERAL function source but its body " +
+                    $"contains an aggregate function. Aggregates are computed after the join — " +
+                    $"they cannot feed a lateral source.");
+            }
+            if (WindowRewriter.ExpressionContainsWindowFunction(b.Expression))
+            {
+                throw new InvalidOperationException(
+                    $"LET binding '{n}' is referenced from a LATERAL function source but its body " +
+                    $"contains a window function. Window functions are computed after the join — " +
+                    $"they cannot feed a lateral source.");
+            }
+        }
+
+        // Step 4: topo-order. Inner deps first.
+        Dictionary<string, Expression> hoists = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string n in liftedNames)
+        {
+            hoists[n] = bindingByName[n].Expression;
+        }
+        List<List<string>> levels = HoistDependencyOrdering.OrderByDependency(hoists);
+
+        // Step 5: synthetic column names + staircase.
+        Dictionary<string, string> nameToSynth = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string n in liftedNames)
+        {
+            nameToSynth[n] = $"__let_{n}_lat";
+        }
+
+        foreach (List<string> level in levels)
+        {
+            List<RowEnrichment> enrichments = new();
+            foreach (string n in level)
+            {
+                LetBinding b = bindingByName[n];
+                Expression rewrittenBody = LetBindingLifter.ReplaceLetNameRefs(b.Expression, nameToSynth);
+
+                if (rewrittenBody is FunctionCallExpression fn
+                    && string.Equals(fn.SchemaName, ModelInvocationHoister.ModelSchema, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_catalog.Models is null)
+                    {
+                        throw new InvalidOperationException(
+                            $"LET binding '{n}' calls a model but no ModelCatalog is configured.");
+                    }
+                    left = LetBindingLifter.BuildSingleMioForLiftedLet(left, fn, nameToSynth[n], _catalog.Models);
+                }
+                else
+                {
+                    if (_catalog.Models is not null)
+                    {
+                        (left, rewrittenBody) =
+                            ModelInvocationHoister.HoistModelCallsFromExpression(
+                                left, rewrittenBody, _catalog.Models);
+                    }
+                    enrichments.Add(new RowEnrichment(nameToSynth[n], rewrittenBody));
+                }
+            }
+            if (enrichments.Count > 0)
+            {
+                left = new RowEnricherOperator(left, enrichments);
+            }
+        }
+
+        // Step 6: rewrite the lateral source's argument expressions.
+        Expression[] rewrittenArgs = new Expression[lateralSource.Arguments.Count];
+        for (int i = 0; i < lateralSource.Arguments.Count; i++)
+        {
+            rewrittenArgs[i] = LetBindingLifter.ReplaceLetNameRefs(lateralSource.Arguments[i], nameToSynth);
+        }
+        FunctionSource rewrittenSource = lateralSource with { Arguments = rewrittenArgs };
+
+        // Step 7: lifted LETs become pass-through references so the downstream
+        // projection still names them but the evaluation is a column read.
+        List<LetBinding> updatedBindings = new(letBindings.Count);
+        foreach (LetBinding b in letBindings)
+        {
+            updatedBindings.Add(b.Destructure is null && liftedNames.Contains(b.Name)
+                ? b with { Expression = new ColumnReference(TableName: null, ColumnName: nameToSynth[b.Name]) }
+                : b);
+        }
+
+        return (left, rewrittenSource, updatedBindings);
     }
 
 

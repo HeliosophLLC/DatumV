@@ -995,6 +995,27 @@ public static partial class SqlParser
                      ToSpan(open))))
             .Try()
             .Or(
+                // Postfix `.field` for deep struct-field access. Lowers
+                // to <c>IndexAccessExpression(e, ['field'])</c> so the
+                // existing struct-by-name accessor path (which handles
+                // <c>struct['field']</c>) covers both forms. The 3-part
+                // ColumnReference primary parses up to <c>a.b.c</c>
+                // greedily, so this postfix only fires for the 4th+ dot
+                // (e.g. <c>c.value.bbox.h</c>) — earlier segments stay
+                // in the ColumnReference for schema/table/column
+                // resolution.
+                (from dot in Token.EqualTo(SqlToken.Dot)
+                 from fieldName in PostDotColumnNameToken
+                 select (Func<Expression, Expression>)(e =>
+                     new IndexAccessExpression(
+                         e,
+                         (IReadOnlyList<Expression>)new[]
+                         {
+                             (Expression)new LiteralExpression(GetTokenText(fieldName)),
+                         },
+                         ToSpan(dot))))
+                .Try())
+            .Or(
                 from cc in Token.EqualTo(SqlToken.DoubleColon)
                 from targetType in SP.Ref(() => TypeNameParser!)
                 select (Func<Expression, Expression>)(e =>

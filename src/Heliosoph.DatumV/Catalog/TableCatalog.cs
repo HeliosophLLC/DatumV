@@ -1216,6 +1216,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             throw new PreFlightRequiredException(preflight);
         }
 
+        // Plan-time scope-aware column-reference validation: catches the
+        // "alias used as value", "unknown alias in qualifier", and
+        // "unknown unqualified column" failure classes before any
+        // operator is built. Pre-inliner so UDF bodies stay opaque
+        // (their column references are visible to the UDF's own
+        // validation, not the caller's). Conservative — when a scope
+        // contains an opaque source (TVF, subquery) the validator
+        // skips unqualified-column existence checks rather than risk
+        // a false positive.
+        new QueryScopeValidator(this, Functions).Validate(permuted);
+
         QueryExpression inlined = UdfInliner.Inline(permuted, Udfs, SearchPath, Procedures);
         QueryPlanner planner = new(this, Functions);
         QueryOperator op = planner.Plan(inlined);

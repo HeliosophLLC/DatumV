@@ -85,6 +85,20 @@ public sealed class LateralJoinOperator : QueryOperator
     /// <inheritdoc/>
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
+        // Lateral join is not 1:1 with its driving side: each driving row
+        // produces 0..N output rows. A downstream LimitOperator sets
+        // context.RowLimit to let expensive producers (e.g. MIO above the
+        // driving scan) short-circuit. Forwarding that hint unchanged is
+        // unsafe in both directions — the driving side would stop after
+        // RowLimit driving rows even though a single one might fan out into
+        // many output rows, and a downstream filter could discard most of
+        // them. Strip so the driving side pumps until exhausted; the
+        // downstream Limit still cuts at the right place.
+        if (context.RowLimit is not null)
+        {
+            context = context.WithRowLimit(null);
+        }
+
         Pool pool = context.Pool;
         ExpressionEvaluator evaluator = context.CreateEvaluator();
         JoinOutputWriter writer = new(context);

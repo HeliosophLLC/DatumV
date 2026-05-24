@@ -172,6 +172,18 @@ namespace Heliosoph.DatumV.Models;
 /// or any other entry whose canonical weights file isn't expressible
 /// as a path relative to the catalog's model directory.
 /// </param>
+/// <param name="OutputKindLabel">
+/// User-written return-type annotation preserved verbatim from
+/// <c>CREATE MODEL ... RETURNS &lt;annotation&gt;</c>, e.g.
+/// <c>"Array&lt;LabeledDetection&gt;"</c> or
+/// <c>"Struct&lt;a: Int32, b: String&gt;"</c>. Lets the manifest
+/// renderer surface the original named-type identity rather than the
+/// flattened <c>Array&lt;Struct&gt;</c> form the <see cref="OutputKind"/>
+/// enum + <see cref="OutputIsArray"/> bit would produce. Built-in models
+/// leave this <see langword="null"/> — they declare their output via
+/// <see cref="OutputKind"/> + <see cref="OutputStructFields"/> and the
+/// manifest renderer reconstructs a label.
+/// </param>
 public sealed record ModelCatalogEntry(
     string Name,
     string Backend,
@@ -195,7 +207,8 @@ public sealed record ModelCatalogEntry(
     string? FingerprintPath = null,
     bool OutputIsArray = false,
     IReadOnlyList<ModelParameterInfo>? ParameterInfos = null,
-    IReadOnlyList<ModelStructFieldInfo>? OutputStructFields = null);
+    IReadOnlyList<ModelStructFieldInfo>? OutputStructFields = null,
+    string? OutputKindLabel = null);
 
 /// <summary>
 /// Per-parameter metadata for a registered model — used by the language

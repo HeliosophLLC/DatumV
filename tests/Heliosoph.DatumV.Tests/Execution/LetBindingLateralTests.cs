@@ -233,4 +233,87 @@ public sealed class LetBindingLateralTests : ServiceTestBase
             leftMio.OutputColumnName.EndsWith("_lat", System.StringComparison.Ordinal),
             $"Lateral pass fired spuriously: MIO '{leftMio.OutputColumnName}' uses _lat suffix on no-LET query.");
     }
+
+    /// <summary>
+    /// Repro for the user-reported "file is not a declared variable in scope and
+    /// is not a column in the current row" failure: multi-column driving table,
+    /// aliased lateral unnest (no LATERAL keyword), and a projection that
+    /// references a driving-side column from INSIDE a function call alongside
+    /// the LET name. Mirrors the shape of the dataset query:
+    /// <c>image_draw_bounding_boxes(file, classes)</c>.
+    /// </summary>
+    [Fact]
+    public async Task UnqualifiedColumnInProjectionFn_ResolvesWithLetLifted()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["file_name", "csv", "width"],
+            new object?[] { "row0", "a,b", 100 });
+        catalog.Models = BuildCatalogWithSplit();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET parts = models.split(csv), " +
+            "concat(csv, '|', value) AS combined, " +
+            "c.value " +
+            "FROM t " +
+            "CROSS JOIN unnest(parts) c",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        Assert.Equal("a,b|a", rows[0]["combined"].AsString(scratch));
+        Assert.Equal("a,b|b", rows[1]["combined"].AsString(scratch));
+    }
+
+    /// <summary>
+    /// Regression for the LET-lifted lateral shape used by the user's
+    /// <c>SELECT LET classes = models.yolox_darknet(file), c.value
+    /// FROM coco_val2017 a CROSS JOIN unnest(classes) c
+    /// WHERE c.value.label = 'person' LIMIT 20</c> query, where the result
+    /// came back short of LIMIT (15 instead of 20).
+    ///
+    /// Cause: LimitOperator pushes <c>context.RowLimit</c> down so expensive
+    /// producers (MIO) can short-circuit. That hint is a 1:1 contract and
+    /// only valid through row-count-preserving operators. The LET-lifting
+    /// pass puts MIO on the driving side of the LateralJoin, and neither
+    /// FilterOperator (reduces) nor LateralJoinOperator (fans out per driving
+    /// row) strip RowLimit before recursing — so MIO halts after rowLimit
+    /// *driving* rows, the filter throws most of the unnested fan-out away,
+    /// and the final LIMIT sees fewer rows than requested.
+    ///
+    /// Setup: 50 driving rows alternating between csv values that do/don't
+    /// contain 'target'. Each row's split() unnests to 3 elements; the filter
+    /// keeps only value='target'. Yielding 10 target rows needs ~20 driving
+    /// rows. With the bug, MIO stops at 10 driving rows → 5 'target' hits →
+    /// LIMIT returns 5. Note that the inline form
+    /// (<c>CROSS JOIN unnest(models.split(csv))</c>) does NOT trip the bug
+    /// because the inline-model hoister places MIO inside the lateral
+    /// subtree, where it's re-executed per driving row and never sees a
+    /// RowLimit > 1.
+    /// </summary>
+    [Fact]
+    public async Task LimitPushdown_LetLiftedLateralWithFilter_DoesNotUnderdeliver()
+    {
+        object?[][] tableRows = new object?[50][];
+        for (int i = 0; i < tableRows.Length; i++)
+        {
+            tableRows[i] = new object?[] { i % 2 == 0 ? "x,y,target" : "x,y,z" };
+        }
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["csv"],
+            tableRows);
+        catalog.Models = BuildCatalogWithSplit();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET parts = models.split(csv), c.value " +
+            "FROM t " +
+            "CROSS JOIN unnest(parts) c " +
+            "WHERE c.value = 'target' " +
+            "LIMIT 10",
+            catalog);
+
+        Assert.Equal(10, rows.Count);
+    }
+
 }
