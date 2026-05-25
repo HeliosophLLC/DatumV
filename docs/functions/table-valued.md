@@ -40,6 +40,8 @@ Enumerates frames of a video as lazy `VideoFrame` handles. Each output row is `(
 
 `start_frame` defaults to 0; `stride` to 1; `max_frames` defaults to the container's reported frame count (when known — falls back to "all frames" semantics where the function emits handles until the source returns end-of-stream).
 
+`frame_index` is **0-based** — frame 0 is the first frame of the container. This is the FFmpeg / ffprobe / video-tooling convention and deliberately departs from PostgreSQL's 1-based ordinality (`generate_series`, `WITH ORDINALITY`, array subscripts): aligning with PG would force `start_frame` and `max_frames` to disagree with every external video tool the user compares against. If a recipe wants a 1-based row number that's distinct from the underlying frame address, layer `ROW_NUMBER() OVER ()` over the output.
+
 ```sql
 -- All frames of a stored video, decoded at source resolution
 SELECT video_frame_to_image(f.frame) AS img
