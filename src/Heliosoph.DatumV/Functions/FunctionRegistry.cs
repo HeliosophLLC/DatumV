@@ -1116,6 +1116,8 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.ReadCsvFunction>();
         registry.RegisterTableValued<TableValued.OpenCsvFunction>();
         registry.RegisterTableValued<TableValued.OpenCsvTypedFunction>();
+        registry.RegisterTableValued<TableValued.OpenJsonFunction>();
+        registry.RegisterTableValued<TableValued.OpenJsonLinesFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxImagesFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxLabelsFunction>();
         registry.RegisterTableValued<TableValued.OpenCifar10Function>();

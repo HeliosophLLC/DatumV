@@ -276,6 +276,66 @@ SELECT *
 FROM open_csv_typed($manifest_path);
 ```
 
+### open_json
+
+`open_json(path)` -> Rows
+
+Opens a JSON file with **plan-time type inference** and yields typed, named rows. Accepts two root shapes — a single object (1 row) or an array of objects (N rows) — and rejects primitive or array-of-non-object roots. The schema is the union of keys across rows with per-column kinds inferred from observed values.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time (literal in source, or a `$parameter` reference the parameter binder has substituted). The validator parses the document, runs the shared JSON type scanner over every row, and builds a real `Schema` — so `SELECT id, name FROM open_json(...)` type-checks against the actual keys. Calling with a non-constant argument throws — inline the path or pass it as a bound parameter.
+
+**Type inference.** Each column's kind is the most-specific family that holds for every non-null value: integers narrow to the smallest fitting width (`UInt8`, `Int16`, …, `Int64`, `UInt128`, `Int128`); fractional numbers narrow to `Float32` when every value round-trips through single precision, else `Float64`; pure JSON-`true`/`false` columns become `Boolean`; pure JSON-string columns become `String`. Columns whose values mix scalar families across rows, or hold nested objects / arrays, fall through to `Json` so the original shape stays queryable.
+
+**Nullability.** JSON `null` and key absence are treated identically — a column present in some rows and missing in others becomes nullable.
+
+**Memory.** The document is parsed in full once at plan time (scan) and again at execute time (emit), so peak memory is one document's worth of parsed tape. For multi-GB feeds prefer `open_jsonl`, which streams line-by-line.
+
+Compressed inputs (`.json.gz`, `.json.bz2`) route through the same descriptor as the file-format ingest path, so a gzipped JSON file works without manual decompression.
+
+```sql
+-- Typed columns straight from a root-array document
+SELECT id, name, score
+FROM open_json('D:\datasets\users.json');
+
+-- Nested values land as Json — query them with the json_* function family
+SELECT id, json_extract_path(metadata, 'tags', 0) AS first_tag
+FROM open_json('D:\datasets\events.json');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_json($feed_path);
+```
+
+### open_jsonl
+
+`open_jsonl(path)` -> Rows
+
+Opens a newline-delimited JSON file (`.jsonl` / `.ndjson`) with **plan-time type inference** and yields one row per non-empty line. Each line is one independent JSON value. The file's shape is locked on the first non-empty line:
+
+- If line 1 is a JSON object → **object-mode**. Schema is the union of keys across all lines with narrowed per-column kinds (same inference as `open_json`).
+- If line 1 is any other JSON value (array, string, number, true/false, null) → **single-column-mode**. Schema is a single `value Json` column; each line lands as one `Json` cell.
+
+Mid-file shape mismatches (an object line in a single-column-mode file, or a non-object line in an object-mode file) throw with the offending line number. Empty / whitespace-only lines are skipped.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time. The validator walks the file once to detect shape and infer the schema — same authoritative inference path the JSONL ingester uses. Calling with a non-constant argument throws.
+
+**Streaming.** Both the scan pass and the emit pass walk lines one at a time, parsing each as its own JSON document and disposing it before reading the next. Peak memory stays bounded to a single line's parsed shape regardless of file size — preferred over `open_json` for large feeds.
+
+```sql
+-- Typed columns from an object-mode JSONL log
+SELECT timestamp, user_id, event
+FROM open_jsonl('D:\logs\events.jsonl')
+WHERE event = 'login';
+
+-- Single-column-mode: each line is a JSON array, kept whole
+SELECT json_array_length(value) AS row_width
+FROM open_jsonl('D:\datasets\rows.jsonl');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_jsonl($feed_path);
+```
+
 ### open_fits_hdus
 
 `open_fits_hdus(path)` -> Rows

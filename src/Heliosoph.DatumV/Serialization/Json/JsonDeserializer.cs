@@ -36,12 +36,24 @@ public sealed class JsonDeserializer : IFormatDeserializer
     private const int DefaultBatchSize = 1024;
 
     private readonly FileFormatDescriptor _descriptor;
+    private readonly JsonScanResult? _precomputedScan;
     private PassMetrics? _scanMetrics;
 
     /// <summary>Creates a JSON deserializer for the given source descriptor.</summary>
     public JsonDeserializer(FileFormatDescriptor descriptor)
     {
         _descriptor = descriptor;
+    }
+
+    /// <summary>
+    /// Creates a deserializer from a pre-computed <see cref="JsonScanResult"/>.
+    /// Use when the scan was performed separately (e.g. at plan time by a TVF)
+    /// so the emit pass skips redoing schema inference.
+    /// </summary>
+    public JsonDeserializer(FileFormatDescriptor descriptor, JsonScanResult precomputedScan)
+    {
+        _descriptor = descriptor;
+        _precomputedScan = precomputedScan;
     }
 
     /// <inheritdoc/>
@@ -59,16 +71,32 @@ public sealed class JsonDeserializer : IFormatDeserializer
             stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         JsonElement root = document.RootElement;
 
-        // Scan pass: discover schema before emitting any rows.
-        Stopwatch scanSw = Stopwatch.StartNew();
-        JsonScanResult scan = JsonTypeScanner.Scan(EnumerateRows(root, _descriptor.FilePath), cancellationToken);
-        scanSw.Stop();
-        _scanMetrics = new PassMetrics(
-            RowCount: scan.RowCount,
-            BatchCount: 0,
-            BytesRead: bytesRead,
-            ArenaBytesWritten: 0,
-            Elapsed: scanSw.Elapsed);
+        // Scan pass: discover schema before emitting any rows. Skipped when a
+        // pre-computed scan was supplied to the constructor (e.g. by open_json
+        // at plan time, where the schema must be known before execution).
+        JsonScanResult scan;
+        if (_precomputedScan is not null)
+        {
+            scan = _precomputedScan;
+            _scanMetrics = new PassMetrics(
+                RowCount: scan.RowCount,
+                BatchCount: 0,
+                BytesRead: bytesRead,
+                ArenaBytesWritten: 0,
+                Elapsed: scan.Elapsed);
+        }
+        else
+        {
+            Stopwatch scanSw = Stopwatch.StartNew();
+            scan = JsonTypeScanner.Scan(EnumerateRows(root, _descriptor.FilePath), cancellationToken);
+            scanSw.Stop();
+            _scanMetrics = new PassMetrics(
+                RowCount: scan.RowCount,
+                BatchCount: 0,
+                BytesRead: bytesRead,
+                ArenaBytesWritten: 0,
+                Elapsed: scanSw.Elapsed);
+        }
 
         if (scan.ColumnNames.Length == 0) yield break;
 
