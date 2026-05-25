@@ -462,6 +462,97 @@ FROM open_fits_table($archive, 'CATALOG');
 
 **Ingest path.** Dropping a `.fits` file into the dataset pipeline lands it through `FitsFileFormat`, which emits the same shape `open_fits_hdus` does — the most informative default for an unknown file. Recipes that want pixel previews or catalog rows directly should use the corresponding TVF inside an SQL recipe.
 
+### open_h5_meta
+
+`open_h5_meta(path)` -> Rows | QU: 1
+
+Opens an HDF5 file and yields **one row per group and dataset** in the file's tree, including the root. The interrogation TVF for HDF5: read this first to see what's inside an unknown file before pulling rows out with `open_h5_dataset`.
+
+HDF5 files are hierarchical — datasets live at paths inside groups, like a tiny in-file filesystem. ML pipelines, Python tooling, and scientific software all use this structure heavily (e.g. `/embeddings/train/x`, `/metadata/instrument/filter`). The walker visits every node depth-first, so the row stream mirrors the file's logical layout.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `path` | `STRING` | Full in-file path, slash-separated. Root is `/`. |
+| `kind` | `STRING` | `'group'` or `'dataset'` |
+| `element_kind` | `STRING?` | Dataset element type name (e.g. `'Float32'`, `'Int64'`, `'String'`). NULL for groups. `'Unknown'` for datasets whose dtype isn't supported in v1. |
+| `dimensions` | `INT64[]?` | Dataset shape. `[N]` for 1-D, `[R, C]` for 2-D, etc. Empty array for scalar datasets. NULL for groups. |
+| `is_scalar` | `BOOLEAN` | TRUE for scalar (rank-0) datasets, FALSE otherwise. FALSE for groups. |
+| `is_supported` | `BOOLEAN` | TRUE when `open_h5_dataset` can read this dataset in v1. FALSE for compound, opaque, reference, bit-field, and enumerated dtypes. |
+| `attribute_count` | `INT32` | Number of attributes attached to this object. |
+| `attributes` | `JSON` | Array of `{name, kind, value}` objects, materialised so callers can filter / extract without going back to the file. |
+
+**Supported element kinds (v1):** signed and unsigned 8/16/32/64-bit integers, IEEE single / double floats, fixed-width and variable-length strings, and booleans. Compound dtypes (HDF5 "struct" cells) and the other rare classes show up with `element_kind = 'Unknown'` and `is_supported = false` so recipes can skip them cleanly.
+
+**Attributes column.** Every HDF5 object can carry metadata attributes — units, descriptions, instrument state, processing history. The TVF reads them eagerly into managed primitives, then renders as a JSON array so SQL can query them with the same JSON operators used for any other JSON column.
+
+```sql
+-- Survey a file: what does it contain?
+SELECT path, kind, element_kind, dimensions, attribute_count
+FROM open_h5_meta('/data/embeddings.h5');
+
+-- Find every supported dataset whose name ends in 'flux'
+SELECT path, dimensions
+FROM open_h5_meta('/data/spectra.h5')
+WHERE kind = 'dataset'
+  AND is_supported
+  AND path LIKE '%/flux';
+
+-- Pull a specific attribute value from every dataset
+SELECT
+    path,
+    (SELECT attr->>'value' FROM jsonb_array_elements(attributes) AS attr
+     WHERE attr->>'name' = 'units') AS units
+FROM open_h5_meta('/data/spectra.h5')
+WHERE kind = 'dataset';
+```
+
+### open_h5_dataset
+
+`open_h5_dataset(path, dataset_path)` -> Rows | QU: 1
+
+Opens a single HDF5 dataset by its in-file path and yields its rows with one typed column. The output schema is the dataset's real schema — the validator peeks the file at plan time to discover the element kind and shape, so projections type-check against actual data:
+
+```sql
+SELECT labels FROM open_h5_dataset('/data/cifar.h5', '/labels') WHERE labels > 0;
+```
+
+The `labels` column above is typed as `INT32` (or whatever the on-disk dtype really is) at plan time, not at first row.
+
+**Output shape.**
+
+| Source dataset | Yields |
+|---|---|
+| Scalar (rank-0) | One row, one cell with the scalar value |
+| 1-D, length N | N rows, one element per row |
+| 2-D, shape (R, C) | R rows, each carrying the C-element row slice as a typed array column |
+| 3-D and higher | Throws `NotSupportedException` at plan time. Projection semantics for higher-rank tensors need more thought before we pick one — a follow-up TVF (`open_h5_tensor`?) is the likely landing pad. |
+
+The output column is named after the dataset's leaf segment: `/labels` → column `labels`, `/spectra/flux` → column `flux`.
+
+**Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, looks up the dataset, and reads its dtype + dimensions to produce a real `Schema`. Calling with a non-constant argument throws — recipe writers must inline the paths or pass bound parameters.
+
+**Supported element kinds (v1):** same set as `open_h5_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, and strings (both fixed-width and variable-length). Compound dtypes throw `FunctionArgumentException` at validation; recipes can use `open_h5_meta` to detect them ahead of time.
+
+```sql
+-- 1-D labels column from a CIFAR-shaped file
+SELECT labels FROM open_h5_dataset('/data/cifar.h5', '/labels');
+
+-- 2-D embeddings: one row per training sample, embedding as a Float32 array
+SELECT idx.value AS sample_id, e.embeddings
+FROM range(0, 1000) AS idx
+JOIN open_h5_dataset('/data/embeddings.h5', '/train/x') AS e
+  ON idx.value < (SELECT COUNT(*) FROM open_h5_dataset('/data/embeddings.h5', '/train/x'));
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_h5_dataset($archive, '/labels');
+```
+
+**Performance.** v1 reads the entire dataset into memory at the start of execution, then iterates rows from the in-memory buffer. Fine for the typical ML dataset (tens to hundreds of MB); a chunked-streaming follow-up will land for files bigger than RAM. The downstream operator pipeline batches the row stream into the planner's standard batch size regardless of how we feed it.
+
+**Ingest path.** Dropping a `.h5` / `.hdf5` / `.hdf` file into the dataset pipeline lands it through `Hdf5FileFormat`, which emits the same shape `open_h5_meta` does. Magic-byte detection picks up extensionless or mislabelled HDF5 files too. Recipes that want specific dataset rows directly should use `open_h5_dataset` inside an SQL recipe.
+
 ## See Also
 
 - [Aggregate Functions](aggregate.md) -- grouping and reduction functions

@@ -1125,6 +1125,8 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenFitsHdusFunction>();
         registry.RegisterTableValued<TableValued.OpenFitsImagesFunction>();
         registry.RegisterTableValued<TableValued.OpenFitsTableFunction>();
+        registry.RegisterTableValued<TableValued.OpenH5MetaFunction>();
+        registry.RegisterTableValued<TableValued.OpenH5DatasetFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't
