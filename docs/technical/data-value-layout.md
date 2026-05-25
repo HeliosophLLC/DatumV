@@ -154,11 +154,23 @@ _p6        (bytes 24–27)  reserved
 
 The hash domain differs by storage shape because the hash-fast-path in `Equals` first checks `_flags` + `_charCount` (which encodes ndim in the high byte for multi-dim). Two multi-dim values with the same elements but different shapes (e.g. `[2,3]` vs `[3,2]`) share `_charCount` and `_flags`, so the hash must distinguish them — hashing the full block (which includes the shape prefix bytes) accomplishes that. Flat arrays carry no shape, so their hash domain is just the element bytes.
 
+This stamped-hash discussion is **primitive-only**. Reference-element arrays (`Array<String>`, `Array<Image>`) — flat or multi-dim — leave `_p4`/`_p5` zero and fall through to the no-cached-hash branch in `Equals`, which returns conservative-false for cross-arena comparison (matches 1-D reference-array behavior). Same-arena byte-identical values still compare equal via the offset/length fast path before the hash check, so `GROUP BY` on a same-arena column works; cross-arena dedup needs an explicit content key.
+
 **Flatten as descriptor slice.** `DataValue.SliceMultiDimAsFlat` converts multi-dim → flat without copying the element bytes: the new value's offset advances by `ShapePrefixByteCount`, length shrinks by the same amount, the `IsMultiDim` flag clears, and `_charCount` zeros (storeId preserved in the low byte for sidecar). The hash is recomputed over the element bytes only so the resulting flat value is indistinguishable in the hash-fast-path from one constructed via `FromArenaArray`. Surfaced at the SQL layer as `CAST(arr AS T[])`, where the target annotation `Array<T>` carries no shape and dropping the multi-dim shape is the only consistent reading.
 
 #### Sidecar-backed reference arrays (`IsArray | InSidecar`)
 
 The slot block in the sidecar follows the per-element `ArraySlot` layout (16 bytes: 64-bit offset + 40-bit length + per-element TypeId + codec discriminator). The container DataValue uses the same 64-bit offset / 40-bit length encoding to address the slot block itself; `_charCount.low` carries the sidecar storeId.
+
+**Multi-dim variant.** When `IsMultiDim` is set, the sidecar bytes addressed by `(offset, length)` start with an `int32 × ndim` shape prefix followed by the slot block:
+
+```
+[shape int32 × ndim][slot₀ 16B][slot₁ 16B]…[slotₙ₋₁ 16B]
+```
+
+`ndim` is in `_charCount.high`; `_charCount.low` still carries the storeId (the two byte halves don't collide). `length` covers both the prefix and the slot block. Element accessors (`AsStringArray`, `AsImageArray`) and `ElementCount` subtract `ShapePrefixByteCount` (= `4 × ndim`) before dividing by `ArraySlot.SizeBytes` to recover the slot count; `GetShape` reads the leading `int32[ndim]` directly. Encoders prepend the prefix atomically in `Encode{String,Image}ArrayToSidecar` so the slot block lands as one append.
+
+Multi-dim reference-element arrays are supported today for `String` and `Image`. `Audio`, `Video`, `Json`, `PointCloud`, `Mesh`, and `Struct` are 1-D only — they either lack a kind-specific multi-dim factory (`Struct`) or share a pre-existing 1-D encoder gap that gates multi-dim work (`Audio`, `Video`, `Json`, `PointCloud`), or have no 1-D form at all (`Mesh`).
 
 ### Inline string (`_flags == None`, `Kind == String` / `Json`)
 

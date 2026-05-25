@@ -147,4 +147,133 @@ public sealed class MultiDimPersistenceTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([1f, 2f, 3f, 4f],
             value.AsArraySpan<float>(registry: catalog.SidecarRegistry).ToArray());
     }
+
+    // ───────────────────── Multi-dim String[] (Slice A) ─────────────────────
+
+    [Fact]
+    public async Task Sidecar_String_2x2_RoundTripsShapeAndElements()
+    {
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (labels Array<String>(2,2))");
+        catalog.Plan("INSERT INTO t VALUES (['alpha', 'beta', 'gamma', 'delta'])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT labels FROM t", catalog);
+
+        Assert.Single(rows);
+        DataValue value = rows[0]["labels"];
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.String, value.Kind);
+        Assert.Equal(2, value.Ndim);
+        Assert.Equal([2, 2], value.GetShape(registry: catalog.SidecarRegistry).ToArray());
+        Assert.Equal(new[] { "alpha", "beta", "gamma", "delta" },
+            value.AsStringArray(store: null!, registry: catalog.SidecarRegistry));
+    }
+
+    [Fact]
+    public async Task Sidecar_String_2x3_MixedSizes_RoundTrip()
+    {
+        // Mixed-length strings (including empty and multi-byte UTF-8) exercise
+        // the per-element offset/length math after the shape prefix.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (labels Array<String>(2,3))");
+        catalog.Plan("INSERT INTO t VALUES (" +
+            "['the quick brown fox', '', 'short', 'α β γ', 'one', 'two'])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT labels FROM t", catalog);
+
+        DataValue value = rows[0]["labels"];
+        Assert.True(value.IsMultiDim);
+        Assert.Equal([2, 3], value.GetShape(registry: catalog.SidecarRegistry).ToArray());
+        Assert.Equal(new[] { "the quick brown fox", "", "short", "α β γ", "one", "two" },
+            value.AsStringArray(store: null!, registry: catalog.SidecarRegistry));
+    }
+
+    [Fact]
+    public async Task Sidecar_String_MultipleRows_PreserveShape()
+    {
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (labels Array<String>(2,2))");
+        catalog.Plan("INSERT INTO t VALUES (['a', 'b', 'c', 'd'])," +
+                                          " (['e', 'f', 'g', 'h'])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT labels FROM t", catalog);
+        Assert.Equal(2, rows.Count);
+
+        foreach (Row row in rows)
+        {
+            Assert.True(row["labels"].IsMultiDim);
+            Assert.Equal([2, 2], row["labels"].GetShape(registry: catalog.SidecarRegistry).ToArray());
+        }
+        Assert.Equal(new[] { "a", "b", "c", "d" },
+            rows[0]["labels"].AsStringArray(store: null!, registry: catalog.SidecarRegistry));
+        Assert.Equal(new[] { "e", "f", "g", "h" },
+            rows[1]["labels"].AsStringArray(store: null!, registry: catalog.SidecarRegistry));
+    }
+
+    // ───────────────────── Multi-dim UInt8[] (Slice B) ─────────────────────
+
+    [Fact]
+    public async Task Sidecar_UInt8_2x3_RoundTripsShapeAndElements()
+    {
+        // Byte arrays take the fixed-width-primitive encode path (RawArrayBytes
+        // returns [shape][elements] for arena multi-dim values) — no encoder
+        // change was needed for Slice B. AsUInt8Array / AsByteSpan skip the
+        // prefix on read.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (bytes Array<UInt8>(2,3))");
+        catalog.Plan("INSERT INTO t VALUES ([10, 20, 30, 40, 50, 60])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT bytes FROM t", catalog);
+
+        Assert.Single(rows);
+        DataValue value = rows[0]["bytes"];
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsByteArrayKind);
+        Assert.Equal(DataKind.UInt8, value.Kind);
+        Assert.Equal(2, value.Ndim);
+        Assert.Equal([2, 3], value.GetShape(registry: catalog.SidecarRegistry).ToArray());
+        Assert.Equal(6, value.ElementCount);
+        Assert.Equal(new byte[] { 10, 20, 30, 40, 50, 60 },
+            value.AsUInt8Array(store: null!, registry: catalog.SidecarRegistry));
+    }
+
+    [Fact]
+    public async Task Sidecar_UInt8_3D_2x2x2()
+    {
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (cube Array<UInt8>(2,2,2))");
+        catalog.Plan("INSERT INTO t VALUES ([0, 1, 2, 3, 4, 5, 6, 7])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT cube FROM t", catalog);
+        DataValue value = rows[0]["cube"];
+
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal([2, 2, 2], value.GetShape(registry: catalog.SidecarRegistry).ToArray());
+        Assert.Equal(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7 },
+            value.AsUInt8Array(store: null!, registry: catalog.SidecarRegistry));
+    }
+
+    [Fact]
+    public async Task Sidecar_UInt8_MultipleRows_PreserveShape()
+    {
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (bytes Array<UInt8>(2,2))");
+        catalog.Plan("INSERT INTO t VALUES ([1, 2, 3, 4]), ([5, 6, 7, 8])");
+
+        List<Row> rows = await ExecuteQueryAsync("SELECT bytes FROM t", catalog);
+        Assert.Equal(2, rows.Count);
+
+        foreach (Row row in rows)
+        {
+            Assert.True(row["bytes"].IsMultiDim);
+            Assert.Equal([2, 2], row["bytes"].GetShape(registry: catalog.SidecarRegistry).ToArray());
+        }
+        Assert.Equal(new byte[] { 1, 2, 3, 4 },
+            rows[0]["bytes"].AsUInt8Array(store: null!, registry: catalog.SidecarRegistry));
+        Assert.Equal(new byte[] { 5, 6, 7, 8 },
+            rows[1]["bytes"].AsUInt8Array(store: null!, registry: catalog.SidecarRegistry));
+    }
 }

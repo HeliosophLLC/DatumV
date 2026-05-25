@@ -458,10 +458,17 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         IBlobSink sidecar,
         ITypeIdAllocator? typeIdAllocator)
     {
+        // Multi-dim reference arrays prepend [int32 × ndim] to the slot block on
+        // the wire (decoder peeks the column's FixedShape.Length to compute ndim
+        // and skip the prefix). 1-D arrays write only the slot block.
+        ReadOnlySpan<int> shape = value.IsMultiDim
+            ? value.GetShape(store)
+            : ReadOnlySpan<int>.Empty;
+
         return value.Kind switch
         {
-            DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), sidecar),
-            DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), sidecar),
+            DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), shape, sidecar),
+            DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), shape, sidecar),
             DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
@@ -470,15 +477,21 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
     private static (long offset, long length) EncodeStringArrayToSidecar(
         string[] elements,
+        ReadOnlySpan<int> shape,
         IBlobSink sidecar)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(elements[i]);
             (long elementOffset, long elementLength) = sidecar.Append(utf8);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength);
         }
@@ -487,14 +500,20 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
     private static (long offset, long length) EncodeImageArrayToSidecar(
         byte[][] elements,
+        ReadOnlySpan<int> shape,
         IBlobSink sidecar)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             (long elementOffset, long elementLength) = sidecar.Append(elements[i]);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength);
         }

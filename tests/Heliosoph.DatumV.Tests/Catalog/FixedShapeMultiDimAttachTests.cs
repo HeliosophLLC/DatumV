@@ -111,4 +111,63 @@ public sealed class FixedShapeMultiDimAttachTests : ServiceTestBase
         Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
             LiteralCoercion.EnforceFixedShape(source, target, "matrix", arena));
     }
+
+    [Fact]
+    public void MultiDimStringColumn_AttachesShapeFromFlatStringArray()
+    {
+        // Slice A: reference-element kinds take the kind-specific multi-dim
+        // factory (FromArenaMultiDimStringArray) rather than the byte-flat path.
+        Arena arena = CreateArena();
+        string[] data = ["a", "b", "c", "d"];
+        DataValue source = DataValue.FromStringArray(data, arena);
+        Assert.False(source.IsMultiDim);
+
+        ColumnInfo target = Column("labels", DataKind.String, fixedShape: [2, 2]);
+        DataValue promoted = LiteralCoercion.EnforceFixedShape(source, target, "labels", arena);
+
+        Assert.True(promoted.IsMultiDim);
+        Assert.Equal(DataKind.String, promoted.Kind);
+        Assert.Equal(2, promoted.Ndim);
+        Assert.Equal([2, 2], promoted.GetShape(arena).ToArray());
+        Assert.Equal(data, promoted.AsStringArray(arena));
+    }
+
+    [Fact]
+    public void MultiDimStringColumn_ElementCountMismatch_Throws()
+    {
+        Arena arena = CreateArena();
+        DataValue source = DataValue.FromStringArray(["a", "b", "c"], arena);
+
+        ColumnInfo target = Column("labels", DataKind.String, fixedShape: [2, 2]);
+        Assert.Throws<Heliosoph.DatumV.Execution.ColumnValueConstraintException>(() =>
+            LiteralCoercion.EnforceFixedShape(source, target, "labels", arena));
+    }
+
+    [Fact]
+    public void MultiDimImageColumn_AttachesShapeFromFlatImageArray()
+    {
+        // Array<Image> takes the kind-specific FromArenaMultiDimImageArray
+        // path; matches the String pattern.
+        Arena arena = CreateArena();
+        byte[][] data = [
+            [0x01, 0x02, 0x03],
+            [0x04, 0x05],
+            [0x06],
+            [0x07, 0x08, 0x09, 0x0A],
+        ];
+        DataValue source = DataValue.FromImageArray(data, arena);
+        Assert.False(source.IsMultiDim);
+
+        ColumnInfo target = Column("frames", DataKind.Image, fixedShape: [2, 2]);
+        DataValue promoted = LiteralCoercion.EnforceFixedShape(source, target, "frames", arena);
+
+        Assert.True(promoted.IsMultiDim);
+        Assert.Equal(DataKind.Image, promoted.Kind);
+        Assert.Equal(2, promoted.Ndim);
+        Assert.Equal([2, 2], promoted.GetShape(arena).ToArray());
+
+        byte[][] recovered = promoted.AsImageArray(arena);
+        Assert.Equal(4, recovered.Length);
+        for (int i = 0; i < data.Length; i++) Assert.Equal(data[i], recovered[i]);
+    }
 }

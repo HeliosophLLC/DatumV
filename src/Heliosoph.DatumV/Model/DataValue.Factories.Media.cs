@@ -604,16 +604,107 @@ public readonly partial struct DataValue
     }
 
     /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Image&gt;</c> value.
+    /// Each element's encoded image bytes are written to <paramref name="store"/>;
+    /// a slot block of <c>elements.Length × 16 bytes</c> is then prepended with an
+    /// <c>int32 × ndim</c> shape prefix and stored as a single contiguous block.
+    /// The resulting <see cref="DataValue"/> carries
+    /// <see cref="DataValueFlags.InArena"/> | <see cref="DataValueFlags.IsArray"/> |
+    /// <see cref="DataValueFlags.IsMultiDim"/>, with <c>ndim</c> in the high byte
+    /// of <c>_charCount</c>. <see cref="AsImageArray"/> transparently skips the
+    /// shape prefix when reading; <see cref="GetShape"/> exposes the dims.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <see cref="FromArenaMultiDimStringArray"/>. Inline multi-dim Image
+    /// is impossible by construction — minimum shape (2×2 = 4 slots × 16 bytes)
+    /// already exceeds the 16-byte inline payload.
+    ///
+    /// Per-element image dimensions (width / height / channels) live in the
+    /// <em>scalar</em> Image's <c>_p4-_p5</c>, not in the slot bytes — so the
+    /// multi-dim container, like the 1-D <see cref="FromImageArray"/>, does not
+    /// preserve per-element dimensions through the array layout. Callers that
+    /// need per-image dimensions must decode each element's header on read.
+    /// </remarks>
+    public static DataValue FromArenaMultiDimImageArray(
+        ReadOnlySpan<byte[]> elements,
+        ReadOnlySpan<int> shape,
+        IValueStore store)
+    {
+        if (shape.Length < 2 || shape.Length > 255)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(shape), shape.Length,
+                "Multi-dim ndim must be in [2, 255].");
+        }
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++)
+        {
+            int dim = shape[i];
+            if (dim <= 0)
+            {
+                throw new ArgumentException(
+                    $"Shape dimension {i} must be positive; got {dim}.", nameof(shape));
+            }
+            product *= dim;
+            if (product > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shape), product,
+                    "Product of shape dimensions overflows Int32.");
+            }
+        }
+        if (product != elements.Length)
+        {
+            throw new ArgumentException(
+                $"Product of shape dimensions ({product}) does not equal element count ({elements.Length}).",
+                nameof(shape));
+        }
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int slotBlockBytes = elements.Length * ArraySlot.SizeBytes;
+        byte[] buffer = new byte[shapeBytes + slotBlockBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+
+        for (int i = 0; i < elements.Length; i++)
+        {
+            byte[]? element = elements[i];
+            if (element is null)
+            {
+                throw new ArgumentException(
+                    $"Element {i} is null. Array<Image> elements must be non-null; " +
+                    "use a typed null DataValue for SQL NULL semantics at the column level.",
+                    nameof(elements));
+            }
+            var (elementP0, elementP1) = store.StoreBytes(element);
+            ArraySlot.Write(
+                buffer.AsSpan(shapeBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0.Value,
+                elementP1.Value);
+        }
+
+        var (blockP0, blockP1) = store.StoreBytes(buffer);
+        ushort cc = (ushort)(shape.Length << 8);
+        return new(
+            DataKind.Image,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            offset: blockP0.Value, length: blockP1.Value, charCount: cc);
+    }
+
+    /// <summary>
     /// Reads an <c>Array&lt;Image&gt;</c> value as a <see cref="byte"/>[][].
     /// </summary>
     public byte[][] AsImageArray(IValueStore store, SidecarRegistry? registry = null)
     {
         ThrowIfNotReferenceArray(DataKind.Image);
 
+        // Multi-dim values prepend [int32 × ndim] to the slot block on both arena
+        // and sidecar tiers; skip it transparently when reading elements.
+        int shapePrefix = ShapePrefixByteCount;
+
         if (IsInSidecar)
         {
             IBlobSource src = ResolveSidecarSource(registry);
-            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry)[shapePrefix..];
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
             byte[][] result = new byte[elementCount][];
             for (int i = 0; i < elementCount; i++)
@@ -629,6 +720,9 @@ public readonly partial struct DataValue
             return result;
         }
 
+        // N = 0 / N = 1 inline path. Multi-dim is unreachable here: minimum shape
+        // product (2×2 = 4 slots × 16 bytes) exceeds the 16-byte inline payload,
+        // so multi-dim Array<Image> values always flow through the arena branch.
         if (IsInline)
         {
             if (_charCount == 0) return [];
@@ -642,7 +736,7 @@ public readonly partial struct DataValue
             return [store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength))];
         }
 
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength))[shapePrefix..];
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         byte[][] arenaResult = new byte[n][];
         for (int i = 0; i < n; i++)

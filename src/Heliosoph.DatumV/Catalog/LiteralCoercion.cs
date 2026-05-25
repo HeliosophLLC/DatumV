@@ -118,6 +118,26 @@ internal static class LiteralCoercion
         // are left alone — their shape is already in the bytes.
         if (shape.Length >= 2 && !source.IsMultiDim && arena is not null)
         {
+            // Reference-element kinds have a slot-block layout, not a flat
+            // element-byte run — they need a kind-specific multi-dim factory
+            // rather than FromArenaMultiDimArrayBytes. Each supported kind
+            // (Slice A: String; Slice C: Image) routes through its own per-kind
+            // factory; remaining reference kinds reject at DDL via
+            // IsMultiDimIncompatibleElementKind and never reach this branch.
+            if (source.IsArray)
+            {
+                if (source.Kind == DataKind.String)
+                {
+                    string[] elements = source.AsStringArray(arena);
+                    return DataValue.FromArenaMultiDimStringArray(elements, shape, arena);
+                }
+                else if (source.Kind == DataKind.Image)
+                {
+                    byte[][] elements = source.AsImageArray(arena);
+                    return DataValue.FromArenaMultiDimImageArray(elements, shape, arena);
+                }
+            }
+
             // Inline arrays expose element bytes via InlineArrayBytes (count × elementSize,
             // prefix-skipping if any); arena/sidecar use AsArraySpan<byte>, which casts
             // through MemoryMarshal so element-count vs. byte-count semantics align.

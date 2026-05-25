@@ -714,6 +714,10 @@ public readonly partial struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNotReferenceArray(DataKind.String);
 
+        // Multi-dim values prepend a [shape × int32] prefix to the slot block on
+        // both sidecar and arena tiers; element accessors skip it transparently.
+        int shapePrefix = ShapePrefixByteCount;
+
         // Sidecar-backed: read slot block AND per-element bytes through the
         // registry's IBlobSource. No per-query arena copy at access time —
         // sidecar arrays stay sidecar-resident until a caller explicitly
@@ -721,7 +725,7 @@ public readonly partial struct DataValue : IEquatable<DataValue>
         if (IsInSidecar)
         {
             IBlobSource src = ResolveSidecarSource(registry);
-            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry)[shapePrefix..];
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
             string[] result = new string[elementCount];
             for (int i = 0; i < elementCount; i++)
@@ -739,7 +743,10 @@ public readonly partial struct DataValue : IEquatable<DataValue>
         }
 
         // N = 0 / N = 1 inline path (in-memory only — sidecar-backed arrays are
-        // never inline). _charCount = element count (0 or 1).
+        // never inline). _charCount = element count (0 or 1). Multi-dim is
+        // unreachable here: minimum shape product (2×2 = 4 slots × 16 bytes)
+        // already exceeds the 16-byte inline payload, so multi-dim String[]
+        // values always flow through the arena branch below.
         if (IsInline)
         {
             if (_charCount == 0) return [];
@@ -755,7 +762,7 @@ public readonly partial struct DataValue : IEquatable<DataValue>
         }
 
         // N ≥ 2 arena-backed — slot block lives at (_p0, _p1) in the array's store.
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength))[shapePrefix..];
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         string[] arenaResult = new string[n];
         for (int i = 0; i < n; i++)
