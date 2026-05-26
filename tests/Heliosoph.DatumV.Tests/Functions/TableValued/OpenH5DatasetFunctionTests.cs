@@ -133,8 +133,9 @@ public sealed class OpenH5DatasetFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public void ValidateArguments_OnHigherRankDataset_Throws()
+    public void ValidateArguments_OnRank3Dataset_DeclaresMultiDimColumnWithInnerShape()
     {
+        // Rank 3 (2 × 2 × 2) Float32 → 2 rows of multi-dim Float32 with FixedShape = [2, 2].
         string path = TempH5("rank3.h5");
         new H5File
         {
@@ -146,13 +147,19 @@ public sealed class OpenH5DatasetFunctionTests : ServiceTestBase, IDisposable
         }.Write(path);
 
         OpenH5DatasetFunction fn = new();
-        FunctionArgumentException ex = Assert.Throws<FunctionArgumentException>(() =>
-            ((ITableValuedFunction)fn).ValidateArguments(
-                argumentKinds: [DataKind.String, DataKind.String],
-                constantArguments: [Const(path), Const("/cube")],
-                constantStore: _constantStore,
-                cancellationToken: default));
-        Assert.Contains("rank 3", ex.Message);
+        Schema schema = ((ITableValuedFunction)fn).ValidateArguments(
+            argumentKinds: [DataKind.String, DataKind.String],
+            constantArguments: [Const(path), Const("/cube")],
+            constantStore: _constantStore,
+            cancellationToken: default);
+
+        Assert.Single(schema.Columns);
+        ColumnInfo column = schema.Columns[0];
+        Assert.Equal("cube", column.Name);
+        Assert.Equal(DataKind.Float32, column.Kind);
+        Assert.True(column.IsArray);
+        Assert.True(column.IsMultiDim);
+        Assert.Equal(new int[] { 2, 2 }, column.FixedShape);
     }
 
     // ───────────────────── Runtime row decode ─────────────────────
@@ -246,6 +253,117 @@ public sealed class OpenH5DatasetFunctionTests : ServiceTestBase, IDisposable
         Assert.Equal(3, rows.Count);
         Assert.Equal("flux", rows[0].ColumnLookup[0]);
         Assert.Equal(1.5, rows[0]["flux"].AsFloat64());
+    }
+
+    // ───────────────────── Multi-dim row decode (rank ≥ 3) ─────────────────────
+
+    [Fact]
+    public async Task Open_ThreeDFloat32Dataset_YieldsOuterRowsOfMultiDimCells()
+    {
+        // Shape (3, 2, 2) Float32 — 3 outer rows, each a 2×2 multi-dim cell.
+        string path = TempH5("3d-float32.h5");
+        new H5File
+        {
+            ["cube"] = new float[,,]
+            {
+                { { 1f,  2f }, { 3f,  4f } },
+                { { 5f,  6f }, { 7f,  8f } },
+                { { 9f, 10f }, { 11f, 12f } },
+            },
+        }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync(
+                [ValueRef.FromString(path), ValueRef.FromString("/cube")], ctx), ctx);
+
+        Assert.Equal(3, rows.Count);
+        for (int r = 0; r < rows.Count; r++)
+        {
+            DataValue cell = rows[r]["cube"];
+            Assert.True(cell.IsMultiDim);
+            ReadOnlySpan<int> shape = cell.GetShape(ctx.Store);
+            Assert.Equal(new int[] { 2, 2 }, shape.ToArray());
+            ReadOnlySpan<float> flat = cell.AsArraySpan<float>(ctx.Store);
+            Assert.Equal(4, flat.Length);
+            // Row r covers elements r*4 .. r*4+3.
+            Assert.Equal(r * 4 + 1, flat[0]);
+            Assert.Equal(r * 4 + 4, flat[3]);
+        }
+    }
+
+    [Fact]
+    public async Task Open_FourDUInt8Dataset_CifarShape_YieldsMultiDimCells()
+    {
+        // Mini CIFAR-shaped fixture: (2, 2, 2, 3) UInt8 → 2 outer rows of
+        // multi-dim UInt8 cells with inner shape (2, 2, 3).
+        string path = TempH5("4d-uint8.h5");
+        byte[,,,] images = new byte[2, 2, 2, 3];
+        byte v = 0;
+        for (int n = 0; n < 2; n++)
+        for (int h = 0; h < 2; h++)
+        for (int w = 0; w < 2; w++)
+        for (int c = 0; c < 3; c++)
+        {
+            images[n, h, w, c] = v++;
+        }
+        new H5File { ["images"] = images }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync(
+                [ValueRef.FromString(path), ValueRef.FromString("/images")], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        for (int n = 0; n < 2; n++)
+        {
+            DataValue cell = rows[n]["images"];
+            Assert.True(cell.IsMultiDim);
+            ReadOnlySpan<int> shape = cell.GetShape(ctx.Store);
+            Assert.Equal(new int[] { 2, 2, 3 }, shape.ToArray());
+            ReadOnlySpan<byte> flat = cell.AsArraySpan<byte>(ctx.Store);
+            Assert.Equal(12, flat.Length);
+            Assert.Equal((byte)(n * 12), flat[0]);
+            Assert.Equal((byte)(n * 12 + 11), flat[11]);
+        }
+    }
+
+    [Fact]
+    public async Task Open_ThreeDStringDataset_YieldsOuterRowsOfMultiDimStringCells()
+    {
+        // Shape (2, 2, 2) String — 2 outer rows, each a 2×2 multi-dim String cell.
+        string path = TempH5("3d-string.h5");
+        new H5File
+        {
+            ["labels"] = new string[,,]
+            {
+                { { "a", "b" }, { "c", "d" } },
+                { { "e", "f" }, { "g", "h" } },
+            },
+        }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync(
+                [ValueRef.FromString(path), ValueRef.FromString("/labels")], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        for (int n = 0; n < 2; n++)
+        {
+            DataValue cell = rows[n]["labels"];
+            Assert.True(cell.IsMultiDim);
+            Assert.Equal(DataKind.String, cell.Kind);
+            ReadOnlySpan<int> shape = cell.GetShape(ctx.Store);
+            Assert.Equal(new int[] { 2, 2 }, shape.ToArray());
+            string[] elements = cell.AsStringArray(ctx.Store);
+            Assert.Equal(4, elements.Length);
+            char start = (char)('a' + n * 4);
+            Assert.Equal(start.ToString(), elements[0]);
+            Assert.Equal(((char)(start + 3)).ToString(), elements[3]);
+        }
     }
 
     // ───────────────────────── Helpers ─────────────────────────

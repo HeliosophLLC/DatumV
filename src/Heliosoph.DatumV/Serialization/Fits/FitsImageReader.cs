@@ -53,7 +53,26 @@ internal static class FitsImageReader
         float[] sciData = new float[pixelCount];
         DecodePixels(hdu, stream, sciData);
 
-        DataValue sci = DataValue.FromArenaArray<float>(sciData, DataKind.Float32, arena);
+        // Shape the sci column matching the HDU's dimensionality:
+        // - NAXIS = 1: flat Float32[] (e.g. 1-D spectrum)
+        // - NAXIS >= 2: multi-dim Float32 with shape derived from NAXISn.
+        //   FITS stores pixels with NAXIS1 as the fastest-varying axis (column),
+        //   NAXIS2 as the slower axis (row), etc. NumPy-style shape lists
+        //   slowest-axis first, so the multi-dim FixedShape is the NAXISn list
+        //   reversed: [NAXISn, ..., NAXIS2, NAXIS1]. For the common 2-D case
+        //   that's [NAXIS2, NAXIS1] = [height, width] — `sci[y, x]` indexes
+        //   the pixel at row y, column x.
+        DataValue sci;
+        if (hdu.NAxis < 2)
+        {
+            sci = DataValue.FromArenaArray<float>(sciData, DataKind.Float32, arena);
+        }
+        else
+        {
+            int[] shape = new int[hdu.NAxis];
+            for (int i = 0; i < hdu.NAxis; i++) shape[i] = hdu.NAxisN[hdu.NAxis - 1 - i];
+            sci = DataValue.FromArenaMultiDimArray<float>(sciData, shape, DataKind.Float32, arena);
+        }
 
         DataValue image = hdu.NAxis == 2
             ? EncodeGrayscalePreview(sciData, width: hdu.NAxisN[0], height: hdu.NAxisN[1], arena)

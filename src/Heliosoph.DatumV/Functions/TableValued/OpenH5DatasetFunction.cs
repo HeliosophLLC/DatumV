@@ -118,13 +118,6 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
                 $"HDF5 dataset '{datasetPath}' has dtype class {type.UnderlyingClass} " +
                 "which isn't supported in v1.");
         }
-        if (type.Dimensions.Count >= 3)
-        {
-            throw new FunctionArgumentException(Name,
-                $"HDF5 dataset '{datasetPath}' has rank {type.Dimensions.Count}; " +
-                "v1 only supports scalar, 1-D, and 2-D datasets.");
-        }
-
         return BuildSchema(datasetPath, type);
     }
 
@@ -188,9 +181,9 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
                 }
             }
         }
-        else
+        else if (type.Dimensions.Count == 2)
         {
-            // 2-D: NAXIS1 outer slices, each of NAXIS2 elements.
+            // 2-D: outer rows of 1-D inner-axis arrays.
             int outer = checked((int)type.Dimensions[0]);
             int inner = checked((int)type.Dimensions[1]);
             for (int i = 0; i < outer; i++)
@@ -199,6 +192,35 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
                 batch ??= context.RentRowBatch(outputLookup);
                 DataValue[] row = context.Pool.RentDataValues(1);
                 row[0] = Hdf5DatasetReader.SliceArray(flat, i * inner, inner, type.ElementKind, batch.Arena);
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
+            }
+        }
+        else
+        {
+            // 3-D and higher: outer rows of (R-1)-dim multi-dim cells.
+            // The inner shape is the dataset's dims minus the outer axis; product
+            // is the per-row element count.
+            int outer = checked((int)type.Dimensions[0]);
+            int[] innerShape = new int[type.Dimensions.Count - 1];
+            int innerElementCount = 1;
+            for (int i = 0; i < innerShape.Length; i++)
+            {
+                innerShape[i] = checked((int)type.Dimensions[i + 1]);
+                innerElementCount = checked(innerElementCount * innerShape[i]);
+            }
+            for (int i = 0; i < outer; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                batch ??= context.RentRowBatch(outputLookup);
+                DataValue[] row = context.Pool.RentDataValues(1);
+                row[0] = Hdf5DatasetReader.SliceMultiDim(
+                    flat, i * innerElementCount, innerElementCount, innerShape, type.ElementKind, batch.Arena);
                 batch.Add(row);
 
                 if (batch.IsFull)
@@ -235,11 +257,39 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
     private static Schema BuildSchema(string datasetPath, Hdf5DatasetType type)
     {
         string columnName = ExtractLeafName(datasetPath);
-        bool isArrayColumn = type.Dimensions.Count == 2;
-        return new Schema(
-        [
-            new ColumnInfo(columnName, type.ElementKind, nullable: false) { IsArray = isArrayColumn },
-        ]);
+        int rank = type.Dimensions.Count;
+
+        ColumnInfo column;
+        if (rank <= 1)
+        {
+            // Scalar / 1-D dataset → scalar column. The 1-D case yields N rows,
+            // each with one element.
+            column = new ColumnInfo(columnName, type.ElementKind, nullable: false);
+        }
+        else if (rank == 2)
+        {
+            // 2-D → R rows of 1-D inner-axis array cells. No multi-dim shape on
+            // the column; the array length equals Dimensions[1].
+            column = new ColumnInfo(columnName, type.ElementKind, nullable: false) { IsArray = true };
+        }
+        else
+        {
+            // 3-D+ → R rows of (R-1)-dim multi-dim cells. The schema carries the
+            // inner shape so downstream projection / coercion knows the per-row
+            // tensor dimensions at plan time.
+            int[] fixedShape = new int[rank - 1];
+            for (int i = 0; i < fixedShape.Length; i++)
+            {
+                fixedShape[i] = checked((int)type.Dimensions[i + 1]);
+            }
+            column = new ColumnInfo(columnName, type.ElementKind, nullable: false)
+            {
+                IsArray = true,
+                IsMultiDim = true,
+                FixedShape = fixedShape,
+            };
+        }
+        return new Schema([column]);
     }
 
     /// <summary>

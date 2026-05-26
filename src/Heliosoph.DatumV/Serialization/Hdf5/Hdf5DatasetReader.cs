@@ -141,9 +141,110 @@ internal static class Hdf5DatasetReader
                 Array.Copy((double[])flat, start, s, 0, length);
                 return DataValue.FromArenaArray<double>(s, kind, arena);
             }
+            case DataKind.String:
+            {
+                string[] s = new string[length];
+                Array.Copy((string[])flat, start, s, 0, length);
+                return DataValue.FromStringArray(s, arena);
+            }
             default:
                 throw new InvalidOperationException(
                     $"Unsupported HDF5 element kind for array slice: {kind}");
+        }
+    }
+
+    /// <summary>
+    /// Slices an outer-axis row from a flat dataset read and packs it as a
+    /// multi-dim <see cref="DataValue"/> with <paramref name="innerShape"/>.
+    /// Used by <c>open_h5_dataset</c> when a source dataset has rank &gt;= 3:
+    /// the row stream slices on the outermost dimension and each row carries
+    /// an <c>(R-1)</c>-dim cell.
+    /// </summary>
+    /// <param name="flat">Flat read of the full dataset (row-major).</param>
+    /// <param name="start">Start index in <paramref name="flat"/>.</param>
+    /// <param name="length">Element count for this row (= product of inner shape).</param>
+    /// <param name="innerShape">Shape of one row's cell — full dataset dims minus the outer axis.</param>
+    /// <param name="kind">Element kind.</param>
+    /// <param name="arena">Arena receiving the packed bytes.</param>
+    public static DataValue SliceMultiDim(
+        System.Array flat,
+        int start,
+        int length,
+        ReadOnlySpan<int> innerShape,
+        DataKind kind,
+        IValueStore arena)
+    {
+        switch (kind)
+        {
+            case DataKind.Int8:
+            {
+                sbyte[] s = new sbyte[length];
+                Array.Copy((sbyte[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<sbyte>(s, innerShape, kind, arena);
+            }
+            case DataKind.UInt8:
+            {
+                byte[] s = new byte[length];
+                Array.Copy((byte[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<byte>(s, innerShape, kind, arena);
+            }
+            case DataKind.Int16:
+            {
+                short[] s = new short[length];
+                Array.Copy((short[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<short>(s, innerShape, kind, arena);
+            }
+            case DataKind.UInt16:
+            {
+                ushort[] s = new ushort[length];
+                Array.Copy((ushort[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<ushort>(s, innerShape, kind, arena);
+            }
+            case DataKind.Int32:
+            {
+                int[] s = new int[length];
+                Array.Copy((int[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<int>(s, innerShape, kind, arena);
+            }
+            case DataKind.UInt32:
+            {
+                uint[] s = new uint[length];
+                Array.Copy((uint[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<uint>(s, innerShape, kind, arena);
+            }
+            case DataKind.Int64:
+            {
+                long[] s = new long[length];
+                Array.Copy((long[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<long>(s, innerShape, kind, arena);
+            }
+            case DataKind.UInt64:
+            {
+                ulong[] s = new ulong[length];
+                Array.Copy((ulong[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<ulong>(s, innerShape, kind, arena);
+            }
+            case DataKind.Float32:
+            {
+                float[] s = new float[length];
+                Array.Copy((float[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<float>(s, innerShape, kind, arena);
+            }
+            case DataKind.Float64:
+            {
+                double[] s = new double[length];
+                Array.Copy((double[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimArray<double>(s, innerShape, kind, arena);
+            }
+            case DataKind.String:
+            {
+                string[] s = new string[length];
+                Array.Copy((string[])flat, start, s, 0, length);
+                return DataValue.FromArenaMultiDimStringArray(s, innerShape, arena);
+            }
+            default:
+                throw new InvalidOperationException(
+                    $"Unsupported HDF5 element kind for multi-dim slice: {kind}");
         }
     }
 }

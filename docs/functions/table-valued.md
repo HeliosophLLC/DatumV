@@ -390,7 +390,7 @@ Output columns:
 | `hdu_index` | `INT64` | Source HDU index (preserved across skipped non-image HDUs) |
 | `extname` | `STRING?` | `EXTNAME` card value |
 | `image` | `IMAGE?` | PNG-encoded grayscale preview, min/max-stretched. Populated only when `NAXIS == 2`. NULL for 1-D spectra and higher-rank cubes. |
-| `sci` | `FLOAT32[]?` | Per-pixel scientific value with BSCALE/BZERO applied. Populated whenever the HDU has pixel data. Shape is flat — read NAXIS / NAXISn from the `header` column to reshape. |
+| `sci` | `FLOAT32[]?` | Per-pixel scientific value with BSCALE/BZERO applied. Populated whenever the HDU has pixel data. For NAXIS ≥ 2 the cell is a multi-dim `FLOAT32` with shape `[NAXISn, …, NAXIS2, NAXIS1]` (slowest-axis-first, NumPy convention) — so `sci[y, x]` indexes a 2-D pixel directly, `sci[z, y, x]` indexes a 3-D spectral cube voxel, etc. For NAXIS = 1 (1-D spectrum) the cell is flat. |
 | `header` | `JSON` | Full card list, same shape as `open_fits_hdus` |
 
 **`image` vs `sci`.** Two columns, two audiences. The `image` column is a browser-displayable thumbnail — handy for chat UIs, dataset previews, sanity checks. The `sci` column carries the *actual* per-pixel scientific values in physical units (BSCALE/BZERO applied during decode), suitable for SQL math, NaN masks, per-pixel filtering, statistics. A query that just wants to look at a frame reads `image`; a query that wants to compute on the pixels reads `sci`.
@@ -526,10 +526,17 @@ The `labels` column above is typed as `INT32` (or whatever the on-disk dtype rea
 |---|---|
 | Scalar (rank-0) | One row, one cell with the scalar value |
 | 1-D, length N | N rows, one element per row |
-| 2-D, shape (R, C) | R rows, each carrying the C-element row slice as a typed array column |
-| 3-D and higher | Throws `NotSupportedException` at plan time. Projection semantics for higher-rank tensors need more thought before we pick one — a follow-up TVF (`open_h5_tensor`?) is the likely landing pad. |
+| 2-D, shape (R, C) | R rows, each carrying the C-element row slice as a typed 1-D array |
+| 3-D, shape (D₀, D₁, D₂) | D₀ rows, each carrying a multi-dim cell of shape `[D₁, D₂]` |
+| 4-D and higher, shape (D₀, D₁, …, Dₙ) | D₀ rows, each carrying a multi-dim cell of shape `[D₁, …, Dₙ]` |
 
-The output column is named after the dataset's leaf segment: `/labels` → column `labels`, `/spectra/flux` → column `flux`.
+The schema's column carries `FixedShape = [D₁, …, Dₙ]` for rank ≥ 3 datasets, so `cell[i, j, k]` indexing type-checks at plan time. Multi-dim cells are supported across every element kind `open_h5_meta` reports as `is_supported = true` — numerics (signed/unsigned 8-64 bit integers, Float32, Float64, Boolean) and String. The canonical ML shapes work directly:
+
+- MNIST `(60000, 28, 28)` UInt8 → 60000 rows, each a multi-dim UInt8 cell with shape `[28, 28]`
+- CIFAR-10 `(50000, 32, 32, 3)` UInt8 → 50000 rows, each shape `[32, 32, 3]`
+- Sentence embeddings `(50000, 768)` Float32 → 50000 rows, each a flat 768-element Float32 array (2-D case)
+
+The output column is named after the dataset's leaf segment: `/labels` → column `labels`, `/spectra/flux` → column `flux`. For rank ≥ 3 datasets the column is multi-dim — the `FixedShape` carries the per-row tensor shape so SQL projections can index into it with type-checked bracket access.
 
 **Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, looks up the dataset, and reads its dtype + dimensions to produce a real `Schema`. Calling with a non-constant argument throws — recipe writers must inline the paths or pass bound parameters.
 
@@ -552,6 +559,62 @@ SELECT * FROM open_h5_dataset($archive, '/labels');
 **Performance.** v1 reads the entire dataset into memory at the start of execution, then iterates rows from the in-memory buffer. Fine for the typical ML dataset (tens to hundreds of MB); a chunked-streaming follow-up will land for files bigger than RAM. The downstream operator pipeline batches the row stream into the planner's standard batch size regardless of how we feed it.
 
 **Ingest path.** Dropping a `.h5` / `.hdf5` / `.hdf` file into the dataset pipeline lands it through `Hdf5FileFormat`, which emits the same shape `open_h5_meta` does. Magic-byte detection picks up extensionless or mislabelled HDF5 files too. Recipes that want specific dataset rows directly should use `open_h5_dataset` inside an SQL recipe.
+
+### open_h5_group
+
+`open_h5_group(path, group_path)` -> Rows
+
+Opens an HDF5 group and yields a **single row** with one column per direct-child dataset, each cell carrying the full dataset shape. The pivot-mode companion to `open_h5_dataset`: when a group represents a logical record made of related-but-different-shaped datasets that you want side-by-side — bitmasks plus their descriptions, parallel label arrays, scalar metadata plus a 1-D array — this lifts them all into one row.
+
+**Shape preservation per cell.**
+
+| Child dataset rank | Yields as a cell |
+|---|---|
+| Scalar (rank-0) | Scalar of the dataset's element kind |
+| 1-D, length N | Flat 1-D array (length N) |
+| 2-D, shape (R, C) | Multi-dim cell with `FixedShape = [R, C]` |
+| N-D, shape (D₀, …, Dₙ₋₁) | Multi-dim cell with `FixedShape = [D₀, …, Dₙ₋₁]` |
+
+**Direct children only.** Sub-groups are silently skipped — recursive descent isn't in scope here because the row width would explode on deep trees. The natural cross-group access pattern is composition: `open_h5_meta` for discovery, then multiple `open_h5_group` / `open_h5_dataset` calls per record. Datasets whose dtype isn't supported in v1 (compound, opaque, reference, bit field, enumerated, ragged variable-length) are also silently skipped — use `open_h5_meta` and filter by `is_supported = false` if you want to know they're there.
+
+**Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, walks the group's direct children, and produces a real `Schema` of typed, named columns. Non-constant arguments throw.
+
+**Group-as-record use cases.**
+
+LIGO gravitational-wave data: `/quality/simple` holds nine-element string arrays describing each data-quality bit, plus a 4096-element UInt32 bitmask, plus a scalar metadata string. The four are different shapes but logically one record — `open_h5_group` puts them in one row so SQL can decode bits against their descriptions in a single query.
+
+10x Genomics single-cell `/matrix/features`: three same-length 1-D arrays (`id`, `name`, `feature_type`) that act as parallel columns of a feature table. `open_h5_group` returns one row whose three array columns are the three datasets; downstream `UNNEST` joins them per index if you want per-feature rows.
+
+ML model checkpoint layers: a Keras `/conv1/kernel` group might pair a 4-D weight tensor with a 1-D bias array and a few scalar attribute datasets. `open_h5_group` packages the whole layer as one record.
+
+**Empty group → zero rows.** A group containing only sub-groups, or no children at all, yields nothing (rather than an empty row).
+
+```sql
+-- LIGO data-quality bit dictionary: descriptions, short names, bitmask, metadata
+SELECT DQDescriptions, DQShortnames, DQmask, GWOSCmeta
+FROM open_h5_group('strain.hdf5', '/quality/simple');
+
+-- 10x parallel arrays — yields one row of three arrays, then unnest by index
+WITH features AS (
+    SELECT id, name, feature_type
+    FROM open_h5_group('pbmc.h5', '/matrix/features')
+)
+SELECT
+    id[i + 1] AS gene_id,
+    name[i + 1] AS gene_name,
+    feature_type[i + 1] AS kind
+FROM features, range(0, 1000) AS i;
+
+-- Layer-as-record from a Keras checkpoint
+SELECT kernel, bias
+FROM open_h5_group('model.h5', '/dense_1');
+```
+
+**Bound parameter:**
+
+```sql
+SELECT * FROM open_h5_group($archive, $group_path);
+```
 
 ## See Also
 
