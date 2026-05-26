@@ -140,6 +140,8 @@ internal static class LiteralCoercion
                         return DataValue.FromArenaMultiDimJsonArray(source.AsJsonArray(arena), shape, arena);
                     case DataKind.PointCloud:
                         return DataValue.FromArenaMultiDimPointCloudArray(source.AsPointCloudArray(arena), shape, arena);
+                    case DataKind.Mesh:
+                        return DataValue.FromArenaMultiDimMeshArray(source.AsMeshArray(arena), shape, arena);
                 }
             }
 

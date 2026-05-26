@@ -445,6 +445,16 @@ public readonly partial struct DataValue
         ReadBlobArray(DataKind.PointCloud, store, registry);
 
     /// <summary>
+    /// Creates an <c>Array&lt;Mesh&gt;</c> value. Mirrors <see cref="FromImageArray"/>.
+    /// </summary>
+    public static DataValue FromMeshArray(ReadOnlySpan<byte[]> elements, IValueStore store) =>
+        BuildBlobArray(elements, DataKind.Mesh, store);
+
+    /// <summary>Reads an <c>Array&lt;Mesh&gt;</c> value as a <see cref="byte"/>[][].</summary>
+    public byte[][] AsMeshArray(IValueStore store, SidecarRegistry? registry = null) =>
+        ReadBlobArray(DataKind.Mesh, store, registry);
+
+    /// <summary>
     /// Shared builder for blob-element typed arrays — Audio / Video / Json /
     /// PointCloud. The layout is identical to <see cref="FromImageArray"/>:
     /// N=0 → empty inline value; N=1 → single slot inline; N≥2 → per-element
@@ -666,6 +676,14 @@ public readonly partial struct DataValue
     public static DataValue FromArenaMultiDimPointCloudArray(
         ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
         BuildArenaMultiDimBlobArray(elements, shape, DataKind.PointCloud, store);
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Mesh&gt;</c> value.
+    /// Mirrors <see cref="FromArenaMultiDimImageArray"/>.
+    /// </summary>
+    public static DataValue FromArenaMultiDimMeshArray(
+        ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
+        BuildArenaMultiDimBlobArray(elements, shape, DataKind.Mesh, store);
 
     /// <summary>
     /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are

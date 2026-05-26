@@ -438,7 +438,8 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     {
         if (!value.IsArray) return false;
         return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct
-            or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud;
+            or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
+            or DataKind.Mesh;
     }
 
     /// <summary>
@@ -474,6 +475,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Video => EncodeBlobArrayToSidecar(value.AsVideoArray(store), shape, sidecar),
             DataKind.Json => EncodeBlobArrayToSidecar(value.AsJsonArray(store), shape, sidecar),
             DataKind.PointCloud => EncodeBlobArrayToSidecar(value.AsPointCloudArray(store), shape, sidecar),
+            DataKind.Mesh => EncodeBlobArrayToSidecar(value.AsMeshArray(store), shape, sidecar),
             DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),

@@ -198,16 +198,15 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     }
 
     [Fact]
-    public void Validate_RejectsReferenceElementKinds()
+    public void Validate_RejectsStructAsFixedWidthMultiDim()
     {
-        // String / Image / Audio / Video / Json / PointCloud have per-kind
-        // multi-dim factories. Struct and Mesh still reject — Struct has no
-        // multi-dim factory yet, Mesh has no 1-D form to extend.
+        // Struct is the only reference-element kind without a dedicated
+        // multi-dim factory; the fixed-width factory still rejects it.
+        // All other blob kinds (String / Image / Audio / Video / Json /
+        // PointCloud / Mesh) route through their per-kind factories.
         Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Struct, arena));
-        Assert.Throws<ArgumentException>(() =>
-            DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Mesh, arena));
     }
 
     // ───────────────────── Sidecar factory (offset/length only — bytes assumed present) ─────────────────────
@@ -679,6 +678,41 @@ public sealed class MultiDimArrayTests : ServiceTestBase
             Assert.Equal(kind, value.Kind);
             Assert.Equal(2, value.Ndim);
         }
+    }
+
+    // ───────────────────── Multi-dim Mesh[] ─────────────────────
+
+    [Fact]
+    public void Arena_Mesh_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [
+            [0x67, 0x6C, 0x54, 0x46],   // "glTF"
+            [0x76, 0x20, 0x31, 0x2E, 0x30],
+            [0x4F, 0x42, 0x4A],         // "OBJ"
+            [0x53, 0x54, 0x4C],         // "STL"
+        ];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimMeshArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Mesh, value, data, [2, 2], arena,
+            v => v.AsMeshArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Mesh_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimMeshArray([[1], [2], [3]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsMesh()
+    {
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.Mesh, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 4);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.Mesh, value.Kind);
+        Assert.Equal(2, value.Ndim);
     }
 
     [Fact]

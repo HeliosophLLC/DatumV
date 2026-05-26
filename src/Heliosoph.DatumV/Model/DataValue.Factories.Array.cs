@@ -172,7 +172,7 @@ public readonly partial struct DataValue
     /// </summary>
     private static void RejectReferenceElementKind(DataKind elementKind)
     {
-        if (elementKind is DataKind.Struct or DataKind.Mesh)
+        if (elementKind is DataKind.Struct)
         {
             throw new ArgumentException(
                 $"Multi-dim is not supported for reference-element kind {elementKind} in this version. " +
@@ -378,7 +378,7 @@ public readonly partial struct DataValue
                 nameof(ndim), ndim,
                 $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
         }
-        if (elementKind is DataKind.Struct or DataKind.Mesh)
+        if (elementKind is DataKind.Struct)
         {
             throw new ArgumentException(
                 $"Multi-dim is not supported for element kind {elementKind} (reference / blob kinds) " +

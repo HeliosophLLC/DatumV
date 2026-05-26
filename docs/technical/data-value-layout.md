@@ -170,7 +170,7 @@ The slot block in the sidecar follows the per-element `ArraySlot` layout (16 byt
 
 `ndim` is in `_charCount.high`; `_charCount.low` still carries the storeId (the two byte halves don't collide). `length` covers both the prefix and the slot block. Element accessors (`AsStringArray`, `AsImageArray`) and `ElementCount` subtract `ShapePrefixByteCount` (= `4 × ndim`) before dividing by `ArraySlot.SizeBytes` to recover the slot count; `GetShape` reads the leading `int32[ndim]` directly. Encoders prepend the prefix atomically in `Encode{String,Image}ArrayToSidecar` so the slot block lands as one append.
 
-Multi-dim reference-element arrays are supported today for `String`, `Image`, `Audio`, `Video`, `Json`, and `PointCloud`. `Struct` and `Mesh` are 1-D only — `Struct` lacks a kind-specific multi-dim factory, `Mesh` has no 1-D form at all.
+Multi-dim reference-element arrays are supported today for `String`, `Image`, `Audio`, `Video`, `Json`, `PointCloud`, and `Mesh`. Only `Struct` is 1-D only — its per-element TypeId in the slot bytes interacts with the slot-block layout and needs separate work.
 
 ### Inline string (`_flags == None`, `Kind == String` / `Json`)
 

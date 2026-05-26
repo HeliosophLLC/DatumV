@@ -13,7 +13,7 @@ Typed array construction, inspection, search, manipulation, and string conversio
 
 Columns declared with multiple dimensions (`Array<Float32>(2, 3)`) and function outputs whose ONNX tensor rank is ≥ 2 (e.g. `infer()` for a `[1, H, W]` depth map) carry an explicit shape — the multi-dim flag survives across SQL expressions and round-trips through `.datum`.
 
-**Supported element kinds.** Multi-dim is supported for fixed-width primitives (`Int*`, `UInt*`, `Float*`, `Decimal`, `Date`, `Time`, `Duration`, `Uuid`, `Point*`, `Boolean`), byte arrays (`UInt8`), `String`, and all blob-element kinds: `Image`, `Audio`, `Video`, `Json`, `PointCloud`. `Struct` and `Mesh` reject at DDL time. `Array<String>(m, n)` stores one UTF-8-encoded slot per cell; the blob kinds each store one encoded payload per cell.
+**Supported element kinds.** Multi-dim is supported for fixed-width primitives (`Int*`, `UInt*`, `Float*`, `Decimal`, `Date`, `Time`, `Duration`, `Uuid`, `Point*`, `Boolean`), byte arrays (`UInt8`), `String`, and all blob-element kinds: `Image`, `Audio`, `Video`, `Json`, `PointCloud`, `Mesh`. Only `Struct` still rejects at DDL time (its per-element TypeId interaction with the slot-block layout needs separate work). `Array<String>(m, n)` stores one UTF-8-encoded slot per cell; the blob kinds each store one encoded payload per cell.
 
 Each function below behaves in one of two ways on multi-dim input:
 

@@ -83,14 +83,10 @@ public sealed class MultiDimDdlRejectionTests : ServiceTestBase
     }
 
     [Fact]
-    public void MeshMultiDim_RejectedAtDdl()
+    public void MeshMultiDim_AcceptedAtDdl()
     {
-        // Mesh was missing from the original reject list — multi-dim Mesh
-        // would have slipped past DDL and detonated at INSERT. Slice A's
-        // cleanup added it to both DDL and runtime guards.
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (m Array<Mesh>(2,3))");
-        Assert.Contains("Mesh", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (m Array<Mesh>(2,3))");
     }
 
     [Fact]
