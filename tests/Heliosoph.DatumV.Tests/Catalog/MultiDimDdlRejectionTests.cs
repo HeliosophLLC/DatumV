@@ -47,22 +47,39 @@ public sealed class MultiDimDdlRejectionTests : ServiceTestBase
     }
 
     [Fact]
-    public void AudioMultiDim_RejectedAtDdl()
+    public void AudioMultiDim_AcceptedAtDdl()
     {
-        // Audio / Video / Json / PointCloud have a 1-D encoder bug
-        // (IsReferenceTypeArray in VariableSlotPageEncoderV2 doesn't list them)
-        // — multi-dim support for these kinds is gated on fixing that first.
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (a Array<Audio>(2,3))");
-        Assert.Contains("Audio", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (a Array<Audio>(2,3))");
     }
 
     [Fact]
-    public void JsonMultiDim_RejectedAtDdl()
+    public void VideoMultiDim_AcceptedAtDdl()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (v Array<Video>(2,3))");
+    }
+
+    [Fact]
+    public void JsonMultiDim_AcceptedAtDdl()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (j Array<Json>(2,3))");
+    }
+
+    [Fact]
+    public void PointCloudMultiDim_AcceptedAtDdl()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (p Array<PointCloud>(2,3))");
+    }
+
+    [Fact]
+    public void StructMultiDim_RejectedAtDdl()
     {
         InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (j Array<Json>(2,3))");
-        Assert.Contains("Json", ex.Message);
+            "CREATE TEMP TABLE t (s Array<Struct>(2,3))");
+        Assert.Contains("Struct", ex.Message);
     }
 
     [Fact]

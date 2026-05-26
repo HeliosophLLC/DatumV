@@ -62,17 +62,18 @@ internal static class ColumnDefinitionResolver
             }
 
             // Multi-dim (ndim ≥ 2) arrays support fixed-width primitive element
-            // kinds, byte arrays (UInt8), String, and Image. The remaining
-            // reference / blob kinds (Struct, Audio, Video, Json, PointCloud,
-            // Mesh) don't have multi-dim factories yet; reject at DDL time so
-            // users see the error on CREATE TABLE rather than on the first INSERT.
+            // kinds, byte arrays (UInt8), String, Image, Audio, Video, Json,
+            // and PointCloud. The remaining kinds (Struct, Mesh) don't have
+            // multi-dim factories yet; reject at DDL time so users see the
+            // error on CREATE TABLE rather than on the first INSERT.
             if (isArray && fixedShape is { Length: >= 2 } && IsMultiDimIncompatibleElementKind(kind))
             {
                 throw new InvalidOperationException(
                     $"Column '{d.Name}': multi-dimensional shape (ndim={fixedShape.Length}) is " +
                     $"not supported for element kind {kind} in this version. Supported element " +
                     "kinds: Int*, UInt*, Float*, Decimal, Date, Time, Duration, Uuid, Point*, " +
-                    $"Boolean, String, Image. Use a 1-D array (Array<{kind}>) or denormalize the row.");
+                    $"Boolean, String, Image, Audio, Video, Json, PointCloud. Use a 1-D array " +
+                    $"(Array<{kind}>) or denormalize the row.");
             }
 
             Expression? defaultExpression = null;
@@ -595,10 +596,5 @@ internal static class ColumnDefinitionResolver
     /// are not on this list.
     /// </summary>
     private static bool IsMultiDimIncompatibleElementKind(DataKind kind) =>
-        kind is DataKind.Struct
-              or DataKind.Audio
-              or DataKind.Video
-              or DataKind.Json
-              or DataKind.PointCloud
-              or DataKind.Mesh;
+        kind is DataKind.Struct or DataKind.Mesh;
 }

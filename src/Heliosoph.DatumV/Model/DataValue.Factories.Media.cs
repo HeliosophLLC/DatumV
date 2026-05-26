@@ -499,16 +499,20 @@ public readonly partial struct DataValue
     /// Shared reader for blob-element typed arrays — Audio / Video / Json /
     /// PointCloud. Mirrors <see cref="AsImageArray"/>'s storage-tier dispatch
     /// (sidecar / inline / arena) but with the element-kind discriminator
-    /// passed in.
+    /// passed in. Multi-dim values prepend an <c>int32 × ndim</c> shape
+    /// prefix to the slot block on both arena and sidecar tiers; element
+    /// reads skip the prefix transparently.
     /// </summary>
     private byte[][] ReadBlobArray(DataKind kind, IValueStore store, SidecarRegistry? registry)
     {
         ThrowIfNotReferenceArray(kind);
 
+        int shapePrefix = ShapePrefixByteCount;
+
         if (IsInSidecar)
         {
             IBlobSource src = ResolveSidecarSource(registry);
-            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry)[shapePrefix..];
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
             byte[][] result = new byte[elementCount][];
             for (int i = 0; i < elementCount; i++)
@@ -524,6 +528,10 @@ public readonly partial struct DataValue
             return result;
         }
 
+        // N = 0 / N = 1 inline path. Multi-dim is unreachable here: minimum
+        // shape product (2×2 = 4 slots × 16 bytes) exceeds the 16-byte inline
+        // payload, so multi-dim blob arrays always flow through the arena
+        // branch below.
         if (IsInline)
         {
             if (_charCount == 0) return [];
@@ -537,7 +545,7 @@ public readonly partial struct DataValue
             return [store.RetrieveBytes(new ArenaOffset((int)elementOffset), new ArenaLength((int)elementLength))];
         }
 
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength))[shapePrefix..];
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         byte[][] arenaResult = new byte[n][];
         for (int i = 0; i < n; i++)
@@ -552,6 +560,112 @@ public readonly partial struct DataValue
         }
         return arenaResult;
     }
+
+    /// <summary>
+    /// Shared multi-dim builder for blob-element typed arrays — Audio / Video
+    /// / Json / PointCloud. Each element's encoded bytes are written to
+    /// <paramref name="store"/>; a slot block of <c>elements.Length × 16 bytes</c>
+    /// is prepended with an <c>int32 × ndim</c> shape prefix and stored as a
+    /// single contiguous block. Mirrors <see cref="FromArenaMultiDimImageArray"/>
+    /// but with the element-kind discriminator passed in.
+    /// </summary>
+    private static DataValue BuildArenaMultiDimBlobArray(
+        ReadOnlySpan<byte[]> elements,
+        ReadOnlySpan<int> shape,
+        DataKind kind,
+        IValueStore store)
+    {
+        if (shape.Length < 2 || shape.Length > 255)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(shape), shape.Length,
+                "Multi-dim ndim must be in [2, 255].");
+        }
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++)
+        {
+            int dim = shape[i];
+            if (dim <= 0)
+            {
+                throw new ArgumentException(
+                    $"Shape dimension {i} must be positive; got {dim}.", nameof(shape));
+            }
+            product *= dim;
+            if (product > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shape), product,
+                    "Product of shape dimensions overflows Int32.");
+            }
+        }
+        if (product != elements.Length)
+        {
+            throw new ArgumentException(
+                $"Product of shape dimensions ({product}) does not equal element count ({elements.Length}).",
+                nameof(shape));
+        }
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int slotBlockBytes = elements.Length * ArraySlot.SizeBytes;
+        byte[] buffer = new byte[shapeBytes + slotBlockBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+
+        for (int i = 0; i < elements.Length; i++)
+        {
+            byte[]? element = elements[i];
+            if (element is null)
+            {
+                throw new ArgumentException(
+                    $"Element {i} is null. Array<{kind}> elements must be non-null; " +
+                    "use a typed null DataValue for SQL NULL semantics at the column level.",
+                    nameof(elements));
+            }
+            var (elementP0, elementP1) = store.StoreBytes(element);
+            ArraySlot.Write(
+                buffer.AsSpan(shapeBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0.Value,
+                elementP1.Value);
+        }
+
+        var (blockP0, blockP1) = store.StoreBytes(buffer);
+        ushort cc = (ushort)(shape.Length << 8);
+        return new(
+            kind,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            offset: blockP0.Value, length: blockP1.Value, charCount: cc);
+    }
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Audio&gt;</c> value.
+    /// Mirrors <see cref="FromArenaMultiDimImageArray"/>.
+    /// </summary>
+    public static DataValue FromArenaMultiDimAudioArray(
+        ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
+        BuildArenaMultiDimBlobArray(elements, shape, DataKind.Audio, store);
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Video&gt;</c> value.
+    /// Mirrors <see cref="FromArenaMultiDimImageArray"/>.
+    /// </summary>
+    public static DataValue FromArenaMultiDimVideoArray(
+        ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
+        BuildArenaMultiDimBlobArray(elements, shape, DataKind.Video, store);
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Json&gt;</c> value.
+    /// Mirrors <see cref="FromArenaMultiDimImageArray"/>.
+    /// </summary>
+    public static DataValue FromArenaMultiDimJsonArray(
+        ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
+        BuildArenaMultiDimBlobArray(elements, shape, DataKind.Json, store);
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;PointCloud&gt;</c> value.
+    /// Mirrors <see cref="FromArenaMultiDimImageArray"/>.
+    /// </summary>
+    public static DataValue FromArenaMultiDimPointCloudArray(
+        ReadOnlySpan<byte[]> elements, ReadOnlySpan<int> shape, IValueStore store) =>
+        BuildArenaMultiDimBlobArray(elements, shape, DataKind.PointCloud, store);
 
     /// <summary>
     /// Creates an <c>Array&lt;Image&gt;</c> value. Each element's encoded bytes are

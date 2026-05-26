@@ -312,10 +312,10 @@ public readonly partial struct DataValue
             // Reference-element arrays store one 16-byte ArraySlot per element
             // after the optional shape prefix; element count derives from slot
             // count, not ScalarByteSize (which has no fixed answer for these
-            // kinds). String and Image are the multi-dim-enabled members today;
-            // the same slot-block layout applies to all reference-element kinds
-            // so the count derivation works for any 1-D form too.
-            if (_kind is DataKind.String or DataKind.Image)
+            // kinds). All blob-element kinds (String, Image, Audio, Video, Json,
+            // PointCloud) share the same slot-block layout and support multi-dim.
+            if (_kind is DataKind.String or DataKind.Image
+                or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
             {
                 long blockBytes = ((_flags & DataValueFlags.InArena) != 0 ? BackedLength : SidecarLength)
                     - ShapePrefixByteCount;

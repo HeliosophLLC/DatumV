@@ -437,7 +437,8 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     private static bool IsReferenceTypeArray(DataValue value)
     {
         if (!value.IsArray) return false;
-        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct;
+        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct
+            or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud;
     }
 
     /// <summary>
@@ -468,7 +469,11 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         return value.Kind switch
         {
             DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), shape, sidecar),
-            DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), shape, sidecar),
+            DataKind.Image => EncodeBlobArrayToSidecar(value.AsImageArray(store), shape, sidecar),
+            DataKind.Audio => EncodeBlobArrayToSidecar(value.AsAudioArray(store), shape, sidecar),
+            DataKind.Video => EncodeBlobArrayToSidecar(value.AsVideoArray(store), shape, sidecar),
+            DataKind.Json => EncodeBlobArrayToSidecar(value.AsJsonArray(store), shape, sidecar),
+            DataKind.PointCloud => EncodeBlobArrayToSidecar(value.AsPointCloudArray(store), shape, sidecar),
             DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
@@ -498,7 +503,14 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         return sidecar.Append(slotBlock);
     }
 
-    private static (long offset, long length) EncodeImageArrayToSidecar(
+    /// <summary>
+    /// Shared encoder for blob-element reference arrays — Image, Audio, Video,
+    /// Json, PointCloud. Each element's bytes are appended to <paramref name="sidecar"/>
+    /// individually; the resulting (offset, length) pairs populate a slot block
+    /// optionally prefixed by an <c>int32 × ndim</c> shape header (multi-dim
+    /// only). The combined block is appended as one atomic write.
+    /// </summary>
+    private static (long offset, long length) EncodeBlobArrayToSidecar(
         byte[][] elements,
         ReadOnlySpan<int> shape,
         IBlobSink sidecar)

@@ -121,20 +121,25 @@ internal static class LiteralCoercion
             // Reference-element kinds have a slot-block layout, not a flat
             // element-byte run — they need a kind-specific multi-dim factory
             // rather than FromArenaMultiDimArrayBytes. Each supported kind
-            // (Slice A: String; Slice C: Image) routes through its own per-kind
-            // factory; remaining reference kinds reject at DDL via
-            // IsMultiDimIncompatibleElementKind and never reach this branch.
+            // routes through its own per-kind factory; remaining reference
+            // kinds reject at DDL via IsMultiDimIncompatibleElementKind and
+            // never reach this branch.
             if (source.IsArray)
             {
-                if (source.Kind == DataKind.String)
+                switch (source.Kind)
                 {
-                    string[] elements = source.AsStringArray(arena);
-                    return DataValue.FromArenaMultiDimStringArray(elements, shape, arena);
-                }
-                else if (source.Kind == DataKind.Image)
-                {
-                    byte[][] elements = source.AsImageArray(arena);
-                    return DataValue.FromArenaMultiDimImageArray(elements, shape, arena);
+                    case DataKind.String:
+                        return DataValue.FromArenaMultiDimStringArray(source.AsStringArray(arena), shape, arena);
+                    case DataKind.Image:
+                        return DataValue.FromArenaMultiDimImageArray(source.AsImageArray(arena), shape, arena);
+                    case DataKind.Audio:
+                        return DataValue.FromArenaMultiDimAudioArray(source.AsAudioArray(arena), shape, arena);
+                    case DataKind.Video:
+                        return DataValue.FromArenaMultiDimVideoArray(source.AsVideoArray(arena), shape, arena);
+                    case DataKind.Json:
+                        return DataValue.FromArenaMultiDimJsonArray(source.AsJsonArray(arena), shape, arena);
+                    case DataKind.PointCloud:
+                        return DataValue.FromArenaMultiDimPointCloudArray(source.AsPointCloudArray(arena), shape, arena);
                 }
             }
 

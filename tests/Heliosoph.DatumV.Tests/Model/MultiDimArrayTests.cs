@@ -200,17 +200,14 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     [Fact]
     public void Validate_RejectsReferenceElementKinds()
     {
-        // String + Image have their own multi-dim factories
-        // (FromArenaMultiDimStringArray / FromArenaMultiDimImageArray) and are
-        // no longer rejected by the fixed-width factory. Struct / Mesh / Audio /
-        // Video / Json / PointCloud still reject until their per-kind factories land.
+        // String / Image / Audio / Video / Json / PointCloud have per-kind
+        // multi-dim factories. Struct and Mesh still reject — Struct has no
+        // multi-dim factory yet, Mesh has no 1-D form to extend.
         Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Struct, arena));
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Mesh, arena));
-        Assert.Throws<ArgumentException>(() =>
-            DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Json, arena));
     }
 
     // ───────────────────── Sidecar factory (offset/length only — bytes assumed present) ─────────────────────
@@ -576,6 +573,112 @@ public sealed class MultiDimArrayTests : ServiceTestBase
         Assert.NotEqual(flat, multi);
         Assert.False(flat.IsMultiDim);
         Assert.True(multi.IsMultiDim);
+    }
+
+    // ───────────────── Multi-dim Audio/Video/Json/PointCloud[] ─────────────────
+    //
+    // These four kinds share the same blob-element slot-block layout as Image
+    // and route through the BuildArenaMultiDimBlobArray / ReadBlobArray shared
+    // helpers; the round-trip path is structurally identical so the
+    // per-kind coverage focuses on the kind discriminator surviving and
+    // ElementCount + GetShape returning the right values.
+
+    private static void AssertMultiDimBlobRoundTrips(
+        DataKind expectedKind,
+        DataValue value,
+        byte[][] expectedElements,
+        int[] expectedShape,
+        Arena arena,
+        Func<DataValue, byte[][]> accessor)
+    {
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(expectedKind, value.Kind);
+        Assert.Equal(expectedShape.Length, value.Ndim);
+        Assert.Equal(expectedShape, value.GetShape(arena).ToArray());
+        Assert.Equal(expectedElements.Length, value.ElementCount);
+        byte[][] recovered = accessor(value);
+        Assert.Equal(expectedElements.Length, recovered.Length);
+        for (int i = 0; i < expectedElements.Length; i++) Assert.Equal(expectedElements[i], recovered[i]);
+    }
+
+    [Fact]
+    public void Arena_Audio_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [[0xAA, 0xBB], [0xCC], [0xDD, 0xEE, 0xFF], [0x00]];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimAudioArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Audio, value, data, [2, 2], arena,
+            v => v.AsAudioArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Video_3D_2x2x2()
+    {
+        byte[][] data = new byte[8][];
+        for (int i = 0; i < 8; i++) data[i] = [(byte)i, (byte)(i + 100)];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimVideoArray(data, [2, 2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Video, value, data, [2, 2, 2], arena,
+            v => v.AsVideoArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Json_2x3_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [
+            [(byte)'{', (byte)'}'],
+            [(byte)'[', (byte)']'],
+            [(byte)'1'],
+            [(byte)'2'],
+            [(byte)'3'],
+            [(byte)'4'],
+        ];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimJsonArray(data, [2, 3], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Json, value, data, [2, 3], arena,
+            v => v.AsJsonArray(arena));
+    }
+
+    [Fact]
+    public void Arena_PointCloud_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimPointCloudArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.PointCloud, value, data, [2, 2], arena,
+            v => v.AsPointCloudArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Audio_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimAudioArray([[1], null!, [3], [4]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_Json_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimJsonArray([[1], [2], [3]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsAudioVideoJsonPointCloud()
+    {
+        // All four route through FromMultiDimArrayInSidecar without being rejected.
+        foreach (DataKind kind in (DataKind[])[DataKind.Audio, DataKind.Video, DataKind.Json, DataKind.PointCloud])
+        {
+            DataValue value = DataValue.FromMultiDimArrayInSidecar(
+                kind, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 1);
+            Assert.True(value.IsMultiDim);
+            Assert.Equal(kind, value.Kind);
+            Assert.Equal(2, value.Ndim);
+        }
     }
 
     [Fact]
