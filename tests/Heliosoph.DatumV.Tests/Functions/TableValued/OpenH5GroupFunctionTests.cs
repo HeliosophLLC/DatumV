@@ -293,28 +293,65 @@ public sealed class OpenH5GroupFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
-    public async Task Open_EmptyGroup_YieldsNoRows()
+    public void ValidateArguments_OnGroupWithOnlySubGroups_ThrowsWithSubGroupSuggestions()
     {
-        // A group containing only sub-groups, no datasets, yields no rows.
-        string path = TempH5("only-subgroups.h5");
+        // LIGO-shape: /quality has no direct datasets, only sub-groups
+        // (/quality/simple, /quality/injections). The error should list the
+        // sub-groups so the user can drill into one of them instead of
+        // getting a silent zero-row result.
+        string path = TempH5("ligo-quality-shape.h5");
         new H5File
         {
-            ["wrapper"] = new H5Group
+            ["quality"] = new H5Group
             {
-                ["nested"] = new H5Group
+                ["simple"] = new H5Group
                 {
-                    ["unreachable"] = new int[] { 0 },
+                    ["DQmask"] = new uint[8],
                 },
+                ["injections"] = new H5Group
+                {
+                    ["Injmask"] = new uint[8],
+                },
+                ["detail"] = new H5Group { },
             },
         }.Write(path);
 
         OpenH5GroupFunction fn = new();
-        ExecutionContext ctx = CreateExecutionContext();
-        List<Row> rows = await CollectAsync(
-            ((ITableValuedFunction)fn).ExecuteAsync(
-                [ValueRef.FromString(path), ValueRef.FromString("/wrapper")], ctx), ctx);
+        FunctionArgumentException ex = Assert.Throws<FunctionArgumentException>(() =>
+            ((ITableValuedFunction)fn).ValidateArguments(
+                argumentKinds: [DataKind.String, DataKind.String],
+                constantArguments: [Const(path), Const("/quality")],
+                constantStore: _constantStore,
+                cancellationToken: default));
 
-        Assert.Empty(rows);
+        Assert.Contains("no direct-child datasets", ex.Message);
+        Assert.Contains("'/quality/simple'", ex.Message);
+        Assert.Contains("'/quality/injections'", ex.Message);
+        Assert.Contains("'/quality/detail'", ex.Message);
+    }
+
+    [Fact]
+    public void ValidateArguments_OnTrulyEmptyGroup_ThrowsWithExploreSuggestion()
+    {
+        // No children at all → different error message that points the
+        // user to open_h5_meta for full-tree exploration instead of
+        // suggesting a (non-existent) sub-group.
+        string path = TempH5("empty-group.h5");
+        new H5File
+        {
+            ["wrapper"] = new H5Group { },
+        }.Write(path);
+
+        OpenH5GroupFunction fn = new();
+        FunctionArgumentException ex = Assert.Throws<FunctionArgumentException>(() =>
+            ((ITableValuedFunction)fn).ValidateArguments(
+                argumentKinds: [DataKind.String, DataKind.String],
+                constantArguments: [Const(path), Const("/wrapper")],
+                constantStore: _constantStore,
+                cancellationToken: default));
+
+        Assert.Contains("no children", ex.Message);
+        Assert.Contains("open_h5_meta", ex.Message);
     }
 
     // ───────────────────────── Helpers ─────────────────────────

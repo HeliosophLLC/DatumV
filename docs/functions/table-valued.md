@@ -587,7 +587,11 @@ LIGO gravitational-wave data: `/quality/simple` holds nine-element string arrays
 
 ML model checkpoint layers: a Keras `/conv1/kernel` group might pair a 4-D weight tensor with a 1-D bias array and a few scalar attribute datasets. `open_h5_group` packages the whole layer as one record.
 
-**Empty group → zero rows.** A group containing only sub-groups, or no children at all, yields nothing (rather than an empty row).
+**Empty group → throws with sub-group suggestions.** Calling `open_h5_group` on a group that has no direct-child datasets — only sub-groups underneath — throws a helpful error listing the sub-groups so you can drill in:
+
+> *"HDF5 group `/quality` has no direct-child datasets. It contains sub-groups: `/quality/detail`, `/quality/injections`, `/quality/simple`. Pass one of those to open_h5_group, or use open_h5_meta to explore the full tree."*
+
+This is the LIGO-shaped case: their `/quality` is a logical container made of `/quality/simple` (data-quality bits) and `/quality/injections` (injection flags), so the user gets pointed at the actual record groups. Truly empty groups (no children at all) get a different message pointing at `open_h5_meta` for tree exploration.
 
 ```sql
 -- LIGO data-quality bit dictionary: descriptions, short names, bitmask, metadata

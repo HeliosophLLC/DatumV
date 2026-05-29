@@ -110,6 +110,7 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             throw new FunctionArgumentException(Name, error);
         }
 
+        EnsureGroupHasDirectDatasets(group, groupPath);
         return BuildSchema(group);
     }
 
@@ -146,18 +147,12 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             throw new InvalidDataException(error);
         }
 
+        EnsureGroupHasDirectDatasets(group, groupPath);
+
         // Walk children once, collecting (name, dataset, type) for every
         // includable child. The Schema we build here must agree with the one
         // ValidateArguments produced, so the rules live in BuildIncludedChildren.
         List<IncludedChild> children = BuildIncludedChildren(group);
-        if (children.Count == 0)
-        {
-            // No columns to emit. Yield nothing rather than an empty row —
-            // an empty group is informationally indistinguishable from a
-            // missing group at this layer, and downstream callers can use
-            // open_h5_meta to disambiguate.
-            yield break;
-        }
 
         string[] columnNames = new string[children.Count];
         for (int i = 0; i < children.Count; i++)
@@ -265,6 +260,52 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             columns[i] = column;
         }
         return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Throws <see cref="FunctionArgumentException"/> when
+    /// <paramref name="group"/> has no direct-child datasets. The error
+    /// message names available sub-groups (when there are any) so the
+    /// caller can drill in — the dominant failure mode is
+    /// <c>open_h5_group('/quality')</c> on a LIGO file whose <c>/quality</c>
+    /// only contains <c>/quality/simple</c> + <c>/quality/injections</c> as
+    /// sub-groups, with no datasets directly underneath.
+    /// </summary>
+    private static void EnsureGroupHasDirectDatasets(IH5Group group, string groupPath)
+    {
+        bool hasDataset = false;
+        List<string> subGroupNames = [];
+        foreach (IH5Object child in group.Children())
+        {
+            if (child is IH5Dataset)
+            {
+                hasDataset = true;
+                // Walk the rest to populate subGroupNames for the error message
+                // only if there is no dataset — otherwise the validator returns
+                // a schema and the sub-group list is unused.
+                continue;
+            }
+            if (child is IH5Group)
+            {
+                subGroupNames.Add(child.Name);
+            }
+        }
+        if (hasDataset) return;
+
+        string normalisedGroupPath = groupPath == "" ? "/" : groupPath;
+        if (subGroupNames.Count == 0)
+        {
+            throw new FunctionArgumentException(Name,
+                $"HDF5 group '{normalisedGroupPath}' has no children. " +
+                "Use open_h5_meta to explore the file structure.");
+        }
+
+        string parentPrefix = normalisedGroupPath == "/" ? "/" : normalisedGroupPath + "/";
+        string joined = string.Join(", ", subGroupNames.Select(n => $"'{parentPrefix}{n}'"));
+        throw new FunctionArgumentException(Name,
+            $"HDF5 group '{normalisedGroupPath}' has no direct-child datasets. " +
+            $"It contains sub-groups: {joined}. " +
+            "Pass one of those to open_h5_group, or use open_h5_meta to explore the full tree.");
     }
 
     /// <summary>
