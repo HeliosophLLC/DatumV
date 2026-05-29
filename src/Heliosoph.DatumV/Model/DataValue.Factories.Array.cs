@@ -172,11 +172,19 @@ public readonly partial struct DataValue
     /// </summary>
     private static void RejectReferenceElementKind(DataKind elementKind)
     {
-        if (elementKind is DataKind.Struct)
+        // Reference-element kinds use a slot-block layout (one 16-byte ArraySlot
+        // per element), not a flat byte run, so the fixed-width factory can't
+        // produce them. Every reference kind has its own per-kind multi-dim
+        // factory; callers must use that one. Cleaner error than the downstream
+        // "no fixed element byte size" from ScalarByteSize.
+        if (elementKind is DataKind.String or DataKind.Struct
+            or DataKind.Image or DataKind.Audio or DataKind.Video
+            or DataKind.Json or DataKind.PointCloud or DataKind.Mesh)
         {
             throw new ArgumentException(
-                $"Multi-dim is not supported for reference-element kind {elementKind} in this version. " +
-                "Use the per-kind multi-dim factory once it lands.",
+                $"Multi-dim {elementKind} arrays use a slot-block layout. " +
+                $"Use FromArenaMultiDim{elementKind}Array(elements, shape, store, ...) instead of " +
+                "the fixed-width factory.",
                 nameof(elementKind));
         }
     }
@@ -377,13 +385,6 @@ public readonly partial struct DataValue
             throw new ArgumentOutOfRangeException(
                 nameof(ndim), ndim,
                 $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
-        }
-        if (elementKind is DataKind.Struct)
-        {
-            throw new ArgumentException(
-                $"Multi-dim is not supported for element kind {elementKind} (reference / blob kinds) " +
-                "in this version.",
-                nameof(elementKind));
         }
 
         if (offset < 0)

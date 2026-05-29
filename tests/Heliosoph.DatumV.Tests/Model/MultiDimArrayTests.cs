@@ -715,6 +715,126 @@ public sealed class MultiDimArrayTests : ServiceTestBase
         Assert.Equal(2, value.Ndim);
     }
 
+    // ───────────────────── Multi-dim Struct[] ─────────────────────
+
+    [Fact]
+    public void Arena_Struct_2x2_RoundTripsShapeAndElements()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1), DataValue.FromFloat32(1.5f)],
+            [DataValue.FromInt32(2), DataValue.FromFloat32(2.5f)],
+            [DataValue.FromInt32(3), DataValue.FromFloat32(3.5f)],
+            [DataValue.FromInt32(4), DataValue.FromFloat32(4.5f)],
+        ];
+        int[] shape = [2, 2];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, shape, arena, typeId: 7);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(DataKind.Struct, value.Kind);
+        Assert.Equal(2, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(4, value.ElementCount);
+
+        DataValue[] recovered = value.AsStructArray(arena);
+        Assert.Equal(4, recovered.Length);
+        for (int i = 0; i < recovered.Length; i++)
+        {
+            // Per-element TypeId is the same id we stamped at construction.
+            Assert.Equal(7, recovered[i].TypeId);
+            DataValue[] fields = recovered[i].AsStruct(arena);
+            Assert.Equal(i + 1, fields[0].AsInt32());
+            Assert.Equal(i + 1.5f, fields[1].AsFloat32());
+        }
+    }
+
+    [Fact]
+    public void Arena_Struct_3D_2x2x2()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = new DataValue[8][];
+        for (int i = 0; i < 8; i++)
+        {
+            elements[i] = [DataValue.FromInt32(i)];
+        }
+        int[] shape = [2, 2, 2];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, shape, arena, typeId: 0);
+
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(8, value.ElementCount);
+    }
+
+    [Fact]
+    public void Arena_Struct_WithStringField_RoundTrips()
+    {
+        // Each struct element carries an arena-backed String field. Multi-dim
+        // doesn't change the per-element field semantics; the shape prefix
+        // sits ahead of the slot block, the slots reference field-array
+        // offsets in the same arena, and field bytes (the String) live wherever
+        // store.StoreString put them.
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromString("alpha", arena), DataValue.FromInt32(1)],
+            [DataValue.FromString("beta", arena),  DataValue.FromInt32(2)],
+            [DataValue.FromString("gamma", arena), DataValue.FromInt32(3)],
+            [DataValue.FromString("delta", arena), DataValue.FromInt32(4)],
+        ];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 11);
+
+        DataValue[] recovered = value.AsStructArray(arena);
+        Assert.Equal(4, recovered.Length);
+        string[] expectedNames = ["alpha", "beta", "gamma", "delta"];
+        for (int i = 0; i < recovered.Length; i++)
+        {
+            DataValue[] fields = recovered[i].AsStruct(arena);
+            Assert.Equal(expectedNames[i], fields[0].AsString(arena));
+            Assert.Equal(i + 1, fields[1].AsInt32());
+        }
+    }
+
+    [Fact]
+    public void Arena_Struct_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1)],
+            [DataValue.FromInt32(2)],
+            [DataValue.FromInt32(3)],
+        ];
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 0));
+    }
+
+    [Fact]
+    public void Arena_Struct_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1)],
+            null!,
+            [DataValue.FromInt32(3)],
+            [DataValue.FromInt32(4)],
+        ];
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 0));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsStruct()
+    {
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.Struct, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 6);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.Struct, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
     [Fact]
     public void Arena_UInt8_FlatVsMultiDim_NotEqual()
     {

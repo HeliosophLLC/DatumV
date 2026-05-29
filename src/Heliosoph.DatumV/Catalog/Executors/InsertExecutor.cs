@@ -665,10 +665,43 @@ internal static class InsertExecutor
         string columnName)
     {
         // Reference-element arrays — re-emit via the existing managed-intermediate
-        // round-trip primitives. AsStringArray / AsImageArray return managed
-        // string[] / byte[][] respectively, which are arena-independent; the
-        // matching FromXArray writes new slot blocks + per-element bodies in
-        // the target arena. No source-arena references survive into the result.
+        // round-trip primitives. As{Kind}Array returns managed string[] / byte[][]
+        // / DataValue[] respectively, which are arena-independent; the matching
+        // From{Kind}Array writes new slot blocks + per-element bodies in the
+        // target arena. No source-arena references survive into the result.
+        // Multi-dim sources thread the shape through the per-kind multi-dim
+        // factory so the target value preserves IsMultiDim + shape prefix.
+        if (source.IsArray && source.IsMultiDim)
+        {
+            int[] shape = source.GetShape(sourceStore, sidecarRegistry).ToArray();
+            switch (source.Kind)
+            {
+                case DataKind.String:
+                    return DataValue.FromArenaMultiDimStringArray(
+                        source.AsStringArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Image:
+                    return DataValue.FromArenaMultiDimImageArray(
+                        source.AsImageArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Audio:
+                    return DataValue.FromArenaMultiDimAudioArray(
+                        source.AsAudioArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Video:
+                    return DataValue.FromArenaMultiDimVideoArray(
+                        source.AsVideoArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Json:
+                    return DataValue.FromArenaMultiDimJsonArray(
+                        source.AsJsonArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.PointCloud:
+                    return DataValue.FromArenaMultiDimPointCloudArray(
+                        source.AsPointCloudArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Mesh:
+                    return DataValue.FromArenaMultiDimMeshArray(
+                        source.AsMeshArray(sourceStore, sidecarRegistry), shape, targetArena);
+                case DataKind.Struct:
+                    return CopyStructArrayToTargetArena(source, sourceStore, sidecarRegistry, targetArena, shape);
+            }
+        }
+
         switch (source.Kind)
         {
             case DataKind.String:
@@ -680,7 +713,7 @@ internal static class InsertExecutor
                     source.AsImageArray(sourceStore, sidecarRegistry),
                     targetArena);
             case DataKind.Struct:
-                return CopyStructArrayToTargetArena(source, sourceStore, sidecarRegistry, targetArena);
+                return CopyStructArrayToTargetArena(source, sourceStore, sidecarRegistry, targetArena, shape: null);
             case DataKind.Audio:
                 return DataValue.FromAudioArray(
                     source.AsAudioArray(sourceStore, sidecarRegistry),
@@ -696,6 +729,10 @@ internal static class InsertExecutor
             case DataKind.PointCloud:
                 return DataValue.FromPointCloudArray(
                     source.AsPointCloudArray(sourceStore, sidecarRegistry),
+                    targetArena);
+            case DataKind.Mesh:
+                return DataValue.FromMeshArray(
+                    source.AsMeshArray(sourceStore, sidecarRegistry),
                     targetArena);
         }
 
@@ -723,7 +760,8 @@ internal static class InsertExecutor
         DataValue source,
         IValueStore sourceStore,
         SidecarRegistry? sidecarRegistry,
-        Arena targetArena)
+        Arena targetArena,
+        int[]? shape = null)
     {
         DataValue[] elements = source.AsStructArray(sourceStore, sidecarRegistry);
         if (elements.Length == 0)
@@ -743,10 +781,14 @@ internal static class InsertExecutor
             reboundElements[i] = reboundFields;
         }
 
-        // Pull the per-element TypeId from the first element; FromStructArray
-        // applies it uniformly across slots. Same-query shared TypeRegistry
-        // means the id is directly portable; no translation needed.
+        // Pull the per-element TypeId from the first element; both factories
+        // apply it uniformly across slots. Same-query shared TypeRegistry means
+        // the id is directly portable; no translation needed.
         ushort elementTypeId = elements[0].TypeId;
+        if (shape is not null)
+        {
+            return DataValue.FromArenaMultiDimStructArray(reboundElements, shape, targetArena, elementTypeId);
+        }
         return DataValue.FromStructArray(reboundElements, targetArena, elementTypeId);
     }
 

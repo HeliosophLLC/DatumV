@@ -3,18 +3,13 @@ using Heliosoph.DatumV.Catalog;
 namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
-/// Multi-dim arrays (ndim ≥ 2) currently support fixed-width primitive
-/// element kinds and String. The remaining reference / blob kinds and the
-/// UInt8 byte-array kind reject at <c>CREATE TABLE</c> so users see the
-/// error before any INSERT touches the column.
+/// Multi-dim arrays (ndim ≥ 2) are now supported for every element kind. This
+/// file used to gate the DDL rejection set; remaining tests assert
+/// acceptance across the kind matrix and serve as a regression net against
+/// re-introducing a guard.
 /// </summary>
 public sealed class MultiDimDdlRejectionTests : ServiceTestBase
 {
-    private InvalidOperationException ExpectRejection(string ddl)
-    {
-        using TableCatalog catalog = CreateCatalog();
-        return Assert.Throws<InvalidOperationException>(() => catalog.Plan(ddl));
-    }
 
     [Fact]
     public void StringMultiDim_AcceptedAtDdl()
@@ -75,11 +70,10 @@ public sealed class MultiDimDdlRejectionTests : ServiceTestBase
     }
 
     [Fact]
-    public void StructMultiDim_RejectedAtDdl()
+    public void StructMultiDim_AcceptedAtDdl()
     {
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (s Array<Struct>(2,3))");
-        Assert.Contains("Struct", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s Array<Struct>(2,3))");
     }
 
     [Fact]

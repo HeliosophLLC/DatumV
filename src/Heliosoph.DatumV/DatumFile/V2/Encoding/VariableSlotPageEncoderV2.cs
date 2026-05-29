@@ -476,7 +476,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             DataKind.Json => EncodeBlobArrayToSidecar(value.AsJsonArray(store), shape, sidecar),
             DataKind.PointCloud => EncodeBlobArrayToSidecar(value.AsPointCloudArray(store), shape, sidecar),
             DataKind.Mesh => EncodeBlobArrayToSidecar(value.AsMeshArray(store), shape, sidecar),
-            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
+            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), shape, store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
         };
@@ -536,11 +536,17 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
     private static (long offset, long length) EncodeStructArrayToSidecar(
         DataValue[] elements,
+        ReadOnlySpan<int> shape,
         IValueStore store,
         IBlobSink sidecar,
         ITypeIdAllocator? typeIdAllocator)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             // Each element is a self-describing Struct DataValue carrying its own
@@ -556,7 +562,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                 ? elements[i].TypeId
                 : typeIdAllocator.AllocateOrLookup(elements[i].TypeId);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength,
                 onDiskTypeId);

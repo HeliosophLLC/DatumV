@@ -142,6 +142,23 @@ internal static class LiteralCoercion
                         return DataValue.FromArenaMultiDimPointCloudArray(source.AsPointCloudArray(arena), shape, arena);
                     case DataKind.Mesh:
                         return DataValue.FromArenaMultiDimMeshArray(source.AsMeshArray(arena), shape, arena);
+                    case DataKind.Struct:
+                        // Container Array<Struct> doesn't carry a TypeId — the per-element
+                        // TypeId rides in each slot's bytes. Materialise the elements (each
+                        // is a Struct DataValue), unpack each to its field array, then call
+                        // the per-kind factory. The shared TypeId is taken from the first
+                        // element (struct arrays are uniformly-shaped within a column).
+                        DataValue[] structElements = source.AsStructArray(arena);
+                        DataValue[][] structFields = new DataValue[structElements.Length][];
+                        for (int i = 0; i < structElements.Length; i++)
+                        {
+                            structFields[i] = structElements[i].AsStruct(arena);
+                        }
+                        ushort elementTypeId = structElements.Length > 0
+                            ? structElements[0].TypeId
+                            : (ushort)TypeRegistry.NoType;
+                        return DataValue.FromArenaMultiDimStructArray(
+                            structFields, shape, arena, elementTypeId);
                 }
             }
 

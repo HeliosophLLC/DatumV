@@ -74,6 +74,82 @@ public readonly partial struct DataValue
         FromStructArray(elements, store, typeId: TypeRegistry.NoType);
 
     /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;Struct&gt;</c> value.
+    /// Each element's fields are written to <paramref name="store"/>; a slot block
+    /// of <c>elements.Length × 16 bytes</c> is prepended with an <c>int32 × ndim</c>
+    /// shape prefix and stored as a single contiguous block. The per-element
+    /// <paramref name="typeId"/> rides in each slot's reserved bytes (13-14) so
+    /// elements stay self-describing on read; the array container itself carries
+    /// no TypeId. <see cref="AsStructArray"/> transparently skips the shape prefix.
+    /// </summary>
+    public static DataValue FromArenaMultiDimStructArray(
+        ReadOnlySpan<DataValue[]> elements,
+        ReadOnlySpan<int> shape,
+        IValueStore store,
+        ushort typeId)
+    {
+        if (shape.Length < 2 || shape.Length > 255)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(shape), shape.Length,
+                "Multi-dim ndim must be in [2, 255].");
+        }
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++)
+        {
+            int dim = shape[i];
+            if (dim <= 0)
+            {
+                throw new ArgumentException(
+                    $"Shape dimension {i} must be positive; got {dim}.", nameof(shape));
+            }
+            product *= dim;
+            if (product > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shape), product,
+                    "Product of shape dimensions overflows Int32.");
+            }
+        }
+        if (product != elements.Length)
+        {
+            throw new ArgumentException(
+                $"Product of shape dimensions ({product}) does not equal element count ({elements.Length}).",
+                nameof(shape));
+        }
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int slotBlockBytes = elements.Length * ArraySlot.SizeBytes;
+        byte[] buffer = new byte[shapeBytes + slotBlockBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+
+        for (int i = 0; i < elements.Length; i++)
+        {
+            DataValue[]? fields = elements[i];
+            if (fields is null)
+            {
+                throw new ArgumentException(
+                    $"Element {i} is null. Array<Struct> elements must be non-null; " +
+                    "use a typed null DataValue for SQL NULL semantics at the column level.",
+                    nameof(elements));
+            }
+            var (elementP0, elementP1) = store.StoreDataValues(fields);
+            ArraySlot.Write(
+                buffer.AsSpan(shapeBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0.Value,
+                elementP1.Value,
+                typeId);
+        }
+
+        var (blockP0, blockP1) = store.StoreBytes(buffer);
+        ushort cc = (ushort)(shape.Length << 8);
+        return new(
+            DataKind.Struct,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            offset: blockP0.Value, length: blockP1.Value, charCount: cc);
+    }
+
+    /// <summary>
     /// Polymorphic typed-array factory. Accepts a span of element <see cref="DataValue"/>s
     /// and dispatches to the appropriate per-kind factory based on
     /// <paramref name="elementKind"/>:
@@ -227,10 +303,15 @@ public readonly partial struct DataValue
     {
         ThrowIfNotReferenceArray(DataKind.Struct);
 
+        // Multi-dim values prepend an [int32 × ndim] shape prefix to the slot
+        // block on both arena and sidecar tiers; element reads skip it
+        // transparently.
+        int shapePrefix = ShapePrefixByteCount;
+
         if (IsInSidecar)
         {
             IBlobSource src = ResolveSidecarSource(registry);
-            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry);
+            ReadOnlySpan<byte> blockBytes = ReadSidecarBytes(registry)[shapePrefix..];
             int elementCount = blockBytes.Length / ArraySlot.SizeBytes;
             DataValue[] result = new DataValue[elementCount];
             byte storeId = SidecarStoreId;
@@ -258,6 +339,8 @@ public readonly partial struct DataValue
             return result;
         }
 
+        // N = 0 / N = 1 inline path. Multi-dim is unreachable here (min shape
+        // product 2×2 = 4 slots × 16 bytes exceeds the 16-byte inline payload).
         if (IsInline)
         {
             if (_charCount == 0) return [];
@@ -276,7 +359,7 @@ public readonly partial struct DataValue
             return [SynthesiseArenaStruct(elementOffset, elementLength, elementTypeId)];
         }
 
-        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        ReadOnlySpan<byte> arenaBlock = store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength))[shapePrefix..];
         int n = arenaBlock.Length / ArraySlot.SizeBytes;
         DataValue[] arenaResult = new DataValue[n];
         for (int i = 0; i < n; i++)

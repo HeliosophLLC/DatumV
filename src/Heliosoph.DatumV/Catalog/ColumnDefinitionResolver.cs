@@ -61,16 +61,6 @@ internal static class ColumnDefinitionResolver
                     "suffixed with [] for typed-array columns.");
             }
 
-            // Multi-dim (ndim ≥ 2) arrays support every element kind except
-            // Struct; Struct still rejects until its per-element TypeId carry
-            // is plumbed through the slot-block layout.
-            if (isArray && fixedShape is { Length: >= 2 } && IsMultiDimIncompatibleElementKind(kind))
-            {
-                throw new InvalidOperationException(
-                    $"Column '{d.Name}': multi-dimensional shape (ndim={fixedShape.Length}) is " +
-                    $"not supported for element kind {kind} in this version. " +
-                    $"Use a 1-D array (Array<{kind}>) or denormalize the row.");
-            }
 
             Expression? defaultExpression = null;
             if (d.DefaultValue is not null)
@@ -581,16 +571,4 @@ internal static class ColumnDefinitionResolver
         }
     }
 
-    /// <summary>
-    /// True when <paramref name="kind"/> has no multi-dim factory yet — the
-    /// reference / blob kinds without a per-kind multi-dim factory. Mirrors
-    /// <c>DataValue.RejectReferenceElementKind</c>; we duplicate the list here
-    /// to surface the error at DDL time rather than first INSERT.
-    /// <see cref="DataKind.String"/> and <see cref="DataKind.UInt8"/> are
-    /// supported (String via <see cref="DataValue.FromArenaMultiDimStringArray"/>;
-    /// UInt8 via the fixed-width factory with shape-prefix-aware accessors) and
-    /// are not on this list.
-    /// </summary>
-    private static bool IsMultiDimIncompatibleElementKind(DataKind kind) =>
-        kind is DataKind.Struct;
 }
