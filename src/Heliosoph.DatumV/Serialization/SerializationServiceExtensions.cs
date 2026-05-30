@@ -1,4 +1,5 @@
 using Heliosoph.DatumV.Serialization;
+using Heliosoph.DatumV.Serialization.Arrow;
 using Heliosoph.DatumV.Serialization.Csv;
 using Heliosoph.DatumV.Serialization.Fits;
 using Heliosoph.DatumV.Serialization.Hdf5;
@@ -27,6 +28,7 @@ public static class SerializationServiceExtensions
         services.AddTransient<IFileFormat, JsonFileFormat>();
         services.AddTransient<IFileFormat, JsonLinesFileFormat>();
         services.AddTransient<IFileFormat, ParquetFileFormat>();
+        services.AddTransient<IFileFormat, ArrowFileFormat>();
         services.AddTransient<IFileFormat, Hdf5FileFormat>();
         services.AddTransient<IFileFormat, IdxFileFormat>();
         services.AddTransient<IFileFormat, FitsFileFormat>();

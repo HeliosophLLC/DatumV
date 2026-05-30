@@ -1130,6 +1130,8 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenH5GroupFunction>();
         registry.RegisterTableValued<TableValued.OpenParquetMetaFunction>();
         registry.RegisterTableValued<TableValued.OpenParquetFunction>();
+        registry.RegisterTableValued<TableValued.OpenArrowMetaFunction>();
+        registry.RegisterTableValued<TableValued.OpenArrowFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't
