@@ -718,6 +718,59 @@
       ]
     },
     {
+      "name": "MedNIST",
+      "summary": "58,954 64×64 grayscale medical thumbnails labelled with one of six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). The medical-imaging counterpart to MNIST.",
+      "description": "Compiled by Bradley Erickson (Mayo Clinic) from CT, MRI, and X-ray slices drawn from the Cancer Imaging Archive (TCIA), the RSNA Bone Age Challenge, and the NIH ChestX-ray14 release, then packaged by the MONAI team as a small drop-in benchmark for medical image classification. ~10,000 thumbnails per class (BreastMRI is slightly smaller at 8,954), all rendered to uniform 64×64 grayscale JPEG. Plays the same role for medical imaging that MNIST plays for handwritten digits — small enough to ingest in under a minute, easy enough that a tiny CNN converges to ~99% test accuracy in a few epochs, but realistic enough that the modality boundaries actually correspond to clinical categories. Folder layout is one class per directory under a top-level `MedNIST/` prefix; the class label is the folder name verbatim.",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-sa-4.0"],
+      "attributions": [
+        "Bradley J. Erickson, MD, PhD (Mayo Clinic — MedNIST compilation)",
+        "MONAI Consortium (packaging and hosting via MONAI-extra-test-data)",
+        "The Cancer Imaging Archive (TCIA), RSNA Bone Age Challenge, NIH ChestX-ray14 (source corpora)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "cardFile": "cards/mednist/index.md",
+      "heroImageFile": "cards/mednist/hero.jpg",
+      "variants": [
+        {
+          "id": "mednist_classes",
+          "displayName": "classes (6 modalities)",
+          "summary": "58,954 64×64 grayscale JPEGs across six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). Each row carries the decoded image plus the modality class name extracted from the source folder.",
+          "approxArchiveBytes": 61000000,
+          "approxIngestedBytes": 75000000,
+          "expectedRowCounts": { "images": 58954 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "0.8.1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://github.com/Project-MONAI/MONAI-extra-test-data/releases/download/0.8.1/MedNIST.tar.gz",
+                      "destFile": "MedNIST.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "mednist/classes.sql",
+                  "archive": "MedNIST.tar.gz"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "EuroSAT",
       "summary": "27,000 64×64 RGB satellite tiles from Sentinel-2 over Europe, labelled with one of ten land-use / land-cover classes. The reach-for small benchmark for remote-sensing image classification.",
       "description": "Released in 2017 by Helber et al., EuroSAT samples Sentinel-2 imagery across 34 European countries and crops it into 27,000 64×64 patches across ten classes — AnnualCrop, Forest, HerbaceousVegetation, Highway, Industrial, Pasture, PermanentCrop, Residential, River, SeaLake. The dataset ships in two forms: a 13-band multispectral version (the full Sentinel-2 sensor stack) and a 3-band RGB version. This variant ingests the RGB JPEGs. State-of-the-art models reach ~98–99% accuracy, so EuroSAT plays a similar role to MNIST in the remote-sensing space — large enough to be non-trivial, small enough to iterate on, easy enough to converge. Land cover is balanced (~2,000–3,000 samples per class) so a plain accuracy number is a reasonable headline metric.",
