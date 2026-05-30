@@ -646,6 +646,170 @@ FROM open_h5_group('model.h5', '/dense_1');
 SELECT * FROM open_h5_group($archive, $group_path);
 ```
 
+### open_parquet_meta
+
+`open_parquet_meta(path)` -> Rows | QU: 1
+
+Opens an Apache Parquet file and yields **one row per leaf column** with its parsed type metadata, row group count, and total row count. The interrogation TVF for Parquet — call this first to see what's inside an unfamiliar file before pulling rows with `open_parquet`.
+
+Parquet is the dominant on-disk format for HuggingFace datasets (every dataset that doesn't ship as JSONL or raw archives is Parquet), Spark output, dlt pipelines, and pandas `.to_parquet()` exports. The schema is hierarchical — primitives at the leaves, optional nested `LIST<T>` and `STRUCT<…>` groupings — but `open_parquet_meta` flattens to one row per leaf column with the dotted path as the identifier.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `column_path` | `STRING` | Leaf path in dotted form (e.g. `image.bytes` for a struct child) |
+| `element_kind` | `STRING` | DataKind name for the leaf (e.g. `Int32`, `String`, `Float64`). `Unknown` for unsupported logical types. |
+| `is_array` | `BOOLEAN` | True for `LIST<T>` columns; false for scalars |
+| `is_nullable` | `BOOLEAN` | True when the column allows nulls (optional/repeated repetition) |
+| `is_supported` | `BOOLEAN` | True when `open_parquet` can read this column in v1 |
+| `logical_type` | `STRING` | Short description of the column's logical type (CLR-name based) |
+| `row_group_count` | `INT32` | Number of row groups in the file |
+| `total_rows` | `INT64` | Total row count across all row groups |
+
+**Supported element kinds (v1):** booleans, signed and unsigned 8/16/32/64-bit integers, IEEE Float32 / Float64, UTF-8 strings, byte arrays (raw `BYTE_ARRAY`), plus `Decimal` / `Timestamp` / `TimestampTz` / `Date` / `Time` / `Uuid` when Parquet.Net surfaces them as the corresponding CLR type. Nested `STRUCT<…>` columns surface as flat leaves with dotted paths in v1 — they're queryable as `SELECT "image.bytes" FROM …`; a typed `STRUCT` projection is a planned follow-up.
+
+```sql
+-- Inspect a HuggingFace dataset shard before querying
+SELECT column_path, element_kind, is_array, total_rows
+FROM open_parquet_meta('/data/imdb-train-00000-of-00004.parquet');
+
+-- Find every text-like column in a multi-shard dataset
+SELECT column_path
+FROM open_parquet_meta('/data/wiki-shard-0.parquet')
+WHERE element_kind = 'String';
+
+-- Bound parameter
+SELECT * FROM open_parquet_meta($shard_path);
+```
+
+### open_parquet
+
+`open_parquet(path)` -> Rows | QU: 1
+
+Opens an Apache Parquet file and yields its rows with one column per leaf field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
+
+```sql
+SELECT label, text FROM open_parquet('/data/imdb-train.parquet') WHERE label = 1;
+```
+
+The `label` column above is typed as `INT32` (or whatever the on-disk type really is) at plan time, not at first row.
+
+**Plan-time schema peek.** The `path` argument must be a constant at plan time (literal in source, or a `$parameter` reference that the parameter binder has substituted). The validator opens the file, reads the Parquet schema, and produces a real `Schema` per leaf column. Non-constant arguments throw — recipe writers must inline the path or pass a bound parameter.
+
+**Supported types (v1):** same set as `open_parquet_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, strings, byte arrays, Decimal / Timestamp / Date / Time / UUID when Parquet.Net surfaces them. Plus 1-D arrays of any supported primitive via `LIST<T>` (token sequences, embedding vectors stored as `LIST<FLOAT>`).
+
+**Nested types (v1 limits):**
+
+| Aspect | Status |
+|---|---|
+| Primitive scalar columns | Supported |
+| 1-D arrays (`LIST<T>`) | Supported |
+| Nested STRUCT children | Surfaced as flat leaf columns with dotted paths (e.g. `image.bytes`, `image.path`) — typed STRUCT projection is a follow-up |
+| `LIST<LIST<T>>` / multi-axis tensor columns | Deferred (defer until a real file demands it; would use the multi-dim cell path) |
+| `MAP<K, V>` | Deferred |
+
+**Memory.** v1 reads each row group fully into memory before emitting rows. Fine for typical HF shards (tens to hundreds of MB per row group); larger-than-RAM files land via the chunked-streaming follow-up — the architecture supports it, the reader hasn't been refactored yet.
+
+```sql
+-- Pull rows from a HuggingFace classification dataset
+SELECT label, text
+FROM open_parquet('/data/imdb-train.parquet')
+WHERE label = 1
+LIMIT 100;
+
+-- Token-sequence dataset: each row's tokens column is a typed Int32 array
+SELECT array_length(tokens) AS token_count
+FROM open_parquet('/data/c4-tokenized.parquet');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_parquet($shard_path);
+```
+
+**Ingest path.** Dropping a `.parquet` (or `.pq`) file into the dataset pipeline lands it through `ParquetFileFormat`, which emits the same typed shape `open_parquet` does. Magic-byte detection (`PAR1`) picks up extensionless or mislabelled Parquet files — common with Spark / dlt output that uses `part-00000-*.snappy` naming.
+
+### open_arrow_meta
+
+`open_arrow_meta(path)` -> Rows | QU: 1
+
+Opens an Apache Arrow IPC file (also Feather v2) and yields **one row per top-level column** with its parsed type metadata, record batch count, and total row count. The interrogation TVF for Arrow — call this first to see what's inside an unfamiliar `.arrow` / `.feather` file before pulling rows with `open_arrow`.
+
+Arrow IPC is the native on-disk format for the HuggingFace `datasets` library (the Python-side cache shape), Polars cache writes, DuckDB exports, and pandas `.to_feather()`. The schema is flat at the top level — Arrow does have nested `StructType` columns, but the dominant HF-dataset shape (text + label + embedding) is flat — and `open_arrow_meta` surfaces every top-level column with its mapped element kind.
+
+| Column | Type | Description |
+|---|---|---|
+| `column_name` | `STRING` | Top-level field name from the Arrow schema |
+| `element_kind` | `STRING` | Mapped `DataKind` (`Int32`, `String`, `Float64`, `Timestamp`, …); `Unknown` when not yet wired |
+| `is_array` | `BOOLEAN` | True for `ListType` / `LargeListType` / `FixedSizeListType` columns |
+| `is_nullable` | `BOOLEAN` | From the Arrow field's nullable flag |
+| `is_supported` | `BOOLEAN` | True when `open_arrow` can read this column in v1 |
+| `logical_type` | `STRING` | Arrow logical type description (e.g. `Timestamp[Microsecond, UTC]`, `FixedSizeList<Float>[768]`) |
+| `batch_count` | `INT32` | Number of record batches in the file |
+| `total_rows` | `INT64` | Sum of record batch lengths |
+
+```sql
+-- Quick look at a HuggingFace dataset cache shard
+SELECT column_name, element_kind, is_array, logical_type
+FROM open_arrow_meta('/data/hf-cache/squad/train-00000-of-00001.arrow');
+
+-- Only the columns we can actually pull rows from
+SELECT column_name, element_kind
+FROM open_arrow_meta('/data/polars-cache.feather')
+WHERE is_supported;
+
+-- Via a bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_arrow_meta($shard_path);
+```
+
+Dictionary-encoded columns (Arrow's compact encoding for low-cardinality string columns — HF label columns, language codes) are transparently unwrapped: `element_kind` reflects the dictionary's value type, not the index type.
+
+### open_arrow
+
+`open_arrow(path)` -> Rows | QU: 1
+
+Opens an Apache Arrow IPC / Feather v2 file and yields its rows with one column per top-level field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
+
+```sql
+SELECT label, text FROM open_arrow('/data/squad-train.arrow') WHERE label = 1;
+```
+
+The `label` column above is typed as `INT32` (or whatever the on-disk type really is) at plan time, not at first row.
+
+**Plan-time schema peek.** The `path` argument must be a constant at plan time (literal in source, or a `$parameter` reference that the parameter binder has substituted). The validator opens the file, reads the Arrow schema, and produces a real `Schema` per top-level column. Non-constant arguments throw — recipe writers must inline the path or pass a bound parameter.
+
+**Supported types (v1):** booleans, signed / unsigned integers (8/16/32/64-bit), Float32 (including HalfFloat / Float16 promoted), Float64, UTF-8 strings, and 1-D arrays of any supported primitive via `ListType` (variable-length) or `FixedSizeListType` (fixed-length — embeddings stored as `FixedSizeList<Float>[768]` land as typed Float32 arrays). Dictionary-encoded columns decode through to their value type transparently.
+
+**Nested types (v1 limits):**
+
+| Aspect | Status |
+|---|---|
+| Primitive scalar columns | Supported |
+| 1-D arrays (`List<T>`, `FixedSizeList<T>`) | Supported |
+| Dictionary-encoded columns | Supported (transparently unwrapped) |
+| `Timestamp` / `Date` / `Decimal` / `Time` row values | Surfaced by `open_arrow_meta` but row decoding is a follow-up |
+| `Struct<...>` children | Deferred — typed struct surface lands with the same multi-format struct-fields rollout |
+| Multi-level list nesting (`List<List<T>>`) | Deferred (would use the multi-dim cell path) |
+| `Map<K, V>` / `Union` / `Decimal256` | Deferred |
+
+**Memory.** v1 reads each record batch fully into memory before emitting rows. Fine for typical HF shards (record batches are usually well under a hundred MB); larger-than-RAM batches land via the chunked-streaming follow-up — the architecture supports it, the reader hasn't been refactored yet.
+
+```sql
+-- Pull rows from a HuggingFace dataset cache shard
+SELECT label, text
+FROM open_arrow('/data/hf-cache/imdb/train-00000-of-00001.arrow')
+WHERE label = 1
+LIMIT 100;
+
+-- Embedding column stored as FixedSizeList<Float>[768]
+SELECT array_length(embedding) AS dim
+FROM open_arrow('/data/embeddings.feather');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_arrow($shard_path);
+```
+
+**Ingest path.** Dropping a `.arrow` (or `.feather`) file into the dataset pipeline lands it through `ArrowFileFormat`, which emits the same typed shape `open_arrow` does. Magic-byte detection (`ARROW1\0\0` at offset 0) picks up extensionless or mislabelled Arrow files — common with HF / Polars cache writes that strip the suffix.
+
 ## See Also
 
 - [Aggregate Functions](aggregate.md) -- grouping and reduction functions
