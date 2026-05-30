@@ -2256,8 +2256,10 @@ const MATRIX_DECODE_CAP = 16384;
  * The decode is bounded — we never materialise the full array unless
  * the matrix path explicitly needs it.
  */
+const PREVIEW_STEP = 64;
+
 function NumericArrayInspector({ cell }: { cell: JsonCell }) {
-  const PREVIEW_COUNT = 64;
+  const { t } = useTranslation('query');
   const kind = cell.elementKind ?? '?';
   const count = cell.count ?? 0;
   const shape = cell.shape;
@@ -2266,7 +2268,8 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
     && shape.length === 2
     && count > 0
     && count <= MATRIX_DECODE_CAP;
-  const decodeCount = renderMatrix ? count : PREVIEW_COUNT;
+  const [previewCount, setPreviewCount] = useState(PREVIEW_STEP);
+  const decodeCount = renderMatrix ? count : previewCount;
   const values = useMemo(
     () => decodeNumericArrayHead(cell, decodeCount),
     [cell, decodeCount],
@@ -2279,6 +2282,9 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
   if (cell.min !== undefined) stats.push({ label: 'min', value: formatStat(cell.min) });
   if (cell.max !== undefined) stats.push({ label: 'max', value: formatStat(cell.max) });
   if (cell.mean !== undefined) stats.push({ label: 'mean', value: formatStat(cell.mean) });
+  const remaining = values ? count - values.length : 0;
+  const canLoadMore = !renderMatrix && values !== null && remaining > 0;
+  const nextStep = Math.min(PREVIEW_STEP, remaining);
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
@@ -2295,13 +2301,41 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
         values && values.length > 0 && (
           <div className="flex flex-col gap-1">
             <div className="text-muted-foreground text-xs">
-              first {values.length.toLocaleString()} of {count.toLocaleString()}
-              {shape && shape.length > 2 ? ` · shape ${shape.join(' × ')}` : ''}
+              {shape && shape.length > 2
+                ? t('numericArrayInspector.firstOfWithShape', {
+                    shown: values.length,
+                    total: count,
+                    shape: shape.join(' × '),
+                  })
+                : t('numericArrayInspector.firstOf', {
+                    shown: values.length,
+                    total: count,
+                  })}
             </div>
             <pre className="bg-muted/40 border-border max-h-96 overflow-auto rounded-xs border p-2 font-mono text-xs whitespace-pre-wrap">
               {values.map((v) => formatStat(v)).join(', ')}
               {count > values.length ? ', …' : ''}
             </pre>
+            {canLoadMore && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewCount((c) => c + PREVIEW_STEP)}
+                  className="border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer rounded-sm border px-2 py-0.5 text-xs"
+                >
+                  {t('numericArrayInspector.loadMore', { step: nextStep })}
+                </button>
+                {remaining > PREVIEW_STEP && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCount(count)}
+                    className="border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer rounded-sm border px-2 py-0.5 text-xs"
+                  >
+                    {t('numericArrayInspector.loadRest', { rest: remaining })}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )
       )}
