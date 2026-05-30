@@ -279,3 +279,74 @@ public sealed class CosineSimilarityFunction : IFunction, IScalarFunction
         return new(ValueRef.FromFloat32((float)sim));
     }
 }
+
+/// <summary>
+/// <c>dot_product(a FLOAT32[], b FLOAT32[]) → FLOAT32</c>. Standard
+/// inner product: <c>Σ aᵢ · bᵢ</c>. Equivalent to
+/// <c>cosine_similarity</c> when both inputs are already unit-normalised,
+/// and is the preferred similarity primitive for pre-normalised
+/// embedding stores where the per-row sqrt is wasted work.
+/// </summary>
+/// <remarks>
+/// Throws when the two arrays have different lengths. Accumulates in
+/// <c>double</c> to keep precision on long vectors, then narrows.
+/// </remarks>
+public sealed class DotProductFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "dot_product";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Vector;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Dot product of two Float32 vectors of equal length: " +
+        "dot_product(a FLOAT32[], b FLOAT32[]) → FLOAT32. " +
+        "Equivalent to cosine_similarity when both inputs are unit-normalised.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("a", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("b", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Float32)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<DotProductFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull)
+        {
+            return new(ValueRef.Null(DataKind.Float32));
+        }
+
+        float[] a = ActivationOps.ReadFloat32Array(args[0]);
+        float[] b = ActivationOps.ReadFloat32Array(args[1]);
+        if (a.Length != b.Length)
+        {
+            throw new FunctionArgumentException(Name,
+                $"vectors must have the same length, got {a.Length} and {b.Length}.");
+        }
+
+        double dot = 0.0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            dot += (double)a[i] * b[i];
+        }
+        return new(ValueRef.FromFloat32((float)dot));
+    }
+}

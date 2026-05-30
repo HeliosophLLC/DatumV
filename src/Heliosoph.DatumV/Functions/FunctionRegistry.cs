@@ -1030,6 +1030,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
         registry.RegisterScalar<Scalar.Vector.MeanPoolMaskedFunction>();
         registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
+        registry.RegisterScalar<Scalar.Vector.DotProductFunction>();
         registry.RegisterScalar<Scalar.Vector.NmsFunction>();
         registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
 
