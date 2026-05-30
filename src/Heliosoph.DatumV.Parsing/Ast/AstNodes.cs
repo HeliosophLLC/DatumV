@@ -1098,6 +1098,31 @@ public abstract record Statement;
 public sealed record QueryStatement(QueryExpression Query) : Statement;
 
 /// <summary>
+/// <c>COPY (query) TO 'path' [WITH] (option, ...)</c> — streams a query's
+/// result rows to an external file in a chosen format. Mirrors DuckDB /
+/// PostgreSQL <c>COPY</c>. The result of executing a COPY is a single
+/// summary row (<c>rows_written</c>, <c>bytes_written</c>).
+/// </summary>
+/// <param name="Source">The query whose rows to export.</param>
+/// <param name="TargetPath">Destination file or directory path (single-quoted string literal).</param>
+/// <param name="Options">
+/// Key/value pairs from the trailing <c>(...)</c> block. Reserved keys —
+/// <c>FORMAT</c> — are surfaced as their own fields; everything else stays
+/// in this list verbatim and is interpreted per-format at plan time.
+/// </param>
+public sealed record CopyStatement(
+    QueryExpression Source,
+    string TargetPath,
+    IReadOnlyList<CopyOption> Options) : Statement;
+
+/// <summary>
+/// A single <c>key value</c> pair inside the trailing <c>(...)</c> option block of a
+/// <see cref="CopyStatement"/>. Keys are case-insensitive identifiers; values are
+/// literal expressions (string, number, boolean, identifier).
+/// </summary>
+public sealed record CopyOption(string Key, Expression Value);
+
+/// <summary>
 /// <c>CREATE [TEMP] TABLE name (col type, ..., [PRIMARY KEY (col, ...)]) [AT 'path']</c>
 /// — creates a table with an explicit column definition list. The
 /// <see cref="IsTemp"/> flag selects between an in-memory table (TEMP)

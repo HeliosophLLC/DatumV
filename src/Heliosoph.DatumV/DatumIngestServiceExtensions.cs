@@ -1,3 +1,5 @@
+using Heliosoph.DatumV.Export;
+using Heliosoph.DatumV.Export.Parquet;
 using Heliosoph.DatumV.Inference;
 using Heliosoph.DatumV.Inference.LlamaSharp;
 using Heliosoph.DatumV.Inference.OnnxRuntime;
@@ -31,6 +33,13 @@ public static class DatumVServiceExtensions
         services.AddTransient<StatisticsCollector>();
         services.AddTransient<SchemaDetector>();
         services.AddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
+
+        // Export format registry: DI consumers resolve the same process-wide
+        // ExportFormatRegistry.Default the COPY planner uses, so adding/probing
+        // formats through DI surfaces the same set the engine actually exports
+        // through. Built-in formats (Parquet today; CSV / JSONL / HDF5 / FITS /
+        // .datum in follow-ups) live in ExportFormatRegistry's static init.
+        services.AddSingleton(_ => ExportFormatRegistry.Default);
         services.AddTransient(provider =>
         {
             PoolBacking backing = provider.GetRequiredService<PoolBacking>();

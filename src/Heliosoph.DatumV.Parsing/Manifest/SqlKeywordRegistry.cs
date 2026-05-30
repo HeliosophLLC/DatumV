@@ -62,6 +62,9 @@ public static class SqlKeywordRegistry
         // DML keywords
         "INSERT", "VALUES", "RETURNING", "UPDATE", "SET", "DELETE",
 
+        // Export
+        "COPY",
+
         // Direct invocation
         "CALL",
 

@@ -122,6 +122,7 @@ internal static class KeywordRegistry
         [
             // Query / DML / DDL statements
             "SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE", "REINDEX", "CALL",
+            "COPY",
             // Model-runtime DDL — soft keywords in the parser, surfaced
             // here so the user can discover them by typing EV / RE.
             "EVICT", "RESET",
@@ -360,6 +361,7 @@ internal static class KeywordRegistry
     {
         [SqlToken.Select] = ["SELECT"],
         [SqlToken.Into] = ["INTO"],
+        [SqlToken.Copy] = ["COPY"],
         [SqlToken.From] = ["FROM"],
         [SqlToken.Join] = ["JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN"],
         [SqlToken.Left] = ["LEFT JOIN"],

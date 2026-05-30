@@ -14,6 +14,9 @@ public enum SqlToken
     /// <summary>The INTO keyword.</summary>
     Into,
 
+    /// <summary>The COPY keyword (top-level export statement: <c>COPY (query) TO 'path' (FORMAT x, ...)</c>).</summary>
+    Copy,
+
     /// <summary>The FROM keyword.</summary>
     From,
 

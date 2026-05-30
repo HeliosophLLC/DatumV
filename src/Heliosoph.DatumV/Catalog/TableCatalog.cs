@@ -995,6 +995,17 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             return await Plans.CtasPlan.PlanAsync(this, ctas, sourceText).ConfigureAwait(false);
         }
 
+        // COPY (query) TO 'path' (...) — composes a child SelectPlan under an
+        // ExportPlan. Format resolution + per-column media-disposition validation
+        // run against the process-wide Export.ExportFormatRegistry.Default, so
+        // unsupported column kinds fail before any file handle opens.
+        if (statement is CopyStatement copy)
+        {
+            return await Plans.ExportPlan
+                .PlanAsync(this, copy, Export.ExportFormatRegistry.Default, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
         // DML plans own their source plans at plan time (where applicable):
         // INSERT … SELECT carries a real child SelectPlan; UPDATE / DELETE
         // drivers stay internal to the executor. Pre-flight gating for DML
