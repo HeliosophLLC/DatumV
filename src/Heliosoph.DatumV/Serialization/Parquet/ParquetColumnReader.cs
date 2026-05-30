@@ -134,6 +134,13 @@ internal static class ParquetColumnReader
             DataKind.Float32 => DataValue.FromFloat32((float)raw),
             DataKind.Float64 => DataValue.FromFloat64((double)raw),
             DataKind.String => DataValue.FromString((string)raw, arena),
+            DataKind.Decimal => DataValue.FromDecimal((decimal)raw),
+            DataKind.Timestamp => DataValue.FromTimestamp((DateTime)raw),
+            DataKind.TimestampTz => DataValue.FromTimestampTz((DateTimeOffset)raw),
+            DataKind.Date => DataValue.FromDate((DateOnly)raw),
+            DataKind.Time when raw is TimeOnly to => DataValue.FromTime(to),
+            DataKind.Time when raw is TimeSpan ts => DataValue.FromTime(TimeOnly.FromTimeSpan(ts)),
+            DataKind.Uuid => DataValue.FromUuid((Guid)raw),
             _ => throw new InvalidOperationException(
                 $"Parquet scalar element kind {type.ElementKind} not yet wired."),
         };

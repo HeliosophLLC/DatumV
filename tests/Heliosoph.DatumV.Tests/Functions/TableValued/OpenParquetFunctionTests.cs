@@ -140,6 +140,40 @@ public sealed class OpenParquetFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task Open_TemporalAndDecimalColumns_DecodeAsTypedScalars()
+    {
+        // Mirrors the NYC taxi trip shape: a Timestamp pickup/dropoff plus
+        // a Decimal fare column. Parquet.Net surfaces these CLR types
+        // (DateTime, decimal); the row decoder needs scalar arms wired.
+        string path = TempParquet("trips.parquet");
+        var pickupField = new DataField<DateTime>("pickup");
+        var fareField = new DataField<decimal>("fare");
+        var schema = new ParquetSchema(pickupField, fareField);
+
+        DateTime t0 = new(2026, 1, 15, 9, 30, 0, DateTimeKind.Utc);
+        DateTime t1 = new(2026, 1, 15, 9, 45, 0, DateTimeKind.Utc);
+
+        await using (Stream writeStream = File.Create(path))
+        using (ParquetWriter writer = await ParquetWriter.CreateAsync(schema, writeStream))
+        using (ParquetRowGroupWriter rg = writer.CreateRowGroup())
+        {
+            await rg.WriteColumnAsync(new DataColumn(pickupField, new DateTime[] { t0, t1 }));
+            await rg.WriteColumnAsync(new DataColumn(fareField, new decimal[] { 12.50m, 7.25m }));
+        }
+
+        OpenParquetFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(t0, rows[0]["pickup"].AsTimestamp());
+        Assert.Equal(12.50m, rows[0]["fare"].AsDecimal());
+        Assert.Equal(t1, rows[1]["pickup"].AsTimestamp());
+        Assert.Equal(7.25m, rows[1]["fare"].AsDecimal());
+    }
+
+    [Fact]
     public async Task Open_MultipleRowGroups_StreamsAcrossThem()
     {
         // Write a fixture with 2 row groups (different sizes) and verify the
