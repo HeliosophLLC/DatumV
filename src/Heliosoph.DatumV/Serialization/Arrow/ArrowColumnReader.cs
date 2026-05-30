@@ -133,6 +133,11 @@ internal static class ArrowColumnReader
             DataKind.Float32 when array is HalfFloatArray hfa => DataValue.FromFloat32((float)hfa.GetValue(index)!.Value),
             DataKind.Float64 => DataValue.FromFloat64(((DoubleArray)array).GetValue(index)!.Value),
             DataKind.String => DataValue.FromString(((StringArray)array).GetString(index), arena),
+            DataKind.Timestamp => DataValue.FromTimestamp(((TimestampArray)array).GetTimestamp(index)!.Value.UtcDateTime),
+            DataKind.TimestampTz => DataValue.FromTimestampTz(((TimestampArray)array).GetTimestamp(index)!.Value),
+            DataKind.Date when array is Date32Array d32 => DataValue.FromDate(DateOnly.FromDateTime(d32.GetDateTime(index)!.Value)),
+            DataKind.Date when array is Date64Array d64 => DataValue.FromDate(DateOnly.FromDateTime(d64.GetDateTime(index)!.Value)),
+            DataKind.Decimal when array is Decimal128Array dec => DataValue.FromDecimal(dec.GetValue(index)!.Value),
             _ => throw new InvalidOperationException(
                 $"Arrow scalar element kind {type.ElementKind} not yet wired."),
         };

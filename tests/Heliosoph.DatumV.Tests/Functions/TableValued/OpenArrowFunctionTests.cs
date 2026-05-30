@@ -187,6 +187,43 @@ public sealed class OpenArrowFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task Open_TemporalAndDecimalColumns_DecodeAsTypedScalars()
+    {
+        // NYC-taxi-shaped: a tz-aware Timestamp pickup + a Decimal fare. Apache.Arrow
+        // surfaces these as TimestampArray (with timezone metadata) and Decimal128Array;
+        // the row decoder needs scalar arms wired for both.
+        string path = TempArrow("trips.arrow");
+        var fareType = new Decimal128Type(precision: 10, scale: 2);
+        var schema = new ArrowSchema.Builder()
+            .Field(f => f.Name("pickup").DataType(new TimestampType(TimeUnit.Microsecond, "UTC")).Nullable(false))
+            .Field(f => f.Name("fare").DataType(fareType).Nullable(false))
+            .Build();
+
+        DateTimeOffset t0 = new(2026, 1, 15, 9, 30, 0, TimeSpan.Zero);
+        DateTimeOffset t1 = new(2026, 1, 15, 9, 45, 0, TimeSpan.Zero);
+        var pickupArr = new TimestampArray.Builder(TimeUnit.Microsecond).Append(t0).Append(t1).Build();
+        var fareArr = new Decimal128Array.Builder(fareType).Append(12.50m).Append(7.25m).Build();
+        using var batch = new RecordBatch(schema, new IArrowArray[] { pickupArr, fareArr }, length: 2);
+        await using (Stream s = File.Create(path))
+        using (var w = new ArrowFileWriter(s, schema))
+        {
+            await w.WriteRecordBatchAsync(batch);
+            await w.WriteEndAsync();
+        }
+
+        OpenArrowFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(t0, rows[0]["pickup"].AsTimestampTz());
+        Assert.Equal(12.50m, rows[0]["fare"].AsDecimal());
+        Assert.Equal(t1, rows[1]["pickup"].AsTimestampTz());
+        Assert.Equal(7.25m, rows[1]["fare"].AsDecimal());
+    }
+
+    [Fact]
     public async Task Open_MultipleRecordBatches_StreamsAcrossThem()
     {
         // Write a fixture with 2 record batches (different sizes) and verify
