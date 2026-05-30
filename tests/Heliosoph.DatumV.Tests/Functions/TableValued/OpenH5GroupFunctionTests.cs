@@ -354,6 +354,138 @@ public sealed class OpenH5GroupFunctionTests : ServiceTestBase, IDisposable
         Assert.Contains("open_h5_meta", ex.Message);
     }
 
+    // ───────────────────── Compound child datasets ─────────────────────
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+    private struct ParticleRow
+    {
+        public int Id;
+        public double Energy;
+    }
+
+    [Fact]
+    public void ValidateArguments_OnCompoundChildDataset_DeclaresStructColumnWithFields()
+    {
+        // Group contains a 1-D compound (catalog-row) dataset + a 1-D
+        // primitive sibling — the schema should surface the compound
+        // child as an Array<Struct> column with the member fields
+        // declared, alongside the primitive child as a regular
+        // Array<DataKind>.
+        string path = TempH5("compound-child.h5");
+        new H5File
+        {
+            ["bag"] = new H5Group
+            {
+                ["particles"] = new ParticleRow[]
+                {
+                    new() { Id = 1, Energy = 10.5 },
+                    new() { Id = 2, Energy = 20.5 },
+                    new() { Id = 3, Energy = 30.5 },
+                },
+                ["weights"] = new float[] { 0.1f, 0.2f, 0.3f },
+            },
+        }.Write(path);
+
+        OpenH5GroupFunction fn = new();
+        Schema schema = ((ITableValuedFunction)fn).ValidateArguments(
+            argumentKinds: [DataKind.String, DataKind.String],
+            constantArguments: [Const(path), Const("/bag")],
+            constantStore: _constantStore,
+            cancellationToken: default);
+
+        Assert.Equal(2, schema.Columns.Count);
+
+        // particles → Array<Struct> with Fields list
+        ColumnInfo particles = schema.Columns[0];
+        Assert.Equal("particles", particles.Name);
+        Assert.Equal(DataKind.Struct, particles.Kind);
+        Assert.True(particles.IsArray);
+        Assert.NotNull(particles.Fields);
+        Assert.Equal(2, particles.Fields!.Count);
+        Assert.Equal("Id", particles.Fields[0].Name);
+        Assert.Equal(DataKind.Int32, particles.Fields[0].Kind);
+        Assert.Equal("Energy", particles.Fields[1].Name);
+        Assert.Equal(DataKind.Float64, particles.Fields[1].Kind);
+
+        // weights → primitive 1-D
+        ColumnInfo weights = schema.Columns[1];
+        Assert.Equal("weights", weights.Name);
+        Assert.Equal(DataKind.Float32, weights.Kind);
+        Assert.True(weights.IsArray);
+        Assert.False(weights.IsMultiDim);
+    }
+
+    [Fact]
+    public async Task Open_CompoundChild_DecodesAsArrayOfStructPerCell()
+    {
+        string path = TempH5("compound-child-decode.h5");
+        new H5File
+        {
+            ["bag"] = new H5Group
+            {
+                ["particles"] = new ParticleRow[]
+                {
+                    new() { Id = 11, Energy = 100.25 },
+                    new() { Id = 12, Energy = 200.5 },
+                },
+            },
+        }.Write(path);
+
+        OpenH5GroupFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync(
+                [ValueRef.FromString(path), ValueRef.FromString("/bag")], ctx), ctx);
+
+        Assert.Single(rows);
+        DataValue cell = rows[0]["particles"];
+        Assert.Equal(DataKind.Struct, cell.Kind);
+
+        DataValue[] elements = cell.AsStructArray(ctx.Store);
+        Assert.Equal(2, elements.Length);
+
+        DataValue[] e0 = elements[0].AsStruct(ctx.Store);
+        Assert.Equal(11, e0[0].AsInt32());
+        Assert.Equal(100.25, e0[1].AsFloat64());
+
+        DataValue[] e1 = elements[1].AsStruct(ctx.Store);
+        Assert.Equal(12, e1[0].AsInt32());
+        Assert.Equal(200.5, e1[1].AsFloat64());
+    }
+
+    [Fact]
+    public void ValidateArguments_TwoDCompoundChild_IsSilentlySkipped()
+    {
+        // A 2-D compound child is out of v1 scope for open_h5_group too —
+        // matches open_h5_dataset's compound limit. Silently dropped from
+        // the column list (the schema still surfaces siblings that are
+        // shaped within the supported set).
+        string path = TempH5("2d-compound-child.h5");
+        new H5File
+        {
+            ["bag"] = new H5Group
+            {
+                ["matrix"] = new ParticleRow[,]
+                {
+                    { new() { Id = 1, Energy = 0 }, new() { Id = 2, Energy = 0 } },
+                    { new() { Id = 3, Energy = 0 }, new() { Id = 4, Energy = 0 } },
+                },
+                ["scale"] = 1.0,
+            },
+        }.Write(path);
+
+        OpenH5GroupFunction fn = new();
+        Schema schema = ((ITableValuedFunction)fn).ValidateArguments(
+            argumentKinds: [DataKind.String, DataKind.String],
+            constantArguments: [Const(path), Const("/bag")],
+            constantStore: _constantStore,
+            cancellationToken: default);
+
+        // Only the scalar sibling surfaces.
+        Assert.Single(schema.Columns);
+        Assert.Equal("scale", schema.Columns[0].Name);
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> batches, ExecutionContext ctx)

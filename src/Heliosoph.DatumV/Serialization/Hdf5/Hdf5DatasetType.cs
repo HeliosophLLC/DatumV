@@ -28,6 +28,14 @@ internal readonly record struct Hdf5DatasetType(
     bool IsSupported,
     H5DataTypeClass UnderlyingClass)
 {
+    /// <summary>
+    /// Populated only when <see cref="UnderlyingClass"/> is
+    /// <see cref="H5DataTypeClass.Compound"/>: the field layout the row
+    /// decoder uses to project compound bytes into a Struct
+    /// <see cref="DataValue"/>. <c>null</c> for non-compound dtypes.
+    /// </summary>
+    public Hdf5CompoundLayout? CompoundLayout { get; init; }
+
     /// <summary>True when the dataset has rank &gt; 0 (i.e. is array-shaped).</summary>
     public bool IsArrayShaped => !IsScalar && Dimensions.Count > 0;
 
@@ -61,8 +69,25 @@ internal readonly record struct Hdf5DatasetType(
         bool isScalar = space.Type == H5DataspaceType.Scalar;
         ulong[] dimensions = isScalar ? [] : space.Dimensions;
 
-        (DataKind kind, bool supported) = MapElementKind(type);
+        // Compound dtypes go through a dedicated path: ElementKind becomes
+        // Struct, IsSupported is gated on whether every member type maps
+        // cleanly, and the field layout rides as an extra property the row
+        // decoder needs.
+        if (type.Class == H5DataTypeClass.Compound && type.Compound is { } compound)
+        {
+            Hdf5CompoundLayout layout = Hdf5CompoundLayout.Build(compound, checked((int)type.Size));
+            return new Hdf5DatasetType(
+                ElementKind: DataKind.Struct,
+                Dimensions: dimensions,
+                IsScalar: isScalar,
+                IsSupported: layout.IsFullySupported,
+                UnderlyingClass: type.Class)
+            {
+                CompoundLayout = layout,
+            };
+        }
 
+        (DataKind kind, bool supported) = MapElementKind(type);
         return new Hdf5DatasetType(
             ElementKind: kind,
             Dimensions: dimensions,

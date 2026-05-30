@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Text;
 using Heliosoph.DatumV.Model;
 using PureHDF;
 
@@ -245,6 +247,66 @@ internal static class Hdf5DatasetReader
             default:
                 throw new InvalidOperationException(
                     $"Unsupported HDF5 element kind for multi-dim slice: {kind}");
+        }
+    }
+
+    // ───────────────────── Compound dtype decode ─────────────────────
+
+    /// <summary>
+    /// Reads a compound-dtype dataset's raw bytes — one contiguous block
+    /// of <c>RowCount × RowByteSize</c>. The caller decodes each row's
+    /// fields per <see cref="Hdf5CompoundLayout"/> via
+    /// <see cref="DecodeCompoundField"/>. Used by <c>open_h5_dataset</c>
+    /// and <c>open_h5_group</c>'s compound code paths.
+    /// </summary>
+    public static byte[] ReadCompoundRaw(IH5Dataset dataset) => dataset.Read<byte[]>();
+
+    /// <summary>
+    /// Decodes one field of one row. <paramref name="rowBytes"/> is the
+    /// row's <c>Hdf5CompoundLayout.RowByteSize</c>-byte slice of the raw
+    /// block from <see cref="ReadCompoundRaw"/>; the field's own offset
+    /// and size come from its <see cref="Hdf5CompoundField"/>.
+    /// </summary>
+    /// <remarks>
+    /// Endianness: v1 assumes little-endian on-disk encoding, which is
+    /// what every mainstream HDF5 producer (h5py on Linux/Mac/Windows,
+    /// MATLAB, HDF5-tools native) writes. Files written explicitly
+    /// big-endian would need a per-member byte-order check —
+    /// <see cref="IH5DataType.FixedPoint"/> exposes it — and a swap on
+    /// read. Deferred until a real file demands it.
+    /// </remarks>
+    public static DataValue DecodeCompoundField(
+        ReadOnlySpan<byte> rowBytes,
+        Hdf5CompoundField field,
+        IValueStore arena)
+    {
+        ReadOnlySpan<byte> cell = rowBytes.Slice(field.ByteOffset, field.ByteSize);
+        switch (field.Kind)
+        {
+            case DataKind.Boolean: return DataValue.FromBoolean(cell[0] != 0);
+            case DataKind.Int8: return DataValue.FromInt8((sbyte)cell[0]);
+            case DataKind.UInt8: return DataValue.FromUInt8(cell[0]);
+            case DataKind.Int16: return DataValue.FromInt16(BinaryPrimitives.ReadInt16LittleEndian(cell));
+            case DataKind.UInt16: return DataValue.FromUInt16(BinaryPrimitives.ReadUInt16LittleEndian(cell));
+            case DataKind.Int32: return DataValue.FromInt32(BinaryPrimitives.ReadInt32LittleEndian(cell));
+            case DataKind.UInt32: return DataValue.FromUInt32(BinaryPrimitives.ReadUInt32LittleEndian(cell));
+            case DataKind.Int64: return DataValue.FromInt64(BinaryPrimitives.ReadInt64LittleEndian(cell));
+            case DataKind.UInt64: return DataValue.FromUInt64(BinaryPrimitives.ReadUInt64LittleEndian(cell));
+            case DataKind.Float32: return DataValue.FromFloat32(BinaryPrimitives.ReadSingleLittleEndian(cell));
+            case DataKind.Float64: return DataValue.FromFloat64(BinaryPrimitives.ReadDoubleLittleEndian(cell));
+            case DataKind.String:
+            {
+                // Fixed-width ASCII / UTF-8 string. Trim trailing NULs and
+                // spaces, both of which are common padding conventions
+                // (HDF5 docs allow null-terminated, null-padded, and
+                // space-padded; we just strip both).
+                string raw = Encoding.UTF8.GetString(cell);
+                string trimmed = raw.TrimEnd('\0', ' ');
+                return DataValue.FromString(trimmed, arena);
+            }
+            default:
+                throw new InvalidOperationException(
+                    $"Unsupported HDF5 compound field kind: {field.Kind}");
         }
     }
 }

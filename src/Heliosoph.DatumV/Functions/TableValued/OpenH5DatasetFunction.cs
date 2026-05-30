@@ -118,6 +118,13 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
                 $"HDF5 dataset '{datasetPath}' has dtype class {type.UnderlyingClass} " +
                 "which isn't supported in v1.");
         }
+        if (type.CompoundLayout is not null && type.Dimensions.Count > 1)
+        {
+            throw new FunctionArgumentException(Name,
+                $"HDF5 compound dataset '{datasetPath}' has rank {type.Dimensions.Count}; " +
+                "v1 only supports scalar and 1-D compound datasets (catalog-row shape). " +
+                "Higher-rank compound arrays are deferred until a real file demands them.");
+        }
         return BuildSchema(datasetPath, type);
     }
 
@@ -157,6 +164,21 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
         Hdf5DatasetType type = Hdf5DatasetType.From(dataset.Type, dataset.Space);
         Schema outputSchema = BuildSchema(datasetPath, type);
         ColumnLookup outputLookup = new([outputSchema.Columns[0].Name]);
+
+        // Compound (HDF5 struct) dtype path: read raw bytes, intern a
+        // Struct TypeId in the per-query registry, then decode each row's
+        // fields per the layout and emit one Struct cell per row. Caller
+        // already gated rank > 1 in ValidateArguments.
+        if (type.CompoundLayout is { } compound)
+        {
+            await foreach (RowBatch compoundBatch in StreamCompoundRowsAsync(
+                dataset, outputSchema.Columns[0], compound, outputLookup, context, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                yield return compoundBatch;
+            }
+            yield break;
+        }
 
         System.Array flat = Hdf5DatasetReader.ReadFlat(dataset, type);
 
@@ -237,6 +259,59 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
         }
     }
 
+    /// <summary>
+    /// Streams rows for a compound-dtype dataset: reads the raw byte
+    /// block once, interns the struct TypeId in the per-query
+    /// <see cref="TypeRegistry"/>, and emits one Struct
+    /// <see cref="DataValue"/> per row. Scalar (rank-0) compound yields
+    /// a single row; 1-D compound (catalog-row shape) yields N rows.
+    /// </summary>
+    private static async IAsyncEnumerable<RowBatch> StreamCompoundRowsAsync(
+        IH5Dataset dataset,
+        ColumnInfo column,
+        Hdf5CompoundLayout layout,
+        ColumnLookup outputLookup,
+        ExecutionContext context,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ushort typeId = (ushort)context.Types.InternStructFromColumnInfoFields(column.Fields!);
+
+        byte[] raw = Hdf5DatasetReader.ReadCompoundRaw(dataset);
+        int rowBytes = layout.RowByteSize;
+        int rowCount = raw.Length / rowBytes;
+
+        RowBatch? batch = null;
+        await Task.Yield();
+
+        for (int r = 0; r < rowCount; r++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            batch ??= context.RentRowBatch(outputLookup);
+
+            ReadOnlySpan<byte> rowSpan = raw.AsSpan(r * rowBytes, rowBytes);
+            DataValue[] fields = new DataValue[layout.Fields.Count];
+            for (int f = 0; f < fields.Length; f++)
+            {
+                fields[f] = Hdf5DatasetReader.DecodeCompoundField(rowSpan, layout.Fields[f], batch.Arena);
+            }
+
+            DataValue[] row = context.Pool.RentDataValues(1);
+            row[0] = DataValue.FromStruct(fields, batch.Arena, typeId);
+            batch.Add(row);
+
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null && batch.Count > 0)
+        {
+            yield return batch;
+        }
+    }
+
     private void ValidateArgumentShape(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)
@@ -258,6 +333,20 @@ public sealed class OpenH5DatasetFunction : ITableValuedFunctionMetadata, ITable
     {
         string columnName = ExtractLeafName(datasetPath);
         int rank = type.Dimensions.Count;
+
+        // Compound dtype path: emit a Struct column whose Fields are the
+        // mapped member descriptors. The runtime path interns this struct
+        // shape against the per-query TypeRegistry on first row.
+        if (type.CompoundLayout is { } compound)
+        {
+            ColumnInfo[] structFields = new ColumnInfo[compound.Fields.Count];
+            for (int i = 0; i < structFields.Length; i++)
+            {
+                Hdf5CompoundField f = compound.Fields[i];
+                structFields[i] = new ColumnInfo(f.Name, f.Kind, nullable: false);
+            }
+            return new Schema([new ColumnInfo(columnName, nullable: false, structFields)]);
+        }
 
         ColumnInfo column;
         if (rank <= 1)

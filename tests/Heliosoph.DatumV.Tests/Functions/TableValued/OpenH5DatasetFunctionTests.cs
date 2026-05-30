@@ -366,6 +366,113 @@ public sealed class OpenH5DatasetFunctionTests : ServiceTestBase, IDisposable
         }
     }
 
+    // ───────────────────── Compound dtype (HDF5 struct) ─────────────────────
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+    private struct CatalogRow
+    {
+        public int Id;
+        public double Mag;
+    }
+
+    [Fact]
+    public void ValidateArguments_OnCompoundDataset_DeclaresStructColumnWithFieldDescriptors()
+    {
+        // Plan-time peek: validator opens the file, sees Compound class,
+        // and produces a Struct column whose Fields list mirrors the
+        // members (Id Int32, Mag Float64) — same logical surface
+        // open_fits_table produces from TFORMn cards.
+        string path = TempH5("compound-catalog.h5");
+        new H5File
+        {
+            ["catalog"] = new CatalogRow[]
+            {
+                new() { Id = 1, Mag = 19.5 },
+                new() { Id = 2, Mag = 20.25 },
+            },
+        }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        Schema schema = ((ITableValuedFunction)fn).ValidateArguments(
+            argumentKinds: [DataKind.String, DataKind.String],
+            constantArguments: [Const(path), Const("/catalog")],
+            constantStore: _constantStore,
+            cancellationToken: default);
+
+        Assert.Single(schema.Columns);
+        ColumnInfo column = schema.Columns[0];
+        Assert.Equal("catalog", column.Name);
+        Assert.Equal(DataKind.Struct, column.Kind);
+        Assert.NotNull(column.Fields);
+        Assert.Equal(2, column.Fields!.Count);
+        Assert.Equal("Id", column.Fields[0].Name);
+        Assert.Equal(DataKind.Int32, column.Fields[0].Kind);
+        Assert.Equal("Mag", column.Fields[1].Name);
+        Assert.Equal(DataKind.Float64, column.Fields[1].Kind);
+    }
+
+    [Fact]
+    public void ValidateArguments_OnTwoDCompoundDataset_Throws()
+    {
+        // 2-D compound (e.g. a (R, C) matrix of struct cells) is rare in
+        // practice and out of scope in v1 — error message names the rank
+        // and points to the limit.
+        string path = TempH5("compound-2d.h5");
+        new H5File
+        {
+            ["matrix"] = new CatalogRow[,]
+            {
+                { new() { Id = 1, Mag = 0 }, new() { Id = 2, Mag = 0 } },
+                { new() { Id = 3, Mag = 0 }, new() { Id = 4, Mag = 0 } },
+            },
+        }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        FunctionArgumentException ex = Assert.Throws<FunctionArgumentException>(() =>
+            ((ITableValuedFunction)fn).ValidateArguments(
+                argumentKinds: [DataKind.String, DataKind.String],
+                constantArguments: [Const(path), Const("/matrix")],
+                constantStore: _constantStore,
+                cancellationToken: default));
+        Assert.Contains("rank 2", ex.Message);
+        Assert.Contains("compound", ex.Message);
+    }
+
+    [Fact]
+    public async Task Open_CompoundDataset_DecodesEachRowAsStructWithTypedFields()
+    {
+        string path = TempH5("compound-decode.h5");
+        new H5File
+        {
+            ["catalog"] = new CatalogRow[]
+            {
+                new() { Id = 101, Mag = 19.5 },
+                new() { Id = 102, Mag = 20.25 },
+                new() { Id = 103, Mag = 18.75 },
+            },
+        }.Write(path);
+
+        OpenH5DatasetFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync(
+                [ValueRef.FromString(path), ValueRef.FromString("/catalog")], ctx), ctx);
+
+        Assert.Equal(3, rows.Count);
+
+        // Each cell is a Struct; decompose into fields via AsStructArray
+        // accessor — DataValue.AsStructArray returns the per-field values
+        // in declaration order.
+        Assert.Equal(DataKind.Struct, rows[0]["catalog"].Kind);
+        DataValue[] r0 = rows[0]["catalog"].AsStruct(ctx.Store);
+        Assert.Equal(101, r0[0].AsInt32());
+        Assert.Equal(19.5, r0[1].AsFloat64());
+
+        DataValue[] r2 = rows[2]["catalog"].AsStruct(ctx.Store);
+        Assert.Equal(103, r2[0].AsInt32());
+        Assert.Equal(18.75, r2[1].AsFloat64());
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> batches, ExecutionContext ctx)

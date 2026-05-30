@@ -483,7 +483,7 @@ Output columns:
 | `attribute_count` | `INT32` | Number of attributes attached to this object. |
 | `attributes` | `JSON` | Array of `{name, kind, value}` objects, materialised so callers can filter / extract without going back to the file. |
 
-**Supported element kinds (v1):** signed and unsigned 8/16/32/64-bit integers, IEEE single / double floats, fixed-width and variable-length strings, and booleans. Compound dtypes (HDF5 "struct" cells) and the other rare classes show up with `element_kind = 'Unknown'` and `is_supported = false` so recipes can skip them cleanly.
+**Supported element kinds (v1):** signed and unsigned 8/16/32/64-bit integers, IEEE single / double floats, fixed-width and variable-length strings, booleans, and **compound dtypes** (HDF5 "struct" cells — see the [compound dtype notes](#compound-dtypes) below). Opaque, reference, bit field, enumerated, and ragged variable-length classes still surface as `element_kind = 'Unknown'` and `is_supported = false`.
 
 **Attributes column.** Every HDF5 object can carry metadata attributes — units, descriptions, instrument state, processing history. The TVF reads them eagerly into managed primitives, then renders as a JSON array so SQL can query them with the same JSON operators used for any other JSON column.
 
@@ -540,7 +540,33 @@ The output column is named after the dataset's leaf segment: `/labels` → colum
 
 **Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, looks up the dataset, and reads its dtype + dimensions to produce a real `Schema`. Calling with a non-constant argument throws — recipe writers must inline the paths or pass bound parameters.
 
-**Supported element kinds (v1):** same set as `open_h5_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, and strings (both fixed-width and variable-length). Compound dtypes throw `FunctionArgumentException` at validation; recipes can use `open_h5_meta` to detect them ahead of time.
+**Supported element kinds (v1):** same set as `open_h5_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, strings (both fixed-width and variable-length), and **compound dtypes** (see below). Other classes still throw at validation; recipes can use `open_h5_meta` to detect them ahead of time.
+
+#### Compound dtypes
+
+HDF5 compound dtypes — the "struct" element kind, used for catalog rows in astronomy, event lists in particle physics, single-cell genomics feature records, and many other structured data shapes — are supported in v1 for **scalar and 1-D datasets**. Each row carries the dataset's compound element as a `STRUCT` cell with the on-disk member layout exposed as typed fields:
+
+```sql
+-- Catalog row dataset: each row is one struct with named fields
+SELECT * FROM open_h5_dataset('catalog.h5', '/sources');
+-- Yields rows of shape (sources STRUCT<id INT32, ra FLOAT64, dec FLOAT64, mag FLOAT64>)
+```
+
+Project fields via dotted access — `SELECT sources.id, sources.ra FROM ...` — same as any struct-valued column. The schema is real at plan time: column types are inferred from the compound member dtypes at validate, so `WHERE sources.mag < 20.0` type-checks before any data is read.
+
+**v1 limits:**
+
+| Aspect | Status |
+|---|---|
+| Scalar + 1-D compound datasets | Supported |
+| 2-D and higher-rank compound datasets | Throws `FunctionArgumentException` at validation (rare in practice; deferred) |
+| Primitive member kinds (signed/unsigned 8-64 bit integers, Float32/64, fixed-width string, boolean) | Supported |
+| Nested compound members (struct-in-struct) | Member surfaces as `Unknown` → whole dataset becomes `is_supported = false` |
+| Variable-length string members | Same — refused at the dataset level until follow-up |
+| Variable-length array members (ragged) | Same |
+| Byte order | Little-endian assumed (every mainstream HDF5 producer writes LE) |
+
+Compound child datasets inside `open_h5_group` follow the same rules — included as `ARRAY<STRUCT>` columns for 1-D, single `STRUCT` for scalar, silently dropped for 2-D+.
 
 ```sql
 -- 1-D labels column from a CIFAR-shaped file

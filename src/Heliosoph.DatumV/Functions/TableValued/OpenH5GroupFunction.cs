@@ -161,6 +161,20 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
         }
         ColumnLookup outputLookup = new(columnNames);
 
+        // Intern a Struct TypeId per compound child up-front against the
+        // per-query TypeRegistry — same schema fields the Schema column
+        // declares, so dedup is exact across the two ColumnInfo lists.
+        Schema outputSchema = BuildSchema(group);
+        ushort[] structTypeIds = new ushort[children.Count];
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (children[i].Type.CompoundLayout is not null
+                && outputSchema.Columns[i].Fields is { } fields)
+            {
+                structTypeIds[i] = (ushort)context.Types.InternStructFromColumnInfoFields(fields);
+            }
+        }
+
         await Task.Yield();
         RowBatch batch = context.RentRowBatch(outputLookup);
         DataValue[] row = context.Pool.RentDataValues(children.Count);
@@ -169,7 +183,7 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
         {
             cancellationToken.ThrowIfCancellationRequested();
             IncludedChild child = children[i];
-            row[i] = BuildCell(child.Dataset, child.Type, batch.Arena);
+            row[i] = BuildCell(child.Dataset, child.Type, structTypeIds[i], batch.Arena);
         }
 
         batch.Add(row);
@@ -181,10 +195,17 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
     /// <see cref="DataValue"/> respecting the dataset's rank:
     /// scalar → scalar cell, 1-D → flat array cell, ≥2-D → multi-dim
     /// cell with the dataset's full <see cref="Hdf5DatasetType.Dimensions"/>
-    /// as the shape.
+    /// as the shape. For compound dtypes the cell becomes a Struct
+    /// (scalar) or <c>Array&lt;Struct&gt;</c> (1-D) built against the
+    /// pre-interned <paramref name="structTypeId"/>.
     /// </summary>
-    private static DataValue BuildCell(IH5Dataset dataset, Hdf5DatasetType type, IValueStore arena)
+    private static DataValue BuildCell(IH5Dataset dataset, Hdf5DatasetType type, ushort structTypeId, IValueStore arena)
     {
+        if (type.CompoundLayout is { } compound)
+        {
+            return BuildCompoundCell(dataset, type, compound, structTypeId, arena);
+        }
+
         System.Array flat = Hdf5DatasetReader.ReadFlat(dataset, type);
 
         if (type.IsScalar)
@@ -204,6 +225,42 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             totalElements = checked(totalElements * shape[i]);
         }
         return Hdf5DatasetReader.SliceMultiDim(flat, 0, totalElements, shape, type.ElementKind, arena);
+    }
+
+    /// <summary>
+    /// Packs a compound-dtype dataset into a single Struct (scalar) or
+    /// <c>Array&lt;Struct&gt;</c> (1-D) cell. v1 refuses 2-D+ compound
+    /// children at the schema layer via <see cref="BuildIncludedChildren"/>,
+    /// so this only sees rank 0 or 1 here.
+    /// </summary>
+    private static DataValue BuildCompoundCell(
+        IH5Dataset dataset,
+        Hdf5DatasetType type,
+        Hdf5CompoundLayout compound,
+        ushort structTypeId,
+        IValueStore arena)
+    {
+        byte[] raw = Hdf5DatasetReader.ReadCompoundRaw(dataset);
+        int rowBytes = compound.RowByteSize;
+        int rowCount = type.IsScalar ? 1 : raw.Length / rowBytes;
+
+        DataValue[][] elements = new DataValue[rowCount][];
+        for (int r = 0; r < rowCount; r++)
+        {
+            ReadOnlySpan<byte> rowSpan = raw.AsSpan(r * rowBytes, rowBytes);
+            DataValue[] fields = new DataValue[compound.Fields.Count];
+            for (int f = 0; f < fields.Length; f++)
+            {
+                fields[f] = Hdf5DatasetReader.DecodeCompoundField(rowSpan, compound.Fields[f], arena);
+            }
+            elements[r] = fields;
+        }
+
+        if (type.IsScalar)
+        {
+            return DataValue.FromStruct(elements[0], arena, structTypeId);
+        }
+        return DataValue.FromStructArray(elements, arena, structTypeId);
     }
 
     private void ValidateArgumentShape(ReadOnlySpan<DataKind> argumentKinds)
@@ -234,7 +291,25 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             int rank = type.Dimensions.Count;
 
             ColumnInfo column;
-            if (rank <= 1)
+            if (type.CompoundLayout is { } compound)
+            {
+                // Compound child (HDF5 struct dataset) → Struct column whose
+                // Fields list mirrors the member layout. Scalar compound
+                // emits a scalar Struct cell; 1-D compound emits an
+                // Array<Struct> cell. v1 doesn't expose 2-D+ compound
+                // children — they're filtered out in BuildIncludedChildren.
+                ColumnInfo[] structFields = new ColumnInfo[compound.Fields.Count];
+                for (int f = 0; f < structFields.Length; f++)
+                {
+                    Hdf5CompoundField mf = compound.Fields[f];
+                    structFields[f] = new ColumnInfo(mf.Name, mf.Kind, nullable: false);
+                }
+                column = new ColumnInfo(child.Name, nullable: false, structFields)
+                {
+                    IsArray = !type.IsScalar,
+                };
+            }
+            else if (rank <= 1)
             {
                 // Scalar (rank-0) → scalar column; 1-D → flat array column.
                 column = new ColumnInfo(child.Name, type.ElementKind, nullable: false)
@@ -324,6 +399,11 @@ public sealed class OpenH5GroupFunction : ITableValuedFunctionMetadata, ITableVa
             if (child is not IH5Dataset dataset) continue;
             Hdf5DatasetType type = Hdf5DatasetType.From(dataset.Type, dataset.Space);
             if (!type.IsSupported) continue;
+            // v1: compound (Struct) children are supported only at scalar or
+            // 1-D rank — same limit open_h5_dataset uses. 2-D+ compound is
+            // deferred until a real file demands it; for now those children
+            // are silently dropped from the column list.
+            if (type.CompoundLayout is not null && type.Dimensions.Count > 1) continue;
             result.Add(new IncludedChild(child.Name, dataset, type));
         }
         return result;
