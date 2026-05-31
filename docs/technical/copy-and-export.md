@@ -27,8 +27,20 @@ COPY (SELECT id, pic FROM samples) TO 'samples.parquet' (FORMAT parquet);
 
 -- with options
 COPY (SELECT id, pic FROM samples) TO 'samples.parquet'
-  (FORMAT parquet, ROW_GROUP_SIZE 10000);
+  (FORMAT parquet, ROW_GROUP_SIZE 10000, COMPRESSION 'zstd');
 ```
+
+Parquet options recognised today:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `FORMAT` | identifier / string | inferred from extension | `parquet` |
+| `ROW_GROUP_SIZE` | integer | 50,000 | Rows per row group |
+| `ROW_GROUP_BYTE_BUDGET` | integer | 128 MiB | Aggregate buffered-byte trigger for early flush |
+| `COMPRESSION` | identifier / string | `snappy` | `none` / `snappy` / `gzip` / `zstd` / `brotli` / `lz4` |
+| `COMPRESSION_LEVEL` | integer (0–3) | codec default | Honoured by gzip / zstd / brotli; ignored by snappy / lz4 |
+
+`ROW_GROUP_SIZE`, `ROW_GROUP_BYTE_BUDGET`, and `COMPRESSION` are validated at plan time — typos and non-positive values throw `ExportPlanException` before any file handle opens.
 
 ### Format resolution
 
@@ -121,15 +133,18 @@ The `SidecarRegistry` parameter on `CreateSink` is what lets the sink resolve si
 
 `ParquetColumnEncoder` is the per-column accumulator. Each encoder owns a typed buffer, computes `BufferedBytes` so the sink can flush row groups before per-column buffers exceed Parquet.Net's 2 GB writer ceiling, and produces a `DataColumn` on flush.
 
-Three concrete encoders cover the scalar and reference-type cases:
+Scalar / reference-type encoders:
 
 - `ValueTypeEncoder<T>` — non-nullable value types (`int`, `long`, `double`, …). Stores in `List<T>`, flushes as `T[]`.
 - `NullableValueTypeEncoder<T>` — nullable value types. Stores in `List<T?>`, flushes as `T?[]` which Parquet.Net wires up as a nullable primitive column.
-- `ReferenceTypeEncoder<T>` — strings and string-like reference types. Reference nulls map to SQL NULL.
+- `ReferenceTypeEncoder<T>` — strings and string-like reference types. Reference nulls map to SQL NULL. Also the carrier for `DataKind.Json` (decoded CBOR → canonical JSON text) with the matching `datumv.*` tag.
 
-A fourth encoder handles typed media:
+Typed-media and array encoders:
 
-- `ByteArrayListEncoder` — Image / Audio / Video / Mesh / PointCloud. Writes as Parquet `LIST<UInt8>` with a flat values array and repetition levels. *Not* `DataField<byte[]>` (the BYTE_ARRAY shape) because Heliosoph.DatumV's own reader maps that to scalar `UInt8` and would mis-decode every row as a single byte. `is_array=true` on the meta surface matches the SQL intuition "image = array of bytes".
+- `ByteArrayListEncoder` — Image / Audio / Video / Mesh / PointCloud. Writes as Parquet `LIST<UInt8>` with a flat values array, repetition levels, and (when nullable) a definition-level stream. *Not* `DataField<byte[]>` (the BYTE_ARRAY shape) because Heliosoph.DatumV's own reader maps that to scalar `UInt8` and would mis-decode every row as a single byte. `is_array=true` on the meta surface matches the SQL intuition "image = array of bytes". Honours the source column's nullability — SQL NULL rows survive as on-disk `(rep=0, def=0)` markers and read back as typed `NULL`.
+- `PrimitiveArrayListEncoder<T>` / `StringArrayListEncoder` — `Array<T>` columns for `Boolean` / `Int8/16/32/64` / `UInt8/16/32/64` / `Float32/64` / `String` elements. Same `LIST<T>` shape as the typed-media encoder but with the element-type CLR span.
+- `StructColumnEncoder` — top-level `STRUCT` columns. Owns a `StructChildHandler[]` (scalar primitives via `ScalarStructChild`, list children via `ListStructChild<T>` / `StringListStructChild`). The list-child handler wires a real Parquet `ListField` *inside* the wrapping `StructField` so nested `LIST<T>` round-trips cleanly through external tools — without it Parquet.Net mis-serialises the `DataField(isArray:true)` shortcut and the column reads back as raw bytes.
+- `StructArrayListEncoder` — top-level `Array<Struct>` columns (e.g. `[{ field1: 'a', field2: 1 }]`). Produces `LIST<STRUCT<…>>`: per-row arrays flatten into per-leaf flat buffers + shared rep levels, per-leaf def levels at each leaf's `MaxDefinitionLevel`. Children must be primitives in v1.
 
 ### Byte-budget flush
 
@@ -146,11 +161,13 @@ Mesh and PointCloud are different. Heliosoph.DatumV's internal blob format isn't
 
 This trades round-trip fidelity (PLY drops attributes outside `position` + `RGB`; glTF drops anything outside the standard vertex attributes) for immediate external usability. The lost attributes are precisely the ones reserved for Phase 2 of those kinds anyway (`MeshFlags.HasUVs` / `HasTexture`, `PointCloudFlags.HasNormals`).
 
+Json is decoded from canonical CBOR to JSON text via `CborJsonCodec.DecodeToJsonText` on the way out — the column on disk is a plain UTF-8 string that pandas / DuckDB / Spark / Polars all read directly. The `datumv.kind=Json` + `datumv.format=text` tag tells `open_parquet` to re-encode the text back to CBOR via `CborJsonCodec.EncodeFromJsonText` on read so the engine's `DataKind.Json` contract (bytes are canonical CBOR) survives the round trip.
+
 Drawing is rejected at plan time with a `render(drawing, point2d(w, h))` hint — Drawing is a procedural recipe (a `DrawingPayload` tree), not bytes, so implicit rasterisation would silently pick a size and surprise users.
 
-### Nullable typed media — known sharp edge
+### The `DataColumn` argument-order trap
 
-`ByteArrayListEncoder` forces `isNullable: false` on the underlying Parquet field because Parquet.Net's nullable-LIST writer path didn't converge — every variant rejected the definition-level stream with a row-count mismatch. A SQL `NULL` in an Image / Audio / Video / Mesh / PointCloud column throws `ExportRuntimeException` at append time. Real columns from ingested datasets rarely carry NULLs, but it's a documented limitation worth lifting.
+Parquet.Net's `DataColumn(field, data, definitionLevels, repetitionLevels)` 4-arg ctor takes definition levels *before* repetition levels in positional order — opposite to what most level-stream APIs expect. Every encoder that writes level streams in this codebase uses named arguments (`definitionLevels:` / `repetitionLevels:`) so a future drive-by edit can't silently swap them. The byte-for-byte symptom of a positional mistake is a file that *writes* successfully but produces `IndexOutOfRangeException` deep in `DeltaBinaryPackedEncoder.DecodeInt` on read — easy to misdiagnose as a level-arithmetic bug.
 
 ---
 
@@ -162,11 +179,11 @@ The sink attaches three key/value pairs to each typed column's Parquet column-ch
 
 | Key | Value | Set for |
 |---|---|---|
-| `datumv.kind` | `Mesh` / `PointCloud` / `Image` / `Audio` / `Video` / `Date` / `TimestampTz` | Every typed column the engine emits |
-| `datumv.format` | `gltf` / `ply` / `passthrough` | The on-disk byte format |
+| `datumv.kind` | `Mesh` / `PointCloud` / `Image` / `Audio` / `Video` / `Json` / `Date` / `TimestampTz` | Every typed column the engine emits |
+| `datumv.format` | `gltf` / `ply` / `text` / `passthrough` | The on-disk byte format |
 | `datumv.version` | `1` | All annotated columns (lets us evolve) |
 
-Typed-media kinds use `gltf` / `ply` / `passthrough`. Scalar kinds whose Parquet logical type lifts to a different CLR type than the writer started with (Date lifts to `DateTime` on read, not `DateOnly`; TimestampTz lifts to `DateTime` UTC, not `DateTimeOffset`) use `passthrough` — the value survives, only the kind label needs to be restored.
+Typed-media kinds use `gltf` / `ply` / `passthrough`. `Json` uses `text` (UTF-8 JSON text on disk; `open_parquet` re-encodes to CBOR on read). Scalar kinds whose Parquet logical type lifts to a different CLR type than the writer started with (Date lifts to `DateTime` on read, not `DateOnly`; TimestampTz lifts to `DateTime` UTC, not `DateTimeOffset`) use `passthrough` — the value survives, only the kind label needs to be restored.
 
 Other scalar kinds (Decimal, Time, Uuid, Int*, Float*, Boolean, String) round-trip cleanly through Parquet.Net's CLR type mapping without metadata.
 
@@ -259,13 +276,23 @@ Two important nuances:
 
 ---
 
+## Language Server integration
+
+[`src/Heliosoph.DatumV.LanguageServer/CompletionContext.cs`](../../src/Heliosoph.DatumV.LanguageServer/CompletionContext.cs)
+
+The completion provider recognises four COPY-specific zones — `AfterCopy` (`COPY ⌷` → suggest `(`), `AfterCopySource` (`COPY (q) ⌷` → suggest `TO`), `AfterCopyTo` (`COPY (q) TO 'path' ⌷` → suggest option-block `(`), and `InCopyOptions` (cursor inside the option parens → surface format-specific option keys). The walk-back classifier detects the option-block paren by the `STRING → TO` token pair (with an optional `WITH` in between) and stops at the first `LeftParen` whose preceding tokens match that shape.
+
+Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. When CSV / JSON sinks ship, they register their option keys against the format-name key and the completion provider picks them up automatically — no edits in `CompletionContext` or `CompletionProvider`.
+
+---
+
 ## Limitations and follow-ups
 
 Real gaps in the current implementation:
 
-- **Nullable typed-media arrays** can't be written (`ByteArrayListEncoder` forces `isNullable: false`). SQL `NULL` in an Image / Audio / Video / Mesh / PointCloud column throws `ExportRuntimeException` at append time.
-- **SQL `Array<T>` (non-typed-media) columns** reject at plan time in the encoder factory. `LIST<T>` for general arrays is more code but the same shape.
-- **`Json` (CBOR) kind** doesn't export — the CBOR-vs-JSON-text decision is open.
+- **`STRUCT` inside `STRUCT`** is not supported at any nesting depth — the encoder rejects nested struct children at plan time with a column-named error. The natural fix is recursive child handlers; defer until a real consumer needs it.
+- **Per-element NULL inside `LIST<T>`** is not surfaced — list-level NULL is honoured (`def == 0` marker) but individual elements within a present list are emitted at `MaxDefinitionLevel`. Heliosoph.DatumV typed arrays don't carry per-element nullability today.
+- **Empty per-row lists** inside a top-level `LIST<STRUCT>` or struct list child throw at append time. The intermediate def level for "list present, no element" works on paper but hasn't been exercised; defer until a real consumer needs it.
 
 Deferred design choices (called out, status unchanged):
 
