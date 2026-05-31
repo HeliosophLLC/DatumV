@@ -19,6 +19,7 @@ import { openDialog } from '@/state/dialogs';
 import { runTab } from '@/state/execution';
 import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
+import { beginExport } from '@/state/export';
 import { resetZoom, zoomIn, zoomOut } from '@/state/zoom';
 
 export type CommandId =
@@ -29,6 +30,7 @@ export type CommandId =
   | 'file.openCatalog'
   | 'file.exit'
   | 'query.run'
+  | 'query.export'
   | 'view.zoomIn'
   | 'view.zoomOut'
   | 'view.zoomReset'
@@ -72,6 +74,15 @@ const handlers: Record<CommandId, CommandHandler> = {
       return;
     }
     void runTab(leaf.activeTabId, resolveRunSql(tab.sql, leafId));
+  },
+  'query.export': () => {
+    // Same enablement bar as `query.run` but stricter: function tabs
+    // synthesise their script from form state and have no single SQL
+    // surface to wrap in a COPY. Pinned tabs (Models / Settings / Docs)
+    // have no SQL at all. beginExport itself guards on tab.kind so the
+    // menu accelerator stays inert when it shouldn't fire.
+    const leafId = panesState.focusedLeafId;
+    void beginExport(leafId);
   },
   'view.zoomIn': () => zoomIn(),
   'view.zoomOut': () => zoomOut(),

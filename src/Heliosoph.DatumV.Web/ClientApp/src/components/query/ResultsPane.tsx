@@ -475,7 +475,7 @@ function SingleValueView({
           {column.isArray ? '[]' : ''}
         </Badge>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
         <SingleValueBody cell={cell} />
       </div>
     </div>
@@ -531,7 +531,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </span>
     );
   }
-  if (
+  else if (
     cell.kind === 'media'
     || cell.kind === 'image'
     || cell.kind === 'audio'
@@ -569,7 +569,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </span>
     );
   }
-  if (cell.kind === 'media_array' && cell.items) {
+  else if (cell.kind === 'media_array' && cell.items) {
     return (
       <div className="grid w-full max-h-full grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2 overflow-auto">
         {cell.items.map((it, i) => (
@@ -584,13 +584,13 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </div>
     );
   }
-  if (cell.kind === 'pointcloud') {
+  else if (cell.kind === 'pointcloud') {
     return <SingleValuePointCloud cell={cell} />;
   }
-  if (cell.kind === 'mesh') {
+  else if (cell.kind === 'mesh') {
     return <SingleValueMesh cell={cell} />;
   }
-  if (cell.kind === 'numeric_array') {
+  else if (cell.kind === 'numeric_array') {
     if (
       (cell.elementKind === 'u8' || cell.elementKind === 'i8')
       && (cell.count ?? 0) <= 64
@@ -606,7 +606,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
     }
     return <SingleValueNumericArray cell={cell} />;
   }
-  if (cell.kind === 'struct') {
+  else if (cell.kind === 'struct') {
     return <SingleValueStruct cell={cell} />;
   }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
@@ -2574,6 +2574,7 @@ function JsonTreeView({
       <div className="min-h-0 flex-1 overflow-auto">
         <JsonView
           value={rootValue}
+          className='w-full min-h-full'
           style={isDark ? darkTheme : lightTheme}
           collapsed={3}
           displayDataTypes={false}
@@ -2586,45 +2587,28 @@ function JsonTreeView({
 }
 
 function SingleValueStruct({ cell }: { cell: JsonCell }) {
-  const fields = cell.fields ?? [];
+  const { theme } = useSnapshot(settingsState);
+  const isDark =
+    theme === 'dark'
+    || (theme === 'system'
+      && typeof document !== 'undefined'
+      && document.documentElement.classList.contains('dark'));
+  const value = useMemo(() => cellToJsonValue(cell), [cell]);
+  const rootValue =
+    value !== null && typeof value === 'object'
+      ? (value as object)
+      : { value };
   return (
-    <div className="flex max-h-full w-full max-w-4xl flex-col overflow-auto p-4">
-      <StructFieldTable fields={fields} />
-    </div>
-  );
-}
-
-/**
- * Two-column key/value tree. Field names left, the recursively-rendered
- * child cell right. CellValue carries the dispatch — nested numeric
- * arrays / images / sub-structs reuse the same renderers used in the
- * grid. We pass `largeMedia` so image/video children render at their
- * larger inline size, which is the right default in an expanded view.
- */
-function StructFieldTable({
-  fields,
-}: {
-  fields: { name: string; cell: JsonCell }[];
-}) {
-  if (fields.length === 0) {
-    return (
-      <span className="text-muted-foreground font-mono text-sm italic">
-        empty struct
-      </span>
-    );
-  }
-  return (
-    <div className="grid grid-cols-[auto,1fr] items-start gap-x-4 gap-y-2 text-sm">
-      {fields.map((f, i) => (
-        <div key={`${f.name}-${i}`} className="contents">
-          <div className="text-muted-foreground py-0.5 pr-2 font-mono">
-            {f.name}
-          </div>
-          <div className="min-w-0 font-mono break-words">
-            <CellValue cell={f.cell} largeMedia={true} />
-          </div>
-        </div>
-      ))}
+    <div className="h-full w-full overflow-auto">
+      <JsonView
+        className='w-full min-h-full'
+        style={isDark ? darkTheme : lightTheme}
+        value={rootValue}
+        collapsed={3}
+        displayDataTypes={false}
+        enableClipboard={true}
+        shortenTextAfterLength={120}
+      />
     </div>
   );
 }

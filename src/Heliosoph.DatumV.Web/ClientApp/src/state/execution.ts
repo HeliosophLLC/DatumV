@@ -171,6 +171,14 @@ export type ExecutionStatus =
   | 'error'
   | 'cancelled';
 
+/**
+ * Which user-facing action started this run. The toolbar reads it so the
+ * Stop button surfaces on whichever button actually launched the active
+ * stream — Run's Play/Stop versus Export's Download/Stop — and the other
+ * button greys out while the stream is in flight.
+ */
+export type ExecutionOrigin = 'run' | 'export';
+
 // Mirrors Heliosoph.DatumV.Execution.PreFlightReason (camelCased for JSON wire).
 export type PreFlightReason =
   | 'modelNotInstalled'
@@ -258,6 +266,13 @@ export interface TabExecution {
    * modal; cleared via {@link dismissPreFlight} or the next run start.
    */
   preFlight: PreFlightBlock | null;
+  /**
+   * Which user-facing action started the most-recent run, or null when
+   * the tab has never run. Survives across statuses so the toolbar can
+   * still tell which surface to label as the active export after a
+   * stream completes successfully.
+   */
+  origin: ExecutionOrigin | null;
 }
 
 // AbortControllers don't go in the proxy — they're non-serialisable and
@@ -385,6 +400,7 @@ function freshExecution(): TabExecution {
     memoryProfile: null,
     trace: freshTraceState(),
     preFlight: null,
+    origin: null,
   };
 }
 
@@ -700,6 +716,18 @@ export interface RunMultipartOpts {
   files: Record<string, File>;
 }
 
+/** Options shared by every `runTab` overload. */
+export interface RunOpts {
+  /**
+   * Which user-facing action started the run. Defaults to `'run'`. Pass
+   * `'export'` from the export action so the toolbar can route the Stop
+   * affordance onto the Export button rather than the Run button.
+   */
+  origin?: ExecutionOrigin;
+  /** Multipart body for the function-tab path. Plain SQL runs omit this. */
+  multipart?: RunMultipartOpts;
+}
+
 /**
  * Kicks off an NDJSON stream against `/api/query/stream` for the given
  * tab + SQL. If another run is in flight for the tab, this is a no-op —
@@ -720,8 +748,20 @@ export interface RunMultipartOpts {
 export async function runTab(
   tabId: string,
   sql: string,
-  opts?: RunMultipartOpts,
+  opts?: RunOpts | RunMultipartOpts,
 ): Promise<void> {
+  // Back-compat for callers that pre-dated RunOpts and pass the multipart
+  // shape directly. The legacy shape has `parameters` + `files`; the new
+  // shape has `origin` and/or `multipart`. Detect by the presence of the
+  // old fields.
+  const normalizedOpts: RunOpts | undefined = opts
+    ? 'parameters' in opts || 'files' in opts
+      ? { multipart: opts as RunMultipartOpts }
+      : (opts as RunOpts)
+    : undefined;
+  const origin: ExecutionOrigin = normalizedOpts?.origin ?? 'run';
+  const multipart = normalizedOpts?.multipart;
+
   const existing = executionsState.byTabId[tabId];
   if (existing && existing.status === 'streaming') {
     return; // already running; cancel first if you want to restart
@@ -751,6 +791,7 @@ export async function runTab(
       completed: false,
     },
     preFlight: null,
+    origin,
   };
 
   // Wire-shape trace argument. Mirrors server-side TraceOptionsJson:
@@ -762,10 +803,10 @@ export async function runTab(
 
   let terminated = false;
   try {
-    const iter = opts
+    const iter = multipart
       ? postNdjsonMultipart<StreamEvent>(
           '/api/query/stream',
-          buildMultipartBody(sql, opts, traceEnvelope),
+          buildMultipartBody(sql, multipart, traceEnvelope),
           abort.signal,
         )
       : postNdjson<StreamEvent>(
