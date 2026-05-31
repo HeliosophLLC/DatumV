@@ -469,13 +469,23 @@ public static class ExpressionTypeResolver
 
         foreach (StructField field in literal.Fields)
         {
-            DataKind? kind = ResolveType(field.Value, sourceSchema, functions);
-            if (kind is null)
+            // Use the full type shape so Array<T>-typed fields surface with
+            // IsArray=true on the child ColumnInfo — Parquet sink relies on
+            // this to wire a ListField inside the wrapping StructField.
+            // Without IsArray propagation, an array field would land as
+            // a flat primitive ColumnInfo and the sink would mis-encode it.
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape =
+                ResolveTypeShape(field.Value, sourceSchema, functions);
+            if (shape is null)
             {
                 return null;
             }
 
-            result.Add(new ColumnInfo(field.Name, kind.Value, nullable: false));
+            result.Add(new ColumnInfo(field.Name, shape.Value.Kind, nullable: false)
+            {
+                IsArray = shape.Value.IsArray,
+                IsMultiDim = shape.Value.IsMultiDim,
+            });
         }
 
         return result;

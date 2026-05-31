@@ -36,7 +36,20 @@ public sealed record ResolvedColumn(
     bool Nullable,
     string? SourceTableOrAlias,
     bool IsArray = false,
-    bool IsMultiDim = false);
+    bool IsMultiDim = false)
+{
+    /// <summary>
+    /// For <see cref="DataKind.Struct"/> columns, the ordered child
+    /// <see cref="ColumnInfo"/> descriptors with field names and per-field
+    /// kinds. <see langword="null"/> for non-struct columns and for struct
+    /// columns whose shape isn't statically resolvable (e.g. a struct-typed
+    /// expression that flows through a model invocation). When present,
+    /// downstream consumers — notably <c>ExportPlan</c>'s sink construction —
+    /// surface the children so the writer can build a real Parquet
+    /// <c>StructField</c> instead of falling back to a kind-only column.
+    /// </summary>
+    public IReadOnlyList<ColumnInfo>? Fields { get; init; }
+}
 
 /// <summary>
 /// The combined column schema resolved from all table sources in a query's

@@ -338,6 +338,16 @@ internal static class KeywordRegistry
         [CompletionZoneKind.AfterInto] =
             ["SHARD"],
 
+        // COPY zones — push the user along the canonical shape:
+        //   COPY (q) TO 'path' [(FORMAT parquet, …)]
+        // AfterCopy nudges them into the source paren; AfterCopySource
+        // surfaces TO; AfterCopyTo surfaces the option-block opener.
+        // InCopyOptions is driven by CopyFormatOptions through the
+        // provider so future formats register their keys there, not here.
+        [CompletionZoneKind.AfterCopy] = ["("],
+        [CompletionZoneKind.AfterCopySource] = ["TO"],
+        [CompletionZoneKind.AfterCopyTo] = ["("],
+
         [CompletionZoneKind.AfterTablesampleMethodArg] =
         [
             "ON", "REPEATABLE",
@@ -487,7 +497,7 @@ internal static class KeywordRegistry
         [SqlToken.Begin] = [],
         [SqlToken.While] = [],
         [SqlToken.Declare] = [],
-        [SqlToken.To] = [],
+        [SqlToken.To] = ["TO"],
         [SqlToken.Break] = [],
         [SqlToken.Continue] = [],
         [SqlToken.Return] = [],         // Procedural-UDF body terminator; only meaningful inside BEGIN…END.

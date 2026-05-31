@@ -1,7 +1,11 @@
+using Heliosoph.DatumV.DatumFile.Sidecar;
 using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Export;
+using Heliosoph.DatumV.Export.Parquet;
 using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Functions.TableValued;
 using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Pooling;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
@@ -41,7 +45,7 @@ public sealed class OpenParquetMetaFunctionTests : ServiceTestBase, IDisposable
         OpenParquetMetaFunction fn = new();
         Schema schema = ((ITableValuedFunction)fn).ValidateArguments([DataKind.String]);
 
-        Assert.Equal(8, schema.Columns.Count);
+        Assert.Equal(11, schema.Columns.Count);
         Assert.Equal("column_path", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
         Assert.Equal("element_kind", schema.Columns[1].Name);
@@ -49,6 +53,14 @@ public sealed class OpenParquetMetaFunctionTests : ServiceTestBase, IDisposable
         Assert.Equal(DataKind.Boolean, schema.Columns[2].Kind);
         Assert.Equal("total_rows", schema.Columns[7].Name);
         Assert.Equal(DataKind.Int64, schema.Columns[7].Kind);
+        // Trailing datumv_* columns surface the Heliosoph.DatumV typed-kind
+        // metadata embedded by ParquetExportSink. Nullable so third-party
+        // Parquet files (no metadata) read as NULL rather than empty string.
+        Assert.Equal("datumv_kind", schema.Columns[8].Name);
+        Assert.Equal(DataKind.String, schema.Columns[8].Kind);
+        Assert.True(schema.Columns[8].Nullable);
+        Assert.Equal("datumv_format", schema.Columns[9].Name);
+        Assert.Equal("datumv_version", schema.Columns[10].Name);
     }
 
     [Fact]
@@ -111,7 +123,90 @@ public sealed class OpenParquetMetaFunctionTests : ServiceTestBase, IDisposable
         Assert.True(rows[0]["is_supported"].AsBoolean());
     }
 
+    [Fact]
+    public async Task Open_FileWithDatumvTaggedColumn_SurfacesKindFormatVersion()
+    {
+        // Slice A: open_parquet_meta now surfaces the datumv.kind / format /
+        // version column-chunk metadata so a user can inspect "what kind tag
+        // does this file carry" without firing a trial open_parquet. The
+        // ParquetExportSink path attaches the tag on every typed-media
+        // column — exercise it with an Image column here since the round
+        // trip is the simplest of the bunch.
+        string path = TempParquet("tagged-image.parquet");
+        await WriteTaggedImageFixture(path);
+
+        OpenParquetMetaFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        Row idRow = rows.Single(r => r["column_path"].AsString() == "id");
+        Row picRow = rows.Single(r => r["column_path"].AsString() == "pic");
+
+        // The id column is plain Int32 — no datumv tag.
+        Assert.True(idRow["datumv_kind"].IsNull);
+        Assert.True(idRow["datumv_format"].IsNull);
+        Assert.True(idRow["datumv_version"].IsNull);
+
+        // The pic column carries the typed-media tag block.
+        Assert.Equal("Image", picRow["datumv_kind"].AsString());
+        Assert.Equal("passthrough", picRow["datumv_format"].AsString());
+        Assert.Equal("1", picRow["datumv_version"].AsString());
+    }
+
+    [Fact]
+    public async Task Open_UntaggedFile_DatumvColumnsAreNull()
+    {
+        // Backward compat: a Parquet file produced by any tool that doesn't
+        // write the datumv keys (every external tool, plus pre-metadata
+        // Heliosoph.DatumV builds) surfaces NULL for the trailing columns
+        // instead of empty strings.
+        string path = TempParquet("untagged.parquet");
+        await WritePrimitiveFixture(path);
+
+        OpenParquetMetaFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        foreach (Row row in rows)
+        {
+            Assert.True(row["datumv_kind"].IsNull,
+                $"column {row["column_path"].AsString()} unexpectedly carries a datumv_kind value.");
+            Assert.True(row["datumv_format"].IsNull);
+            Assert.True(row["datumv_version"].IsNull);
+        }
+    }
+
     // ───────────────────────── Fixtures + helpers ─────────────────────────
+
+    private async Task WriteTaggedImageFixture(string path)
+    {
+        Pool pool = CreatePool();
+        SidecarRegistry registry = new();
+        Schema schema = new(
+        [
+            new ColumnInfo("id", DataKind.Int32, nullable: false),
+            new ColumnInfo("pic", DataKind.Image, nullable: false),
+        ]);
+        ColumnLookup lookup = new(["id", "pic"]);
+        using Arena arena = new();
+        using RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
+        // One row with a recognisably-PNG byte pattern — open_parquet_meta
+        // doesn't inspect the bytes, but using the magic keeps the file
+        // sensible if anyone opens it manually later.
+        byte[] pic = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xDE, 0xAD];
+        batch.Add([DataValue.FromInt32(1), DataValue.FromImage(pic, arena)]);
+
+        ParquetExportFormat format = new();
+        await using IExportSink sink = format.CreateSink(
+            new ExportTarget.File(path), schema,
+            [MediaDisposition.Inline, MediaDisposition.Inline],
+            ExportOptions.Empty, registry);
+        await sink.WriteAsync(batch, default);
+        await sink.FinishAsync(default);
+    }
 
     private static async Task WritePrimitiveFixture(string path)
     {

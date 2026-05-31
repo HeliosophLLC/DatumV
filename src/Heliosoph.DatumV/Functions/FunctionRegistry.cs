@@ -1004,6 +1004,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.MeshToGltfFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshToObjFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshToStlFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromGltfFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromPlyFunction>();
 
         // Encoding
         registry.RegisterScalar<Scalar.Encoding.EncodeFunction>();

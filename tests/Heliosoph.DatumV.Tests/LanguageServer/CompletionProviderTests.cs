@@ -1223,6 +1223,82 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Empty(items);
     }
 
+    // ───────────────────── COPY / TO ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterCopy_OffersSourceParen()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("COPY ", 5);
+
+        Assert.Contains(items, item => item.Label == "(" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterCopySource_OffersTo()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // Past the balanced source paren — the cursor sits after the source
+        // group's closing `)`, waiting on the TO keyword.
+        CompletionItem[] items = provider.GetCompletions("COPY (SELECT 1) ", 16);
+
+        Assert.Contains(items, item => item.Label == "TO" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterCopyTo_OffersOptionBlockParen()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("COPY (SELECT 1) TO 'out.parquet' ", 33);
+
+        Assert.Contains(items, item => item.Label == "(" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_InCopyOptions_OffersFormatAndParquetKeys()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // Cursor inside the option block — popup should surface FORMAT plus
+        // every registered Parquet option key. Future CSV / JSON formats
+        // appear here too once they register via CopyFormatOptions.
+        CompletionItem[] items = provider.GetCompletions("COPY (SELECT 1) TO 'out.parquet' (", 34);
+
+        Assert.Contains(items, item => item.Label == "FORMAT");
+        Assert.Contains(items, item => item.Label == "ROW_GROUP_SIZE");
+        Assert.Contains(items, item => item.Label == "ROW_GROUP_BYTE_BUDGET");
+        Assert.Contains(items, item => item.Label == "COMPRESSION");
+        Assert.Contains(items, item => item.Label == "COMPRESSION_LEVEL");
+    }
+
+    [Fact]
+    public void GetCompletions_InCopyOptionsAfterWith_OffersFormatKeys()
+    {
+        // Optional WITH keyword between path and option block is allowed
+        // (PostgreSQL-compatible). The classifier should still detect
+        // InCopyOptions through it.
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "COPY (SELECT 1) TO 'out.parquet' WITH (", 39);
+
+        Assert.Contains(items, item => item.Label == "FORMAT");
+        Assert.Contains(items, item => item.Label == "ROW_GROUP_SIZE");
+    }
+
+    [Fact]
+    public void GetCompletions_StatementStart_IncludesCopy()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("", 0);
+
+        Assert.Contains(items, item => item.Label == "COPY" && item.Kind == CompletionItemKind.Keyword);
+    }
+
     // ───────────────────── Function arguments ─────────────────────
 
     [Fact]

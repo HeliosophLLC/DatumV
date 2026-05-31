@@ -750,6 +750,17 @@ public static class CompletionContext
                     return CompletionZoneKind.InFunctionArguments;
                 }
 
+                // COPY option block: `COPY (q) TO 'path' [WITH] (⌷` — the
+                // LeftParen is preceded by either the path string or the
+                // optional WITH keyword, and walking further back finds the
+                // TO keyword. Detect the shape so the popup offers the
+                // per-format option keys instead of the generic expression
+                // / function-args fallback.
+                if (IsCopyOptionParen(tokens, index))
+                {
+                    return CompletionZoneKind.InCopyOptions;
+                }
+
                 // Subquery paren or IN (...) — treat as expression context.
                 return CompletionZoneKind.Expression;
             }
@@ -1125,6 +1136,23 @@ public static class CompletionContext
                     // After ANALYZE — offer table names.
                     return CompletionZoneKind.AfterFrom;
 
+                case SqlToken.Copy:
+                    // `COPY ⌷` → user hasn't typed the source paren yet,
+                    // surface the opening paren. `COPY (q) ⌷` (cursor has
+                    // crossed the source paren group) → suggest TO.
+                    return passedParenGroup
+                        ? CompletionZoneKind.AfterCopySource
+                        : CompletionZoneKind.AfterCopy;
+
+                case SqlToken.To:
+                    // `COPY (q) TO 'path' ⌷` — user has typed the target path
+                    // (passedContent==true), surface the opening paren of the
+                    // option block. Bare `TO ⌷` is the path-typing position;
+                    // no keyword completions appropriate there.
+                    return passedContent
+                        ? CompletionZoneKind.AfterCopyTo
+                        : CompletionZoneKind.AfterAs;
+
                 case SqlToken.Reindex:
                     // After REINDEX — offer table names. The optional TABLE
                     // keyword between REINDEX and the table name is handled by
@@ -1432,6 +1460,28 @@ public static class CompletionContext
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="parenIndex"/> is the opening
+    /// <c>(</c> of a <c>COPY (q) TO 'path' [WITH] (⌷</c> option block. The
+    /// detector walks back past an optional <c>WITH</c>, then requires the
+    /// preceding token to be a <see cref="SqlToken.StringLiteral"/> (the
+    /// path), then a <see cref="SqlToken.To"/>. The further-back walk to
+    /// <see cref="SqlToken.Copy"/> isn't required — the
+    /// <c>STRING → TO</c> pair alone is unique to COPY in v1 SQL — but
+    /// the bracket-anchored check stays cheap enough to leave in place.
+    /// </summary>
+    private static bool IsCopyOptionParen(List<TokenInfo> tokens, int parenIndex)
+    {
+        int back = parenIndex - 1;
+        if (back < 0) return false;
+        // Optional WITH between path and option block.
+        if (tokens[back].Kind == SqlToken.With) back--;
+        if (back < 0 || tokens[back].Kind != SqlToken.StringLiteral) return false;
+        back--;
+        if (back < 0 || tokens[back].Kind != SqlToken.To) return false;
+        return true;
     }
 
     /// <summary>
@@ -2021,4 +2071,98 @@ public enum CompletionZoneKind
     /// they surface top-level.
     /// </summary>
     AfterCall,
+
+    // ───────────────────── COPY / TO zones ─────────────────────
+
+    /// <summary>
+    /// Cursor sits right after <c>COPY</c> — the source query goes in a
+    /// parenthesised subquery (DuckDB / PostgreSQL shape). The popup
+    /// offers the opening <c>(</c> so the user can drill straight into
+    /// the inner SELECT without remembering the grammar.
+    /// </summary>
+    AfterCopy,
+
+    /// <summary>
+    /// Cursor sits after the balanced <c>COPY (...)</c> source group but
+    /// before the <c>TO</c> keyword. Offer <c>TO</c> to guide the user
+    /// toward the target-path position.
+    /// </summary>
+    AfterCopySource,
+
+    /// <summary>
+    /// Cursor sits after <c>COPY (...) TO 'path'</c> with no option block
+    /// open yet. Offer the option-block opening <c>(</c>; users that
+    /// stop here get a default-options export, which is the common case.
+    /// </summary>
+    AfterCopyTo,
+
+    /// <summary>
+    /// Cursor sits inside <c>COPY (...) TO 'path' (…|)</c> — the option
+    /// block. Offer per-format option keys (<c>FORMAT</c>,
+    /// <c>ROW_GROUP_SIZE</c>, <c>COMPRESSION</c>, …); the set is
+    /// registered through <see cref="CopyFormatOptions"/> so future
+    /// formats (CSV / JSON) plug in cleanly without touching the
+    /// completion provider.
+    /// </summary>
+    InCopyOptions,
+}
+
+/// <summary>
+/// Registry of <c>COPY ... TO 'path' (…)</c> option keys keyed by export
+/// format name. The language server's <see cref="CompletionZoneKind.InCopyOptions"/>
+/// dispatch surfaces the union when no format hint is present, and
+/// per-format keys once <c>FORMAT &lt;name&gt;</c> has been typed.
+/// Centralising the mapping here keeps the future CSV / JSON additions
+/// from needing edits in the completion provider — each new format just
+/// drops its option keys + recognized values into the dictionaries.
+/// </summary>
+public static class CopyFormatOptions
+{
+    /// <summary>
+    /// Per-format option-key set. v1 covers Parquet; future formats
+    /// register additional entries against their format-name keys.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> OptionKeysByFormat =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["parquet"] =
+            [
+                "ROW_GROUP_SIZE",
+                "ROW_GROUP_BYTE_BUDGET",
+                "COMPRESSION",
+                "COMPRESSION_LEVEL",
+            ],
+        };
+
+    /// <summary>
+    /// Format names recognised by the engine — surfaced after <c>FORMAT</c>
+    /// in the option block.
+    /// </summary>
+    public static readonly string[] FormatNames = ["parquet"];
+
+    /// <summary>
+    /// Returns the option-key set the language server should offer in
+    /// <see cref="CompletionZoneKind.InCopyOptions"/>. When
+    /// <paramref name="formatName"/> is <see langword="null"/> or
+    /// unrecognised, returns the union of every known format's keys
+    /// alongside <c>FORMAT</c> itself so the user can pick either before
+    /// committing to a specific format.
+    /// </summary>
+    public static IReadOnlyList<string> GetOptionKeys(string? formatName)
+    {
+        if (formatName is not null
+            && OptionKeysByFormat.TryGetValue(formatName, out string[]? formatKeys))
+        {
+            string[] result = new string[formatKeys.Length + 1];
+            result[0] = "FORMAT";
+            formatKeys.CopyTo(result, 1);
+            return result;
+        }
+        HashSet<string> all = new(StringComparer.OrdinalIgnoreCase) { "FORMAT" };
+        foreach (string[] entry in OptionKeysByFormat.Values)
+        {
+            foreach (string key in entry) all.Add(key);
+        }
+        return all.ToArray();
+    }
 }

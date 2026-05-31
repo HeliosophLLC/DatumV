@@ -124,24 +124,65 @@ internal sealed class ExportPlan : StatementPlan
         }
         cancellationToken.ThrowIfCancellationRequested();
 
-        await using IExportSink sink = _format.CreateSink(
-            _target, _projectedSchema, _columnDispositions, _options);
-
+        // The sink is constructed lazily — see ReconcileSchemaWithRuntime.
+        // QuerySchemaResolver can return DataKind.String as a fallback for
+        // expressions it can't statically classify (notably model invocations
+        // whose return type isn't visible to the static resolver). Trusting
+        // that at sink-construction time produces a String encoder that then
+        // tries to read non-String runtime values via AsString. Observing the
+        // actual DataValue.Kind from the first non-empty batch fixes the
+        // schema before the encoders bind to it.
+        IExportSink? sink = null;
         bool committed = false;
+        long rowsWritten = 0L;
+        long bytesWritten = 0L;
+        // Run the inner SELECT against a non-streaming context so its own
+        // CellStarted / CellRowBatch / CellCompleted bracket doesn't fire —
+        // otherwise the source's full row stream would land in the UI as a
+        // separate "select" cell ahead of the summary, which is both noisy
+        // (potentially millions of rows the user didn't ask to see) and
+        // pushes the summary off the bottom of the results pane. The COPY
+        // cell stays in the surrounding bracket so the summary row still
+        // surfaces. Mirrors how ProceduralEvaluator silences internal
+        // synthesized SELECTs (DECLARE / SET initialisers / IF predicates).
+        using Execution.ExecutionContext sourceContext = context.WithoutStreaming();
         try
         {
             await foreach (RowBatch batch in _sourcePlan
-                .ExecuteAsync(cancellationToken, context)
+                .ExecuteAsync(cancellationToken, sourceContext)
                 .ConfigureAwait(false))
             {
                 if (batch.Count == 0) continue;
+                if (sink is null)
+                {
+                    (Schema effectiveSchema, IReadOnlyList<MediaDisposition> effectiveDispositions) =
+                        ReconcileSchemaWithRuntime(
+                            _projectedSchema, _columnDispositions, _format, _options, batch);
+                    sink = _format.CreateSink(
+                        _target, effectiveSchema, effectiveDispositions, _options,
+                        context.SidecarRegistry);
+                }
                 await sink.WriteAsync(batch, cancellationToken).ConfigureAwait(false);
             }
+            // Empty source — still produce a valid (empty) target so callers
+            // can distinguish "the export ran" from "the export never started".
+            sink ??= _format.CreateSink(
+                _target, _projectedSchema, _columnDispositions, _options,
+                context.SidecarRegistry);
             await sink.FinishAsync(cancellationToken).ConfigureAwait(false);
+            // Capture the counts before Dispose runs — IExportSink doesn't
+            // promise the properties remain readable after disposal, and the
+            // summary RowBatch needs them after the finally block.
+            rowsWritten = sink.RowsWritten;
+            bytesWritten = sink.BytesWritten;
             committed = true;
         }
         finally
         {
+            if (sink is not null)
+            {
+                await sink.DisposeAsync().ConfigureAwait(false);
+            }
             // On any mid-stream failure best-effort delete a partially-written
             // single-file target so the catalog never surfaces an unreadable
             // file as if it were a successful export. Directory targets are
@@ -154,7 +195,94 @@ internal sealed class ExportPlan : StatementPlan
             }
         }
 
-        yield break;
+        // Summary row — one batch with one row, two scalar Int64 columns. The
+        // streaming layer treats this like any other plan output, so the UI's
+        // results pane shows `rows_written` / `bytes_written` after a COPY
+        // the same way it shows row counts after a SELECT. Matches DuckDB's
+        // `COPY (…) TO …` return shape so anyone bouncing between engines
+        // gets the expected feedback.
+        RowBatch summary = context.RentRowBatch(SummaryLookup);
+        DataValue[] row = context.Pool.RentDataValues(2);
+        row[0] = DataValue.FromInt64(rowsWritten);
+        row[1] = DataValue.FromInt64(bytesWritten);
+        summary.Add(row);
+        yield return summary;
+    }
+
+    /// <summary>
+    /// <see cref="ColumnLookup"/> for the COPY summary RowBatch — a single
+    /// row of <c>(rows_written, bytes_written)</c>. Allocated once at type
+    /// load so every COPY shares the same instance; ColumnLookup is
+    /// immutable-by-convention so this is safe to share.
+    /// </summary>
+    private static readonly ColumnLookup SummaryLookup = new(["rows_written", "bytes_written"]);
+
+    /// <summary>
+    /// Builds a corrected schema by observing the actual <see cref="DataValue.Kind"/>
+    /// of each column in the first non-empty batch. Columns whose runtime kind
+    /// matches the planner kind pass through unchanged; columns whose runtime
+    /// kind differs get a fresh <see cref="ColumnInfo"/> with the runtime kind
+    /// and a re-resolved <see cref="MediaDisposition"/>. Fully-NULL columns
+    /// (no runtime kind observable in this batch) fall back to the planner
+    /// kind — an edge case that only trips when the very first batch carries
+    /// a NULL in every row of a deferred-kind column; downstream rows whose
+    /// kind disagrees with the planner fallback still throw at append time.
+    /// </summary>
+    private static (Schema Schema, IReadOnlyList<MediaDisposition> Dispositions) ReconcileSchemaWithRuntime(
+        Schema plannerSchema,
+        IReadOnlyList<MediaDisposition> plannerDispositions,
+        IExportFormat format,
+        ExportOptions options,
+        RowBatch batch)
+    {
+        ColumnLookup lookup = batch.ColumnLookup;
+        ColumnInfo[] corrected = new ColumnInfo[plannerSchema.Columns.Count];
+        MediaDisposition[] correctedDispositions = new MediaDisposition[plannerSchema.Columns.Count];
+        bool anyChanged = false;
+
+        for (int i = 0; i < plannerSchema.Columns.Count; i++)
+        {
+            ColumnInfo plannerCol = plannerSchema.Columns[i];
+            corrected[i] = plannerCol;
+            correctedDispositions[i] = plannerDispositions[i];
+
+            if (!lookup.TryGetColumnOrdinal(plannerCol.Name, out int sourceOrd))
+            {
+                continue;
+            }
+
+            // Walk the batch looking for the first non-null value in this
+            // column. A single null first row is common — defer to subsequent
+            // rows within the same batch before falling back to the planner
+            // kind.
+            DataKind? observed = null;
+            for (int r = 0; r < batch.Count; r++)
+            {
+                DataValue value = batch[r][sourceOrd];
+                if (!value.IsNull)
+                {
+                    observed = value.Kind;
+                    break;
+                }
+            }
+            if (observed is null || observed.Value == plannerCol.Kind)
+            {
+                continue;
+            }
+
+            ColumnInfo runtimeCol = new(plannerCol.Name, observed.Value, plannerCol.Nullable)
+            {
+                IsArray = plannerCol.IsArray,
+                IsMultiDim = plannerCol.IsMultiDim,
+            };
+            corrected[i] = runtimeCol;
+            correctedDispositions[i] = format.ResolveDisposition(runtimeCol, options);
+            anyChanged = true;
+        }
+
+        return anyChanged
+            ? (new Schema(corrected), correctedDispositions)
+            : (plannerSchema, plannerDispositions);
     }
 
     private static ExportOptions ResolveOptions(IReadOnlyList<CopyOption> astOptions)
@@ -222,11 +350,26 @@ internal sealed class ExportPlan : StatementPlan
         for (int i = 0; i < projection.Columns.Count; i++)
         {
             ResolvedColumn resolved = projection.Columns[i];
-            columns[i] = new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable)
-            {
-                IsArray = resolved.IsArray,
-                IsMultiDim = resolved.IsMultiDim,
-            };
+            // Struct projections with known field metadata route to the
+            // struct ColumnInfo so the Parquet sink can build a real
+            // StructField. Without this branch a struct literal lands as
+            // a fields-less Struct ColumnInfo and the encoder factory
+            // rejects it at plan time.
+            columns[i] = resolved.Kind == DataKind.Struct && resolved.Fields is { } fields
+                ? new ColumnInfo(resolved.ColumnName, resolved.Nullable, fields)
+                {
+                    // Preserve IsArray for Array<Struct> projections — array
+                    // literals like `[{a:1,b:'x'}]` resolve as Kind=Struct +
+                    // IsArray=true + Fields populated. Without this the sink
+                    // would see a scalar struct and try to encode one element.
+                    IsArray = resolved.IsArray,
+                    IsMultiDim = resolved.IsMultiDim,
+                }
+                : new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable)
+                {
+                    IsArray = resolved.IsArray,
+                    IsMultiDim = resolved.IsMultiDim,
+                };
         }
         return new Schema(columns);
     }

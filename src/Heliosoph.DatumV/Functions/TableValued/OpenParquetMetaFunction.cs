@@ -34,6 +34,7 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
     [
         "column_path", "element_kind", "is_array", "is_nullable",
         "is_supported", "logical_type", "row_group_count", "total_rows",
+        "datumv_kind", "datumv_format", "datumv_version",
     ]);
 
     /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
@@ -46,8 +47,10 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
     public static string Description =>
         "Opens a Parquet file and yields one row per leaf column: open_parquet_meta(path). " +
         "Columns: (column_path STRING, element_kind STRING, is_array BOOLEAN, is_nullable BOOLEAN, " +
-        "is_supported BOOLEAN, logical_type STRING, row_group_count INT32, total_rows INT64). " +
-        "Read this first to see what's inside an unfamiliar Parquet file.";
+        "is_supported BOOLEAN, logical_type STRING, row_group_count INT32, total_rows INT64, " +
+        "datumv_kind STRING, datumv_format STRING, datumv_version STRING). The trailing " +
+        "datumv_* columns expose the Heliosoph.DatumV typed-kind metadata when the file was produced by " +
+        "the engine; NULL otherwise. Read this first to see what's inside an unfamiliar Parquet file.";
 
     /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
     public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
@@ -64,6 +67,12 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
                 new ColumnInfo("logical_type", DataKind.String, nullable: false),
                 new ColumnInfo("row_group_count", DataKind.Int32, nullable: false),
                 new ColumnInfo("total_rows", DataKind.Int64, nullable: false),
+                // datumv_* columns are nullable — they're only populated for
+                // columns the engine tagged on export, NULL for third-party
+                // Parquet (every external producer).
+                new ColumnInfo("datumv_kind", DataKind.String, nullable: true),
+                new ColumnInfo("datumv_format", DataKind.String, nullable: true),
+                new ColumnInfo("datumv_version", DataKind.String, nullable: true),
             ])),
     ];
 
@@ -126,14 +135,30 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
             totalRows += rgReader.RowCount;
         }
 
+        // Read per-column datumv.* metadata from the first row group. The
+        // writer emits the same map on every row group, so probing the first
+        // one is sufficient — same convention open_parquet relies on. Files
+        // with zero row groups simply have no datumv metadata, which the
+        // null-check below handles.
+        Dictionary<string, Dictionary<string, string>?> perColumnMeta = new(StringComparer.Ordinal);
+        if (rowGroupCount > 0)
+        {
+            using ParquetRowGroupReader probe = reader.OpenRowGroupReader(0);
+            foreach (DataField field in fields)
+            {
+                perColumnMeta[field.Name] = probe.GetCustomMetadata(field);
+            }
+        }
+
         RowBatch? batch = null;
         foreach (DataField field in fields)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             ParquetColumnType type = ParquetColumnType.From(field);
+            perColumnMeta.TryGetValue(field.Name, out Dictionary<string, string>? meta);
             batch ??= context.RentRowBatch(OutputColumnLookup);
-            DataValue[] row = BuildRow(field, type, rowGroupCount, totalRows, batch.Arena, context);
+            DataValue[] row = BuildRow(field, type, rowGroupCount, totalRows, meta, batch.Arena, context);
             batch.Add(row);
 
             if (batch.IsFull)
@@ -154,6 +179,7 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
         ParquetColumnType type,
         int rowGroupCount,
         long totalRows,
+        IReadOnlyDictionary<string, string>? datumvMetadata,
         IValueStore arena,
         ExecutionContext context)
     {
@@ -172,6 +198,26 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
         row[5] = DataValue.FromString(type.LogicalTypeName ?? string.Empty, arena);
         row[6] = DataValue.FromInt32(rowGroupCount);
         row[7] = DataValue.FromInt64(totalRows);
+        row[8] = MetaStringOrNull(datumvMetadata, ParquetDatumvMetadata.KindKey, arena);
+        row[9] = MetaStringOrNull(datumvMetadata, ParquetDatumvMetadata.FormatKey, arena);
+        row[10] = MetaStringOrNull(datumvMetadata, ParquetDatumvMetadata.VersionKey, arena);
         return row;
+    }
+
+    /// <summary>
+    /// Returns the column-metadata value for <paramref name="key"/> as a
+    /// <see cref="DataKind.String"/> <see cref="DataValue"/>, or a typed
+    /// SQL NULL when the key isn't present. Used for the three trailing
+    /// datumv_* output columns so files without Heliosoph.DatumV tagging surface as
+    /// <c>NULL</c> rather than empty strings.
+    /// </summary>
+    private static DataValue MetaStringOrNull(
+        IReadOnlyDictionary<string, string>? metadata, string key, IValueStore arena)
+    {
+        if (metadata is not null && metadata.TryGetValue(key, out string? value))
+        {
+            return DataValue.FromString(value, arena);
+        }
+        return DataValue.Null(DataKind.String);
     }
 }

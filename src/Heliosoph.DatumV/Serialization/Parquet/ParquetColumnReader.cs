@@ -59,12 +59,15 @@ internal static class ParquetColumnReader
     }
 
     /// <summary>
-    /// Walks repetition levels to slice the flat array column into
-    /// per-row sub-arrays. Repetition level 0 marks the first element
-    /// of a new row; levels ≥ 1 continue the current row's list.
-    /// Definition level &lt; max means a NULL element (skipped here —
-    /// v1 elides nulls inside arrays; per-element nullability is part
-    /// of the streaming follow-up).
+    /// Walks repetition and definition levels to slice the flat array
+    /// column into per-row sub-arrays. Repetition level 0 marks the first
+    /// position of a new row; rep ≥ 1 continues the current row's list.
+    /// Definition level &lt; max means the position carries no element
+    /// (whole-list NULL when def == 0; empty present list at the
+    /// intermediate def values). The flat data array only contains values
+    /// at max-def positions, so the reader tracks the data cursor
+    /// separately from the level cursor — this lets nullable LIST&lt;T&gt;
+    /// columns round-trip cleanly without inventing placeholder bytes.
     /// </summary>
     private static DataValue[] ReadArrayColumn(
         DataColumn column,
@@ -84,7 +87,10 @@ internal static class ParquetColumnReader
             return singleton;
         }
 
-        // First pass: find each row's [start, end) range in the flat array.
+        int[]? definitionLevels = column.DefinitionLevels;
+        int maxDef = column.Field.MaxDefinitionLevel;
+
+        // First pass: find each row's [start, end) range in the level streams.
         int[] rowStarts = new int[rowCount + 1];
         int currentRow = -1;
         for (int i = 0; i < repetitionLevels.Length; i++)
@@ -106,11 +112,52 @@ internal static class ParquetColumnReader
         for (int r = 0; r < rowCount; r++)
         {
             int start = rowStarts[r];
-            int length = rowStarts[r + 1] - start;
-            result[r] = BuildArrayCell(data, start, length, type, arena);
+            int end = rowStarts[r + 1];
+
+            if (definitionLevels is null)
+            {
+                // Required column: every level position carries an element,
+                // so the legacy "length = end - start" mapping still holds.
+                int length = end - start;
+                result[r] = BuildArrayCell(data, start, length, type, arena);
+                continue;
+            }
+
+            // Nullable column. Parquet.Net's `Data` is padded 1:1 with the
+            // level streams — placeholder entries (typically zeros) sit at
+            // positions where the corresponding def level is below max, so
+            // the slice offset is still the level cursor. We only need to
+            // detect whole-list NULL (def == 0 anywhere in the row's range)
+            // and emit a typed null; otherwise the legacy slice works.
+            bool listIsNull = false;
+            for (int i = start; i < end; i++)
+            {
+                if (definitionLevels[i] == 0)
+                {
+                    listIsNull = true;
+                    break;
+                }
+            }
+            if (listIsNull)
+            {
+                result[r] = DataValue.Null(type.ElementKind);
+                continue;
+            }
+            result[r] = BuildArrayCell(data, start, end - start, type, arena);
         }
         return result;
     }
+
+    /// <summary>
+    /// Internal entry point for callers that need to lift a single boxed
+    /// CLR value out of a Parquet <see cref="DataColumn"/> into a
+    /// <see cref="DataValue"/> — used by the LIST&lt;STRUCT&gt; read path
+    /// in <c>OpenParquetFunction</c>, which can't go through
+    /// <see cref="ReadAsRows"/> (the data length doesn't equal the row
+    /// count once the list grouping is sliced).
+    /// </summary>
+    internal static DataValue BuildScalarAt(Array data, int index, DataKind elementKind, IValueStore arena)
+        => BuildScalar(data, index, new ParquetColumnType(elementKind, false, false, true, null, typeof(object)), arena);
 
     private static DataValue BuildScalar(Array data, int index, ParquetColumnType type, IValueStore arena)
     {

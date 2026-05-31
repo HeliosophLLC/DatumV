@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 using Heliosoph.DatumV.Model;
 
 namespace Heliosoph.DatumV.Export;
@@ -41,10 +42,19 @@ public interface IExportFormat
     /// Builds the per-run sink. Called once after planner-time validation;
     /// the sink owns the target file/directory until
     /// <see cref="IExportSink.FinishAsync"/> + <see cref="System.IAsyncDisposable.DisposeAsync"/>.
+    /// The <paramref name="sidecarRegistry"/> parameter carries the
+    /// execution-scoped <see cref="SidecarRegistry"/> (typically
+    /// <c>ExecutionContext.SidecarRegistry</c>) so the sink can resolve
+    /// sidecar-backed typed-media values — Image / Audio / Video / Mesh /
+    /// PointCloud / Json whose bytes live in a <c>.datum-blob</c> sidecar
+    /// rather than the row arena. <see langword="null"/> is only safe when
+    /// the caller guarantees no sidecar-backed values reach the sink
+    /// (planner-time validation calls, single-statement smoke tests).
     /// </summary>
     IExportSink CreateSink(
         ExportTarget target,
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
-        ExportOptions options);
+        ExportOptions options,
+        SidecarRegistry? sidecarRegistry);
 }
