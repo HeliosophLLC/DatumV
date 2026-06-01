@@ -383,10 +383,6 @@ public sealed class CompletionProvider
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
-            case CompletionZoneKind.AfterInto:
-                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
-                break;
-
             case CompletionZoneKind.AfterAs:
                 // No schema-based completions — user is typing an alias name.
                 break;

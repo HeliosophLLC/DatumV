@@ -311,7 +311,6 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("ESCAPE"), SqlToken.Escape, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IS"), SqlToken.Is, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("AS"), SqlToken.As, requireDelimiters: true)
-            .Match(Span.EqualToIgnoreCase("SHARD"), SqlToken.Shard, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("BY"), SqlToken.By, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ASC"), SqlToken.Asc, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DESC"), SqlToken.Desc, requireDelimiters: true)

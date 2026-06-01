@@ -11,7 +11,7 @@ Table-valued functions produce multiple rows and are used in FROM, CROSS JOIN, a
 
 ### unnest
 
-`unnest(array_col)` -> Rows | QU: 1
+`unnest(array_col)` -> Rows
 
 Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays.
 
@@ -24,7 +24,7 @@ CROSS JOIN LATERAL UNNEST(t.scores) AS s
 
 ### range
 
-`range(start, end[, step])` -> Rows | QU: 1
+`range(start, end[, step])` -> Rows
 
 Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1.
 
@@ -32,7 +32,7 @@ See [SQL Reference -- LATERAL JOIN / APPLY](../sql/joins.md#lateral-join--apply)
 
 ### video_unnest_frames
 
-`video_unnest_frames(source [, start_frame [, stride [, max_frames]]])` -> Rows | QU: 1
+`video_unnest_frames(source [, start_frame [, stride [, max_frames]]])` -> Rows
 
 Enumerates frames of a video as lazy `VideoFrame` handles. Each output row is `(frame_index Int32, frame VideoFrame)`. The function does no decoding — it opens the source once to read container metadata, then emits one handle per frame in stride order. Pixels are materialised only when a downstream consumer (typically `video_frame_to_image`) routes the handle back through the per-query video registry.
 
@@ -65,7 +65,7 @@ See [Examples — Video frames as a queryable column](../sql/examples.md#video-f
 
 ### open_archive
 
-`open_archive(source [, path_pattern])` -> Rows | QU: 1
+`open_archive(source [, path_pattern])` -> Rows
 
 Opens a ZIP / TAR / TAR.GZ / TAR.BZ2 archive and yields one row per regular-file entry. Streams N rows per batch with the body bytes materialized into the query arena — no temp extraction, no managed `byte[]` per entry. The load-bearing primitive behind SQL dataset recipes: compose with `read_csv`, `audio_decode`, `image_decode`, joins, and CTAS to shape raw archives into typed tables.
 
@@ -112,7 +112,7 @@ JOIN open_archive('LJSpeech-1.1.tar.gz', path_pattern := 'LJSpeech-1.1/wavs/%.wa
 
 ### open_folder
 
-`open_folder(source [, recursion_depth [, path_pattern]])` -> Rows | QU: 1
+`open_folder(source [, recursion_depth [, path_pattern]])` -> Rows
 
 Walks a filesystem directory and yields one row per regular file. The on-disk analogue of `open_archive` — same output schema (`path STRING, size INT64, modified TIMESTAMPTZ, bytes Array<UInt8>`), same streaming-into-arena memory shape, same path-pattern filter — so recipes built for archive sources port to directory sources by swapping the call. Use when the source dataset is already extracted, a scratch directory of in-progress media, or a drop folder being staged for ingest.
 
@@ -157,7 +157,7 @@ JOIN open_folder('D:\corpora\LJSpeech-1.1',
 
 ### list_folder
 
-`list_folder(source [, recursion_depth [, path_pattern]])` -> Rows | QU: 1
+`list_folder(source [, recursion_depth [, path_pattern]])` -> Rows
 
 Yields one row per regular file under a filesystem directory with metadata only — `path`, `size`, `modified`, no bytes. The no-body counterpart to `open_folder`. Use for listings, file-count queries, size audits, finding the biggest files, or generating a manifest to feed into a subsequent `open_folder` + `JOIN`. Cheap: no file open, no arena pressure, no IO beyond the directory enumeration itself — a recursive walk of hundreds of thousands of files completes in seconds.
 
@@ -190,7 +190,7 @@ JOIN open_folder('D:\corpora', recursion_depth := -1, path_pattern := '%.flac') 
 
 ### read_csv
 
-`read_csv(bytes [, delimiter])` -> Rows | QU: 1
+`read_csv(bytes [, delimiter])` -> Rows
 
 Parses CSV bytes into rows of `Array<String>` — each input line becomes one row whose single `fields` column carries the split field values. Designed for composition with `open_archive` / `open_folder` so SQL recipes can read a manifest from inside an archive (or a sibling `metadata.csv` on disk) without ever touching the bytes from a separate file path.
 
@@ -200,7 +200,7 @@ Output column: `fields Array<String>`. Project named columns positionally — `f
 SELECT fields[1] AS clip_id, fields[2] AS transcript FROM read_csv(...)
 ```
 
-**Why `Array<String>` rather than named columns.** Named-column output would require the planner to know the column count and names at plan time, but for a runtime-bound `bytes` argument neither is available until execute. Returning `Array<String>` sidesteps a planner enhancement (constant-fold-at-validate for TVF arguments) and lets recipes ship today. A schema-bearing overload can be added alongside this one once the planner grows that hook — existing recipes continue to work unchanged.
+**Why `Array<String>` rather than named columns.** Named-column output would require the planner to know the column count and names at plan time, but for a runtime-bound `bytes` argument neither is available until execute. Returning `Array<String>` sidesteps a planner enhancement (constant-fold-at-validate for TVF arguments) and lets recipes ship today. If a schema is required, use `open_csv_typed` instead.
 
 `delimiter` is an optional single-character STRING (`,` by default). Common values: `','` for CSV, `'\t'` for TSV, `'|'` for LJSpeech-style pipe-delimited manifests. Multi-character delimiters throw — composite separators aren't supported in v1.
 
@@ -221,7 +221,7 @@ WHERE fields[1] != 'client_id'
 
 ### open_csv
 
-`open_csv(path [, delimiter])` -> Rows | QU: 1
+`open_csv(path [, delimiter])` -> Rows
 
 Streams a CSV file from disk and yields one row per line, each row carrying a single `fields Array<String>` column. The file-path analogue of `read_csv` — same single-column output, same positional projection pattern, same line-splitter — for the case where the manifest is a loose file rather than bytes inside an archive. Avoids the byte-materialisation hop and stays bounded regardless of file size.
 
@@ -464,7 +464,7 @@ FROM open_fits_table($archive, 'CATALOG');
 
 ### open_h5_meta
 
-`open_h5_meta(path)` -> Rows | QU: 1
+`open_h5_meta(path)` -> Rows
 
 Opens an HDF5 file and yields **one row per group and dataset** in the file's tree, including the root. The interrogation TVF for HDF5: read this first to see what's inside an unknown file before pulling rows out with `open_h5_dataset`.
 
@@ -510,7 +510,7 @@ WHERE kind = 'dataset';
 
 ### open_h5_dataset
 
-`open_h5_dataset(path, dataset_path)` -> Rows | QU: 1
+`open_h5_dataset(path, dataset_path)` -> Rows
 
 Opens a single HDF5 dataset by its in-file path and yields its rows with one typed column. The output schema is the dataset's real schema — the validator peeks the file at plan time to discover the element kind and shape, so projections type-check against actual data:
 
@@ -648,7 +648,7 @@ SELECT * FROM open_h5_group($archive, $group_path);
 
 ### open_parquet_meta
 
-`open_parquet_meta(path)` -> Rows | QU: 1
+`open_parquet_meta(path)` -> Rows
 
 Opens an Apache Parquet file and yields **one row per leaf column** with its parsed type metadata, row group count, and total row count. The interrogation TVF for Parquet — call this first to see what's inside an unfamiliar file before pulling rows with `open_parquet`.
 
@@ -685,7 +685,7 @@ SELECT * FROM open_parquet_meta($shard_path);
 
 ### open_parquet
 
-`open_parquet(path)` -> Rows | QU: 1
+`open_parquet(path)` -> Rows
 
 Opens an Apache Parquet file and yields its rows with one column per leaf field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
 
@@ -730,7 +730,7 @@ SELECT * FROM open_parquet($shard_path);
 
 ### open_arrow_meta
 
-`open_arrow_meta(path)` -> Rows | QU: 1
+`open_arrow_meta(path)` -> Rows
 
 Opens an Apache Arrow IPC file (also Feather v2) and yields **one row per top-level column** with its parsed type metadata, record batch count, and total row count. The interrogation TVF for Arrow — call this first to see what's inside an unfamiliar `.arrow` / `.feather` file before pulling rows with `open_arrow`.
 
@@ -765,7 +765,7 @@ Dictionary-encoded columns (Arrow's compact encoding for low-cardinality string 
 
 ### open_arrow
 
-`open_arrow(path)` -> Rows | QU: 1
+`open_arrow(path)` -> Rows
 
 Opens an Apache Arrow IPC / Feather v2 file and yields its rows with one column per top-level field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
 

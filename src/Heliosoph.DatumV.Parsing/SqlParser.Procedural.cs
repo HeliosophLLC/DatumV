@@ -785,7 +785,6 @@ public static partial class SqlParser
         SqlToken.Define,
         SqlToken.Pivot,
         SqlToken.Unpivot,
-        SqlToken.Into,
         SqlToken.Order,
         SqlToken.Limit,
         SqlToken.Offset,

@@ -36,7 +36,7 @@ internal static class KeywordRegistry
     private static readonly string[] PostWhereKeywords =
     [
         "CROSS VALIDATE", "GROUP BY", "HAVING", "QUALIFY",
-        "ORDER BY", "LIMIT", "OFFSET", "INTO",
+        "ORDER BY", "LIMIT", "OFFSET",
         "UNION", "INTERSECT", "EXCEPT",
         "PIVOT", "UNPIVOT", "ASSERT",
         // `RETURNING` is legal in UPDATE/DELETE WHERE-tails; surfacing
@@ -49,7 +49,7 @@ internal static class KeywordRegistry
     private static readonly string[] PostGroupByKeywords =
     [
         "HAVING", "QUALIFY", "ASSERT",
-        "ORDER BY", "LIMIT", "OFFSET", "INTO",
+        "ORDER BY", "LIMIT", "OFFSET",
         "UNION", "INTERSECT", "EXCEPT",
         "PIVOT", "UNPIVOT",
     ];
@@ -58,7 +58,7 @@ internal static class KeywordRegistry
     private static readonly string[] PostHavingKeywords =
     [
         "QUALIFY", "ASSERT",
-        "ORDER BY", "LIMIT", "OFFSET", "INTO",
+        "ORDER BY", "LIMIT", "OFFSET",
         "UNION", "INTERSECT", "EXCEPT",
         "PIVOT", "UNPIVOT",
     ];
@@ -67,7 +67,7 @@ internal static class KeywordRegistry
     private static readonly string[] PostQualifyKeywords =
     [
         "ASSERT",
-        "ORDER BY", "LIMIT", "OFFSET", "INTO",
+        "ORDER BY", "LIMIT", "OFFSET",
         "UNION", "INTERSECT", "EXCEPT",
         "PIVOT", "UNPIVOT",
     ];
@@ -75,7 +75,7 @@ internal static class KeywordRegistry
     /// <summary>Clause keywords available from the ORDER BY position onward.</summary>
     private static readonly string[] PostOrderByKeywords =
     [
-        "LIMIT", "OFFSET", "INTO",
+        "LIMIT", "OFFSET",
         "UNION", "INTERSECT", "EXCEPT",
     ];
 
@@ -147,7 +147,7 @@ internal static class KeywordRegistry
         [
             .. JoinKeywords,
             "WHERE", "CROSS VALIDATE", "GROUP BY", "HAVING", "QUALIFY",
-            "ORDER BY", "LIMIT", "OFFSET", "INTO",
+            "ORDER BY", "LIMIT", "OFFSET",
             "TABLESAMPLE", "AS",
             "UNION", "INTERSECT", "EXCEPT",
             "PIVOT", "UNPIVOT", "ASSERT",
@@ -161,7 +161,7 @@ internal static class KeywordRegistry
             "ON",
             .. JoinKeywords,
             "WHERE", "CROSS VALIDATE", "GROUP BY", "HAVING", "QUALIFY",
-            "ORDER BY", "LIMIT", "OFFSET", "INTO",
+            "ORDER BY", "LIMIT", "OFFSET",
             "UNION", "INTERSECT", "EXCEPT",
             "PIVOT", "UNPIVOT", "ASSERT",
         ],
@@ -335,9 +335,6 @@ internal static class KeywordRegistry
         [CompletionZoneKind.InsideCreateIndexWithOptions] =
             ["analyzer"],
 
-        [CompletionZoneKind.AfterInto] =
-            ["SHARD"],
-
         // COPY zones — push the user along the canonical shape:
         //   COPY (q) TO 'path' [(FORMAT parquet, …)]
         // AfterCopy nudges them into the source paren; AfterCopySource
@@ -370,7 +367,9 @@ internal static class KeywordRegistry
     private static readonly Dictionary<SqlToken, string[]> TokenCompletionMap = new()
     {
         [SqlToken.Select] = ["SELECT"],
-        [SqlToken.Into] = ["INTO"],
+        // INTO is reserved (for INSERT INTO and future PG SELECT INTO new_table)
+        // but has no standalone surfacing zone in v1 of the SELECT grammar.
+        [SqlToken.Into] = [],
         [SqlToken.Copy] = ["COPY"],
         [SqlToken.From] = ["FROM"],
         [SqlToken.Join] = ["JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN"],
@@ -396,7 +395,6 @@ internal static class KeywordRegistry
         [SqlToken.Is] = ["IS"],
         [SqlToken.Null] = ["NULL", "NOT NULL"],
         [SqlToken.As] = ["AS"],
-        [SqlToken.Shard] = ["SHARD"],
         [SqlToken.Group] = ["GROUP BY"],
         [SqlToken.Having] = ["HAVING"],
         [SqlToken.Qualify] = ["QUALIFY"],

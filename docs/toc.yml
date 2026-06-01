@@ -89,13 +89,6 @@
       href: sql/define.md
     - name: PIVOT / UNPIVOT
       href: sql/pivot-unpivot.md
-    - name: INTO
-      href: sql/into.md
-      items:
-        - name: Sharding
-          href: sql/into.md#sharding
-        - name: Checkpointing
-          href: sql/into.md#checkpointing-resumable-writes
     - name: ORDER BY / LIMIT / OFFSET
       href: sql/order-by.md
     - name: CASE Expressions

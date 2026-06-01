@@ -72,7 +72,7 @@ public static partial class SqlParser
     }
 
     /// <summary>
-    /// Attaches trailing ORDER BY, LIMIT, OFFSET, and INTO clauses to a compound
+    /// Attaches trailing ORDER BY, LIMIT, and OFFSET clauses to a compound
     /// query expression. For a single SELECT these clauses are already parsed on
     /// the <see cref="SelectStatement"/> itself and no lifting is needed.
     /// </summary>
@@ -80,10 +80,9 @@ public static partial class SqlParser
         QueryExpression query,
         OrderByClause? orderBy,
         Expression? limit,
-        Expression? offset,
-        IntoClause? into)
+        Expression? offset)
     {
-        bool hasTrailing = orderBy is not null || limit is not null || offset is not null || into is not null;
+        bool hasTrailing = orderBy is not null || limit is not null || offset is not null;
         if (!hasTrailing)
         {
             return query;
@@ -91,7 +90,7 @@ public static partial class SqlParser
 
         if (query is CompoundQueryExpression compound)
         {
-            return compound with { OrderBy = orderBy, Limit = limit, Offset = offset, Into = into };
+            return compound with { OrderBy = orderBy, Limit = limit, Offset = offset };
         }
 
         if (query is SelectQueryExpression selectQuery)
@@ -102,7 +101,6 @@ public static partial class SqlParser
                     OrderBy = orderBy ?? selectQuery.Statement.OrderBy,
                     Limit = limit ?? selectQuery.Statement.Limit,
                     Offset = offset ?? selectQuery.Statement.Offset,
-                    Into = into ?? selectQuery.Statement.Into,
                 });
         }
 
@@ -424,47 +422,4 @@ public static partial class SqlParser
 
     // ───────────────────── Helpers ─────────────────────
 
-    /// <summary>
-    /// Determines the output format from the file extension in the INTO path.
-    /// </summary>
-    private static OutputFormat InferOutputFormat(string path)
-    {
-        if (path.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase))
-        {
-            return OutputFormat.Parquet;
-        }
-
-        if (path.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-        {
-            return OutputFormat.Csv;
-        }
-
-        if (path.EndsWith(".datum", StringComparison.OrdinalIgnoreCase))
-        {
-            return OutputFormat.Datum;
-        }
-
-        // .h5, .hdf5, or anything else defaults to HDF5
-        return OutputFormat.Hdf5;
-    }
-
-    /// <summary>
-    /// Parses the shard mode identifier (sample_count or byte_size).
-    /// </summary>
-    private static ShardMode ParseShardMode(string mode)
-    {
-        if (string.Equals(mode, "sample_count", StringComparison.OrdinalIgnoreCase))
-        {
-            return ShardMode.SampleCount;
-        }
-
-        if (string.Equals(mode, "byte_size", StringComparison.OrdinalIgnoreCase))
-        {
-            return ShardMode.ByteSize;
-        }
-
-        throw new ParseException(
-            $"Unknown shard mode '{mode}'. Expected 'sample_count' or 'byte_size'.",
-            Position.Empty);
-    }
 }

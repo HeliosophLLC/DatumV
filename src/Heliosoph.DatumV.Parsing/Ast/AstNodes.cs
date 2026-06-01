@@ -16,7 +16,6 @@ public sealed record SourceSpan(int Line, int Column, int Length);
 public sealed record SelectStatement(
     IReadOnlyList<SelectColumn> Columns,
     FromClause? From = null,
-    IntoClause? Into = null,
     IReadOnlyList<JoinClause>? Joins = null,
     Expression? Where = null,
     GroupByClause? GroupBy = null,
@@ -316,49 +315,6 @@ public enum JoinType
 
     /// <summary>Left anti-semi-join -- rows from the left where no match exists on the right.</summary>
     LeftAntiSemi,
-}
-
-/// <summary>
-/// The INTO clause specifying the output format, path, and optional sharding.
-/// </summary>
-public sealed record IntoClause(
-    OutputFormat Format,
-    string Path,
-    ShardClause? Shard = null);
-
-/// <summary>
-/// The target output format for the INTO clause.
-/// </summary>
-public enum OutputFormat
-{
-    /// <summary>HDF5 file format.</summary>
-    Hdf5,
-
-    /// <summary>Apache Parquet file format.</summary>
-    Parquet,
-
-    /// <summary>Comma-separated values text format.</summary>
-    Csv,
-
-    /// <summary>Heliosoph.DatumV native columnar format (.datum).</summary>
-    Datum,
-}
-
-/// <summary>
-/// The SHARD ON sub-clause specifying how output files are split.
-/// </summary>
-public sealed record ShardClause(ShardMode Mode, long Value);
-
-/// <summary>
-/// The sharding mode: split by sample count or byte size.
-/// </summary>
-public enum ShardMode
-{
-    /// <summary>Create a new shard every N rows.</summary>
-    SampleCount,
-
-    /// <summary>Create a new shard every N bytes.</summary>
-    ByteSize,
 }
 
 /// <summary>
@@ -1072,7 +1028,6 @@ public sealed record DeleteQueryExpression(DeleteStatement Delete) : QueryExpres
 /// <param name="OrderBy">Optional ORDER BY applied to the combined result.</param>
 /// <param name="Limit">Optional LIMIT applied to the combined result.</param>
 /// <param name="Offset">Optional OFFSET applied to the combined result.</param>
-/// <param name="Into">Optional INTO clause for output of the combined result.</param>
 public sealed record CompoundQueryExpression(
     QueryExpression Left,
     SetOperationType OperationType,
@@ -1080,8 +1035,7 @@ public sealed record CompoundQueryExpression(
     QueryExpression Right,
     OrderByClause? OrderBy = null,
     Expression? Limit = null,
-    Expression? Offset = null,
-    IntoClause? Into = null) : QueryExpression;
+    Expression? Offset = null) : QueryExpression;
 
 // ───────────────────── Statement hierarchy ─────────────────────
 

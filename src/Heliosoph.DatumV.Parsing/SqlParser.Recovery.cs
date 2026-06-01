@@ -297,26 +297,6 @@ public static partial class SqlParser
             }
         }
 
-        // ── INTO clause ──
-        IntoClause? intoClause = null;
-        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Into)
-        {
-            TokenList<SqlToken> remaining = new(tokenArray[position..]);
-            TokenListParserResult<SqlToken, IntoClause> intoResult =
-                IntoClauseParser.TryParse(remaining);
-
-            if (!intoResult.HasValue)
-            {
-                AddErrorFromToken(errors, tokenArray, position, "Invalid INTO clause.");
-                position = SkipToNextClauseIndex(tokenArray, position + 1);
-            }
-            else
-            {
-                intoClause = intoResult.Value;
-                position += CountConsumed(tokenArray, position, intoResult.Remainder);
-            }
-        }
-
         // ── ORDER BY clause ──
         OrderByClause? orderByClause = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Order)
@@ -396,7 +376,6 @@ public static partial class SqlParser
             SelectStatement statement = new(
                 columns,
                 fromClause,
-                intoClause,
                 joinClauses.Count > 0 ? joinClauses.ToArray() : null,
                 whereClause,
                 groupByClause,

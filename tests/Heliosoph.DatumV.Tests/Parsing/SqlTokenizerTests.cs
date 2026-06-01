@@ -52,7 +52,6 @@ public class SqlTokenizerTests : ServiceTestBase
     [InlineData("IS", SqlToken.Is)]
     [InlineData("NULL", SqlToken.Null)]
     [InlineData("AS", SqlToken.As)]
-    [InlineData("SHARD", SqlToken.Shard)]
     [InlineData("ORDER", SqlToken.Order)]
     [InlineData("BY", SqlToken.By)]
     [InlineData("ASC", SqlToken.Asc)]
@@ -269,18 +268,6 @@ public class SqlTokenizerTests : ServiceTestBase
             [SqlToken.Where, SqlToken.Identifier, SqlToken.GreaterThan,
              SqlToken.NumberLiteral, SqlToken.And, SqlToken.Identifier,
              SqlToken.Is, SqlToken.Not, SqlToken.Null],
-            kinds);
-    }
-
-    [Fact]
-    public void IntoClauseIsTokenized()
-    {
-        Token<SqlToken>[] tokens = Tokenize("INTO 'output.parquet' SHARD ON sample_count 1000");
-        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
-
-        Assert.Equal(
-            [SqlToken.Into, SqlToken.StringLiteral, SqlToken.Shard,
-             SqlToken.On, SqlToken.Identifier, SqlToken.NumberLiteral],
             kinds);
     }
 

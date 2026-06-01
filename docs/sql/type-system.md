@@ -215,8 +215,10 @@ A quick example to anchor what's possible — turn a photo into a
 Blender-loadable 3D mesh in one statement:
 
 ```sql
-SELECT mesh_to_gltf(mesh_from_depth_orthographic(file_bytes, models.midas_small(file_bytes), 60.0))
-INTO 'scene.glb' FROM photos LIMIT 1
+COPY (
+  SELECT mesh_to_gltf(mesh_from_depth_orthographic(file_bytes, models.midas_small(file_bytes), 60.0))
+  FROM photos LIMIT 1
+) TO 'scene.glb'
 ```
 
 The full constructor / accessor / exporter reference for `PointCloud`

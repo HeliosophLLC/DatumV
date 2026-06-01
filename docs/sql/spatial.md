@@ -220,7 +220,7 @@ FROM (
 |----------|--------|----------|
 | `point_cloud_to_ply(pc)` | Binary PLY (`.ply`) | Universal point-cloud interchange: MeshLab, CloudCompare, Open3D, PCL, Blender's PLY importer. Emits `binary_little_endian` with x/y/z floats and (when present) red/green/blue uchar per point; alpha is dropped. Always emits in OpenGL right-handed +Y-up frame; auto-converts from `CameraOpenCv` source clouds. |
 
-Returns `UInt8[]` so it composes with the `INTO 'file.ext'` clause the
+Returns `UInt8[]` so it composes with `COPY (...) TO 'file.ext'` the
 same way the mesh exporters do.
 
 ```sql
@@ -322,8 +322,8 @@ remain in the vertex buffer but no triangle references them.
 | `mesh_to_stl(m)` | Binary STL | Universal 3D-printing format. Read by every slicer (Bambu Studio, PrusaSlicer, Cura, Lychee, ChiTuBox). Loses color and per-vertex normals — STL stores only triangle positions + face normals. |
 | `mesh_to_obj(m)` | Wavefront OBJ (UTF-8 text) | Interchange with MeshLab / CloudCompare / Open3D / Blender. Per-vertex colors via the `v X Y Z R G B` extension recognized by those tools; bare-spec OBJ readers ignore the trailing color triplet. |
 
-All three return `UInt8[]` so they compose with the `INTO 'file.ext'`
-clause uniformly:
+All three return `UInt8[]` so they compose with `COPY (...) TO 'file.ext'`
+uniformly:
 
 ```sql
 SELECT mesh_to_gltf(mesh_from_depth_orthographic(image, models.midas_small(image), 60.0))

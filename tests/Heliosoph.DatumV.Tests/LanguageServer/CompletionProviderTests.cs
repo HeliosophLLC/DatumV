@@ -1201,17 +1201,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.DoesNotContain(items, i => i.Label == "encode");
     }
 
-    // ───────────────────── INTO / AS — no completions ─────────────────────
-
-    [Fact]
-    public void GetCompletions_AfterInto_OffersShard()
-    {
-        CompletionProvider provider = CreateProvider();
-
-        CompletionItem[] items = provider.GetCompletions("SELECT * FROM t INTO ", 21);
-
-        Assert.Contains(items, item => item.Label == "SHARD" && item.Kind == CompletionItemKind.Keyword);
-    }
+    // ───────────────────── AS — no completions ─────────────────────
 
     [Fact]
     public void GetCompletions_AfterAs_ReturnsEmpty()

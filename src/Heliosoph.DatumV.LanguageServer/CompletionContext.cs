@@ -857,7 +857,7 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterOrderBy;
 
                 case SqlToken.By:
-                    // Could be ORDER BY, GROUP BY, or SHARD ... BY — walk back to see.
+                    // Could be ORDER BY or GROUP BY — walk back to see.
                     if (index > 0 && tokens[index - 1].Kind == SqlToken.Order)
                     {
                         return CompletionZoneKind.AfterOrderBy;
@@ -869,12 +869,14 @@ public static class CompletionContext
                     return CompletionZoneKind.Expression;
 
                 case SqlToken.Into:
-                    // Check if preceded by INSERT — offer table names.
+                    // Only meaningful after INSERT — offer table names. The
+                    // token is otherwise reserved with no current SELECT
+                    // surfacing zone; fall through to the default classifier.
                     if (index > 0 && tokens[index - 1].Kind == SqlToken.Insert)
                     {
                         return CompletionZoneKind.AfterInsertInto;
                     }
-                    return CompletionZoneKind.AfterInto;
+                    continue;
 
                 case SqlToken.Union:
                 case SqlToken.Intersect:
@@ -1877,9 +1879,6 @@ public enum CompletionZoneKind
 
     /// <summary>Inside a DEFINE block — offer LET and ASSERT declarations.</summary>
     InsideDefineBlock,
-
-    /// <summary>After INTO — offer file path (no schema completions).</summary>
-    AfterInto,
 
     /// <summary>After AS — user is typing an alias (no schema completions).</summary>
     AfterAs,

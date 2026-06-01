@@ -49,8 +49,7 @@ public static class ProjectionSetReturningRewriter
                 Rewrite(compound.Right, functions),
                 compound.OrderBy,
                 compound.Limit,
-                compound.Offset,
-                compound.Into),
+                compound.Offset),
             _ => query,
         };
 
