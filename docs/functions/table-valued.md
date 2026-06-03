@@ -457,7 +457,7 @@ SELECT * FROM open_fits_table('/data/catalog.fits', 1);
 
 -- Bound parameter (substituted to a literal at plan time)
 SELECT *
-FROM open_fits_table($archive, 'CATALOG');
+FROM open_fits_table($artifact, 'CATALOG');
 ```
 
 **Ingest path.** Dropping a `.fits` file into the dataset pipeline lands it through `FitsFileFormat`, which emits the same shape `open_fits_hdus` does — the most informative default for an unknown file. Recipes that want pixel previews or catalog rows directly should use the corresponding TVF inside an SQL recipe.
@@ -579,7 +579,7 @@ JOIN open_h5_dataset('/data/embeddings.h5', '/train/x') AS e
   ON idx.value < (SELECT COUNT(*) FROM open_h5_dataset('/data/embeddings.h5', '/train/x'));
 
 -- Bound parameter (substituted to a literal at plan time)
-SELECT * FROM open_h5_dataset($archive, '/labels');
+SELECT * FROM open_h5_dataset($artifact, '/labels');
 ```
 
 **Performance.** v1 reads the entire dataset into memory at the start of execution, then iterates rows from the in-memory buffer. Fine for the typical ML dataset (tens to hundreds of MB); a chunked-streaming follow-up will land for files bigger than RAM. The downstream operator pipeline batches the row stream into the planner's standard batch size regardless of how we feed it.
@@ -643,7 +643,7 @@ FROM open_h5_group('model.h5', '/dense_1');
 **Bound parameter:**
 
 ```sql
-SELECT * FROM open_h5_group($archive, $group_path);
+SELECT * FROM open_h5_group($artifact, $group_path);
 ```
 
 ### open_parquet_meta

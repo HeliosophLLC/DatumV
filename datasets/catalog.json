@@ -1041,6 +1041,56 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Chicago Crimes",
+      "summary": "8M+ Chicago Police Department incident reports from 2001 to the present. The reach-for big-tabular benchmark for time-series, geospatial, and categorical analytics over a single municipal stream.",
+      "description": "Published by the Chicago Police Department through the City of Chicago Open Data Portal (Socrata-hosted). Each row is one reported incident: timestamp, block-level address, FBI / IUCR offense codes, arrest + domestic flags, lat/lng (Socrata rounds to the city block to protect privacy), and the beat / district / ward / community-area administrative codes. The corpus refreshes daily with a roughly 7-day reporting lag, so the headline row count and on-disk size drift over time. The ingest recipe drives `open_csv_typed` at plan time so the schema lands with real per-column types (TIMESTAMPTZ for the date columns, FLOAT for lat/lng, narrowed integers for the FBI code) rather than the `Array<String>` shape `open_csv` yields — queries can write `WHERE \"Primary Type\" = 'THEFT' AND \"Year\" = 2024` against typed columns directly.",
+      "modalities": ["Tabular", "Geospatial"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "Chicago Police Department (incident report data)",
+        "City of Chicago Open Data Portal (hosting + Socrata distribution)"
+      ],
+      "suitableForTasks": [
+        "TabularClassifier",
+        "TimeSeriesForecaster",
+        "TimeSeriesAnomalyDetector"
+      ],
+      "variants": [
+        {
+          "id": "chicago_crimes_live",
+          "displayName": "live (daily-updated)",
+          "summary": "Direct CSV from the City of Chicago Open Data Portal. Counts and bytes drift with each daily update — reach for this variant for freshness-sensitive work (recent-trend dashboards, current-quarter analysis) rather than reproducible benchmarks. As of mid-2026, ~8.2M rows and ~1.8 GB on the wire; both grow on the order of 5k–10k rows per day.",
+          "approxArchiveBytes": 1800000000,
+          "approxIngestedBytes": 1500000000,
+          "expectedRowCounts": { "crimes": 8200000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "live",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://data.cityofchicago.org/api/views/ijzp-q8t2/rows.csv?accessType=DOWNLOAD",
+                      "destFile": "crimes.csv"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "crimes",
+                  "artifact": "crimes.csv",
+                  "sqlFile": "chicago_crimes/crimes.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

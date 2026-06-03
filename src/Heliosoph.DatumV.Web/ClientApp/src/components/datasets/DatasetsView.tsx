@@ -22,6 +22,7 @@ import {
   groupTasksByFamily,
 } from '@/state/models';
 import { DatasetDetail } from '@/components/datasets/DatasetDetail';
+import { InlineMarkdown } from '@/components/markdown/InlineMarkdown';
 import { TaskChipIcon } from '@/components/shared/TaskChip';
 import { Button } from '@/components/ui/button';
 import {
@@ -307,7 +308,7 @@ function EntryListItem({
         </div>
         {entry.summary && (
           <span className="text-muted-foreground line-clamp-2 text-xs">
-            {entry.summary}
+            <InlineMarkdown>{entry.summary}</InlineMarkdown>
           </span>
         )}
         {(entry.suitableForTasks?.length ?? 0) > 0 && (
