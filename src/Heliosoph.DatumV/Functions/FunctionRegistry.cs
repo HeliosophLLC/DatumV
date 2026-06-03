@@ -1019,11 +1019,20 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Crypto.Sha512Function>();
         registry.RegisterScalar<Scalar.Crypto.DigestFunction>();
 
-        // Activations — softmax / sigmoid. ReLU + GELU + tanh land when a
-        // model actually needs them post-graph (most are baked into the
-        // ONNX export).
+        // Activations. All accept Float32 scalar or Float32[] vector.
         registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
         registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
+        registry.RegisterScalar<Scalar.Activation.ReluFunction>();
+        registry.RegisterScalar<Scalar.Activation.LeakyReluFunction>();
+        registry.RegisterScalar<Scalar.Activation.EluFunction>();
+        registry.RegisterScalar<Scalar.Activation.SeluFunction>();
+        registry.RegisterScalar<Scalar.Activation.GeluFunction>();
+        registry.RegisterScalar<Scalar.Activation.SwishFunction>();
+        registry.RegisterScalar<Scalar.Activation.SoftplusFunction>();
+        registry.RegisterScalar<Scalar.Activation.SoftsignFunction>();
+        registry.RegisterScalar<Scalar.Activation.MishFunction>();
+        registry.RegisterScalar<Scalar.Activation.HardSigmoidFunction>();
+        registry.RegisterScalar<Scalar.Activation.HardSwishFunction>();
         registry.RegisterScalar<Scalar.Activation.MultilabelClassifyFunction>();
 
         // Vector reductions + normalization + detection postprocess.
