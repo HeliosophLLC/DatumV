@@ -18,7 +18,7 @@ namespace Heliosoph.DatumV.Execution;
 /// <see cref="LiteralExpression"/>. Most visibly, the constant-aware
 /// <c>ITableValuedFunction.ValidateArguments</c> overload (used by TVFs
 /// whose output schema is determined by argument values — FITS bintables,
-/// HDF5 datasets, etc.) treats <c>$archive</c> and <c>'path/to/foo.h5'</c>
+/// HDF5 datasets, etc.) treats <c>$artifact</c> and <c>'path/to/foo.h5'</c>
 /// uniformly because both are LiteralExpressions after this pass runs. If
 /// a future change introduces plan caching across multiple bind-and-execute
 /// calls (so the same plan is reused with different parameter values), the
@@ -308,7 +308,7 @@ public static class ParameterBinder
         }
 
         // Recurse into CTE bodies and LET binding expressions so $parameters
-        // inside them substitute too. Without this, `WITH foo AS (… $archive …)`
+        // inside them substitute too. Without this, `WITH foo AS (… $artifact …)`
         // would leave the parameter unbound and trip the planner.
         IReadOnlyList<CommonTableExpression>? commonTableExpressions = null;
         if (statement.CommonTableExpressions is not null)

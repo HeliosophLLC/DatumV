@@ -95,10 +95,10 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
 
         string destPath = Path.Combine(_scratch, "ondisk.datum");
         await executor.ExecuteAsync(
-            sql: "SELECT audio_decode(bytes) AS clip FROM open_archive($archive)",
+            sql: "SELECT audio_decode(bytes) AS clip FROM open_archive($artifact)",
             parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
             {
-                ["archive"] = new StringParameter(archivePath),
+                ["artifact"] = new StringParameter(archivePath),
             },
             destPath: destPath,
             onRowProgress: null,
@@ -162,10 +162,10 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
             // failing ingest does.
             sql: "SELECT regexp_replace(path, '^.+/(.+)\\.wav$', '\\1') AS utt_id, "
                + "audio_decode(bytes) AS clip, size AS file_bytes, modified "
-               + "FROM open_archive($archive) WHERE get_filename_ext(path) = 'wav'",
+               + "FROM open_archive($artifact) WHERE get_filename_ext(path) = 'wav'",
             parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
             {
-                ["archive"] = new StringParameter(archivePath),
+                ["artifact"] = new StringParameter(archivePath),
             },
             destPath: destPath,
             onRowProgress: null,
@@ -227,7 +227,7 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
     public void Parse_CrossJoinOpenCifar_MarksJoinAsLateral()
     {
         Heliosoph.DatumV.Parsing.Ast.Statement parsed = Heliosoph.DatumV.Parsing.SqlParser.ParseStatement(
-            "SELECT c.idx FROM open_archive($archive) AS a " +
+            "SELECT c.idx FROM open_archive($artifact) AS a " +
             "CROSS JOIN open_cifar10(a.bytes) AS c");
         Heliosoph.DatumV.Parsing.Ast.QueryStatement query = Assert.IsType<Heliosoph.DatumV.Parsing.Ast.QueryStatement>(parsed);
         Heliosoph.DatumV.Parsing.Ast.SelectQueryExpression sel =
@@ -301,16 +301,16 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
                 "WITH labels AS ( " +
                 "  SELECT CAST(row_number() OVER () - 1 AS UInt8) AS label_id, " +
                 "         f.fields[1] AS label_name " +
-                "  FROM open_archive($archive, 'cifar-10-batches-bin/batches.meta.txt') tt " +
+                "  FROM open_archive($artifact, 'cifar-10-batches-bin/batches.meta.txt') tt " +
                 "  JOIN read_csv(tt.bytes) f " +
                 ") " +
                 "SELECT c.idx, c.image, c.label, labels.label_name " +
-                "FROM open_archive($archive, 'cifar-10-batches-bin/test_batch.bin') AS a " +
+                "FROM open_archive($artifact, 'cifar-10-batches-bin/test_batch.bin') AS a " +
                 "CROSS JOIN open_cifar10(a.bytes) AS c " +
                 "JOIN labels ON labels.label_id = c.label",
             parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
             {
-                ["archive"] = new StringParameter(archivePath),
+                ["artifact"] = new StringParameter(archivePath),
             },
             destPath: destPath,
             onRowProgress: null,
@@ -337,11 +337,11 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
         string destPath = Path.Combine(_scratch, "cifar.datum");
         SqlIngestResult result = await executor.ExecuteAsync(
             sql: "SELECT c.idx AS idx, c.image AS image, c.label AS label "
-               + "FROM open_archive($archive, 'cifar-10-batches-bin/data_batch_%.bin') AS a "
+               + "FROM open_archive($artifact, 'cifar-10-batches-bin/data_batch_%.bin') AS a "
                + "CROSS JOIN open_cifar10(a.bytes) AS c",
             parameters: new Dictionary<string, ParameterValue>(StringComparer.Ordinal)
             {
-                ["archive"] = new StringParameter(archivePath),
+                ["artifact"] = new StringParameter(archivePath),
             },
             destPath: destPath,
             onRowProgress: null,

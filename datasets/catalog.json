@@ -407,7 +407,7 @@
                 {
                   "type": "huggingface",
                   "repoType": "dataset",
-                  "repo": "DatumV/LJ-Speech-Dataset",
+                  "repo": "Heliosoph/LJ-Speech-Dataset",
                   "revision": "81d7ce28576278f81036034a94b4cf87180daf17",
                   "include": ["LJSpeech-1.1.tar.gz"]
                 }
@@ -415,7 +415,7 @@
               "ingest": [
                 {
                   "tableName": "audio",
-                  "archive": "LJSpeech-1.1.tar.gz",
+                  "artifact": "LJSpeech-1.1.tar.gz",
                   "sqlFile": "ljspeech_audio/audio.sql"
                 }
               ]
@@ -472,7 +472,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-images-idx3-ubyte.gz",
                     "labels": "train-labels-idx1-ubyte.gz"
                   }
@@ -511,7 +511,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-images-idx3-ubyte.gz",
                     "labels": "t10k-labels-idx1-ubyte.gz"
                   }
@@ -569,7 +569,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "fashion_mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-images-idx3-ubyte.gz",
                     "labels": "train-labels-idx1-ubyte.gz"
                   }
@@ -608,7 +608,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "fashion_mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-images-idx3-ubyte.gz",
                     "labels": "t10k-labels-idx1-ubyte.gz"
                   }
@@ -667,7 +667,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "kmnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-imgs.gz",
                     "labels": "train-labels.gz"
                   }
@@ -706,7 +706,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "kmnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-imgs.gz",
                     "labels": "t10k-labels.gz"
                   }
@@ -762,7 +762,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "mednist/classes.sql",
-                  "archive": "MedNIST.tar.gz"
+                  "artifact": "MedNIST.tar.gz"
                 }
               ]
             }
@@ -814,7 +814,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "eurosat/rgb.sql",
-                  "archive": "EuroSAT.zip"
+                  "artifact": "EuroSAT.zip"
                 }
               ]
             }
@@ -866,7 +866,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "oxford_pets/images.sql",
-                  "archive": "images.tar.gz"
+                  "artifact": "images.tar.gz"
                 }
               ]
             }
@@ -918,7 +918,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar10/train.sql",
-                  "archive": "cifar-10-binary.tar.gz"
+                  "artifact": "cifar-10-binary.tar.gz"
                 }
               ]
             }
@@ -950,7 +950,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar10/test.sql",
-                  "archive": "cifar-10-binary.tar.gz"
+                  "artifact": "cifar-10-binary.tar.gz"
                 }
               ]
             }
@@ -1002,7 +1002,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar100/train.sql",
-                  "archive": "cifar-100-binary.tar.gz"
+                  "artifact": "cifar-100-binary.tar.gz"
                 }
               ]
             }
@@ -1034,7 +1034,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar100/test.sql",
-                  "archive": "cifar-100-binary.tar.gz"
+                  "artifact": "cifar-100-binary.tar.gz"
                 }
               ]
             }

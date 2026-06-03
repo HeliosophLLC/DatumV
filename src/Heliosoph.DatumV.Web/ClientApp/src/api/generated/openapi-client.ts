@@ -2767,8 +2767,8 @@ export interface CatalogIngestJob {
     tableName?: string;
     sourcePath?: string | undefined;
     sqlFile?: string | undefined;
-    archive?: string | undefined;
-    archives?: { [key: string]: string; } | undefined;
+    artifact?: string | undefined;
+    artifacts?: { [key: string]: string; } | undefined;
 }
 
 export type DatasetInstallState = "notDownloaded" | "partial" | "installed";

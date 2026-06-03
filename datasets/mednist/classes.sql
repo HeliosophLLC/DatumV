@@ -7,5 +7,5 @@ SELECT
     regexp_replace(path, '^[^/]+/([^/]+)/[^/]+$', '\1') AS class,
     size AS file_bytes,
     modified
-FROM open_archive($archive)
+FROM open_archive($artifact)
 WHERE get_filename_ext(path) IN ('jpg', 'jpeg', 'JPG', 'JPEG')

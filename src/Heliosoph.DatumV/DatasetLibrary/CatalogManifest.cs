@@ -168,18 +168,20 @@ public sealed record CatalogDatasetVersion(
 //     directory) that produces the ingested rows. The script's raw-cache
 //     inputs are declared via one of two shapes:
 //
-//       - Archive (single) — the file the script primarily targets
+//       - Artifact (single) — the file the script primarily targets
 //         (relative to raw cache); its absolute path is bound as
-//         $archive and its base name stripped of compound extensions
+//         $artifact and its base name stripped of compound extensions
 //         (e.g. `LJSpeech-1.1.tar.gz` → `LJSpeech-1.1`) is bound as
-//         $archive_stem. Used by single-file recipes like LJSpeech.
+//         $artifact_stem. Used by single-file recipes like LJSpeech.
+//         The name says nothing about archive-ness — a plain `.csv`
+//         download is an artifact too, bound the same way.
 //
-//       - Archives (named map) — multiple raw-cache files keyed by a
+//       - Artifacts (named map) — multiple raw-cache files keyed by a
 //         caller-chosen logical name. Each entry binds an absolute path
-//         to the parameter $&lt;name&gt; (e.g. `archives: { "images": "...",
+//         to the parameter $&lt;name&gt; (e.g. `artifacts: { "images": "...",
 //         "labels": "..." }` binds $images and $labels). Used by recipes
 //         that need to JOIN across two or more source files at install
-//         time, e.g. MNIST images-IDX + labels-IDX. $archive_stem is not
+//         time, e.g. MNIST images-IDX + labels-IDX. $artifact_stem is not
 //         bound in this shape — recipes that need per-file stems compute
 //         them with SQL string functions.
 //
@@ -190,5 +192,5 @@ public sealed record CatalogIngestJob(
     string TableName,
     string? SourcePath = null,
     string? SqlFile = null,
-    string? Archive = null,
-    IReadOnlyDictionary<string, string>? Archives = null);
+    string? Artifact = null,
+    IReadOnlyDictionary<string, string>? Artifacts = null);

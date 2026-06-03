@@ -341,38 +341,38 @@ internal sealed class ManifestStore : IManifestStore
                 }
                 if (hasSql)
                 {
-                    bool hasArchive = !string.IsNullOrWhiteSpace(job.Archive);
-                    bool hasArchives = job.Archives is { Count: > 0 };
-                    if (hasArchive == hasArchives)
+                    bool hasArtifact = !string.IsNullOrWhiteSpace(job.Artifact);
+                    bool hasArtifacts = job.Artifacts is { Count: > 0 };
+                    if (hasArtifact == hasArtifacts)
                     {
                         throw new InvalidOperationException(
                             $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
                             $"'{job.TableName}' in {manifestPath} declares `sqlFile` but " +
-                            (hasArchive
-                                ? "also sets `archives`; pick exactly one. Use `archive` for a "
-                                    + "single-source recipe ($archive + $archive_stem), or `archives` "
+                            (hasArtifact
+                                ? "also sets `artifacts`; pick exactly one. Use `artifact` for a "
+                                    + "single-source recipe ($artifact + $artifact_stem), or `artifacts` "
                                     + "for a multi-source recipe ($<name> per entry)."
-                                : "neither `archive` nor `archives`. Use `archive` for a "
-                                    + "single-source recipe ($archive + $archive_stem), or `archives` "
+                                : "neither `artifact` nor `artifacts`. Use `artifact` for a "
+                                    + "single-source recipe ($artifact + $artifact_stem), or `artifacts` "
                                     + "for a multi-source recipe ($<name> per entry)."));
                     }
-                    if (hasArchives)
+                    if (hasArtifacts)
                     {
-                        foreach ((string paramName, string archivePath) in job.Archives!)
+                        foreach ((string paramName, string artifactPath) in job.Artifacts!)
                         {
                             if (!IsValidSqlIdentifier(paramName))
                             {
                                 throw new InvalidOperationException(
                                     $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
-                                    $"'{job.TableName}' in {manifestPath} declares archives entry " +
-                                    $"'{paramName}' which is not a valid SQL identifier. Each archives " +
+                                    $"'{job.TableName}' in {manifestPath} declares artifacts entry " +
+                                    $"'{paramName}' which is not a valid SQL identifier. Each artifacts " +
                                     "key is bound as a `$name` parameter so names must be snake_case.");
                             }
-                            if (string.IsNullOrWhiteSpace(archivePath))
+                            if (string.IsNullOrWhiteSpace(artifactPath))
                             {
                                 throw new InvalidOperationException(
                                     $"Dataset variant '{variant.Id}' version '{v.Version}' ingest job " +
-                                    $"'{job.TableName}' in {manifestPath} archives entry " +
+                                    $"'{job.TableName}' in {manifestPath} artifacts entry " +
                                     $"'{paramName}' has empty path.");
                             }
                         }
