@@ -21,7 +21,11 @@ namespace Heliosoph.DatumV.Export;
 public sealed class ExportFormatRegistry : IExportFormatRegistry
 {
     private static readonly Lazy<ExportFormatRegistry> _default = new(
-        () => new ExportFormatRegistry([new Parquet.ParquetExportFormat()]));
+        () => new ExportFormatRegistry(
+        [
+            new Parquet.ParquetExportFormat(),
+            new Csv.CsvExportFormat(),
+        ]));
 
     /// <summary>
     /// Process-wide default registry, populated with every format the engine

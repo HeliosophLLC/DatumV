@@ -1,6 +1,6 @@
 # COPY and Export
 
-Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet today; CSV / JSONL / `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Three.js, and other standard tooling — and re-importable through `open_parquet` back into the typed engine without an explicit conversion step.
+Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet and CSV today; JSONL / `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Excel, Three.js, and other standard tooling — and re-importable through `open_parquet` / `open_csv_typed` back into the typed engine without an explicit conversion step.
 
 This document covers the SQL surface, the plan / sink layering, the typed-media encoding strategy, the `datumv.*` metadata convention that closes the round-trip loop, and the front-end Electron UI that drives it.
 
@@ -30,7 +30,7 @@ COPY (SELECT id, pic FROM samples) TO 'samples.parquet'
   (FORMAT parquet, ROW_GROUP_SIZE 10000, COMPRESSION 'zstd');
 ```
 
-Parquet options recognised today:
+Format options recognised today (CSV options follow further down):
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -171,6 +171,73 @@ Parquet.Net's `DataColumn(field, data, definitionLevels, repetitionLevels)` 4-ar
 
 ---
 
+## The CSV Sink
+
+[`src/Heliosoph.DatumV/Export/Csv/`](../../src/Heliosoph.DatumV/Export/Csv/)
+
+CSV is the second built-in format, sitting alongside Parquet in `ExportFormatRegistry.Default`. The contract is the same `IExportFormat` / `IExportSink` pair — what differs is the on-disk shape and the typed-media policy.
+
+### Options
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `HEADER` | boolean | `true` | First row is the comma-separated column names |
+| `DELIMITER` | string | `,` | Single character; `tab` or `\t` shorthand for the literal tab |
+| `QUOTE` | string | `"` | Single non-newline character; doubled inside quoted bodies per RFC 4180 |
+| `LINE_ENDING` | identifier / string | `lf` | `lf` (default) or `crlf` |
+| `NULL_STRING` | string | `''` (empty) | The text written for SQL NULL |
+
+All options are validated at plan time. Unknown `LINE_ENDING`, multi-character `DELIMITER` / `QUOTE`, and a delimiter that would collide with quoting (`"`, `\r`, `\n`) each throw `ExportPlanException` before the file is opened.
+
+The boolean option passes as a quoted string today (`HEADER 'false'`) because the COPY grammar's `<value>` rule covers string-literal / number-literal / identifier — bareword `false` is the reserved keyword, not an option literal. `ExportOptions.TryGetBool` parses the string.
+
+### Scalar text formats
+
+The scalar formats are picked to round-trip cleanly through [`open_csv_typed`](../functions/table-valued.md) — the table-valued function that runs `CsvTypeScanner` at plan time and surfaces real per-column types. The contract:
+
+- **Booleans**: lowercase `true` / `false` — `IsBooleanLiteral` accepts both casings, and lowercase matches Postgres / Polars convention.
+- **Integers**: `InvariantCulture.ToString()` — no thousands separators, no sign except `-`.
+- **Floats**: `"R"` round-trippable form. `NaN` / `Infinity` survive as text; the scanner re-classifies the column as `String` (no JSON `null`-style elision needed because CSV doesn't have a JSON-number constraint).
+- **Decimals**: `InvariantCulture.ToString()` — preserves trailing zeros that came in via the SQL `DECIMAL(p, s)` declaration (`12.50m` writes as `12.50`, not `12.5`).
+- **Dates**: `yyyy-MM-dd`.
+- **Times**: `HH:mm:ss.FFFFFFF` (trailing fractional zeros suppressed).
+- **Timestamp**: `yyyy-MM-ddTHH:mm:ss.FFFFFFF` (naive — no offset).
+- **TimestampTz**: ISO 8601 `"O"` form. Internal storage is UTC ticks, so the on-disk offset is always `+00:00` — that's accurate, not a fidelity loss; the original wall-clock offset is already gone by the time the value reaches the sink.
+- **Uuid**: `D` form (`8-4-4-4-12` hex without braces).
+- **String**: passes through unchanged except for RFC 4180 quoting.
+- **NULL**: empty field by default. `NULL_STRING 'NULL'` (or any literal) opts in to a sentinel.
+
+### Composite kinds → JSON text
+
+`DataKind.Struct` and `Array<T>` columns serialise as JSON text inside a single CSV field via `DataValueJsonWriter` (a `Utf8JsonWriter` over a pooled `ArrayBufferWriter<byte>`). The scanner re-reads them as `String` columns on import — that's the honest answer; CSV has no carrier for "this column is structured." Users who need a lossless composite round trip should export to Parquet.
+
+Struct field names *aren't* on the wire (the engine carries them on the enclosing `TypeDescriptor`, not the per-value `DataValue`). The JSON writer falls back to positional `f0`, `f1`, … names. Json-kind values (CBOR on the wire) decode through `CborJsonCodec.DecodeToJsonText` before embedding so a Json-typed struct field surfaces as a real nested JSON object, not a stringified blob.
+
+Array element support matches the Parquet sink's `PrimitiveArrayListEncoder` set in v1: `Boolean`, `Int8/16/32/64`, `UInt16/32/64`, `Float32/64`, `String`, and `Struct`. `Array<UInt8>` is rejected at plan time (see below); `Array<Date>` and friends fall through to a `<Array<Kind> not encodable in CSV>` placeholder. Broader array element support is paired across both formats when added.
+
+### Typed media: plan-time rejection
+
+CSV is a flat-text format; inlining base64 megabytes per row defeats the point. `CsvExportFormat.ResolveDisposition` rejects every typed-media kind at plan time with a clear column-named message that points the user at Parquet:
+
+- `Image` / `Audio` / `Video` / `Mesh` / `PointCloud` — "export this column to parquet instead — Parquet preserves the bytes losslessly and round-trips through `open_parquet`."
+- `Drawing` — same hint as the Parquet sink: rasterise via `render(drawing, point2d(w, h))` first.
+- `Array<UInt8>` — "byte array which CSV cannot represent without base64-inlining megabytes per row. Export to parquet instead, or project it out of the SELECT."
+- `VideoFrame` / `AudioSlice` / `VideoSlice` — runtime-only lazy handles; materialise to `Image` / `Audio` first.
+
+The check recurses into `ColumnInfo.Fields` so a typed-media field inside an otherwise-representable struct fails at plan time with a `parent.field` dotted path in the message, not mid-stream.
+
+### RFC 4180 quoting
+
+A field is quoted when it contains the delimiter, the quote character, or any newline (`\n` or `\r`). The quote character inside a quoted body is doubled (`"` → `""`). Header names are quoted by the same rule, so a column called `weird,name` survives unambiguously.
+
+There's no separate `ESCAPE` option — RFC 4180 quote-doubling is the only escape mechanism. The DuckDB-style backslash-escape dialect isn't supported because the scanner doesn't read it back.
+
+### Round-trip story
+
+CSV is a one-way export by default: kinds the scanner can narrow re-import cleanly through `open_csv_typed`, composite columns and inline visual / spatial scalars (`Color`, `Point2D`, `Point3D` — written as JSON objects via the same path as structs) come back as `String`. There's no `datumv.*` metadata convention for CSV because the format has no place to put it; that round-trip closure remains a Parquet-only feature.
+
+---
+
 ## The `datumv.*` Metadata Convention
 
 [`src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs`](../../src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs)
@@ -282,7 +349,7 @@ Two important nuances:
 
 The completion provider recognises four COPY-specific zones — `AfterCopy` (`COPY ⌷` → suggest `(`), `AfterCopySource` (`COPY (q) ⌷` → suggest `TO`), `AfterCopyTo` (`COPY (q) TO 'path' ⌷` → suggest option-block `(`), and `InCopyOptions` (cursor inside the option parens → surface format-specific option keys). The walk-back classifier detects the option-block paren by the `STRING → TO` token pair (with an optional `WITH` in between) and stops at the first `LeftParen` whose preceding tokens match that shape.
 
-Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. When CSV / JSON sinks ship, they register their option keys against the format-name key and the completion provider picks them up automatically — no edits in `CompletionContext` or `CompletionProvider`.
+Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. CSV registers `HEADER`, `DELIMITER`, `QUOTE`, `LINE_ENDING`, `NULL_STRING` against the `csv` key; the completion provider picks the set up automatically with no edits in `CompletionContext` or `CompletionProvider`. Future formats follow the same drop-in pattern.
 
 ---
 
@@ -299,7 +366,7 @@ Deferred design choices (called out, status unchanged):
 - **`COPY ... TO STDOUT`** — not implemented. The Electron model has a shared filesystem so the current path-target approach works; STDOUT is the right answer for any web-served deployment.
 - **Directory targets + `MediaDisposition.Sidecar`** — interface admits them, sink doesn't implement.
 - **`PARTITION_BY` and multi-file row-group splits** — same.
-- **CSV / JSONL / `.datum` / HDF5 / FITS** — unwritten. Parquet is the headline.
+- **JSONL / `.datum` / HDF5 / FITS** — unwritten. Parquet and CSV are the only built-in formats today.
 
 Format / fidelity caveats users should know about:
 
