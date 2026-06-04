@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { WindowChrome } from '@/components/window/WindowChrome';
 import { AboutDialog } from './AboutDialog';
 import { DeleteFileDialog } from './DeleteFileDialog';
+import { ExportDialog } from './ExportDialog';
 import { ExternalChangeDialog } from './ExternalChangeDialog';
 import { LicenseDialog } from './LicenseDialog';
 import { PreFlightDialog } from './PreFlightDialog';
@@ -148,6 +149,8 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           informational={params.informational === 'true'}
         />
       );
+    case 'export':
+      return <ExportDialog requestId={requestId} />;
     case 'preflightRequired': {
       // The block payload is JSON-stringified by main.ts when packing
       // non-string values into URL query params. Parse it back; if the

@@ -74,6 +74,57 @@
     "confirm": "Delete",
     "cancel": "Cancel"
   },
+  "export": {
+    "title": "Export query results",
+    "subtitle": "Pick a format and tune its options. You'll choose the file location next.",
+    "cancel": "Cancel",
+    "continue": "Continue…",
+    "defaultSuffix": "(default)",
+    "format": {
+      "legend": "Format",
+      "parquet": {
+        "title": "Parquet",
+        "subtitle": "Lossless, round-trips through open_parquet. Best for typed media."
+      },
+      "csv": {
+        "title": "CSV",
+        "subtitle": "Plain text. Opens in Excel; round-trips scalars through open_csv_typed."
+      }
+    },
+    "parquet": {
+      "legend": "Parquet options",
+      "compression": "Compression",
+      "compressionHint": "Algorithm used to compress each column chunk.",
+      "compressionLevel": "Compression level",
+      "compressionLevelHint": "Only applies to gzip, zstd, and brotli.",
+      "compressionLevelDefault": "Codec default",
+      "levelNone": "No compression",
+      "levelFastest": "Fastest",
+      "levelOptimal": "Optimal",
+      "levelSmallest": "Smallest",
+      "rowGroupSize": "Row group size",
+      "rowGroupSizeHint": "Rows per row group. Leave blank for the default (50,000)."
+    },
+    "csv": {
+      "legend": "CSV options",
+      "header": "Write column header row",
+      "headerHint": "First line is the comma-separated column names.",
+      "delimiter": "Delimiter",
+      "delimiterHint": "Character separating fields on each line.",
+      "delim": {
+        "comma": "Comma (,)",
+        "semicolon": "Semicolon (;)",
+        "tab": "Tab",
+        "pipe": "Pipe (|)",
+        "custom": "Custom…"
+      },
+      "lineEnding": "Line ending",
+      "lineEndingHint": "Newline style at the end of each row.",
+      "nullString": "NULL representation",
+      "nullStringHint": "Text written for SQL NULL values. Empty means an empty field.",
+      "nullStringPlaceholder": "(empty by default)"
+    }
+  },
   "about": {
     "title": "About DatumV",
     "tagline": "DatumV™ — Heliosoph",
