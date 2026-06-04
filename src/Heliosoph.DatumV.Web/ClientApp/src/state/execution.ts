@@ -1,4 +1,4 @@
-import { proxy } from 'valtio';
+import { proxy, ref } from 'valtio';
 import { postNdjson, postNdjsonMultipart } from './ndjson';
 import { downloadsState, installModel } from './downloads';
 import { datasetsState, installVariant } from './datasets';
@@ -95,6 +95,13 @@ export interface CellResult {
   cellId: string;
   cellKind: string;
   schema: ColumnInfo[] | null;
+  // `rows` is wrapped in `valtio/ref` (see `cell_started` init) so the
+  // proxy doesn't deep-wrap every appended row + JsonCell. That avoids
+  // O(rows) proxying overhead during streaming, which dominated at
+  // tens-of-thousands-of-rows scale. The cost: mutations to `rows`
+  // are invisible to subscribers — consumers must read `rowCount`
+  // (incremented after each flush) for reactivity. Reads of
+  // `rows[i]` return the live raw row regardless.
   rows: JsonCell[][];
   rowCount: number;
   truncated: boolean;
@@ -344,10 +351,12 @@ function flushPendingRows(tabId: string): void {
   for (const [cellId, rows] of pending.cells) {
     const cell = findCell(exec, cellId);
     if (!cell) continue;
-    // Single bulk push per cell per flush. push(...rows) is fine for the
-    // batch sizes we expect; if it ever grew into the tens of thousands
-    // range we'd switch to assigning a fresh array.
-    cell.rows.push(...rows);
+    // `cell.rows` is ref()'d (see CellResult), so this push mutates the
+    // raw array without notifying subscribers. The subsequent rowCount
+    // write is the reactivity tap that wakes the grid. Loop append
+    // (rather than push(...rows)) keeps us safe from argument-spread
+    // limits if a long coalesce interval accumulates a huge batch.
+    for (const row of rows) cell.rows.push(row);
     cell.rowCount = cell.rows.length;
   }
   pending.cells.clear();
@@ -811,7 +820,7 @@ export async function runTab(
         )
       : postNdjson<StreamEvent>(
           '/api/query/stream',
-          { sql, maxRows: 1000, trace: traceEnvelope },
+          { sql, maxRows: 50000, trace: traceEnvelope },
           abort.signal,
         );
 
@@ -874,7 +883,7 @@ function buildMultipartBody(
 ): FormData {
   const envelope = {
     sql,
-    maxRows: 1000,
+    maxRows: 50000,
     trace,
     parameters: opts.parameters,
   };
@@ -934,7 +943,9 @@ function applyEvent(tabId: string, event: StreamEvent): void {
         cellId: event.cell,
         cellKind: event.kind,
         schema: null,
-        rows: [],
+        // ref() so the proxy doesn't recursively wrap every appended row.
+        // Reactivity for length changes flows through `rowCount` instead.
+        rows: ref<JsonCell[][]>([]),
         rowCount: 0,
         truncated: false,
         elapsedMs: null,

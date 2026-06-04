@@ -108,7 +108,7 @@ export function ResultsPane({ leafId }: { leafId: string }) {
   // them. Cells with only errors / chunks (no table) sit at content
   // height regardless.
   const tableCount = visibleCells.filter(
-    (c) => c.schema !== null && c.rows.length > 0,
+    (c) => c.schema !== null && c.rowCount > 0,
   ).length;
   const tableMode: TableMode = tableCount === 1 ? 'fill' : 'capped';
 
@@ -387,7 +387,10 @@ function CellBlock({
   tableMode: TableMode;
 }) {
   const settings = useSnapshot(settingsState);
-  const hasTable = cell.schema !== null && cell.rows.length > 0;
+  // `rowCount` (rather than `cell.rows.length`) is the reactive signal:
+  // `cell.rows` is ref()'d in the proxy, so reads through it don't
+  // subscribe to length changes. See CellResult in state/execution.ts.
+  const hasTable = cell.schema !== null && cell.rowCount > 0;
   // Single-value detection: 1 row × 1 column, and this is the only
   // table in the pane (`tableMode === 'fill'`). Function-tab runs that
   // return a single SELECT result land here, but the path is generic —
@@ -396,7 +399,7 @@ function CellBlock({
   const isSingleValue =
     hasTable
     && tableMode === 'fill'
-    && cell.rows.length === 1
+    && cell.rowCount === 1
     && cell.rows[0].length === 1
     && cell.schema!.length === 1;
   // Image-gallery fork: when every column is a single Image and the
@@ -1167,7 +1170,12 @@ function CellTable({ cell }: { cell: CellResult }) {
   // is — a streaming query with 1000s of rows shouldn't pay an O(rows)
   // scan on every appended row. SAMPLE_ROWS is plenty to spot the
   // first media cell, after which the dep stabilises.
-  const sampleSize = Math.min(cell.rows.length, SAMPLE_ROWS);
+  // `cell.rows` is ref()'d in the proxy, so reading its length doesn't
+  // create a snapshot dep. `rowCount` is the reactive tap that the
+  // streaming flush bumps after each batch; once it crosses
+  // SAMPLE_ROWS, the value stabilises and the dependent memos stop
+  // re-running.
+  const sampleSize = Math.min(cell.rowCount, SAMPLE_ROWS);
   const largeMedia = useMemo(
     () => rowsContainImageOrVideo(cell.rows.slice(0, sampleSize)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1176,7 +1184,7 @@ function CellTable({ cell }: { cell: CellResult }) {
   const rowHeight = largeMedia ? ROW_HEIGHT_MEDIA : ROW_HEIGHT;
 
   const rowVirtualizer = useVirtualizer({
-    count: cell.rows.length,
+    count: cell.rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 12,
@@ -1484,7 +1492,7 @@ function CellTable({ cell }: { cell: CellResult }) {
   const totalWidth = ROW_NUMBER_WIDTH + effectiveColWidths.reduce((s, w) => s + w, 0);
   const virtualRows = rowVirtualizer.getVirtualItems();
 
-  const numRows = cell.rows.length;
+  const numRows = cell.rowCount;
   const numCols = cell.schema.length;
   const range = selection ? selectionRange(selection, numRows, numCols) : null;
   const isInRange = (r: number, c: number): boolean =>
