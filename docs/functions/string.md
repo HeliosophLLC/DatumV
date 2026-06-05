@@ -409,10 +409,12 @@ SELECT regexp_count('abc123def456', '\d+') -- 2
 
 `regexp_like(str, pattern, [flags])` → Boolean | QU: 1
 
-Returns whether pattern matches anywhere in the string.
+Returns whether pattern matches anywhere in the string. Supports the `i` (case-insensitive), `c` (case-sensitive), `n`/`m` (newline-sensitive), `s` (single-line) and `x` (extended) flags. NULL in any argument propagates to NULL.
 
 ```sql
 SELECT regexp_like('Hello World', 'world$', 'i') -- true
+SELECT regexp_like('Hello World', 'world$')      -- false
+SELECT regexp_like('foo\nbar', 'foo$', 'n')      -- true
 ```
 
 ### regexp_match

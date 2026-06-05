@@ -736,6 +736,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Strings.LtrimFunction>();
         registry.RegisterScalar<Scalar.Strings.RtrimFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpReplaceFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpLikeFunction>();
 
         // Fulltext family
         registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();
