@@ -43,7 +43,7 @@ export interface ExportDialogResult {
 // strings so the caller doesn't have to know format-specific quoting.
 export type ExportOptionValues = Record<string, string | number>;
 
-type FormatId = 'parquet' | 'csv';
+type FormatId = 'parquet' | 'csv' | 'json';
 
 // Parquet config state — kept as the UI surface (strings / booleans) and
 // translated to ExportOptionValues at submit time. Empty strings mean
@@ -65,6 +65,13 @@ interface CsvState {
 
 type CsvDelimiter = ',' | ';' | 'tab' | '|' | 'custom';
 
+interface JsonState {
+  // 'array' → one top-level array, one object per row.
+  // 'lines' → newline-delimited JSON (JSONL / ndjson).
+  shape: 'array' | 'lines';
+  indent: boolean;                 // only valid with shape === 'array'
+}
+
 const PARQUET_COMPRESSIONS = ['snappy', 'none', 'gzip', 'zstd', 'brotli', 'lz4'] as const;
 
 export function ExportDialog({ requestId }: ExportDialogProps) {
@@ -83,6 +90,10 @@ export function ExportDialog({ requestId }: ExportDialogProps) {
     lineEnding: 'lf',
     nullString: '',
   });
+  const [json, setJson] = useState<JsonState>({
+    shape: 'array',
+    indent: false,
+  });
   const [validationError, setValidationError] = useState<string | null>(null);
 
   function resolve(action: ExportDialogAction) {
@@ -94,7 +105,7 @@ export function ExportDialog({ requestId }: ExportDialogProps) {
       });
       return;
     }
-    const built = buildOptions(format, parquet, csv);
+    const built = buildOptions(format, parquet, csv, json);
     if (built.error) {
       setValidationError(built.error);
       return;
@@ -130,7 +141,7 @@ export function ExportDialog({ requestId }: ExportDialogProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestId, format, parquet, csv]);
+  }, [requestId, format, parquet, csv, json]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden select-none">
@@ -148,6 +159,7 @@ export function ExportDialog({ requestId }: ExportDialogProps) {
           <ParquetSection state={parquet} onChange={setParquet} t={t} />
         )}
         {format === 'csv' && <CsvSection state={csv} onChange={setCsv} t={t} />}
+        {format === 'json' && <JsonSection state={json} onChange={setJson} t={t} />}
         {validationError && (
           <p className="text-destructive text-xs" role="alert">
             {validationError}
@@ -184,7 +196,7 @@ function FormatSection({
       <legend className="text-foreground mb-2 font-medium">
         {t('export.format.legend')}
       </legend>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <FormatRadio
           value="parquet"
           current={format}
@@ -198,6 +210,13 @@ function FormatSection({
           onChange={onChange}
           title={t('export.format.csv.title')}
           subtitle={t('export.format.csv.subtitle')}
+        />
+        <FormatRadio
+          value="json"
+          current={format}
+          onChange={onChange}
+          title={t('export.format.json.title')}
+          subtitle={t('export.format.json.subtitle')}
         />
       </div>
     </fieldset>
@@ -392,6 +411,62 @@ function CsvSection({
   );
 }
 
+function JsonSection({
+  state,
+  onChange,
+  t,
+}: {
+  state: JsonState;
+  onChange: (next: JsonState) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  // Indent is incompatible with JSONL on the backend (one-object-per-line
+  // is the definition; indentation splits each object across multiple
+  // lines). Mirror the constraint here: disable + force-off when the user
+  // picks lines mode so the dialog never produces a SQL the planner will
+  // reject.
+  const linesMode = state.shape === 'lines';
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-foreground font-medium">{t('export.json.legend')}</legend>
+
+      <Field label={t('export.json.shape')} hint={t('export.json.shapeHint')}>
+        <select
+          className="border-border bg-background w-48 rounded border px-2 py-1 text-sm"
+          value={state.shape}
+          onChange={(e) =>
+            onChange({
+              ...state,
+              shape: e.target.value as JsonState['shape'],
+              // Force-off indent when switching to lines so the next
+              // Continue click doesn't trip the backend validator.
+              indent: e.target.value === 'lines' ? false : state.indent,
+            })
+          }
+        >
+          <option value="array">{t('export.json.shape.array')}</option>
+          <option value="lines">{t('export.json.shape.lines')}</option>
+        </select>
+      </Field>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={state.indent}
+          disabled={linesMode}
+          onChange={(e) => onChange({ ...state, indent: e.target.checked })}
+        />
+        <span className={linesMode ? 'text-muted-foreground' : ''}>
+          {t('export.json.indent')}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          {linesMode ? t('export.json.indentDisabled') : t('export.json.indentHint')}
+        </span>
+      </label>
+    </fieldset>
+  );
+}
+
 function Field({
   label,
   hint,
@@ -422,6 +497,7 @@ function buildOptions(
   format: FormatId,
   parquet: ParquetState,
   csv: CsvState,
+  json: JsonState,
 ): BuildResult {
   const opts: ExportOptionValues = {};
   if (format === 'parquet') {
@@ -446,6 +522,16 @@ function buildOptions(
       }
       opts['ROW_GROUP_SIZE'] = n;
     }
+    return { options: opts, error: null };
+  }
+
+  if (format === 'json') {
+    // The backend infers LINES from the path extension (.jsonl /
+    // .ndjson) when not explicit; we still emit it whenever the user
+    // picked it, so the FORMAT-clause-driven SQL is unambiguous
+    // regardless of what file extension the save dialog ends up with.
+    if (json.shape === 'lines') opts['LINES'] = 'true';
+    if (json.indent && json.shape === 'array') opts['INDENT'] = 'true';
     return { options: opts, error: null };
   }
 

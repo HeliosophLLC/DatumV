@@ -2139,13 +2139,18 @@ public static class CopyFormatOptions
                 "LINE_ENDING",
                 "NULL_STRING",
             ],
+            ["json"] =
+            [
+                "LINES",
+                "INDENT",
+            ],
         };
 
     /// <summary>
     /// Format names recognised by the engine — surfaced after <c>FORMAT</c>
     /// in the option block.
     /// </summary>
-    public static readonly string[] FormatNames = ["parquet", "csv"];
+    public static readonly string[] FormatNames = ["parquet", "csv", "json"];
 
     /// <summary>
     /// Returns the option-key set the language server should offer in

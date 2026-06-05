@@ -89,6 +89,10 @@
       "csv": {
         "title": "CSV",
         "subtitle": "Plain text. Opens in Excel; round-trips scalars through open_csv_typed."
+      },
+      "json": {
+        "title": "JSON",
+        "subtitle": "Structured. Struct / array / json columns become nested objects, not strings."
       }
     },
     "parquet": {
@@ -123,6 +127,16 @@
       "nullString": "NULL representation",
       "nullStringHint": "Text written for SQL NULL values. Empty means an empty field.",
       "nullStringPlaceholder": "(empty by default)"
+    },
+    "json": {
+      "legend": "JSON options",
+      "shape": "Shape",
+      "shapeHint": "Array is friendlier for JSON.parse; JSONL is the streaming-friendly shape ML pipelines expect.",
+      "shape.array": "Array of objects",
+      "shape.lines": "JSONL (one object per line)",
+      "indent": "Pretty-print (indent)",
+      "indentHint": "Inflates the file but makes it easier to inspect by eye.",
+      "indentDisabled": "Not available in JSONL mode — one object per line."
     }
   },
   "about": {

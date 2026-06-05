@@ -55,6 +55,7 @@ export interface ExportFormatDescriptor {
 export const EXPORT_FORMATS: ExportFormatDescriptor[] = [
   { name: 'parquet', displayName: 'Apache Parquet', extensions: ['.parquet'] },
   { name: 'csv', displayName: 'CSV (Comma-Separated Values)', extensions: ['.csv'] },
+  { name: 'json', displayName: 'JSON (array or JSONL)', extensions: ['.json', '.jsonl', '.ndjson'] },
 ];
 
 /**
@@ -174,15 +175,13 @@ function buildCopySql(
   const innerSql = resolveRunSql(tab.sql, leafId).trim().replace(/;+\s*$/u, '');
   const escapedPath = targetPath.replace(/'/g, "''");
   // FORMAT goes first so a parse error in a later option still names a
-  // resolved format in the message. Each option's value is emitted as a
-  // SQL literal — numbers unquoted, strings single-quoted with `'`
-  // doubled. The grammar treats `<value> ::= <string-literal> |
-  // <number-literal> | <identifier>`; we pick `<string-literal>` for
-  // non-numeric values because the FORMAT identifier slot is the only
-  // identifier the grammar binds, and most option values (delimiter
-  // characters, line-ending names, NULL strings) aren't valid bare
-  // identifiers anyway.
-  const optionParts: string[] = [`FORMAT ${format}`];
+  // resolved format in the message. The value is single-quoted because
+  // some format names collide with reserved type keywords — `json`
+  // tokenises as the Json type keyword, not an identifier, so a bare
+  // `FORMAT json` would fail the grammar. Quoting it uniformly is safe
+  // because the planner's option resolver reads the value as a string
+  // regardless of whether it arrived as identifier or string-literal.
+  const optionParts: string[] = [`FORMAT ${sqlString(format)}`];
   for (const [key, value] of Object.entries(options)) {
     optionParts.push(`${key} ${formatOptionValue(value)}`);
   }
@@ -192,6 +191,10 @@ function buildCopySql(
 
 function formatOptionValue(value: string | number): string {
   if (typeof value === 'number') return String(value);
+  return sqlString(value);
+}
+
+function sqlString(value: string): string {
   // Single-quoted string literal with `'` doubled. The parser also
   // accepts identifiers but our value strings include things like
   // delimiter characters and line-ending names — string-quoting them

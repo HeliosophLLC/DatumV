@@ -1,6 +1,6 @@
 # COPY and Export
 
-Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet and CSV today; JSONL / `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Excel, Three.js, and other standard tooling — and re-importable through `open_parquet` / `open_csv_typed` back into the typed engine without an explicit conversion step.
+Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet, CSV, and JSON / JSONL today; `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Excel, Three.js, jq, and other standard tooling — and re-importable through `open_parquet` / `open_csv_typed` back into the typed engine without an explicit conversion step.
 
 This document covers the SQL surface, the plan / sink layering, the typed-media encoding strategy, the `datumv.*` metadata convention that closes the round-trip loop, and the front-end Electron UI that drives it.
 
@@ -238,6 +238,64 @@ CSV is a one-way export by default: kinds the scanner can narrow re-import clean
 
 ---
 
+## The JSON Sink
+
+[`src/Heliosoph.DatumV/Export/Json/`](../../src/Heliosoph.DatumV/Export/Json/)
+
+Where CSV stringifies structure into a single cell, JSON preserves it. `Struct` columns become real nested objects with their schema field names; `Array<T>` becomes a real JSON array; `Json` (CBOR on the wire) decodes back to a real nested node rather than an escaped string. The sink streams through a single `Utf8JsonWriter` writing directly to the file stream.
+
+### Two shapes
+
+Both shapes share the same sink — only the row separator differs.
+
+- **Array** (default): one top-level JSON array, one object per row. Bracketed with `[` / `]`, comma-separated. Friendly to `JSON.parse` for ad-hoc consumers; requires the whole document in memory on the consumer side.
+- **JSONL / NDJSON** (`LINES 'true'`, or any `.jsonl` / `.ndjson` extension): newline-delimited JSON. One complete object per line, no outer array. The streaming-friendly shape ML / DuckDB / jq pipelines expect. Achieved by flushing the `Utf8JsonWriter` after each row, writing `\n` directly to the stream, then calling `Utf8JsonWriter.Reset()` so the next row begins a fresh top-level value.
+
+The file extension wins when `LINES` is unset: `.json` defaults to array mode, `.jsonl` / `.ndjson` default to JSONL. The explicit option overrides both ways.
+
+### Options
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `LINES` | boolean | inferred from extension | `'true'` → JSONL; `'false'` → array even for `.jsonl` |
+| `INDENT` | boolean | `false` | Pretty-print. Only valid in array mode |
+
+`INDENT 'true'` combined with `LINES 'true'` is rejected at plan time — JSONL is defined as one object per line, and indentation splits each object across multiple lines.
+
+### Format name collision
+
+`json` tokenises as the `DataKind.Json` type keyword, not as a bare identifier. `COPY (...) (FORMAT json)` therefore fails the grammar; `COPY (...) (FORMAT 'json')` works because the value is a string literal. The export-dialog UI emits the quoted form uniformly across every format so this collision is invisible to users.
+
+### Scalar text formats
+
+JSON has a stricter native scalar grammar than CSV, so the choices are narrower:
+
+- **Booleans, integers (8/16/32/64-bit), Float16/32/64, Decimal** — emitted as JSON numbers via `Utf8JsonWriter.WriteNumberValue`.
+- **Int128 / UInt128** — emitted as strings. JSON's number grammar doesn't carry a precision spec, and consumers reading 128-bit integers as IEEE 754 doubles would lose precision silently.
+- **Dates / times / timestamps** — ISO 8601 strings (`yyyy-MM-dd`, `HH:mm:ss.FFFFFFF`, `yyyy-MM-ddTHH:mm:ss.FFFFFFF`, `"O"` for TimestampTz).
+- **Uuid** — `D` form (`8-4-4-4-12` hex).
+- **Json** — decoded from CBOR to JSON text via `CborJsonCodec.DecodeToJsonText`, then re-parsed and spliced into the writer at its current position so the result is a real nested node, not an escaped string.
+- **Color / Point2D / Point3D** — nested objects (`{ r, g, b, a }`, `{ x, y }`, `{ x, y, z }`). Matches the in-UI struct-cell preview's shape.
+- **NULL** — JSON `null` literal.
+
+### Schema-aware struct field names
+
+Struct field names live on the projected `ColumnInfo.Fields` metadata — not on the per-row `DataValue`. The sink threads the matching `ColumnInfo` down through every nested struct call so field names survive at every depth. For `Array<Struct>` columns the parent column's `Fields` describes the shared element shape and is passed to every per-element writer.
+
+When `ColumnInfo.Fields` is null (a schema-reconciled column whose runtime kind diverged from the planner kind, or a deeply-nested struct the resolver couldn't reach), the writer falls back to positional `f0`, `f1`, … names. Same fallback `WebCellFormatter` uses for the in-UI struct preview.
+
+### Typed media: same plan-time rejection as CSV
+
+Image / Audio / Video / Mesh / PointCloud / Drawing / Array<UInt8> / VideoFrame / AudioSlice / VideoSlice all reject at plan time with the same Parquet-hint message the CSV sink uses. Base64-inlining megabytes per row would silently produce multi-GB JSON documents; that's the wrong default. An `INLINE_MEDIA 'base64'` opt-in escape hatch is a reasonable future addition.
+
+The check recurses into `ColumnInfo.Fields` so a typed-media field inside a struct fails at plan time with a `parent.field` dotted path in the message, not mid-stream.
+
+### Round-trip story
+
+JSON export is one-way today. Scalars survive (ISO temporals, plain numerics) but structure-preserving import requires a typed `open_json` / `open_jsonl` that builds the engine's `Struct` / `Array<T>` shape from JSON's untyped tree — same gap CSV has. The existing `JsonLinesDeserializer` covers the read side for raw `Json`-kind columns; a schema-aware read path is a follow-up.
+
+---
+
 ## The `datumv.*` Metadata Convention
 
 [`src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs`](../../src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs)
@@ -349,7 +407,7 @@ Two important nuances:
 
 The completion provider recognises four COPY-specific zones — `AfterCopy` (`COPY ⌷` → suggest `(`), `AfterCopySource` (`COPY (q) ⌷` → suggest `TO`), `AfterCopyTo` (`COPY (q) TO 'path' ⌷` → suggest option-block `(`), and `InCopyOptions` (cursor inside the option parens → surface format-specific option keys). The walk-back classifier detects the option-block paren by the `STRING → TO` token pair (with an optional `WITH` in between) and stops at the first `LeftParen` whose preceding tokens match that shape.
 
-Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. CSV registers `HEADER`, `DELIMITER`, `QUOTE`, `LINE_ENDING`, `NULL_STRING` against the `csv` key; the completion provider picks the set up automatically with no edits in `CompletionContext` or `CompletionProvider`. Future formats follow the same drop-in pattern.
+Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. CSV registers `HEADER`, `DELIMITER`, `QUOTE`, `LINE_ENDING`, `NULL_STRING`; JSON registers `LINES`, `INDENT`. The completion provider picks the union up automatically with no edits in `CompletionContext` or `CompletionProvider`. Future formats follow the same drop-in pattern.
 
 ---
 
@@ -366,7 +424,7 @@ Deferred design choices (called out, status unchanged):
 - **`COPY ... TO STDOUT`** — not implemented. The Electron model has a shared filesystem so the current path-target approach works; STDOUT is the right answer for any web-served deployment.
 - **Directory targets + `MediaDisposition.Sidecar`** — interface admits them, sink doesn't implement.
 - **`PARTITION_BY` and multi-file row-group splits** — same.
-- **JSONL / `.datum` / HDF5 / FITS** — unwritten. Parquet and CSV are the only built-in formats today.
+- **`.datum` / HDF5 / FITS** — unwritten. Parquet, CSV, and JSON are the built-in formats today.
 
 Format / fidelity caveats users should know about:
 
