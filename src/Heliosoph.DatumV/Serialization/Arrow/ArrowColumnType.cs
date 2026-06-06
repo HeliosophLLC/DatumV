@@ -74,7 +74,7 @@ internal readonly record struct ArrowColumnType(
         DataKind.Image or DataKind.Audio or DataKind.Video
             or DataKind.Mesh or DataKind.PointCloud
             or DataKind.Json or DataKind.Date or DataKind.TimestampTz
-            or DataKind.Uuid or DataKind.Duration
+            or DataKind.Uuid or DataKind.Duration or DataKind.Interval
             or DataKind.Int128 or DataKind.UInt128 => true,
         _ => false,
     };
@@ -157,6 +157,7 @@ internal readonly record struct ArrowColumnType(
             "TimestampTz" => DataKind.TimestampTz,
             "Uuid" => DataKind.Uuid,
             "Duration" => DataKind.Duration,
+            "Interval" => DataKind.Interval,
             "Int128" => DataKind.Int128,
             "UInt128" => DataKind.UInt128,
             _ => null,
@@ -236,6 +237,15 @@ internal readonly record struct ArrowColumnType(
                     : (DataKind.Timestamp, true);
 
             case ArrowTypeId.Decimal128: return (DataKind.Decimal, true);
+
+            case ArrowTypeId.Interval:
+                // Only MonthDayNanosecond round-trips back to our Interval
+                // kind today; YearMonth and DayTime are lossy projections.
+                // Surface them unsupported with the same hint shape as
+                // FixedSizeBinary so users see a clean conversion path.
+                return type is IntervalType { Unit: IntervalUnit.MonthDayNanosecond }
+                    ? (DataKind.Interval, true)
+                    : (DataKind.Unknown, false);
 
             case ArrowTypeId.Struct: return (DataKind.Struct, true);
 

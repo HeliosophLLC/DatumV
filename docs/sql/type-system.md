@@ -60,6 +60,7 @@ SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
 | `Timestamp` | Naive wall-clock date and time, no time zone (PG `timestamp` / `timestamp without time zone`) | `DateTime` (`DateTimeKind.Unspecified`) |
 | `TimestampTz` | Date and time with time zone (PG `timestamptz` / `timestamp with time zone`). Input offset is normalised to UTC at construction and discarded — two values for the same instant compare and hash equal regardless of input offset. | `DateTimeOffset` (offset always `TimeSpan.Zero` on readback) |
 | `Duration` | Elapsed time span | `TimeSpan` |
+| `Interval` | Postgres-compatible `interval` — a calendar-aware span split into independent months, days, and microseconds. Distinct from `Duration` (which is pure elapsed time and totally ordered): `'1 month'` resolves to month arithmetic at *apply* time against an anchor date. | 16 bytes inline: `(int32 months, int32 days, int64 micros)` |
 | `String` | Variable-length UTF-8 text | `string` |
 | `Uuid` | 128-bit UUID (RFC 9562) | `Guid` |
 | `Image` | Encoded image bytes (PNG, JPG, WebP, etc.) | `byte[]` |
@@ -365,10 +366,10 @@ FROM t
 
 `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `Int128`,
 `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`, `Float32`,
-`Float64`, `Decimal`, `String`, `Date`, `Timestamp`, `TimestampTz`, `Time`, `Duration`,
-`Uuid`, `Image`, `Audio`, `AudioSlice`, `Video`, `VideoFrame`, `VideoSlice`,
-`Json`, `Struct`, `Point2D`, `Point3D`, `PointCloud`, `Mesh`, `Type`) are
-reserved in expression position. They produce a `Type` value that can be
+`Float64`, `Decimal`, `String`, `Date`, `Timestamp`, `TimestampTz`, `Time`,
+`Duration`, `Interval`, `Uuid`, `Image`, `Audio`, `AudioSlice`, `Video`,
+`VideoFrame`, `VideoSlice`, `Json`, `Struct`, `Point2D`, `Point3D`,
+`PointCloud`, `Mesh`, `Type`) are reserved in expression position. They produce a `Type` value that can be
 compared with `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
 
 Type names are accepted without quoting in name positions: column names in
@@ -443,6 +444,8 @@ Supported conversions include:
 - **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
 - **`UInt8` array ↔ Image / Audio / Video** — byte reinterpretation between a raw byte buffer and the corresponding encoded blob kind.
 - **String ↔ Json** — `cast(text, Json)` parses the JSON text into canonical CBOR; `cast(json, String)` re-emits the canonical form as text. `try_cast` returns NULL on parse failure.
+- **String ↔ Interval** — `cast(text, Interval)` parses any Postgres-accepted form (verbose `'1 year 2 months'`, ISO 8601 `'P1Y2M'`, SQL-standard `'1-2'` or `'3 04:05:06'`); `cast(interval, String)` emits the postgres canonical form (`'1 year 2 mons 3 days 04:05:06'`). See the `INTERVAL '...'` typed-literal form below.
+- **Duration → Interval** — lossless widening: elapsed time becomes `(days, microseconds)` with no months. The reverse direction is rejected (a month is not a fixed number of seconds).
 
 Use `can_cast(x, Type)` to check if a conversion is lossless before casting, or
 `try_cast(x, Type)` to get NULL on failure instead of an error. The function-call
@@ -473,6 +476,10 @@ division and modulo follow the operand kinds PostgreSQL-style, and only
 | `Duration + Duration`, `Duration - Duration` | `Duration` | n/a |
 | `Timestamp ± Duration`, `TimestampTz ± Duration` | same timestamp kind | n/a |
 | `Timestamp - Timestamp`, `TimestampTz - TimestampTz` (same kind) | `Duration` | n/a |
+| `Interval ± Interval` | `Interval` | n/a |
+| `Timestamp ± Interval`, `TimestampTz ± Interval` | same timestamp kind | n/a |
+| `Date ± Interval` | `Timestamp` | n/a |
+| `Interval * numeric`, `Interval / numeric` | `Interval` | n/a |
 | Any other `Time` / `Duration` mix | `Float32` | `Float32` |
 | Any `String` operand | parsed → `Float64` | parsed → `Float64` |
 
@@ -526,6 +533,46 @@ both store **8 bytes of microsecond/tick precision** and DatumV's
 - **`timestamp ↔ timestamptz` casts.** PG converts via the session TZ;
   DatumV assumes UTC for both directions. Explicit `AT TIME ZONE`
   is the recommended path for the few cases where this matters.
+
+### Interval Literals
+
+PG-style typed literals for the `Interval` kind. The `INTERVAL '...'` form
+accepts the full Postgres parse surface and lowers to `CAST(... AS Interval)`
+at parse time. An optional trailing qualifier (`YEAR`, `MONTH`, `DAY`, `HOUR`,
+`MINUTE`, `SECOND`, or any `X TO Y` span) disambiguates bare-number literals
+and truncates finer-grained components from the parsed value.
+
+```sql
+-- Verbose form (PG default output)
+SELECT INTERVAL '1 year 2 months 3 days 04:05:06'
+SELECT INTERVAL '-5 days'
+SELECT INTERVAL '1 day -01:00:00'
+
+-- ISO 8601 (machine-friendly)
+SELECT INTERVAL 'P1Y2M3DT4H5M6S'
+SELECT INTERVAL 'PT30M'
+
+-- SQL-standard
+SELECT INTERVAL '1-2'                  -- year-month: 14 months
+SELECT INTERVAL '3 04:05:06'           -- day-time: 3 days + 04:05:06
+
+-- Qualifier disambiguates bare numbers
+SELECT INTERVAL '1' HOUR               -- 01:00:00
+SELECT INTERVAL '90' MINUTE            -- 01:30:00
+
+-- Qualifier truncates finer fields
+SELECT INTERVAL '1 year 2 months 3 days' YEAR     -- 1 year
+SELECT INTERVAL '1 day 1:30:45' DAY TO HOUR       -- 1 day + 01:00:00
+```
+
+Output uses the postgres canonical style: `'1 year 2 mons 3 days 04:05:06'`.
+Empty intervals render as `'00:00:00'`.
+
+`Interval` is distinct from `Duration` (which is pure elapsed time, totally
+ordered) — `Interval` carries independent months / days / microseconds and
+isn't totally ordered because `'30 days'` vs `'1 month'` only resolves
+against an anchor date. `Duration → Interval` is a lossless cast; the
+reverse direction is rejected.
 
 ### Transaction-Stable Temporal Constants
 

@@ -13,20 +13,23 @@ Functions for date, time, duration, and timestamp construction, extraction, form
 
 ### date_part
 
-`date_part(part, val)` -> Float32 | QU: 1
+`date_part(part, val)` -> Float64 | QU: 1
 
-Extract a named component from a Date, Timestamp, TimestampTz, or Time as Float32.
+Extract a named component from a Date, Timestamp, TimestampTz, Time, Duration, or Interval. Matches Postgres' `Float64` return type so sub-second precision (`microsecond`, `epoch`) survives without truncation.
 
 ```sql
 SELECT date_part('year', date_col) AS year,
        date_part('month', date_col) AS month,
        date_part('dow', date_col) AS dow
 FROM data
+
+-- Works against Interval too
+SELECT date_part('epoch', INTERVAL '1 hour 30 minutes')  -- 5400.0
 ```
 
 ### EXTRACT
 
-`EXTRACT(field FROM source)` -> Float32 | QU: 1
+`EXTRACT(field FROM source)` -> Float64 | QU: 1
 
 PostgreSQL-standard syntax; desugars to `date_part('field', source)` at parse time.
 
@@ -293,13 +296,21 @@ SELECT date_add('month', 3, start_date) AS extended FROM contracts
 
 ### date_trunc
 
-`date_trunc(part, date)` -> Date/Timestamp/TimestampTz | QU: 1
+`date_trunc(part, source)` -> Timestamp/TimestampTz | QU: 1
 
-Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind.
+Truncate a temporal value to the start of the named field. `Timestamp` and
+`TimestampTz` preserve their kind; `Date` inputs promote to `Timestamp`.
+Week uses ISO 8601 (Monday start).
+
+Supported parts: `microsecond`, `millisecond`, `second`, `minute`, `hour`,
+`day`, `week`, `month`, `quarter`, `year`, `decade`, `century`, `millennium`.
 
 ```sql
 -- Truncation for grouping
 SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY period
+
+-- Snap to the Monday of the ISO week
+SELECT date_trunc('week', event_ts) AS week_start FROM events
 ```
 
 ### date_bucket
@@ -315,13 +326,25 @@ SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP
 
 ### date_bin
 
-`date_bin(interval, source, origin)` -> Date/Timestamp/TimestampTz | QU: 1
+`date_bin(stride Interval, source, origin)` -> Timestamp/TimestampTz | QU: 1
 
-PostgreSQL-compatible binning. Interval is a string like `'15 minutes'` or `'1 hour'`. Preserves input kind.
+PostgreSQL-15-compatible binning: rounds `source` down to the nearest
+`stride` boundary aligned to `origin`. Preserves the source's timestamp
+kind (both `source` and `origin` must be the same kind).
+
+The stride must be a positive `Interval` with no month component — months
+are variable-length and aren't a fixed bin width. Use `date_trunc('month',
+...)` for month buckets.
 
 ```sql
--- 15-minute bucketing (PostgreSQL style)
-SELECT date_bin('15 minutes', event_time, DATETIME '2001-01-01') AS bucket, COUNT(*) FROM logs GROUP BY bucket
+-- 15-minute bucketing
+SELECT date_bin(INTERVAL '15 minutes', event_time, TIMESTAMP '2000-01-01') AS bucket,
+       COUNT(*)
+FROM logs GROUP BY bucket
+
+-- 5-second polling buckets pinned to a known origin
+SELECT date_bin(INTERVAL '5 seconds', poll_at, TIMESTAMP '2026-01-01') AS bucket
+FROM heartbeats
 ```
 
 ### make_time
@@ -397,6 +420,125 @@ All date arithmetic and truncation functions (`date_add`, `date_diff`, `date_tru
 | `decade` | `decades` | Yes (e.g. 2026 -> 2020-01-01) |
 | `century` | `centuries` | Yes (1-based: 2026 -> 2001-01-01) |
 | `millennium` | `millennia` | Yes (1-based: 2026 -> 2001-01-01) |
+
+## Interval
+
+Postgres-compatible calendar-aware spans. The `Interval` kind carries
+months / days / microseconds independently (see
+[Type System](../sql/type-system.md#interval-literals) for the literal
+syntax). All functions in this section take and return `Interval`
+unless otherwise noted.
+
+### make_interval
+
+`make_interval([years [, months [, weeks [, days [, hours [, mins [, secs]]]]]]])` -> Interval | QU: 1
+
+Construct an `Interval` from up to seven numeric components. All
+parameters are optional — omitted trailing arguments default to 0, so
+`make_interval()` returns the zero interval and `make_interval(0, 0, 0, 0, 1, 30)`
+yields `01:30:00`. `secs` accepts a fractional value down to microsecond precision.
+
+```sql
+SELECT make_interval(1, 2, 0, 3, 4, 5, 6)            -- 1 year 2 mons 3 days 04:05:06
+SELECT make_interval(0, 0, 0, 0, 0, 90)              -- 01:30:00
+SELECT make_interval()                                -- 00:00:00
+```
+
+### interval_qualified
+
+`interval_qualified(literal, qualifier)` -> Interval | QU: 1
+
+Parse an interval literal with an explicit PG-style qualifier. The
+parser desugars `INTERVAL '...' YEAR TO MONTH` and similar forms to this
+function; direct calls are useful for programmatic construction from
+runtime strings.
+
+Recognised qualifier names (case-insensitive): `YEAR`, `MONTH`, `DAY`,
+`HOUR`, `MINUTE`, `SECOND`, `YEAR TO MONTH`, `DAY TO HOUR`,
+`DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`,
+`MINUTE TO SECOND`.
+
+```sql
+-- Disambiguate a bare-number literal
+SELECT interval_qualified('1', 'HOUR')                -- 01:00:00
+SELECT interval_qualified('90', 'MINUTE')             -- 01:30:00
+
+-- Truncate finer-grained fields from a verbose literal
+SELECT interval_qualified('1 year 2 months 3 days', 'YEAR')  -- 1 year
+```
+
+### justify_hours / justify_days / justify_interval
+
+`justify_hours(interval)` -> Interval | QU: 1
+`justify_days(interval)` -> Interval | QU: 1
+`justify_interval(interval)` -> Interval | QU: 1
+
+Normalisation helpers mirroring PG:
+
+- `justify_hours` pushes microseconds spanning multiples of 24 hours into the day component.
+- `justify_days` pushes days spanning multiples of 30 into the month component.
+- `justify_interval` applies both, then aligns each component's sign with the interval's net direction.
+
+```sql
+SELECT justify_hours(INTERVAL '36 hours')             -- 1 day 12:00:00
+SELECT justify_days(INTERVAL '35 days')               -- 1 mon 5 days
+SELECT justify_interval(INTERVAL '35 days 25 hours')  -- 1 mon 6 days 01:00:00
+```
+
+### age
+
+`age(later, earlier)` -> Interval | QU: 1
+
+Calendar-aware difference between two timestamps. Unlike `later - earlier`
+(which returns `Duration` with raw elapsed time), `age` walks the calendar
+and returns years, months, days, and sub-day components separately.
+
+The result, when applied back to `earlier`, reproduces `later` exactly.
+
+```sql
+-- "How old is this record?"
+SELECT age(now(), created_at) AS age_interval FROM records
+
+-- Compare against the raw-elapsed form
+SELECT age(later, earlier) AS calendar_age,
+       later - earlier      AS elapsed_duration
+FROM events
+```
+
+Accepts `(Timestamp, Timestamp)` or `(TimestampTz, TimestampTz)`. Cross-kind pairs require an explicit `CAST`.
+
+## Time-Series Generation
+
+### generate_series (timestamp)
+
+`generate_series(start, stop, stride Interval)` -> table(Value Timestamp|TimestampTz) | QU: TVF
+
+Emits one row per stride boundary from `start` through `stop` inclusive.
+The headline gap-filler: pair with a `LEFT JOIN` against a sparse fact
+table to surface empty time buckets.
+
+```sql
+-- Hourly buckets, even ones with no events
+SELECT g.Value AS bucket,
+       COALESCE(SUM(e.amount), 0) AS total
+FROM generate_series(
+       TIMESTAMP '2026-06-11 00:00:00',
+       TIMESTAMP '2026-06-11 23:00:00',
+       INTERVAL '1 hour') AS g
+LEFT JOIN events e
+  ON e.ts >= g.Value AND e.ts < g.Value + INTERVAL '1 hour'
+GROUP BY g.Value
+ORDER BY g.Value
+```
+
+The stride may be negative to walk backwards. Calendar strides
+(`INTERVAL '1 month'`) walk calendar months with PG end-of-month
+clamp-then-stay semantics. The stride must be non-zero; an interval that
+fails to advance the running value short-circuits to avoid infinite
+loops.
+
+`start` and `stop` must be the same temporal kind. For pure numeric
+series, see [`range`](#range).
 
 ## Duration
 

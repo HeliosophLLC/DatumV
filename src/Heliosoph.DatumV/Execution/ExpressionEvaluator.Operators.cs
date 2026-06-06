@@ -186,6 +186,46 @@ public sealed partial class ExpressionEvaluator
             BinaryOperator.Subtract when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Timestamp
                 => ValueRef.FromDuration(left.AsTimestamp() - right.AsTimestamp()),
 
+            // PG interval arithmetic. Months / days / micros apply independently;
+            // months go through DateTime.AddMonths so end-of-month semantics
+            // match Postgres ("2024-01-31 + 1 month" = "2024-02-29"). Date +
+            // Interval returns Timestamp per PG (sub-day components matter).
+            BinaryOperator.Add when left.Kind == DataKind.Interval && right.Kind == DataKind.Interval
+                => ValueRef.FromInterval(left.AsInterval().Add(right.AsInterval())),
+            BinaryOperator.Subtract when left.Kind == DataKind.Interval && right.Kind == DataKind.Interval
+                => ValueRef.FromInterval(left.AsInterval().Subtract(right.AsInterval())),
+
+            BinaryOperator.Add when left.Kind == DataKind.TimestampTz && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestampTz(right.AsInterval().AddTo(left.AsTimestampTz())),
+            BinaryOperator.Add when left.Kind == DataKind.Interval && right.Kind == DataKind.TimestampTz
+                => ValueRef.FromTimestampTz(left.AsInterval().AddTo(right.AsTimestampTz())),
+            BinaryOperator.Subtract when left.Kind == DataKind.TimestampTz && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestampTz(right.AsInterval().Negate().AddTo(left.AsTimestampTz())),
+
+            BinaryOperator.Add when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestamp(right.AsInterval().AddTo(left.AsTimestamp())),
+            BinaryOperator.Add when left.Kind == DataKind.Interval && right.Kind == DataKind.Timestamp
+                => ValueRef.FromTimestamp(left.AsInterval().AddTo(right.AsTimestamp())),
+            BinaryOperator.Subtract when left.Kind == DataKind.Timestamp && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestamp(right.AsInterval().Negate().AddTo(left.AsTimestamp())),
+
+            // PG: date + interval = timestamp; date - interval = timestamp.
+            BinaryOperator.Add when left.Kind == DataKind.Date && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestamp(right.AsInterval().AddTo(left.AsDate())),
+            BinaryOperator.Add when left.Kind == DataKind.Interval && right.Kind == DataKind.Date
+                => ValueRef.FromTimestamp(left.AsInterval().AddTo(right.AsDate())),
+            BinaryOperator.Subtract when left.Kind == DataKind.Date && right.Kind == DataKind.Interval
+                => ValueRef.FromTimestamp(right.AsInterval().Negate().AddTo(left.AsDate())),
+
+            // Interval × Float: PG's "interval * double precision". Routed first
+            // by left-kind so DispatchArithmetic doesn't try a numeric promotion.
+            BinaryOperator.Multiply when left.Kind == DataKind.Interval && DataValue.IsNumericScalarKind(right.Kind)
+                => ValueRef.FromInterval(left.AsInterval().Multiply(ToDoubleValueRef(right))),
+            BinaryOperator.Multiply when right.Kind == DataKind.Interval && DataValue.IsNumericScalarKind(left.Kind)
+                => ValueRef.FromInterval(right.AsInterval().Multiply(ToDoubleValueRef(left))),
+            BinaryOperator.Divide when left.Kind == DataKind.Interval && DataValue.IsNumericScalarKind(right.Kind)
+                => ValueRef.FromInterval(left.AsInterval().Multiply(1.0 / ToDoubleValueRef(right))),
+
             BinaryOperator.Add => DispatchArithmetic(left, right, BinaryOperator.Add),
             BinaryOperator.Subtract => DispatchArithmetic(left, right, BinaryOperator.Subtract),
             BinaryOperator.Multiply => DispatchArithmetic(left, right, BinaryOperator.Multiply),

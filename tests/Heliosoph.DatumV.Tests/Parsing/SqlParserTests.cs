@@ -1462,12 +1462,14 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
-    public void IntervalLiteral_ThrowsNotYetSupported()
+    public void IntervalLiteral_LowersToCastToInterval()
     {
-        ParseException ex = Assert.Throws<ParseException>(
-            () => Parse("SELECT INTERVAL '1 day' FROM t"));
-        Assert.Contains("INTERVAL", ex.Message);
-        Assert.Contains("not yet supported", ex.Message);
+        SelectStatement result = Parse("SELECT INTERVAL '1 day' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Interval", cast.TargetType);
+        LiteralExpression inner = Assert.IsType<LiteralExpression>(cast.Expression);
+        Assert.Equal("1 day", inner.Value);
     }
 
     [Fact]

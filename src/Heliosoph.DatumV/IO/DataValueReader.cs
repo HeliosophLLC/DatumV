@@ -82,6 +82,8 @@ internal static class DataValueReader
                 new DateTime(reader.ReadInt64(), DateTimeKind.Unspecified)),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
+            DataKind.Interval => DataValue.FromInterval(new Interval(
+                reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt64())),
             DataKind.Image => ReadImage(reader, store),
             DataKind.Audio => ReadAudio(reader, store),
             DataKind.Video => ReadVideo(reader, store),
@@ -127,6 +129,8 @@ internal static class DataValueReader
                 new DateTime(reader.ReadInt64(), DateTimeKind.Unspecified)),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
+            DataKind.Interval => DataValue.FromInterval(new Interval(
+                reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt64())),
             DataKind.Image => ReadImage(reader),
             DataKind.PointCloud => ReadPointCloud(reader),
             DataKind.Mesh => ReadMesh(reader),

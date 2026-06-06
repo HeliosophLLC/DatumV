@@ -221,6 +221,14 @@ internal static class ArrowColumnReader
                 DataKind.Duration => DataValue.FromDuration(
                     System.TimeSpan.Parse(raw[i].AsString(arena),
                         System.Globalization.CultureInfo.InvariantCulture)),
+                // Interval rides Arrow's native MonthDayNanosecond type, so
+                // raw[i] is already DataKind.Interval — passthrough. The
+                // legacy string-tag form (from an older writer) would land
+                // here as DataKind.String; parse it back to keep forward-
+                // reading compatibility with files predating the native swap.
+                DataKind.Interval => raw[i].Kind == DataKind.Interval
+                    ? raw[i]
+                    : DataValue.FromInterval(Interval.Parse(raw[i].AsString(arena))),
                 DataKind.Int128 => DataValue.FromInt128(
                     System.Int128.Parse(raw[i].AsString(arena),
                         System.Globalization.CultureInfo.InvariantCulture)),
@@ -521,9 +529,23 @@ internal static class ArrowColumnReader
             DataKind.Date when array is Date32Array d32 => DataValue.FromDate(DateOnly.FromDateTime(d32.GetDateTime(index)!.Value)),
             DataKind.Date when array is Date64Array d64 => DataValue.FromDate(DateOnly.FromDateTime(d64.GetDateTime(index)!.Value)),
             DataKind.Decimal when array is Decimal128Array dec => DataValue.FromDecimal(dec.GetValue(index)!.Value),
+            DataKind.Interval when array is MonthDayNanosecondIntervalArray ia => BuildInterval(ia, index),
             _ => throw new InvalidOperationException(
                 $"Arrow scalar element kind {type.ElementKind} not yet wired."),
         };
+    }
+
+    /// <summary>
+    /// Decodes a native Arrow <c>MonthDayNanosecondInterval</c> value into
+    /// our <see cref="Interval"/>. Nanoseconds widen down to microseconds
+    /// (Arrow's wider precision is truncated — our payload is microsecond-
+    /// granular).
+    /// </summary>
+    private static DataValue BuildInterval(MonthDayNanosecondIntervalArray array, int index)
+    {
+        Apache.Arrow.Scalars.MonthDayNanosecondInterval iv = array.GetValue(index)!.Value;
+        long microseconds = iv.Nanoseconds / 1_000L;
+        return DataValue.FromInterval(new Interval(iv.Months, iv.Days, microseconds));
     }
 
     private static DataValue BuildArrayCell(

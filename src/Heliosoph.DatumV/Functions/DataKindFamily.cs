@@ -34,13 +34,14 @@ public enum DataKindFamily : ulong
     /// <summary>All numeric scalar kinds (integer + float).</summary>
     NumericScalar = IntegerFamily | FloatFamily,
 
-    /// <summary>Temporal kinds (date / time / timestamp / timestamptz / duration).</summary>
+    /// <summary>Temporal kinds (date / time / timestamp / timestamptz / duration / interval).</summary>
     Temporal =
         (1UL << (int)DataKind.Date) |
         (1UL << (int)DataKind.Timestamp) |
         (1UL << (int)DataKind.TimestampTz) |
         (1UL << (int)DataKind.Time) |
-        (1UL << (int)DataKind.Duration),
+        (1UL << (int)DataKind.Duration) |
+        (1UL << (int)DataKind.Interval),
 
     /// <summary>Text-like kinds.</summary>
     TextLike =

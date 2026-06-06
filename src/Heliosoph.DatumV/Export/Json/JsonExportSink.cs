@@ -452,6 +452,9 @@ internal sealed class JsonExportSink : IExportSink
                 writer.WriteStringValue(value.AsDuration().ToString(
                     "c", CultureInfo.InvariantCulture));
                 break;
+            case DataKind.Interval:
+                writer.WriteStringValue(value.AsInterval().Format());
+                break;
 
             case DataKind.Json:
                 // Decode CBOR → JSON text → re-parse into the writer's

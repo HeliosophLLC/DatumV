@@ -748,24 +748,24 @@ public static partial class SqlParser
 
     /// <summary>
     /// PostgreSQL-style typed string literal — <c>DATE 'YYYY-MM-DD'</c>,
-    /// <c>TIMESTAMP '...'</c>, <c>TIMESTAMPTZ '...'</c>, <c>TIME '...'</c>.
-    /// Recognised in expression position and lowered to
+    /// <c>TIMESTAMP '...'</c>, <c>TIMESTAMPTZ '...'</c>, <c>TIME '...'</c>,
+    /// <c>INTERVAL '...'</c>. Recognised in expression position and lowered to
     /// <c>CAST('...' AS &lt;Kind&gt;)</c> so the existing string→temporal
     /// coercion path produces the typed value at runtime; no engine plumbing
     /// changes.
     /// <para>
-    /// The PG forms that Heliosoph.DatumV's type system doesn't yet represent —
-    /// <c>INTERVAL '...'</c> and <c>TIMETZ '...'</c> — are still recognised
-    /// by this combinator so that callers get an explicit "not yet
-    /// supported" <see cref="ParseException"/> instead of the misleading
-    /// "unexpected string literal after identifier" they would otherwise
-    /// see.
+    /// The single PG form not yet represented — <c>TIMETZ '...'</c> — is still
+    /// recognised here so callers get an explicit "not yet supported"
+    /// <see cref="ParseException"/> instead of the misleading "unexpected
+    /// string literal after identifier" they would otherwise see.
     /// </para>
     /// <para>
     /// Semantic note: <c>TIMESTAMP '...'</c> produces a <c>Timestamp</c>
     /// (PG <c>timestamp without time zone</c>, naive); <c>TIMESTAMPTZ '...'</c>
     /// produces a <c>TimestampTz</c> (PG <c>timestamp with time zone</c>,
-    /// UTC ticks; input offset normalised at construction).
+    /// UTC ticks; input offset normalised at construction);
+    /// <c>INTERVAL '...'</c> produces an <c>Interval</c>
+    /// (calendar-aware months/days/microseconds triple).
     /// </para>
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> TypedTemporalLiteral =
@@ -775,7 +775,43 @@ public static partial class SqlParser
             .Where(t => IsTypedTemporalPrefixText(GetTokenText(t)),
                 "DATE / TIMESTAMP / TIMESTAMPTZ / TIME / INTERVAL / TIMETZ")
         from literal in Token.EqualTo(SqlToken.StringLiteral)
-        select BuildTypedTemporalLiteral(prefix, literal);
+        from qualifier in IntervalQualifierTail.OptionalOrDefault()
+        select BuildTypedTemporalLiteral(prefix, literal, qualifier);
+
+    /// <summary>
+    /// Optional trailing qualifier after an <c>INTERVAL '...'</c> literal:
+    /// a single unit (<c>YEAR</c>, <c>MONTH</c>, …) or a span
+    /// (<c>YEAR TO MONTH</c>, <c>DAY TO SECOND</c>, …). Returns the canonical
+    /// PG-cased qualifier text, or <c>null</c> when no qualifier follows.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string?> IntervalQualifierTail =
+        (from first in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => IsIntervalUnitText(GetTokenText(t)), "interval unit")
+         from rest in (
+            from to in Token.EqualTo(SqlToken.To)
+            from second in Token.EqualTo(SqlToken.Identifier)
+                .Where(t => IsIntervalUnitText(GetTokenText(t)), "interval unit")
+            select GetTokenText(second))
+            .OptionalOrDefault()
+         select rest is null
+             ? GetTokenText(first).ToUpperInvariant()
+             : $"{GetTokenText(first).ToUpperInvariant()} TO {rest.ToUpperInvariant()}"
+        ).Try();
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="text"/> names a
+    /// single interval unit (<c>YEAR</c> / <c>MONTH</c> / <c>DAY</c> /
+    /// <c>HOUR</c> / <c>MINUTE</c> / <c>SECOND</c>) — case-insensitive.
+    /// </summary>
+    private static bool IsIntervalUnitText(string text)
+    {
+        return text.Equals("YEAR", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("MONTH", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("DAY", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("HOUR", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("MINUTE", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("SECOND", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Recognises the set of PG-style temporal prefixes that this combinator
@@ -798,16 +834,27 @@ public static partial class SqlParser
     /// Lowers a matched <c>&lt;PREFIX&gt; 'literal'</c> pair to a typed
     /// expression. Supported prefixes lower to a <see cref="CastExpression"/>;
     /// unsupported prefixes throw <see cref="ParseException"/> anchored at
-    /// the prefix token's position.
+    /// the prefix token's position. An optional trailing
+    /// <paramref name="qualifier"/> applies only to <c>INTERVAL</c> and
+    /// routes the literal through the <c>interval_qualified(text, qualifier)</c>
+    /// scalar function instead of the bare cast.
     /// </summary>
     private static Expression BuildTypedTemporalLiteral(
         Token<SqlToken> prefix,
-        Token<SqlToken> literal)
+        Token<SqlToken> literal,
+        string? qualifier)
     {
         string text = UnquoteString(literal);
         string kind = GetTokenText(prefix).ToUpperInvariant();
         SourceSpan span = ToSpan(prefix, literal);
         LiteralExpression inner = new(text);
+
+        if (qualifier is not null && kind != "INTERVAL")
+        {
+            throw new ParseException(
+                $"Trailing qualifier '{qualifier}' is only valid on INTERVAL literals.",
+                prefix.Position);
+        }
 
         return kind switch
         {
@@ -815,10 +862,12 @@ public static partial class SqlParser
             "TIMESTAMP" => new CastExpression(inner, "Timestamp", span),
             "TIMESTAMPTZ" => new CastExpression(inner, "TimestampTz", span),
             "TIME" => new CastExpression(inner, "Time", span),
-            "INTERVAL" => throw new ParseException(
-                "INTERVAL literals are not yet supported. " +
-                "Use a Duration column populated from a numeric value instead.",
-                prefix.Position),
+            "INTERVAL" => qualifier is null
+                ? new CastExpression(inner, "Interval", span)
+                : new FunctionCallExpression(
+                    "interval_qualified",
+                    [inner, new LiteralExpression(qualifier)],
+                    Span: span),
             "TIMETZ" => throw new ParseException(
                 "TIMETZ (TIME WITH TIME ZONE) literals are not yet supported. " +
                 "Use TIME 'literal' for time without time zone.",

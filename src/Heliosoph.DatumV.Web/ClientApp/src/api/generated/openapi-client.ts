@@ -2756,6 +2756,7 @@ export interface GithubReleaseSource extends CatalogSource {
 
 export interface HttpsSource extends CatalogSource {
     urls?: HttpsFile[];
+    userAgent?: string | undefined;
 }
 
 export interface HttpsFile {

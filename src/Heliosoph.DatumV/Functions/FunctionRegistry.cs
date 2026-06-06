@@ -1085,6 +1085,15 @@ public sealed class FunctionRegistry
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
         registry.RegisterScalar<Scalar.Temporal.CyclicalEncodeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeIntervalFunction>();
+        registry.RegisterScalar<Scalar.Temporal.IntervalQualifiedFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyHoursFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyDaysFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyIntervalFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DatePartFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateTruncFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateBinFunction>();
+        registry.RegisterScalar<Scalar.Temporal.AgeFunction>();
 
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();
@@ -1121,6 +1130,7 @@ public sealed class FunctionRegistry
         // UNNEST retired pending the reference-type-array consolidation; will be
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
+        registry.RegisterTableValued<TableValued.GenerateSeriesTimestampFunction>();
         registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
         registry.RegisterTableValued<TableValued.UnnestFunction>();
         registry.RegisterTableValued<TableValued.OpenArchiveFunction>();

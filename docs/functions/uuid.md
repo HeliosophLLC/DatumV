@@ -31,12 +31,18 @@ SELECT gen_random_uuid() AS id FROM data
 
 ## uuidv7
 
-`uuidv7()` → Uuid | QU: 1
+`uuidv7([shift Interval])` → Uuid | QU: 1
 
 Generate a time-ordered version 7 UUID. The high bits encode the current Unix timestamp at millisecond precision, so v7 UUIDs sort by creation time and cluster well on B-tree indexes.
 
+The optional `shift` argument is an `Interval` that offsets the embedded timestamp. Useful for backfill, time-travel testing, or any workload that needs UUIDs sorted into a non-current window. Matches the Postgres-18 signature.
+
 ```sql
+-- Current-time UUIDs
 SELECT uuidv7() AS id FROM data
+
+-- Backfill: produce UUIDs as if they were generated a year ago
+SELECT uuidv7(INTERVAL '-1 year') AS legacy_id FROM data
 ```
 
 ## uuid_str

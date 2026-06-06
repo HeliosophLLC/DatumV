@@ -1,5 +1,6 @@
 using System.Globalization;
 using Apache.Arrow;
+using Apache.Arrow.Scalars;
 using Apache.Arrow.Types;
 using Heliosoph.DatumV.DatumFile.Sidecar;
 using Heliosoph.DatumV.Functions.Json;
@@ -65,6 +66,7 @@ internal static class ArrowColumnBuilderFactory
             DataKind.Decimal => new ArrowDecimalBuilder(),
             DataKind.Uuid => new ArrowUuidAsStringBuilder(),
             DataKind.Duration => new ArrowDurationAsStringBuilder(),
+            DataKind.Interval => new ArrowIntervalNativeBuilder(),
             DataKind.Int128 => new ArrowInt128AsStringBuilder(),
             DataKind.UInt128 => new ArrowUInt128AsStringBuilder(),
             DataKind.Json => new ArrowJsonAsStringBuilder(sidecarRegistry),
@@ -289,6 +291,22 @@ internal sealed class ArrowDurationAsStringBuilder : IArrowColumnBuilder
         else _b.Append(v.AsDuration().ToString("c", CultureInfo.InvariantCulture));
     }
     public IArrowArray Build() => _b.Build();
+}
+
+internal sealed class ArrowIntervalNativeBuilder : IArrowColumnBuilder
+{
+    private readonly MonthDayNanosecondIntervalArray.Builder _b = new();
+    public void Append(DataValue v, IValueStore _)
+    {
+        if (v.IsNull) { _b.AppendNull(); return; }
+        Interval iv = v.AsInterval();
+        // µs → ns at the native Arrow boundary. The 64-bit nanosecond
+        // field overflows roughly past ±292 years' worth of
+        // microseconds — well outside any realistic interval payload.
+        long nanoseconds = checked(iv.Microseconds * 1_000L);
+        _b.Append(new MonthDayNanosecondInterval(iv.Months, iv.Days, nanoseconds));
+    }
+    public IArrowArray Build() => _b.Build(allocator: default);
 }
 
 internal sealed class ArrowInt128AsStringBuilder : IArrowColumnBuilder

@@ -141,6 +141,14 @@ internal static class ArrowFieldBuilder
                 // as ISO 8601 duration text with a datumv tag.
                 return (StringType.Default, "Duration", "iso8601");
 
+            case DataKind.Interval:
+                // Arrow has a native MonthDayNanosecond interval (16-byte
+                // struct that aligns with our (months, days, micros)
+                // layout — micros widen to nanos at the boundary). Emit
+                // the native type with the datumv tag so the read-side
+                // route is uniform.
+                return (IntervalType.MonthDayNanosecond, "Interval", "monthdaynano");
+
             case DataKind.Int128:
                 return (StringType.Default, "Int128", "string");
             case DataKind.UInt128:

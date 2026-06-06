@@ -1281,4 +1281,69 @@ public sealed class ArrowExportSinkTests : ServiceTestBase, IDisposable
     }
 
     private static string EscapeSql(string path) => path.Replace("'", "''");
+
+    /// <summary>
+    /// Interval round-trip via Arrow's native <c>MonthDayNanosecondInterval</c>:
+    /// write a column of intervals through COPY TO, re-read via
+    /// <c>open_arrow</c>, and confirm every field survives the µs ↔ ns
+    /// conversion at the Arrow boundary.
+    /// </summary>
+    [Fact]
+    public async Task CopyToArrow_Interval_RoundTripsNatively()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Add(new InMemoryTableProvider(
+            pool, "public.intervals",
+            columns: ["id", "iv"],
+            columnKinds: [DataKind.Int32, DataKind.Interval],
+            rows:
+            [
+                [1, DataValue.FromInterval(new Interval(months: 14, days: 3, microseconds: 14_706_000_000L))],
+                [2, DataValue.FromInterval(new Interval(months: 0, days: 0, microseconds: 500_000L))],
+                [3, DataValue.FromInterval(new Interval(months: -2, days: -5, microseconds: -3_600_000_000L))],
+            ]));
+
+        string outPath = Path.Combine(_scratchDir, "intervals.arrow");
+        StatementPlan plan = await catalog.PlanAsync(
+            $"COPY (SELECT id, iv FROM public.intervals) TO '{EscapeSql(outPath)}'");
+        await foreach (var _ in catalog.ExecuteAsync(plan)) { }
+        Assert.True(File.Exists(outPath));
+
+        // Confirm the field uses the native MonthDayNanosecond interval type
+        // rather than spilling to String — pins the writer's Arrow type
+        // choice so a regression to the metadata-tagged form is caught.
+        await using (FileStream fs = File.OpenRead(outPath))
+        using (ArrowFileReader directReader = new(fs))
+        {
+            using RecordBatch? rb = await directReader.ReadNextRecordBatchAsync();
+            Assert.NotNull(rb);
+            Field ivField = rb!.Schema.GetFieldByName("iv");
+            IntervalType ivType = Assert.IsType<IntervalType>(ivField.DataType);
+            Assert.Equal(IntervalUnit.MonthDayNanosecond, ivType.Unit);
+            // The datumv.kind tag stays for symmetry with the other
+            // type-routed columns even though the native type is enough.
+            Assert.Equal("Interval", ivField.Metadata[ParquetDatumvMetadata.KindKey]);
+        }
+
+        // Round-trip via open_arrow and pin field-level equality.
+        List<(int id, Interval iv)> rows = [];
+        using TableCatalog readCatalog = CreateCatalog();
+        StatementPlan readPlan = await readCatalog.PlanAsync(
+            $"SELECT id, iv FROM open_arrow('{EscapeSql(outPath)}')");
+        await foreach (RowBatch b in readCatalog.ExecuteAsync(readPlan))
+        {
+            b.ColumnLookup.TryGetColumnOrdinal("id", out int idCol);
+            b.ColumnLookup.TryGetColumnOrdinal("iv", out int ivCol);
+            for (int r = 0; r < b.Count; r++)
+            {
+                rows.Add((b[r][idCol].AsInt32(), b[r][ivCol].AsInterval()));
+            }
+        }
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal((1, new Interval(14, 3, 14_706_000_000L)), rows[0]);
+        Assert.Equal((2, new Interval(0, 0, 500_000L)), rows[1]);
+        Assert.Equal((3, new Interval(-2, -5, -3_600_000_000L)), rows[2]);
+    }
 }
