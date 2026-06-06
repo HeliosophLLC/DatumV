@@ -448,8 +448,11 @@ internal sealed partial class RoutineRegistrar
     /// registered built-in scalar function, check whether every matched
     /// signature variant produces an array vs. a scalar. If all variants
     /// agree and disagree with the declared <c>RETURNS T</c> array-ness,
-    /// throw. Otherwise skip (named-type names aren't surfaced through
-    /// <see cref="FunctionDescriptor"/>, so we can't compare by name).
+    /// throw. When the descriptor mixes array- and scalar-producing
+    /// variants (e.g. <c>softmax</c>), narrow by the call's first
+    /// argument array-ness before deciding. Otherwise skip (named-type
+    /// names aren't surfaced through <see cref="FunctionDescriptor"/>,
+    /// so we can't compare by name).
     /// </summary>
     private void ValidatePassBBuiltinCall(
         CreateModelStatement create,
@@ -459,14 +462,30 @@ internal sealed partial class RoutineRegistrar
         FunctionDescriptor? descriptor = _functions.TryGetScalarDescriptor(fnCall.CallName);
         if (descriptor is null || descriptor.Signatures.Count == 0) return;
 
+        IEnumerable<FunctionSignatureVariant> candidates = descriptor.Signatures;
+
+        // Mixed array/scalar descriptors (e.g. softmax has both shapes):
+        // if the first argument is statically an array expression, drop
+        // the scalar-only variants so the remaining variants agree.
+        bool? firstArgIsArray = ClassifyArgumentArrayness(fnCall.Arguments);
+        if (firstArgIsArray is not null)
+        {
+            candidates = candidates.Where(v =>
+                v.Parameters.Count == 0
+                || ParameterAcceptsArrayness(v.Parameters[0].IsArray, firstArgIsArray.Value));
+        }
+
         bool allProduceArray = true;
         bool noneProduceArray = true;
-        foreach (FunctionSignatureVariant variant in descriptor.Signatures)
+        int matchCount = 0;
+        foreach (FunctionSignatureVariant variant in candidates)
         {
+            matchCount++;
             if (variant.ReturnType.ProducesArray) noneProduceArray = false;
             else allProduceArray = false;
         }
 
+        if (matchCount == 0) return;
         // Mixed signatures — can't decide statically; skip.
         if (!allProduceArray && !noneProduceArray) return;
 
@@ -480,6 +499,30 @@ internal sealed partial class RoutineRegistrar
                 + $"{(expected.IsArray ? "an array" : "a scalar")}.");
         }
     }
+
+    private static bool? ClassifyArgumentArrayness(IReadOnlyList<Expression> arguments)
+    {
+        if (arguments.Count == 0) return null;
+        return arguments[0] switch
+        {
+            FunctionCallExpression arrayCall
+                when arrayCall.SchemaName is null
+                    && string.Equals(arrayCall.FunctionName, "array",
+                        StringComparison.OrdinalIgnoreCase) => true,
+            CastExpression cast =>
+                cast.TargetType.StartsWith("Array<", StringComparison.OrdinalIgnoreCase),
+            _ => null,
+        };
+    }
+
+    private static bool ParameterAcceptsArrayness(ArrayMatch slot, bool argIsArray)
+        => slot switch
+        {
+            ArrayMatch.Either => true,
+            ArrayMatch.Scalar => !argIsArray,
+            ArrayMatch.Array or ArrayMatch.FlatArray or ArrayMatch.MultiDimArray => argIsArray,
+            _ => true,
+        };
 
     /// <summary>
     /// Pass B comparison primitive. Triples match when kind + isArray are
