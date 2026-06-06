@@ -509,36 +509,49 @@ Accepts `(Timestamp, Timestamp)` or `(TimestampTz, TimestampTz)`. Cross-kind pai
 
 ## Time-Series Generation
 
-### generate_series (timestamp)
+### generate_series
 
-`generate_series(start, stop, stride Interval)` -> table(Value Timestamp|TimestampTz) | QU: TVF
+`generate_series(start, stop[, step])` -> table(value Int32|Int64|Float64) | QU: TVF
+`generate_series(start, stop, stride Interval)` -> table(value Timestamp|TimestampTz) | QU: TVF
 
-Emits one row per stride boundary from `start` through `stop` inclusive.
-The headline gap-filler: pair with a `LEFT JOIN` against a sparse fact
-table to surface empty time buckets.
+Emits one row per step (numeric) or stride (temporal) boundary from
+`start` through `stop`, **inclusive** of both ends. The headline
+gap-filler: pair with a `LEFT JOIN` against a sparse fact table to
+surface empty time buckets. For an upper-bound-exclusive sequence, see
+[`range`](table-valued.md#range).
 
 ```sql
 -- Hourly buckets, even ones with no events
-SELECT g.Value AS bucket,
+SELECT g.value AS bucket,
        COALESCE(SUM(e.amount), 0) AS total
 FROM generate_series(
        TIMESTAMP '2026-06-11 00:00:00',
        TIMESTAMP '2026-06-11 23:00:00',
        INTERVAL '1 hour') AS g
 LEFT JOIN events e
-  ON e.ts >= g.Value AND e.ts < g.Value + INTERVAL '1 hour'
-GROUP BY g.Value
-ORDER BY g.Value
+  ON e.ts >= g.value AND e.ts < g.value + INTERVAL '1 hour'
+GROUP BY g.value
+ORDER BY g.value
+
+-- Numeric form (PG-compatible integer sequence)
+SELECT value FROM generate_series(1, 10)        -- 1, 2, …, 10
+SELECT value FROM generate_series(0, 1, 0.25)   -- 0.0, 0.25, …, 1.0
 ```
 
-The stride may be negative to walk backwards. Calendar strides
+Numeric form accepts `Int32`, `Int64`, or `Float64` arguments; mixed
+kinds widen to the widest input. The default step is `1` and must be
+non-zero.
+
+Temporal form: `start` and `stop` must be the same temporal kind. The
+stride may be negative to walk backwards. Calendar strides
 (`INTERVAL '1 month'`) walk calendar months with PG end-of-month
 clamp-then-stay semantics. The stride must be non-zero; an interval that
 fails to advance the running value short-circuits to avoid infinite
 loops.
 
-`start` and `stop` must be the same temporal kind. For pure numeric
-series, see [`range`](#range).
+A step or stride that points away from `stop` (e.g. positive step with
+`start > stop`) yields zero rows — not an error. Any `NULL` argument
+also yields zero rows.
 
 ## Duration
 

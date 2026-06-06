@@ -662,7 +662,7 @@ public sealed class CommonTableExpressionTests : ServiceTestBase
             "     0::Float32, 276.2173::Float32, 112.5::Float32, " +
             "     0::Float32, 0::Float32, 1::Float32] AS arr, " +
             "    value AS n " +
-            "  FROM range(0, 2)" +
+            "  FROM generate_series(0, 2)" +
             "), " +
             "accumulated AS (" +
             "  SELECT n, arr FROM step_poses WHERE n = 0 " +

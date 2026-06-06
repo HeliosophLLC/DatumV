@@ -9,7 +9,10 @@ using ExecutionContext = Heliosoph.DatumV.Execution.ExecutionContext;
 namespace Heliosoph.DatumV.Tests.Functions;
 
 /// <summary>
-/// Unit tests for the <see cref="RangeFunction"/> table-valued function.
+/// Unit tests for the <see cref="RangeFunction"/> table-valued function —
+/// DuckDB-style half-open <c>[start, stop)</c> semantics, output column
+/// named <c>range</c>, numeric (Int32 / Int64 / Float64) and temporal
+/// (Timestamp / TimestampTz with Interval stride) overloads.
 /// </summary>
 public class RangeFunctionTests : ServiceTestBase
 {
@@ -22,90 +25,92 @@ public class RangeFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Range_BasicInclusive_ProducesCorrectRows()
+    public async Task Range_BasicHalfOpen_ExcludesUpperBound()
     {
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(0),
             ValueRef.FromFloat64(5)]);
 
-        Assert.Equal(6, rows.Count);
-        for (int i = 0; i <= 5; i++)
+        // [0, 5) → 0, 1, 2, 3, 4
+        Assert.Equal(5, rows.Count);
+        for (int i = 0; i < 5; i++)
         {
-            Assert.Equal((double)i, rows[i]["Value"].AsFloat64());
+            Assert.Equal((double)i, rows[i]["value"].AsFloat64());
         }
     }
 
     [Fact]
-    public async Task Range_WithStep_ProducesCorrectRows()
+    public async Task Range_WithStep_HalfOpen()
     {
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(0),
             ValueRef.FromFloat64(10),
             ValueRef.FromFloat64(2)]);
 
-        Assert.Equal(6, rows.Count);
-        Assert.Equal(0.0, rows[0]["Value"].AsFloat64());
-        Assert.Equal(2.0, rows[1]["Value"].AsFloat64());
-        Assert.Equal(4.0, rows[2]["Value"].AsFloat64());
-        Assert.Equal(6.0, rows[3]["Value"].AsFloat64());
-        Assert.Equal(8.0, rows[4]["Value"].AsFloat64());
-        Assert.Equal(10.0, rows[5]["Value"].AsFloat64());
+        // [0, 10) step 2 → 0, 2, 4, 6, 8
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(0.0, rows[0]["value"].AsFloat64());
+        Assert.Equal(2.0, rows[1]["value"].AsFloat64());
+        Assert.Equal(4.0, rows[2]["value"].AsFloat64());
+        Assert.Equal(6.0, rows[3]["value"].AsFloat64());
+        Assert.Equal(8.0, rows[4]["value"].AsFloat64());
     }
 
     [Fact]
-    public async Task Range_FractionalStep_ProducesCorrectRows()
+    public async Task Range_FractionalStep_HalfOpen()
     {
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(0.0),
             ValueRef.FromFloat64(1.0),
             ValueRef.FromFloat64(0.25)]);
 
-        Assert.Equal(5, rows.Count);
-        Assert.Equal(0.0, rows[0]["Value"].AsFloat64(), 0.001);
-        Assert.Equal(0.25, rows[1]["Value"].AsFloat64(), 0.001);
-        Assert.Equal(0.5, rows[2]["Value"].AsFloat64(), 0.001);
-        Assert.Equal(0.75, rows[3]["Value"].AsFloat64(), 0.001);
-        Assert.Equal(1.0, rows[4]["Value"].AsFloat64(), 0.001);
+        // [0.0, 1.0) step 0.25 → 0.0, 0.25, 0.5, 0.75
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(0.0, rows[0]["value"].AsFloat64(), 0.001);
+        Assert.Equal(0.25, rows[1]["value"].AsFloat64(), 0.001);
+        Assert.Equal(0.5, rows[2]["value"].AsFloat64(), 0.001);
+        Assert.Equal(0.75, rows[3]["value"].AsFloat64(), 0.001);
     }
 
     [Fact]
-    public async Task Range_SingleValue_ProducesSingleRow()
+    public async Task Range_StartEqualsStop_IsEmpty()
     {
+        // [5, 5) is empty under half-open semantics.
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(5),
             ValueRef.FromFloat64(5)]);
 
-        Assert.Single(rows);
-        Assert.Equal(5.0, rows[0]["Value"].AsFloat64());
+        Assert.Empty(rows);
     }
 
     [Fact]
-    public async Task Range_NegativeStep_Descending()
+    public async Task Range_NegativeStep_Descending_HalfOpen()
     {
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(10),
             ValueRef.FromFloat64(0),
             ValueRef.FromFloat64(-2)]);
 
-        Assert.Equal(6, rows.Count);
-        Assert.Equal(10.0, rows[0]["Value"].AsFloat64());
-        Assert.Equal(8.0, rows[1]["Value"].AsFloat64());
-        Assert.Equal(6.0, rows[2]["Value"].AsFloat64());
-        Assert.Equal(4.0, rows[3]["Value"].AsFloat64());
-        Assert.Equal(2.0, rows[4]["Value"].AsFloat64());
-        Assert.Equal(0.0, rows[5]["Value"].AsFloat64());
+        // (10, 0] reflected: walks 10, 8, 6, 4, 2 — excludes 0.
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(10.0, rows[0]["value"].AsFloat64());
+        Assert.Equal(8.0, rows[1]["value"].AsFloat64());
+        Assert.Equal(6.0, rows[2]["value"].AsFloat64());
+        Assert.Equal(4.0, rows[3]["value"].AsFloat64());
+        Assert.Equal(2.0, rows[4]["value"].AsFloat64());
     }
 
     [Fact]
-    public async Task Range_LargeRange_ProducesCorrectCount()
+    public async Task Range_LargeRange_HalfOpen()
     {
         List<Row> rows = await CollectRows([
             ValueRef.FromFloat64(0),
             ValueRef.FromFloat64(360)]);
 
-        Assert.Equal(361, rows.Count);
-        Assert.Equal(0.0, rows[0]["Value"].AsFloat64());
-        Assert.Equal(360.0, rows[360]["Value"].AsFloat64());
+        // [0, 360) → 360 rows, last is 359.
+        Assert.Equal(360, rows.Count);
+        Assert.Equal(0.0, rows[0]["value"].AsFloat64());
+        Assert.Equal(359.0, rows[359]["value"].AsFloat64());
     }
 
     [Fact]
@@ -115,11 +120,11 @@ public class RangeFunctionTests : ServiceTestBase
             ValueRef.FromInt32(0),
             ValueRef.FromInt32(5)]);
 
-        Assert.Equal(6, rows.Count);
-        Assert.Equal(DataKind.Int32, rows[0]["Value"].Kind);
-        for (int i = 0; i <= 5; i++)
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(DataKind.Int32, rows[0]["value"].Kind);
+        for (int i = 0; i < 5; i++)
         {
-            Assert.Equal(i, rows[i]["Value"].AsInt32());
+            Assert.Equal(i, rows[i]["value"].AsInt32());
         }
     }
 
@@ -131,11 +136,11 @@ public class RangeFunctionTests : ServiceTestBase
             ValueRef.FromInt64(4L),
             ValueRef.FromInt64(2L)]);
 
-        Assert.Equal(3, rows.Count);
-        Assert.Equal(DataKind.Int64, rows[0]["Value"].Kind);
-        Assert.Equal(0L, rows[0]["Value"].AsInt64());
-        Assert.Equal(2L, rows[1]["Value"].AsInt64());
-        Assert.Equal(4L, rows[2]["Value"].AsInt64());
+        // [0, 4) step 2 → 0, 2
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(DataKind.Int64, rows[0]["value"].Kind);
+        Assert.Equal(0L, rows[0]["value"].AsInt64());
+        Assert.Equal(2L, rows[1]["value"].AsInt64());
     }
 
     [Fact]
@@ -145,8 +150,9 @@ public class RangeFunctionTests : ServiceTestBase
             ValueRef.FromInt32(0),
             ValueRef.FromFloat64(2.0)]);
 
-        Assert.Equal(3, rows.Count);
-        Assert.Equal(DataKind.Float64, rows[0]["Value"].Kind);
+        // [0.0, 2.0) → 0.0, 1.0
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(DataKind.Float64, rows[0]["value"].Kind);
     }
 
     [Fact]
@@ -178,23 +184,76 @@ public class RangeFunctionTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Range_PositiveStepWithDescendingBounds_Throws()
+    public async Task Range_PositiveStepWithDescendingBounds_IsEmpty()
     {
-        await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await CollectRows([
-                ValueRef.FromFloat64(10),
-                ValueRef.FromFloat64(0),
-                ValueRef.FromFloat64(1)]));
+        // PG / DuckDB: wrong-direction step yields zero rows, not an error.
+        List<Row> rows = await CollectRows([
+            ValueRef.FromFloat64(10),
+            ValueRef.FromFloat64(0),
+            ValueRef.FromFloat64(1)]);
+
+        Assert.Empty(rows);
     }
 
     [Fact]
-    public async Task Range_NegativeStepWithAscendingBounds_Throws()
+    public async Task Range_NegativeStepWithAscendingBounds_IsEmpty()
     {
-        await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await CollectRows([
-                ValueRef.FromFloat64(0),
-                ValueRef.FromFloat64(10),
-                ValueRef.FromFloat64(-1)]));
+        List<Row> rows = await CollectRows([
+            ValueRef.FromFloat64(0),
+            ValueRef.FromFloat64(10),
+            ValueRef.FromFloat64(-1)]);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task Range_Timestamp_HourlyStride_HalfOpen()
+    {
+        List<Row> rows = await CollectRows([
+            ValueRef.FromTimestamp(new DateTime(2026, 6, 11, 0, 0, 0)),
+            ValueRef.FromTimestamp(new DateTime(2026, 6, 11, 3, 0, 0)),
+            ValueRef.FromInterval(new Interval(0, 0, Interval.MicrosPerHour))]);
+
+        // [00:00, 03:00) hourly → 00:00, 01:00, 02:00
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(DataKind.Timestamp, rows[0]["value"].Kind);
+        Assert.Equal(new DateTime(2026, 6, 11, 0, 0, 0), rows[0]["value"].AsTimestamp());
+        Assert.Equal(new DateTime(2026, 6, 11, 2, 0, 0), rows[2]["value"].AsTimestamp());
+    }
+
+    [Fact]
+    public async Task Range_TimestampTz_HalfOpen_PreservesKind()
+    {
+        List<Row> rows = await CollectRows([
+            ValueRef.FromTimestampTz(new DateTimeOffset(2026, 6, 11, 0, 0, 0, TimeSpan.Zero)),
+            ValueRef.FromTimestampTz(new DateTimeOffset(2026, 6, 11, 1, 0, 0, TimeSpan.Zero)),
+            ValueRef.FromInterval(new Interval(0, 0, 30 * Interval.MicrosPerMinute))]);
+
+        // [00:00, 01:00) every 30 min → 00:00, 00:30
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(DataKind.TimestampTz, rows[0]["value"].Kind);
+    }
+
+    [Fact]
+    public async Task Range_NullArgument_IsEmpty()
+    {
+        // PG semantics: any NULL argument yields zero rows.
+        List<Row> rows = await CollectRows([
+            ValueRef.FromInt32(0),
+            ValueRef.Null(DataKind.Int32)]);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task Range_NullStepArgument_IsEmpty()
+    {
+        List<Row> rows = await CollectRows([
+            ValueRef.FromInt32(0),
+            ValueRef.FromInt32(10),
+            ValueRef.Null(DataKind.Int32)]);
+
+        Assert.Empty(rows);
     }
 
     [Fact]
@@ -204,8 +263,6 @@ public class RangeFunctionTests : ServiceTestBase
         ExecutionContext context = CreateContextWithToken(cts.Token);
         List<Row> rows = [];
 
-        // Range must span multiple batches (DefaultBatchSize = 1024) so that
-        // cancellation is checked on the next MoveNextAsync after the first batch.
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
             await foreach (RowBatch batch in _function.ExecuteAsync(

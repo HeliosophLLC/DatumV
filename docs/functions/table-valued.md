@@ -24,9 +24,28 @@ CROSS JOIN LATERAL UNNEST(t.scores) AS s
 
 ### range
 
-`range(start, end[, step])` -> Rows
+`range(start, stop[, step])` -> Rows
+`range(start, stop, stride)` -> Rows (temporal)
 
-Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1.
+Generate a half-open sequence `[start, stop)` as rows with a single `value` column. The upper bound is **excluded** — `range(0, 5)` yields `0, 1, 2, 3, 4`. For an inclusive sequence, use [`generate_series`](temporal.md#generate_series).
+
+Numeric form accepts `Int32`, `Int64`, or `Float64` arguments; mixed kinds widen to the widest input. The default step is `1` and must be non-zero. A step that points away from `stop` (positive step with `start > stop`, or negative step with `start < stop`) yields zero rows — not an error.
+
+Temporal form accepts `Timestamp` or `TimestampTz` bounds with an `Interval` stride. Month strides walk calendar months (28–31 days each). Stride sign selects direction; a zero stride is rejected.
+
+Any `NULL` argument yields zero rows.
+
+```sql
+-- Half-open numeric sequence
+SELECT value FROM range(0, 5)              -- 0, 1, 2, 3, 4
+SELECT value FROM range(0.0, 1.0, 0.25)    -- 0.0, 0.25, 0.5, 0.75
+
+-- Half-open time window
+SELECT value FROM range(
+    TIMESTAMP '2026-06-11 00:00:00',
+    TIMESTAMP '2026-06-11 03:00:00',
+    INTERVAL '1 hour')                     -- 00:00, 01:00, 02:00
+```
 
 See [SQL Reference -- LATERAL JOIN / APPLY](../sql/joins.md#lateral-join--apply) for full syntax and examples.
 

@@ -37,7 +37,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
     {
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
-        catalog.Plan("CREATE TABLE test AS SELECT Value FROM RANGE(1, 10)");
+        catalog.Plan("CREATE TABLE test AS SELECT Value FROM GENERATE_SERIES(1, 10)");
 
         Assert.True(catalog.HasTable("test"));
         ITableProvider provider = catalog["test"];
@@ -45,7 +45,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal(["Value"], schema.Columns.Select(c => c.Name));
         Assert.Equal(DataKind.Int32, schema.Columns[0].Kind);
 
-        // RANGE(1, 10) emits inclusive endpoints — 10 rows.
+        // GENERATE_SERIES(1, 10) emits inclusive endpoints — 10 rows.
         List<int> values = await ScanIntColumn(provider, "Value");
         Assert.Equal(Enumerable.Range(1, 10).ToList(), values);
     }
@@ -76,7 +76,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Pool pool = CreatePool();
         using TableCatalog catalog = CreateCatalog(pool);
 
-        catalog.Plan("CREATE TEMP TABLE t AS SELECT Value FROM RANGE(1, 3)");
+        catalog.Plan("CREATE TEMP TABLE t AS SELECT Value FROM GENERATE_SERIES(1, 3)");
 
         ITableProvider provider = catalog["t"];
         Assert.IsType<InMemoryTableProvider>(provider);
@@ -89,7 +89,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Pool pool = CreatePool();
         using TableCatalog catalog = CreateCatalog(CatalogPath);
 
-        catalog.Plan("CREATE TABLE numbers AS SELECT Value FROM RANGE(1, 5)");
+        catalog.Plan("CREATE TABLE numbers AS SELECT Value FROM GENERATE_SERIES(1, 5)");
 
         string expectedPath = Path.Combine(_tempDir, "data", "public", "numbers.datum");
         Assert.True(File.Exists(expectedPath));
@@ -135,7 +135,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(CatalogPath);
         catalog.Plan("CREATE SCHEMA reports");
 
-        catalog.Plan("CREATE TABLE reports.numbers AS SELECT Value FROM RANGE(1, 5)");
+        catalog.Plan("CREATE TABLE reports.numbers AS SELECT Value FROM GENERATE_SERIES(1, 5)");
 
         Assert.True(catalog.HasTable("reports.numbers"));
         // Unqualified `numbers` does not resolve — search_path doesn't
@@ -152,7 +152,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         using TableCatalog catalog = CreateCatalog(pool);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE myapp.t AS SELECT Value FROM RANGE(1, 3)"));
+            catalog.Plan("CREATE TEMP TABLE myapp.t AS SELECT Value FROM GENERATE_SERIES(1, 3)"));
         Assert.Contains("TEMP", ex.Message);
         Assert.Contains("schema", ex.Message);
     }
@@ -165,7 +165,7 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         catalog.Plan("CREATE TEMP TABLE t (id Int32)");
 
         Assert.Throws<InvalidOperationException>(() =>
-            catalog.Plan("CREATE TEMP TABLE t AS SELECT Value FROM RANGE(1, 3)"));
+            catalog.Plan("CREATE TEMP TABLE t AS SELECT Value FROM GENERATE_SERIES(1, 3)"));
     }
 
     [Fact]

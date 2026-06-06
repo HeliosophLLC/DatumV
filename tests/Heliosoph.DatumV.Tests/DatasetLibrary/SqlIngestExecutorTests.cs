@@ -16,8 +16,8 @@ namespace Heliosoph.DatumV.Tests.DatasetLibrary;
 /// End-to-end tests for <see cref="SqlIngestExecutor"/> — runs a SELECT
 /// against the live catalog and confirms a queryable <c>.datum</c>
 /// lands on disk with the projected schema + row count. Uses the
-/// engine's <c>range</c> TVF as a parameterless data source so the
-/// fixture doesn't depend on synthetic archives.
+/// engine's <c>generate_series</c> TVF as a parameterless data source
+/// so the fixture doesn't depend on synthetic archives.
 /// </summary>
 public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
 {
@@ -46,13 +46,13 @@ public sealed class SqlIngestExecutorTests : ServiceTestBase, IDisposable
 
         string destPath = Path.Combine(_scratch, "out.datum");
         SqlIngestResult result = await executor.ExecuteAsync(
-            sql: "SELECT * FROM range(0, 4)",
+            sql: "SELECT * FROM generate_series(0, 4)",
             parameters: new Dictionary<string, ParameterValue>(),
             destPath: destPath,
             onRowProgress: null,
             ct: default);
 
-        // range(start, end) is inclusive on both ends → 0..4 = 5 rows.
+        // generate_series(start, stop) is inclusive on both ends → 0..4 = 5 rows.
         Assert.Equal(5, result.RowCount);
         Assert.True(File.Exists(destPath), "expected .datum at " + destPath);
 

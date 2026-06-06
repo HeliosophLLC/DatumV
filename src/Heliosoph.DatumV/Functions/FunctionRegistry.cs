@@ -1130,7 +1130,7 @@ public sealed class FunctionRegistry
         // UNNEST retired pending the reference-type-array consolidation; will be
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
-        registry.RegisterTableValued<TableValued.GenerateSeriesTimestampFunction>();
+        registry.RegisterTableValued<TableValued.GenerateSeriesFunction>();
         registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
         registry.RegisterTableValued<TableValued.UnnestFunction>();
         registry.RegisterTableValued<TableValued.OpenArchiveFunction>();
