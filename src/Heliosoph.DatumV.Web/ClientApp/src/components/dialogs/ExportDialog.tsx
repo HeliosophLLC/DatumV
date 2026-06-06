@@ -43,7 +43,7 @@ export interface ExportDialogResult {
 // strings so the caller doesn't have to know format-specific quoting.
 export type ExportOptionValues = Record<string, string | number>;
 
-type FormatId = 'parquet' | 'csv' | 'json';
+type FormatId = 'parquet' | 'csv' | 'json' | 'arrow';
 
 // Parquet config state — kept as the UI surface (strings / booleans) and
 // translated to ExportOptionValues at submit time. Empty strings mean
@@ -159,6 +159,7 @@ export function ExportDialog({ requestId }: ExportDialogProps) {
           <ParquetSection state={parquet} onChange={setParquet} t={t} />
         )}
         {format === 'csv' && <CsvSection state={csv} onChange={setCsv} t={t} />}
+        {format === 'arrow' && <ArrowSection t={t} />}
         {format === 'json' && <JsonSection state={json} onChange={setJson} t={t} />}
         {validationError && (
           <p className="text-destructive text-xs" role="alert">
@@ -196,7 +197,7 @@ function FormatSection({
       <legend className="text-foreground mb-2 font-medium">
         {t('export.format.legend')}
       </legend>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <FormatRadio
           value="parquet"
           current={format}
@@ -217,6 +218,13 @@ function FormatSection({
           onChange={onChange}
           title={t('export.format.json.title')}
           subtitle={t('export.format.json.subtitle')}
+        />
+        <FormatRadio
+          value="arrow"
+          current={format}
+          onChange={onChange}
+          title={t('export.format.arrow.title')}
+          subtitle={t('export.format.arrow.subtitle')}
         />
       </div>
     </fieldset>
@@ -411,6 +419,23 @@ function CsvSection({
   );
 }
 
+function ArrowSection({
+  t,
+}: {
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  // No options in v1. The format is the on-disk IPC file format,
+  // typed-media metadata is fixed, and we don't expose body-compression
+  // to keep the round-trip story bounded. Surface the rationale so users
+  // don't wonder where the options panel went.
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-foreground font-medium">{t('export.arrow.legend')}</legend>
+      <p className="text-muted-foreground text-xs">{t('export.arrow.noOptions')}</p>
+    </fieldset>
+  );
+}
+
 function JsonSection({
   state,
   onChange,
@@ -522,6 +547,13 @@ function buildOptions(
       }
       opts['ROW_GROUP_SIZE'] = n;
     }
+    return { options: opts, error: null };
+  }
+
+  if (format === 'arrow') {
+    // Arrow has no v1 options. The empty option block is fine; the COPY
+    // builder still emits `FORMAT 'arrow'` so the planner picks the right
+    // sink regardless of file extension.
     return { options: opts, error: null };
   }
 

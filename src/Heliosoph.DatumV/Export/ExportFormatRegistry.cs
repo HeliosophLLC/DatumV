@@ -26,6 +26,7 @@ public sealed class ExportFormatRegistry : IExportFormatRegistry
             new Parquet.ParquetExportFormat(),
             new Csv.CsvExportFormat(),
             new Json.JsonExportFormat(),
+            new Arrow.ArrowExportFormat(),
         ]));
 
     /// <summary>

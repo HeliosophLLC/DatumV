@@ -169,9 +169,16 @@ public sealed class OpenArrowMetaFunction : ITableValuedFunctionMetadata, ITable
     {
         DataValue[] row = context.Pool.RentDataValues(OutputColumnLookup.Count);
         row[0] = DataValue.FromString(field.Name, arena);
+        // Surface the post-datumv-routing kind (SurfacedKind) so a tagged
+        // Image / Mesh / Json column shows its restored kind, matching what
+        // open_arrow itself delivers. Without routing, SurfacedKind ==
+        // ElementKind so untagged files are unaffected.
         row[1] = DataValue.FromString(
-            type.IsSupported ? type.ElementKind.ToString() : "Unknown", arena);
-        row[2] = DataValue.FromBoolean(type.IsArray);
+            type.IsSupported ? type.SurfacedKind.ToString() : "Unknown", arena);
+        // is_array also reflects the post-route shape — Image / Mesh /
+        // PointCloud routes collapse a Binary column from Array<UInt8>
+        // to a scalar typed value.
+        row[2] = DataValue.FromBoolean(type.IsArray && !type.RouteCollapsesToScalar);
         row[3] = DataValue.FromBoolean(type.IsNullable);
         row[4] = DataValue.FromBoolean(type.IsSupported);
         row[5] = DataValue.FromString(type.LogicalTypeName, arena);

@@ -93,6 +93,10 @@
       "json": {
         "title": "JSON",
         "subtitle": "Structured. Struct / array / json columns become nested objects, not strings."
+      },
+      "arrow": {
+        "title": "Arrow",
+        "subtitle": "Columnar IPC. Fastest handoff to pandas / Polars; round-trips through open_arrow."
       }
     },
     "parquet": {
@@ -127,6 +131,10 @@
       "nullString": "NULL representation",
       "nullStringHint": "Text written for SQL NULL values. Empty means an empty field.",
       "nullStringPlaceholder": "(empty by default)"
+    },
+    "arrow": {
+      "legend": "Arrow options",
+      "noOptions": "Arrow has no configurable options in this version. The file is written in the Arrow IPC file format (Feather v2); typed-media columns carry datumv.* field metadata that round-trips through open_arrow."
     },
     "json": {
       "legend": "JSON options",

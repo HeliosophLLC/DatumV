@@ -56,6 +56,7 @@ export const EXPORT_FORMATS: ExportFormatDescriptor[] = [
   { name: 'parquet', displayName: 'Apache Parquet', extensions: ['.parquet'] },
   { name: 'csv', displayName: 'CSV (Comma-Separated Values)', extensions: ['.csv'] },
   { name: 'json', displayName: 'JSON (array or JSONL)', extensions: ['.json', '.jsonl', '.ndjson'] },
+  { name: 'arrow', displayName: 'Apache Arrow IPC / Feather', extensions: ['.arrow', '.feather'] },
 ];
 
 /**

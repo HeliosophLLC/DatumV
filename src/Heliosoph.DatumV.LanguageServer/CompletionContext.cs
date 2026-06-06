@@ -2144,13 +2144,17 @@ public static class CopyFormatOptions
                 "LINES",
                 "INDENT",
             ],
+            // Arrow has no v1 options — file format and the typed-media
+            // metadata convention are both fixed. Listed here so format
+            // completion still surfaces `arrow` as a FORMAT value.
+            ["arrow"] = [],
         };
 
     /// <summary>
     /// Format names recognised by the engine — surfaced after <c>FORMAT</c>
     /// in the option block.
     /// </summary>
-    public static readonly string[] FormatNames = ["parquet", "csv", "json"];
+    public static readonly string[] FormatNames = ["parquet", "csv", "json", "arrow"];
 
     /// <summary>
     /// Returns the option-key set the language server should offer in

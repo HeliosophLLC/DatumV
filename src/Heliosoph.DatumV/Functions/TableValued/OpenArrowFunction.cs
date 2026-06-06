@@ -207,20 +207,55 @@ public sealed class OpenArrowFunction : ITableValuedFunctionMetadata, ITableValu
         for (int i = 0; i < fieldCount; i++)
         {
             ArrowField field = arrowSchema.FieldsList[i];
-            ArrowColumnType type = ArrowColumnType.From(field);
-            if (!type.IsSupported)
-            {
-                throw new FunctionArgumentException(Name,
-                    $"Arrow column '{field.Name}' has unsupported type " +
-                    $"({type.LogicalTypeName}). " +
-                    "Use open_arrow_meta to inspect the file's column types.");
-            }
+            columns[i] = BuildColumnInfo(field);
+        }
+        return new Schema(columns);
+    }
 
-            columns[i] = new ColumnInfo(field.Name, type.ElementKind, nullable: type.IsNullable)
+    /// <summary>
+    /// Builds a <see cref="ColumnInfo"/> from an Arrow <see cref="ArrowField"/>,
+    /// recursing into <c>StructType</c> children so nested-struct files
+    /// surface real per-field names through SQL projections (no <c>f0</c>
+    /// / <c>f1</c> fallbacks).
+    /// </summary>
+    private static ColumnInfo BuildColumnInfo(ArrowField field)
+    {
+        ArrowColumnType type = ArrowColumnType.From(field);
+        if (!type.IsSupported)
+        {
+            throw new FunctionArgumentException(Name,
+                $"Arrow column '{field.Name}' has unsupported type " +
+                $"({type.LogicalTypeName}). " +
+                "Use open_arrow_meta to inspect the file's column types.");
+        }
+
+        // Struct columns surface their child field shape so SQL can
+        // project `loc.x` style accesses against real field names.
+        if (type.SurfacedKind == DataKind.Struct && type.StructChildren is { } children)
+        {
+            ColumnInfo[] childInfos = new ColumnInfo[children.Count];
+            for (int j = 0; j < children.Count; j++)
+            {
+                childInfos[j] = BuildColumnInfo(children[j]);
+            }
+            // ColumnInfo's struct ctor sets Kind = Struct; pass IsArray
+            // via the init flag so Array<Struct> columns keep their
+            // outer shape.
+            return new ColumnInfo(field.Name, nullable: type.IsNullable, fields: childInfos)
             {
                 IsArray = type.IsArray,
             };
         }
-        return new Schema(columns);
+
+        // SurfacedKind is the post-metadata-routing kind (Image / Audio
+        // / Video / Mesh / PointCloud / Json when a datumv.kind tag
+        // fires; otherwise the raw Arrow-mapped kind). Routes that
+        // target a scalar typed kind drop the IsArray flag so SQL sees
+        // Image, not Array<UInt8>.
+        bool routedToScalar = type.RouteCollapsesToScalar;
+        return new ColumnInfo(field.Name, type.SurfacedKind, nullable: type.IsNullable)
+        {
+            IsArray = type.IsArray && !routedToScalar,
+        };
     }
 }

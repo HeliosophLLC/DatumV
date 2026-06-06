@@ -1,6 +1,6 @@
 # COPY and Export
 
-Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet, CSV, and JSON / JSONL today; `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Excel, Three.js, jq, and other standard tooling — and re-importable through `open_parquet` / `open_csv_typed` back into the typed engine without an explicit conversion step.
+Heliosoph.DatumV exports query results to external files via the SQL `COPY` statement. The on-disk shape is a universal interchange format (Parquet, CSV, JSON / JSONL, and Apache Arrow IPC today; `.datum` / HDF5 / FITS staged as follow-ups), so the resulting file is immediately consumable by Blender, MeshLab, DuckDB, pandas, Polars, Excel, Three.js, jq, and other standard tooling — and re-importable through `open_parquet` / `open_csv_typed` / `open_arrow` back into the typed engine without an explicit conversion step.
 
 This document covers the SQL surface, the plan / sink layering, the typed-media encoding strategy, the `datumv.*` metadata convention that closes the round-trip loop, and the front-end Electron UI that drives it.
 
@@ -296,6 +296,66 @@ JSON export is one-way today. Scalars survive (ISO temporals, plain numerics) bu
 
 ---
 
+## The Arrow Sink
+
+[`src/Heliosoph.DatumV/Export/Arrow/`](../../src/Heliosoph.DatumV/Export/Arrow/)
+
+Apache Arrow IPC export — the fast handoff to pandas / Polars / DuckDB. The on-disk file is the Arrow IPC *file* format (also marketed as Feather v2), which carries a footer with per-batch locations so consumers can random-access any record batch without rescanning. One engine `RowBatch` becomes one Arrow `RecordBatch` written through a single `ArrowFileWriter`; no row-group buffering, no compression overhead, no encode/decode step on the way back into pandas — Arrow is the same memory layout in-memory and on-disk, which is the whole point of the format.
+
+### Options
+
+None in v1. The format is fixed to the IPC file format, body compression isn't exposed (Arrow files are typically read as zero-copy `mmap`, where compression defeats the point), and there's no header / delimiter / line-ending knob equivalent to the text formats.
+
+### Round-trip with `open_arrow`
+
+The writer's supported set is deliberately aligned with the `open_arrow` reader's supported set so any column the writer emits re-imports losslessly:
+
+- **Native round-trip kinds**: Boolean, Int8/16/32/64, UInt8/16/32/64, Float32/64, String, Date, Time, Timestamp, TimestampTz, Decimal, and `Array<T>` for every primitive element kind plus String. Arrow's native type system handles these without metadata help (Date32 ↔ Date, Timestamp ↔ Timestamp, Decimal128(38,18) ↔ Decimal). `Struct` and `Array<Struct>` also round-trip natively via Arrow `StructType` / `ListArray<StructArray>` — field names are recovered from the on-disk `StructType.Fields` so SQL projections see real names (`loc.x`), not positional fallbacks (`loc.f0`).
+- **Tagged via `datumv.*` field metadata**: Image, Audio, Video, Mesh, PointCloud, Json, Uuid, Duration, Int128, UInt128. The on-disk Arrow type is the closest standard match (`BinaryType` for media bytes, `StringType` for stringified scalars and JSON text), and the field's custom metadata carries the original `DataKind` so `open_arrow` retypes the column back transparently on read — same `ApplyMediaRoute` shape `open_parquet` uses.
+- **Rejected at plan time**: Drawing, Color, Point2D, Point3D, the runtime-only handles (VideoFrame / AudioSlice / VideoSlice), and multi-dim `Array<T>` columns. Drawing rejects because the recipe isn't bytes. The visual / spatial inline scalars reject because they have no native Arrow shape. Multi-dim rejects because Arrow has no per-row shape buffer and silently flattening to 1-D would lose the dimensionality — users get an actionable hint pointing at `CAST(arr AS Float32[])` or `parquet` instead.
+
+### Typed-media transformation
+
+Same policy as the Parquet sink, same helpers:
+
+- **Image / Audio / Video** — passthrough into Arrow `BinaryType`. The bytes already are the universal interchange format (PNG / JPEG / WAV / MP4 / etc.) and the builder hands them through unchanged with the matching `datumv.kind` tag. The reader's `ApplyMediaRoute` reads the tag and retags the bytes back to the original kind without decoding.
+- **Mesh** — converted to binary glTF via `GltfExporter.Export(blob, "Heliosoph.DatumV")` so external tools see something they can decode. The reader pipes the bytes through `GltfImporter.Import` on the way back in.
+- **PointCloud** — converted to binary PLY via `PlyExporter.Export`; the reader inverts via `PlyImporter.Import`.
+- **Json** — decoded from CBOR to canonical JSON text via `CborJsonCodec.DecodeToJsonText` and emitted as a `StringType` column tagged `datumv.kind=Json, format=text`. The reader re-encodes the JSON text back to canonical CBOR on import so the engine's `DataKind.Json` contract (bytes are CBOR) survives.
+- **Uuid / Duration / Int128 / UInt128** — stringified with a `datumv.kind` tag because the .NET v23 Apache.Arrow surface has no usable builder for `DurationType` or the Uuid extension type, and Arrow has no native Int128/UInt128 primitive at all. The reader parses the string back to the typed kind via `Guid.Parse` / `TimeSpan.Parse` / `Int128.Parse` so the round-trip is lossless at the engine level even though the on-disk representation is a string.
+
+### Struct and Array<Struct>
+
+Struct columns write as Arrow `StructType`, recursing through `ColumnInfo.Fields` to name each child. Nested struct (struct-inside-struct) and struct-with-typed-media-field (`Struct{ id, Image pic }`) work transparently — the per-field writer is the same factory call used at the top level, and the `datumv.*` field metadata propagates through the recursion.
+
+`Array<Struct>` writes as Arrow `ListArray<StructArray>` via `ArrowListOfStructBuilder`. The reader's `DecodeListOfStructRows` is the load-bearing perf decision: it pre-decodes the inner struct's child columns once for the whole batch, then slices per row. The naive per-row `BuildArrayCell` path would re-decode the entire struct child arrays per outer row — O(rows × children) blowup the pre-decode avoids.
+
+Whole-row `NULL` structs survive the round trip via Arrow's struct validity bitmap. Per-element `NULL` inside an `Array<Struct>` is rejected on read with a clear `Array<Struct> contains a NULL element at flat position N` message because the engine's `FromUntypedStructArray` doesn't accept nulls inside an array yet (general arena-array constraint). Filter nulls out before export, or wrap into `Struct{value, is_null}`.
+
+### Dictionary-encoded columns
+
+HuggingFace dataset shards aggressively dictionary-encode low-cardinality columns (labels, language codes, enum-like strings). The Arrow read path detects `DictionaryArray` at decode time, resolves each row's index against the dictionary's value array, then dispatches through the scalar decoder. All Arrow integer widths are supported for the index column; UInt32 / UInt64 indices ≥ `int.MaxValue` would lose precision in the index cast (exceptional — you'd need ≥ 2B unique values to hit it). The engine's Arrow writer doesn't emit dictionary-encoded columns; reading them is the user-visible case.
+
+### Unsupported-but-named Arrow types
+
+The schema layer classifies known-unsupported variants with an actionable hint embedded in `LogicalTypeName` so the `open_arrow` error message is actionable rather than a bare type name:
+
+- `FixedSizeBinary` — Apache.Arrow .NET v23 doesn't expose a concrete reader-array class; hint points at `arr.cast(pa.binary())`.
+- `LargeBinary` / `LargeString` — same v23 surface gap; hint points at the small-variant cast (`pa.binary()` / `pa.string()`).
+- `Map` — hint suggests upstream conversion to a list of `{key, value}` structs.
+- `Union` — recommend exporting individual variants as separate columns.
+- `Decimal256` — exceeds .NET decimal range; recommend upstream conversion to Decimal128.
+
+### Record-batch granularity
+
+One Arrow `RecordBatch` per input `RowBatch`. No accumulation across batches, no byte-budget flush. Arrow's columnar layout is bounded by what fits in a single batch, and the engine's batches are already sized for memory residency, so the per-batch boundary maps cleanly onto Arrow's natural unit.
+
+### Format name collision (FORMAT 'arrow')
+
+`arrow` tokenises as a bare identifier in the COPY grammar — no clash with reserved keywords — so both `COPY (...) (FORMAT arrow)` and `COPY (...) (FORMAT 'arrow')` work. The export-dialog UI emits the quoted form uniformly across every format for the same reason it does for `json`: the dialog doesn't need to know which format names are safe as bare identifiers.
+
+---
+
 ## The `datumv.*` Metadata Convention
 
 [`src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs`](../../src/Heliosoph.DatumV/Serialization/Parquet/ParquetDatumvMetadata.cs)
@@ -407,7 +467,7 @@ Two important nuances:
 
 The completion provider recognises four COPY-specific zones — `AfterCopy` (`COPY ⌷` → suggest `(`), `AfterCopySource` (`COPY (q) ⌷` → suggest `TO`), `AfterCopyTo` (`COPY (q) TO 'path' ⌷` → suggest option-block `(`), and `InCopyOptions` (cursor inside the option parens → surface format-specific option keys). The walk-back classifier detects the option-block paren by the `STRING → TO` token pair (with an optional `WITH` in between) and stops at the first `LeftParen` whose preceding tokens match that shape.
 
-Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. CSV registers `HEADER`, `DELIMITER`, `QUOTE`, `LINE_ENDING`, `NULL_STRING`; JSON registers `LINES`, `INDENT`. The completion provider picks the union up automatically with no edits in `CompletionContext` or `CompletionProvider`. Future formats follow the same drop-in pattern.
+Per-format option keys live in `CopyFormatOptions.OptionKeysByFormat`. CSV registers `HEADER`, `DELIMITER`, `QUOTE`, `LINE_ENDING`, `NULL_STRING`; JSON registers `LINES`, `INDENT`; Arrow registers an empty set (no v1 options) but is still listed so `FORMAT` completion surfaces `arrow` as a value. The completion provider picks the union up automatically with no edits in `CompletionContext` or `CompletionProvider`. Future formats follow the same drop-in pattern.
 
 ---
 
@@ -424,7 +484,7 @@ Deferred design choices (called out, status unchanged):
 - **`COPY ... TO STDOUT`** — not implemented. The Electron model has a shared filesystem so the current path-target approach works; STDOUT is the right answer for any web-served deployment.
 - **Directory targets + `MediaDisposition.Sidecar`** — interface admits them, sink doesn't implement.
 - **`PARTITION_BY` and multi-file row-group splits** — same.
-- **`.datum` / HDF5 / FITS** — unwritten. Parquet, CSV, and JSON are the built-in formats today.
+- **`.datum` / HDF5 / FITS** — unwritten. Parquet, CSV, JSON, and Arrow are the built-in formats today.
 
 Format / fidelity caveats users should know about:
 
