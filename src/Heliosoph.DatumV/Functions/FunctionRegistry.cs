@@ -757,6 +757,25 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Strings.RegexpLikeFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpMatchFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpCountFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpExtractFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpInstrFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpSplitToArrayFunction>();
+        registry.RegisterScalar<Scalar.Strings.AsciiFunction>();
+        registry.RegisterScalar<Scalar.Strings.ChrFunction>();
+        registry.RegisterScalar<Scalar.Strings.TranslateFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToHexFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToBinFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToOctFunction>();
+        registry.RegisterScalar<Scalar.Strings.NormalizeFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToAsciiFunction>();
+        registry.RegisterScalar<Scalar.Strings.UnistrFunction>();
+        registry.RegisterScalar<Scalar.Strings.CasefoldFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteIdentFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteLiteralFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteNullableFunction>();
+        registry.RegisterScalar<Scalar.Strings.ParseIdentFunction>();
+        registry.RegisterScalar<Scalar.Strings.StringToArrayFunction>();
+        registry.RegisterScalar<Scalar.Strings.FormatFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpSubstrFunction>();
 
         // Fulltext family

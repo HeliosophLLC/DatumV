@@ -595,10 +595,12 @@ SELECT quote_nullable(NULL) -- 'NULL'
 
 `parse_ident(str, [strict])` → Array | QU: 1
 
-Split a qualified identifier into an Array, removing quotes and folding to lowercase.
+Split a qualified identifier into an Array. Unquoted parts are folded to lowercase (matching how PostgreSQL itself parses identifiers); double-quoted parts preserve their case and may contain any character. With `strict` (default `true`), trailing characters after the last identifier part raise an error; pass `false` to silently truncate at the first non-identifier character.
 
 ```sql
-SELECT parse_ident('"Schema"."Table"') -- ['schema', 'table']
+SELECT parse_ident('Schema.Table')         -- ['schema', 'table']
+SELECT parse_ident('"Schema"."Table"')     -- ['Schema', 'Table']
+SELECT parse_ident('a.b junk', false)      -- ['a', 'b']
 ```
 
 ## Other
