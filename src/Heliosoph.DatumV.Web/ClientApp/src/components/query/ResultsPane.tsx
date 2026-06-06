@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
@@ -1157,6 +1157,122 @@ function ColumnModeChip({
   );
 }
 
+// Memoised row used by CellTable's virtualiser. Selection-drag and scroll
+// are the two interactions that fire many parent re-renders per second;
+// without memo every visible row would repaint on every tick even when
+// only the range bounds moved. We pass the per-row range mask as
+// primitives (rowInRange / selColMin / selColMax) so React.memo's default
+// shallow comparison short-circuits cheaply, and stabilise the callbacks
+// in the parent so they don't bust the memo.
+type VirtualRowProps = {
+  rowIndex: number;
+  row: readonly JsonCell[];
+  rowSize: number;
+  rowStart: number;
+  gridTemplateColumns: string;
+  largeMedia: boolean;
+  resolvedModes: readonly (string | undefined)[];
+  rowInRange: boolean;
+  // Inclusive column-range of the active selection. Read only when
+  // rowInRange is true; -1 sentinel otherwise.
+  selColMin: number;
+  selColMax: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  dragModeRef: React.MutableRefObject<SelectionMode | null>;
+  beginSelection: (mode: SelectionMode, row: number, col: number, shiftKey: boolean) => void;
+  extendSelection: (row: number, col: number) => void;
+  onContextMenu: (
+    e: React.MouseEvent<HTMLElement>,
+    sourceMode: SelectionMode,
+    row: number,
+    col: number,
+  ) => void;
+};
+
+const VirtualRow = memo(function VirtualRow({
+  rowIndex,
+  row,
+  rowSize,
+  rowStart,
+  gridTemplateColumns,
+  largeMedia,
+  resolvedModes,
+  rowInRange,
+  selColMin,
+  selColMax,
+  scrollRef,
+  dragModeRef,
+  beginSelection,
+  extendSelection,
+  onContextMenu,
+}: VirtualRowProps) {
+  const rowNumber = rowIndex + 1;
+  return (
+    <div
+      data-index={rowIndex}
+      className="border-border bg-table-row absolute inset-x-0 grid border-b"
+      style={{
+        gridTemplateColumns,
+        height: rowSize,
+        transform: `translateY(${rowStart}px)`,
+      }}
+    >
+      <div
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          scrollRef.current?.focus();
+          beginSelection('row', rowIndex, 0, e.shiftKey);
+        }}
+        onMouseEnter={() => {
+          if (dragModeRef.current === 'row') {
+            extendSelection(rowIndex, 0);
+          }
+        }}
+        onContextMenu={(e) => onContextMenu(e, 'row', rowIndex, 0)}
+        className={cn(
+          'bg-muted border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-start justify-end border-r px-1.5 py-1 font-medium tabular-nums select-none',
+          rowInRange
+            && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
+        )}
+        title={String(rowNumber)}
+      >
+        <span className="relative truncate">{rowNumber}</span>
+      </div>
+      {row.map((c, colIdx) => (
+        <div
+          key={colIdx}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            scrollRef.current?.focus();
+            beginSelection('cell', rowIndex, colIdx, e.shiftKey);
+          }}
+          onMouseEnter={() => {
+            if (dragModeRef.current !== null) {
+              extendSelection(rowIndex, colIdx);
+            }
+          }}
+          onContextMenu={(e) => onContextMenu(e, 'cell', rowIndex, colIdx)}
+          title={cellTooltip(c)}
+          className={cn(
+            'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
+            largeMedia
+              ? 'flex items-start overflow-hidden'
+              : 'truncate align-top',
+            rowInRange && colIdx >= selColMin && colIdx <= selColMax
+              && 'bg-foreground/10 group-focus-within:bg-primary/25',
+          )}
+        >
+          <CellValue
+            cell={c}
+            largeMedia={largeMedia}
+            mode={resolvedModes[colIdx]}
+          />
+        </div>
+      ))}
+    </div>
+  );
+});
+
 function CellTable({ cell }: { cell: CellResult }) {
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
@@ -1272,6 +1388,19 @@ function CellTable({ cell }: { cell: CellResult }) {
     if (!def) return undefined;
     return resolveColumnMode(def, columnModes[colIdx], settings.columnDisplayModeDefaults);
   };
+  // Pre-resolved per-column mode ids passed to the memoised row. Stable
+  // identity (memoised) means rows skip re-renders for selection-only
+  // changes; new identity (mode picker / settings change) means every
+  // visible row repaints to honour the new render mode.
+  const resolvedModes = useMemo<(string | undefined)[]>(
+    () =>
+      columnModeDefs.map((def, idx) =>
+        def === null
+          ? undefined
+          : resolveColumnMode(def, columnModes[idx], settings.columnDisplayModeDefaults),
+      ),
+    [columnModeDefs, columnModes, settings.columnDisplayModeDefaults],
+  );
   const setColumnMode = (colIdx: number, modeId: string) => {
     setColumnModes((prev) => ({ ...prev, [colIdx]: modeId }));
   };
@@ -1481,6 +1610,23 @@ function CellTable({ cell }: { cell: CellResult }) {
     [selection, cell.rows, cell.schema],
   );
 
+  // Stable identity wrapper around handleContextMenu so we can hand it to
+  // the memoised VirtualRow without busting its memo every time selection
+  // changes (handleContextMenu itself rebinds on each selection tick).
+  // The ref-then-stable-callback pattern preserves the latest closure
+  // while keeping the function reference fixed across renders.
+  const handleContextMenuRef = useRef(handleContextMenu);
+  handleContextMenuRef.current = handleContextMenu;
+  const stableHandleContextMenu = useCallback(
+    (
+      e: React.MouseEvent<HTMLElement>,
+      sourceMode: SelectionMode,
+      row: number,
+      col: number,
+    ) => handleContextMenuRef.current(e, sourceMode, row, col),
+    [],
+  );
+
   if (cell.schema === null) return null;
 
   // Leading row-number gutter + data columns. Sticky-left only on the
@@ -1495,10 +1641,10 @@ function CellTable({ cell }: { cell: CellResult }) {
   const numRows = cell.rowCount;
   const numCols = cell.schema.length;
   const range = selection ? selectionRange(selection, numRows, numCols) : null;
-  const isInRange = (r: number, c: number): boolean =>
-    range !== null
-    && r >= range.rowMin && r <= range.rowMax
-    && c >= range.colMin && c <= range.colMax;
+  // Per-cell isInRange lives inside VirtualRow now (it derives from the
+  // primitive (rowInRange, selColMin, selColMax) row props). The two
+  // helpers below still serve the header and gutter loops in this
+  // component, which aren't memoised per-row.
   const isRowInRange = (r: number): boolean =>
     range !== null && r >= range.rowMin && r <= range.rowMax;
   const isColInRange = (c: number): boolean =>
@@ -1626,82 +1772,30 @@ function CellTable({ cell }: { cell: CellResult }) {
         }}
       >
         {virtualRows.map((virtualRow) => {
-          const row = cell.rows[virtualRow.index];
-          const rowNumber = virtualRow.index + 1;
+          const idx = virtualRow.index;
+          const rowInRange = isRowInRange(idx);
+          // Primitives, not the closure-captured range object: keeps the
+          // VirtualRow memo's shallow comparison cheap and lets it skip
+          // re-renders on selection drags that don't touch this row.
           return (
-            <div
+            <VirtualRow
               key={virtualRow.key}
-              data-index={virtualRow.index}
-              className="border-border bg-table-row absolute inset-x-0 grid border-b"
-              style={{
-                gridTemplateColumns,
-                height: virtualRow.size,
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              {/* Row-number gutter. Styled like a header cell
-                  (bg-muted + font-medium) and sticky-left so it acts as
-                  the row's identity column during horizontal scroll.
-                  Click+drag here selects rows; mouseenter only extends
-                  during a row-mode drag (cell/col drags route their
-                  extension through the data cells the cursor crosses). */}
-              <div
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
-                  scrollRef.current?.focus();
-                  beginSelection('row', virtualRow.index, 0, e.shiftKey);
-                }}
-                onMouseEnter={() => {
-                  if (dragModeRef.current === 'row') {
-                    extendSelection(virtualRow.index, 0);
-                  }
-                }}
-                onContextMenu={(e) =>
-                  handleContextMenu(e, 'row', virtualRow.index, 0)
-                }
-                className={cn(
-                  'bg-muted border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-start justify-end border-r px-1.5 py-1 font-medium tabular-nums select-none',
-                  isRowInRange(virtualRow.index)
-                    && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
-                )}
-                title={String(rowNumber)}
-              >
-                <span className="relative truncate">{rowNumber}</span>
-              </div>
-              {row.map((c, colIdx) => (
-                <div
-                  key={colIdx}
-                  onMouseDown={(e) => {
-                    if (e.button !== 0) return;
-                    scrollRef.current?.focus();
-                    beginSelection('cell', virtualRow.index, colIdx, e.shiftKey);
-                  }}
-                  onMouseEnter={() => {
-                    if (dragModeRef.current !== null) {
-                      extendSelection(virtualRow.index, colIdx);
-                    }
-                  }}
-                  onContextMenu={(e) =>
-                    handleContextMenu(e, 'cell', virtualRow.index, colIdx)
-                  }
-                  title={cellTooltip(c)}
-                  className={cn(
-                    'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
-                    largeMedia
-                      ? 'flex items-start overflow-hidden'
-                      : 'truncate align-top',
-                    isInRange(virtualRow.index, colIdx)
-                      && 'bg-foreground/10 group-focus-within:bg-primary/25',
-                  )}
-                >
-                  <CellValue
-                    cell={c}
-                    largeMedia={largeMedia}
-                    mode={resolveModeForColumn(colIdx)}
-                  />
-                </div>
-              ))}
-            </div>
+              rowIndex={idx}
+              row={cell.rows[idx]}
+              rowSize={virtualRow.size}
+              rowStart={virtualRow.start}
+              gridTemplateColumns={gridTemplateColumns}
+              largeMedia={largeMedia}
+              resolvedModes={resolvedModes}
+              rowInRange={rowInRange}
+              selColMin={rowInRange && range !== null ? range.colMin : -1}
+              selColMax={rowInRange && range !== null ? range.colMax : -1}
+              scrollRef={scrollRef}
+              dragModeRef={dragModeRef}
+              beginSelection={beginSelection}
+              extendSelection={extendSelection}
+              onContextMenu={stableHandleContextMenu}
+            />
           );
         })}
       </div>
