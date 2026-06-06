@@ -1091,6 +1091,93 @@
           ]
         }
       ]
+    },
+    {
+      "name": "SEC EDGAR Filings Index",
+      "summary": "Every regulatory filing the SEC received between 2021 Q1 and 2025 Q4 — roughly 7 million 10-Ks, 10-Qs, 8-Ks, S-1s, and the long tail of less-famous form types — landed as one unified `edgar_filings` table with typed CIK, form-type, and date-filed columns. Reach-for big-tabular substrate for company-level, time-windowed, and form-type queries against a real regulatory firehose.",
+      "description": "Published by the U.S. Securities and Exchange Commission under public-domain access at https://www.sec.gov/Archives/edgar/full-index/. Each quarter's `master.idx` is a pipe-delimited filings list — CIK | Company Name | Form Type | Date Filed | Filename — that the recipe parses with `open_csv` (delimiter='|'), filters via `regexp_like(fields[0], '^[0-9]+$')` to drop the preamble + header + dashes lines, types the CIK as Int32 and the filed date as DATE, and stamps each row with a `quarter` literal so cross-quarter queries can group by era. The Filename column points at the actual filing document under `https://www.sec.gov/Archives/<filename>` — not ingested here (those are megabytes apiece), but the index is the join key for fetching them later. SEC's access policy requires a contact-bearing User-Agent on every request; the source declares one via the per-source `userAgent` field. The window stops at 2025 Q4 to give a clean 5-year boundary; if you want deeper history reach back through 1993 Q1, the source URL pattern just changes the year folder.",
+      "modalities": ["Tabular"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "U.S. Securities and Exchange Commission (EDGAR dissemination feed)"
+      ],
+      "suitableForTasks": [
+        "TabularClassifier",
+        "TimeSeriesForecaster",
+        "TimeSeriesAnomalyDetector"
+      ],
+      "variants": [
+        {
+          "id": "edgar_filings_5y",
+          "displayName": "5-year window (2021 Q1 – 2025 Q4)",
+          "summary": "Twenty quarterly master.idx files pulled fresh from www.sec.gov, unioned through a single ingest recipe into one `edgar_filings` table. ~660 MB on the wire, ~7M rows, ~150–200 MB ingested footprint after columnar typing. The 2021–2025 window is a clean five-year cut — recent enough that current-day queries land against familiar companies, deep enough to cover the COVID-era SPAC boom and bust.",
+          "approxArchiveBytes": 660000000,
+          "approxIngestedBytes": 180000000,
+          "expectedRowCounts": { "edgar_filings": 7000000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "5y-2021-2025",
+              "sources": [
+                {
+                  "type": "https",
+                  "userAgent": "Heliosoph.DatumV/0.1 (support@heliosoph.net)",
+                  "urls": [
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR1/master.idx", "destFile": "master_2021Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR2/master.idx", "destFile": "master_2021Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR3/master.idx", "destFile": "master_2021Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR4/master.idx", "destFile": "master_2021Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR1/master.idx", "destFile": "master_2022Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR2/master.idx", "destFile": "master_2022Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR3/master.idx", "destFile": "master_2022Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR4/master.idx", "destFile": "master_2022Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR1/master.idx", "destFile": "master_2023Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR2/master.idx", "destFile": "master_2023Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR3/master.idx", "destFile": "master_2023Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR4/master.idx", "destFile": "master_2023Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR1/master.idx", "destFile": "master_2024Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR2/master.idx", "destFile": "master_2024Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR3/master.idx", "destFile": "master_2024Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR4/master.idx", "destFile": "master_2024Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR1/master.idx", "destFile": "master_2025Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR2/master.idx", "destFile": "master_2025Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR3/master.idx", "destFile": "master_2025Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR4/master.idx", "destFile": "master_2025Q4.idx" }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "edgar_filings",
+                  "artifacts": {
+                    "y2021q1": "master_2021Q1.idx",
+                    "y2021q2": "master_2021Q2.idx",
+                    "y2021q3": "master_2021Q3.idx",
+                    "y2021q4": "master_2021Q4.idx",
+                    "y2022q1": "master_2022Q1.idx",
+                    "y2022q2": "master_2022Q2.idx",
+                    "y2022q3": "master_2022Q3.idx",
+                    "y2022q4": "master_2022Q4.idx",
+                    "y2023q1": "master_2023Q1.idx",
+                    "y2023q2": "master_2023Q2.idx",
+                    "y2023q3": "master_2023Q3.idx",
+                    "y2023q4": "master_2023Q4.idx",
+                    "y2024q1": "master_2024Q1.idx",
+                    "y2024q2": "master_2024Q2.idx",
+                    "y2024q3": "master_2024Q3.idx",
+                    "y2024q4": "master_2024Q4.idx",
+                    "y2025q1": "master_2025Q1.idx",
+                    "y2025q2": "master_2025Q2.idx",
+                    "y2025q3": "master_2025Q3.idx",
+                    "y2025q4": "master_2025Q4.idx"
+                  },
+                  "sqlFile": "edgar_filings/index.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

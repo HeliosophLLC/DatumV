@@ -353,7 +353,10 @@ function ActiveRow({ active }: { active: ActiveDownload }) {
         <span className="min-w-0 truncate">
           {active.fileCount > 0 &&
             t('downloadsChip.currentFileLabel', {
-              index: active.fileIndex + 1,
+              // Clamp: a final progress tick after the last file finishes
+              // can arrive with fileIndex == fileCount, which would render
+              // as "21 of 20" without the min.
+              index: Math.min(active.fileIndex + 1, active.fileCount),
               count: active.fileCount,
             })}
           {active.currentFile ? ` · ${active.currentFile}` : ''}

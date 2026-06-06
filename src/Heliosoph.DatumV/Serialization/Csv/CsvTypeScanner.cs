@@ -29,7 +29,7 @@ public static class CsvTypeScanner
     {
         Stopwatch sw = Stopwatch.StartNew();
 
-        await using Stream stream = await source.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using Stream stream = await CsvStreamPrefilter.OpenAsync(source, cancellationToken).ConfigureAwait(false);
 
         char delimiter = DelimiterDetector.Detect(stream, source.Options, source.FilePath);
         bool? headerOverride = GetHeaderOverride(source.Options);
@@ -48,6 +48,7 @@ public static class CsvTypeScanner
         for (int i = 0; i < columnCount; i++) states[i] = ColumnScanState.Initial();
 
         TemporalFormatCache temporalCache = new(columnCount);
+        string? nullToken = GetNullToken(source.Options);
 
         using LineReader lineReader = new(stream);
         if (detection.HasHeader) lineReader.ReadLineAsString();
@@ -62,9 +63,9 @@ public static class CsvTypeScanner
             rowCount++;
 
             if (!lineSpan.Contains('"'))
-                ScanUnquotedLine(lineSpan, delimiter, states, temporalCache);
+                ScanUnquotedLine(lineSpan, delimiter, states, temporalCache, nullToken);
             else
-                ScanQuotedLine(lineSpan, delimiter, states, temporalCache);
+                ScanQuotedLine(lineSpan, delimiter, states, temporalCache, nullToken);
         }
 
         DataKind[] kinds = new DataKind[columnCount];
@@ -88,7 +89,7 @@ public static class CsvTypeScanner
 
     private static void ScanUnquotedLine(
         ReadOnlySpan<char> line, char delimiter,
-        ColumnScanState[] states, TemporalFormatCache temporalCache)
+        ColumnScanState[] states, TemporalFormatCache temporalCache, string? nullToken)
     {
         int fieldStart = 0;
         int columnIndex = 0;
@@ -99,7 +100,7 @@ public static class CsvTypeScanner
             if (i == line.Length || line[i] == delimiter)
             {
                 ReadOnlySpan<char> field = line[fieldStart..i].Trim();
-                UpdateColumnState(ref states[columnIndex], field, columnIndex, temporalCache);
+                UpdateColumnState(ref states[columnIndex], field, columnIndex, temporalCache, nullToken);
                 columnIndex++;
                 fieldStart = i + 1;
             }
@@ -107,7 +108,7 @@ public static class CsvTypeScanner
 
         while (columnIndex < columnCount)
         {
-            UpdateColumnState(ref states[columnIndex], ReadOnlySpan<char>.Empty, columnIndex, temporalCache);
+            UpdateColumnState(ref states[columnIndex], ReadOnlySpan<char>.Empty, columnIndex, temporalCache, nullToken);
             columnIndex++;
         }
     }
@@ -117,7 +118,7 @@ public static class CsvTypeScanner
 
     private static void ScanQuotedLine(
         ReadOnlySpan<char> line, char delimiter,
-        ColumnScanState[] states, TemporalFormatCache temporalCache)
+        ColumnScanState[] states, TemporalFormatCache temporalCache, string? nullToken)
     {
         int position = 0;
         int columnIndex = 0;
@@ -198,13 +199,13 @@ public static class CsvTypeScanner
             }
 
         ProcessField:
-            UpdateColumnState(ref states[columnIndex], fieldSpan.Trim(), columnIndex, temporalCache);
+            UpdateColumnState(ref states[columnIndex], fieldSpan.Trim(), columnIndex, temporalCache, nullToken);
             columnIndex++;
         }
 
         while (columnIndex < columnCount)
         {
-            UpdateColumnState(ref states[columnIndex], ReadOnlySpan<char>.Empty, columnIndex, temporalCache);
+            UpdateColumnState(ref states[columnIndex], ReadOnlySpan<char>.Empty, columnIndex, temporalCache, nullToken);
             columnIndex++;
         }
     }
@@ -221,9 +222,10 @@ public static class CsvTypeScanner
         ref ColumnScanState state,
         ReadOnlySpan<char> field,
         int columnIndex,
-        TemporalFormatCache temporalCache)
+        TemporalFormatCache temporalCache,
+        string? nullToken)
     {
-        if (field.IsEmpty || CsvParser.IsNullLiteral(field))
+        if (field.IsEmpty || CsvParser.IsNullLiteral(field) || MatchesNullToken(field, nullToken))
         {
             state.NullCount++;
             return;
@@ -495,6 +497,16 @@ public static class CsvTypeScanner
         }
         return null;
     }
+
+    internal static string? GetNullToken(IReadOnlyDictionary<string, string> options)
+    {
+        if (options.TryGetValue("null_token", out string? value) && value.Length > 0)
+            return value;
+        return null;
+    }
+
+    internal static bool MatchesNullToken(ReadOnlySpan<char> field, string? nullToken)
+        => nullToken is not null && field.Equals(nullToken.AsSpan(), StringComparison.Ordinal);
 }
 
 /// <summary>Result of a full-file CSV scan. Feeds <see cref="CsvDeserializer"/> for pass 2.</summary>
