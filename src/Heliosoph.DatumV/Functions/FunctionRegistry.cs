@@ -735,8 +735,29 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias<Scalar.Strings.TrimFunction>("btrim");
         registry.RegisterScalar<Scalar.Strings.LtrimFunction>();
         registry.RegisterScalar<Scalar.Strings.RtrimFunction>();
+        registry.RegisterScalar<Scalar.Strings.InitcapFunction>();
+        registry.RegisterScalar<Scalar.Strings.PositionFunction>();
+        registry.RegisterScalarAlias<Scalar.Strings.PositionFunction>("strpos");
+        registry.RegisterScalar<Scalar.Strings.StartsWithFunction>();
+        registry.RegisterScalar<Scalar.Strings.EndsWithFunction>();
+        registry.RegisterScalar<Scalar.Strings.ContainsFunction>();
+        registry.RegisterScalar<Scalar.Strings.ReplaceFunction>();
+        registry.RegisterScalar<Scalar.Strings.SplitPartFunction>();
+        registry.RegisterScalar<Scalar.Strings.LpadFunction>();
+        registry.RegisterScalar<Scalar.Strings.RpadFunction>();
+        registry.RegisterScalar<Scalar.Strings.SubstringFunction>();
+        registry.RegisterScalarAlias<Scalar.Strings.SubstringFunction>("substr");
+        registry.RegisterScalar<Scalar.Strings.MidFunction>();
+        registry.RegisterScalar<Scalar.Strings.LeftFunction>();
+        registry.RegisterScalar<Scalar.Strings.RightFunction>();
+        registry.RegisterScalar<Scalar.Strings.OverlayFunction>();
+        registry.RegisterScalar<Scalar.Strings.ReverseFunction>();
+        registry.RegisterScalar<Scalar.Strings.RepeatFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpReplaceFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpLikeFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpMatchFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpCountFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpSubstrFunction>();
 
         // Fulltext family
         registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();

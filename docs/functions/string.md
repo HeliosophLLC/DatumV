@@ -13,26 +13,22 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 
 `length(str)` → Int32 | QU: 1
 
-Number of Unicode code points in the string. Surrogate-pair characters (emoji, ancient scripts, mathematical alphanumerics) count as 1, matching PostgreSQL semantics.
+Number of Unicode code points in the string. Characters outside the Basic Multilingual Plane — emoji, ancient scripts, mathematical alphanumerics — count as 1, matching PostgreSQL semantics. This differs from .NET `string.Length`, which returns the UTF-16 code-unit count and reports 2 for any non-BMP character.
 
 ```sql
-SELECT length('hello')   -- 5
-SELECT length('cafe')    -- 4
--- Surrogate-pair characters (emoji, ancient scripts) count as 1 here, in
--- contrast to .NET string.Length / UTF-16 code-unit counts.
+SELECT length('hello')      -- 5
+SELECT length('😀hi')        -- 3   (emoji is one code point)
 ```
 
 ### octet_length
 
 `octet_length(str)` → Int32 | QU: 1
 
-Number of UTF-8 bytes in the string.
+Number of UTF-8 bytes in the string. ASCII characters take 1 byte; non-BMP characters take 4 bytes each, so for strings containing emoji or other supplementary-plane characters `octet_length` is strictly larger than `length`.
 
 ```sql
 SELECT octet_length('hello')   -- 5
-SELECT octet_length('cafe')    -- 4
--- Surrogate-pair characters (emoji, ancient scripts) encode as 4 UTF-8 bytes
--- each but count as 1 code point under length().
+SELECT octet_length('😀hi')     -- 6   (emoji = 4 UTF-8 bytes + 2 ASCII)
 ```
 
 ## Case Conversion
@@ -277,10 +273,17 @@ SELECT translate('12345', '143', 'ax') -- 'a2x5'
 
 `regexp_replace(str, pattern, replacement, [flags])` → String | QU: 1
 
-Replace regex matches. Default replaces all; pass `'i'` for case-insensitive, `'g'` for global, `'gi'` for both. Without `'g'`, replaces first match only.
+Replace regex matches. By default only the first match is replaced; pass the `'g'` flag for global replacement. Other supported flags: `'i'` case-insensitive, `'c'` case-sensitive, `'n'`/`'m'` newline-sensitive (`^`/`$` anchor at line boundaries; `.` does not match `\n`), `'s'` single-line (the default — `.` matches `\n`), `'x'` extended (ignore whitespace in pattern). Flags can be combined, e.g. `'gi'`.
 
 ```sql
 SELECT regexp_replace('Hello World', '[aeiou]', '*', 'gi') -- 'H*ll* W*rld'
+SELECT regexp_replace('Hello World', '[aeiou]', '*', 'i')  -- 'H*llo World'
+```
+
+`regexp_replace` also accepts the Oracle-style positional overloads `regexp_replace(str, pattern, replacement, start)`, `(…, start, n)`, `(…, start, flags)`, and `(…, start, n, flags)`. `start` is a 1-based character position; characters before it pass through unchanged. When `n ≥ 1`, only the n-th match at-or-after `start` is replaced (the `'g'` flag is ignored).
+
+```sql
+SELECT regexp_replace('abc123def456', '\d+', '_', 1, 2)    -- 'abc123def_'
 ```
 
 ## Concatenation
@@ -640,14 +643,14 @@ Return extension (without dot) from path.
 SELECT get_filename_ext('/data/images/photo.jpg') -- 'jpg'
 ```
 
-### get_path
+### get_directory
 
-`get_path(path)` → String | QU: 1
+`get_directory(path)` → String | QU: 1
 
 Return directory portion of path.
 
 ```sql
-SELECT get_path('/data/images/photo.jpg') -- '/data/images'
+SELECT get_directory('/data/images/photo.jpg') -- '/data/images'
 ```
 
 ## See Also
