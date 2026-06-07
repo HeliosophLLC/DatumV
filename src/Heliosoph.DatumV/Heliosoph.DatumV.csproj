@@ -19,6 +19,23 @@
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
+  <!--
+    GpuVariant: 'cuda' bundles NVIDIA-only stacks (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12);
+    'standard' bundles cross-vendor stacks (Microsoft.ML.OnnxRuntime[.DirectML on Windows] + LLamaSharp.Backend.Vulkan).
+    Default 'cuda' keeps CI / local dev identical to before. Set -p:GpuVariant=standard at publish to swap.
+    The matching #if constants (GPU_VARIANT_CUDA / GPU_VARIANT_STANDARD) toggle LlamaNativeConfig + LlamaSharpBackend
+    between the two backend paths so the runtime config matches whichever native libs were actually packaged.
+  -->
+  <PropertyGroup>
+    <GpuVariant Condition="'$(GpuVariant)' == ''">cuda</GpuVariant>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GpuVariant)' == 'cuda'">
+    <DefineConstants>$(DefineConstants);GPU_VARIANT_CUDA</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GpuVariant)' == 'standard'">
+    <DefineConstants>$(DefineConstants);GPU_VARIANT_STANDARD</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Heliosoph.DatumV.Tests" />
     <InternalsVisibleTo Include="Heliosoph.DatumV.Web" />
@@ -45,7 +62,6 @@
     <PackageReference Include="Apache.Arrow" Version="23.0.0" />
     <PackageReference Include="CardinalityEstimation" Version="1.14.0" />
     <PackageReference Include="LLamaSharp" Version="0.27.0" />
-    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <!--
       Microsoft.Extensions.Http supplies AddHttpClient<TClient> + the
@@ -63,7 +79,6 @@
       tree listing.
     -->
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.5" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.22.0" />
     <!--
       OpenCvSharp4 supplies ORB feature detection, descriptor matching, and
@@ -106,6 +121,48 @@
     <PackageReference Include="System.Formats.Cbor" Version="9.0.0" />
     <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
+  </ItemGroup>
+
+  <!--
+    GPU stack — CUDA variant. NVIDIA-only. The .Cuda12 meta-package is split
+    into Windows + Linux platform packages so a win-x64 publish doesn't drag
+    the ~500 MB linux libggml-cuda.so along (and vice versa). RestoreOnly when
+    the matching RID is targeted.
+  -->
+  <ItemGroup Condition="'$(GpuVariant)' == 'cuda'">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GpuVariant)' == 'cuda' AND ('$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == '')">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Windows" Version="0.27.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GpuVariant)' == 'cuda' AND '$(RuntimeIdentifier)' == 'linux-x64'">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Linux" Version="0.27.0" />
+  </ItemGroup>
+
+  <!--
+    GPU stack — standard variant. Cross-vendor: DirectML for ONNX on Windows
+    (any DX12 GPU), CPU-only ORT on Linux, Vulkan for LLamaSharp everywhere
+    (NVIDIA + AMD + Intel). Tradeoff vs CUDA: ~70-95% perf on the same NVIDIA
+    hardware, but works on AMD / Intel / no-GPU machines without a 750 MB
+    CUDA payload.
+  -->
+  <!--
+    Standard-variant ORT packages are pinned to 1.24.4 because that's the
+    most recent version Microsoft has shipped for the DirectML EP package;
+    keeping CPU + DirectML on the same managed assembly version avoids
+    cross-OS variant skew. The CUDA-variant Gpu package above stays at
+    1.25.1 (its release cadence is independent). The minor consequence:
+    standard-variant opset ceiling lags by one minor version vs CUDA. Bump
+    both when DirectML 1.25+ ships.
+  -->
+  <ItemGroup Condition="'$(GpuVariant)' == 'standard' AND ('$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == '')">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GpuVariant)' == 'standard' AND '$(RuntimeIdentifier)' == 'linux-x64'">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GpuVariant)' == 'standard'">
+    <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,19 +1,60 @@
 name: Release
 
+# Two ways in:
+#   - release: published   → the canonical path. You draft a Release in
+#     the GH UI (or via `gh release create vX.Y.Z`), and this workflow
+#     builds installers for each matrix slot and attaches them as assets.
+#   - workflow_dispatch    → manual button for iterating without cutting
+#     a real Release. Installers are uploaded as run artifacts only.
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write  # required to attach assets to the Release
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.run_id }}
+  cancel-in-progress: false
 
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+  installer:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Standard variants ship the cross-vendor stack (DirectML on Windows,
+          # Vulkan for LLamaSharp everywhere). Smaller installers; work on
+          # NVIDIA, AMD, and Intel. ~70-95% of CUDA perf on NVIDIA.
+          - os: windows-latest
+            label: Windows standard
+            script: dist:win:standard
+            artifact: windows-standard-installer
+          - os: ubuntu-latest
+            label: Linux standard
+            script: dist:linux:standard
+            artifact: linux-standard-appimage
+          # CUDA variants bundle the NVIDIA-only stack
+          # (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12.*). Peak
+          # perf on NVIDIA; CPU fallback on non-NVIDIA hardware. ~750 MB larger.
+          - os: windows-latest
+            label: Windows CUDA
+            script: dist:win:cuda
+            artifact: windows-cuda-installer
+          - os: ubuntu-latest
+            label: Linux CUDA
+            script: dist:linux:cuda
+            artifact: linux-cuda-appimage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash  # uniform across windows + linux runners
     steps:
       - uses: actions/checkout@v4
 
@@ -21,47 +62,71 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - run: dotnet restore Heliosoph.DatumV.slnx
-
-      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore
-
-      - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
-
-  pack-and-publish-nuget:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-node@v4
         with:
-          dotnet-version: '10.0.x'
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            src/Heliosoph.DatumV.Web/electron/package-lock.json
+            src/Heliosoph.DatumV.Web/ClientApp/package-lock.json
 
-      - name: Extract version from tag
+      # `electron/dist:*` runs `npm --prefix ../ClientApp run build` before
+      # the dotnet publish step, so ClientApp's node_modules must exist
+      # ahead of time. The csproj's ClientAppInstall target would install
+      # them too, but only during the dotnet build path — not before the
+      # earlier Vite build.
+      - name: Install ClientApp deps
+        working-directory: src/Heliosoph.DatumV.Web/ClientApp
+        run: npm ci
+
+      - name: Install Electron deps
+        working-directory: src/Heliosoph.DatumV.Web/electron
+        run: npm ci
+
+      # Stamp the installer with the Release tag so the output filename
+      # matches the user-facing version (electron-builder reads version
+      # from this package.json). On workflow_dispatch we append
+      # -dev.<run-number> so manual runs are obviously not releases.
+      - name: Resolve installer version
         id: version
-        shell: bash
+        working-directory: src/Heliosoph.DatumV.Web/electron
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
-            echo "::error::Tag '$TAG' does not produce a valid semver version: '$VERSION'"
-            exit 1
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Tag '$TAG' does not produce a valid semver version: '$VERSION'"
+              exit 1
+            fi
+          else
+            BASE=$(node -p "require('./package.json').version")
+            VERSION="${BASE}-dev.${{ github.run_number }}"
           fi
+          echo "Resolved version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
 
-      - run: >
-          dotnet pack src/Heliosoph.DatumV/Heliosoph.DatumV.csproj
-          -c Release
-          -o ./artifacts/nuget
-          /p:Version=${{ steps.version.outputs.version }}
-
-      - run: >
-          dotnet nuget push ./artifacts/nuget/*.nupkg
-          --api-key ${{ secrets.NUGET_API_KEY }}
-          --source https://api.nuget.org/v3/index.json
+      - name: Build installer
+        working-directory: src/Heliosoph.DatumV.Web/electron
+        run: npm run ${{ matrix.script }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nuget
-          path: ./artifacts/nuget/*.nupkg
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            src/Heliosoph.DatumV.Web/electron/out/*.exe
+            src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+            src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+            src/Heliosoph.DatumV.Web/electron/out/latest*.yml
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src/Heliosoph.DatumV.Web/electron/out/*.exe
+            src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+            src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+            src/Heliosoph.DatumV.Web/electron/out/latest*.yml
+          fail_on_unmatched_files: true

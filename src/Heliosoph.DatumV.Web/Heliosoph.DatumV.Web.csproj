@@ -14,6 +14,17 @@
     <RootNamespace>Heliosoph.DatumV.Web</RootNamespace>
     <AssemblyName>Heliosoph.DatumV.Web</AssemblyName>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <!--
+      Pin the set of RIDs we ever publish for. Helps the SDK resolver prune
+      package runtime assets to just these targets; complemented by the
+      StripForeignRuntimes target below for packages that ship native libs
+      as plain <Content> (which bypasses RID-based pruning).
+    -->
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
 
@@ -82,10 +93,14 @@
     TypeScript client into ClientApp/src/api/generated/openapi-client.ts.
 
     nswag.json drives both stages. NSwag boots Program.CreateHostBuilder (in
-    Program.cs) to resolve IDocumentProvider. Manual only — invoke via
+    Program.cs) to resolve IDocumentProvider. Runs after Build outside Release
+    (Release skips it — the Electron shell builds Release and the codegen exec
+    can exceed its spawn timeout); still invocable manually via
     /t:GenerateOpenApi (or the /t:GenerateApi umbrella).
   -->
   <Target Name="GenerateOpenApi"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' != 'Release'"
           Inputs="$(TargetPath);nswag.json"
           Outputs="ClientApp/src/api/generated/openapi-client.ts">
     <Exec Command="$(NSwagExe_Net80) run nswag.json /variables:Configuration=$(Configuration)"
@@ -106,9 +121,13 @@
   <!--
     Hub codegen via TypedSignalR.Client.TypeScript.Generator. Reflects Hub<T>
     classes + their client interfaces, emits typed HubConnection wrappers.
-    Manual only — invoke via /t:GenerateHubTypes (or the /t:GenerateApi umbrella).
+    Runs after Build outside Release (same rationale as GenerateOpenApi —
+    keep slow exec out of the Electron Release path); still invocable manually
+    via /t:GenerateHubTypes (or the /t:GenerateApi umbrella).
   -->
   <Target Name="GenerateHubTypes"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' != 'Release'"
           DependsOnTargets="ToolRestore"
           Inputs="$(TargetPath)"
           Outputs="ClientApp/src/api/generated/hubs/TypedSignalR.Client/index.ts">
@@ -118,6 +137,27 @@
 
   <!-- Umbrella for manual codegen: dotnet build /t:GenerateApi -->
   <Target Name="GenerateApi" DependsOnTargets="GenerateOpenApi;GenerateHubTypes" />
+
+  <!--
+    Insurance against packages that ship native binaries for multiple OSes
+    in a single payload (LLamaSharp.Backend.* historically did this). The
+    SDK's RID-based runtime asset pruning relies on the package declaring
+    its natives under runtimes/<rid>/native/ in the nuspec — packages that
+    use plain <Content Include="runtimes\**\*"> bypass that and leak every
+    OS's libs into every publish. Strip everything outside the target RID
+    after publish lands.
+  -->
+  <Target Name="StripForeignRuntimes" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <_ForeignRuntimeFile Include="$(PublishDir)runtimes\**\*"
+                           Exclude="$(PublishDir)runtimes\$(RuntimeIdentifier)\**\*" />
+      <_ForeignRuntimeDir Include="$([System.IO.Directory]::GetDirectories('$(PublishDir)runtimes'))"
+                          Exclude="$(PublishDir)runtimes\$(RuntimeIdentifier)" />
+    </ItemGroup>
+    <Delete Files="@(_ForeignRuntimeFile)" />
+    <RemoveDir Directories="@(_ForeignRuntimeDir)" />
+    <Message Importance="high" Text="StripForeignRuntimes: removed @(_ForeignRuntimeDir->Count()) foreign-RID dirs from $(PublishDir)runtimes" />
+  </Target>
 
   <Target Name="BuildClientApp"
           BeforeTargets="AssignTargetPaths"

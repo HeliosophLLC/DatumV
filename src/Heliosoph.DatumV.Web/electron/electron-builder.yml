@@ -35,7 +35,10 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: ${productName}-${version}-setup.${ext}
+  # DATUMV_VARIANT_SUFFIX is set by the dist:win:* npm scripts ("" for the
+  # standard variant, "-cuda" for the CUDA edition). Keeps both installers
+  # distinguishable on the GitHub Release page.
+  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}-setup.${ext}
 
 nsis:
   oneClick: false
@@ -59,4 +62,4 @@ linux:
       arch:
         - x64
   category: Development
-  artifactName: ${productName}-${version}.${ext}
+  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}.${ext}

@@ -13,18 +13,28 @@ namespace Heliosoph.DatumV.Inference.LlamaSharp;
 /// <remarks>
 /// <para>
 /// <strong>Probe strategy.</strong> CPU is always reported as available
-/// (LlamaSharp's CPU backend is built-in). CUDA availability is derived
-/// from <see cref="CudaRuntimeProbe"/> — if the CUDA 12 Runtime DLLs are
-/// reachable, CUDA is listed; otherwise it isn't. The
-/// <see cref="LlamaNativeConfig.RequireCuda"/> flag affects only the
-/// failure mode at load time (loud error vs silent CPU fallback), not the
-/// device list.
+/// (LlamaSharp's CPU backend is built-in). The accelerator entry depends
+/// on the build variant:
 /// </para>
+/// <list type="bullet">
+///   <item>CUDA variant: CUDA availability is derived from
+///   <see cref="CudaRuntimeProbe"/> — if the CUDA 12 Runtime DLLs are
+///   reachable, CUDA is listed; otherwise it isn't.
+///   <see cref="LlamaNativeConfig.RequireCuda"/> affects only the failure
+///   mode at load time (loud error vs silent CPU fallback), not the
+///   device list.</item>
+///   <item>Standard variant: Vulkan is reported as available
+///   unconditionally — LlamaSharp doesn't expose a pre-load Vulkan probe,
+///   so the actual driver/device check happens during
+///   <c>LLamaWeights.LoadFromFile</c>. AutoFallback demotes to CPU on
+///   real failures and the log callback surfaces the underlying reason.</item>
+/// </list>
 /// <para>
 /// <strong>Single device per session.</strong> LlamaSharp loads the entire
 /// model onto one target (GpuLayerCount = 999 offloads everything to GPU
-/// when CUDA is available; falls back to CPU otherwise). Mixed-device
-/// dispatch is a LlamaSharp 0.27+ feature we don't take advantage of.
+/// when an accelerator is available; falls back to CPU otherwise).
+/// Mixed-device dispatch is a LlamaSharp 0.27+ feature we don't take
+/// advantage of.
 /// </para>
 /// </remarks>
 public sealed class LlamaSharpBackend : IInferenceBackend
@@ -79,13 +89,14 @@ public sealed class LlamaSharpBackend : IInferenceBackend
             List<InferenceDevice> available = new(2);
 
             // CPU is always available — LlamaSharp ships an AVX2 CPU backend
-            // alongside CUDA.
+            // alongside every accelerator backend.
             probed.Add(new DeviceProbeResult(
                 InferenceDevice.LlamaSharpCpu,
                 Available: true,
                 Reason: "LlamaSharp CPU backend (AVX2) is always available."));
             available.Add(InferenceDevice.LlamaSharpCpu);
 
+#if GPU_VARIANT_CUDA
             // CUDA depends on whether the CUDA 12 Runtime DLLs are reachable.
             // This is the same probe LlamaModel's constructor relies on to
             // decide whether to throw at load time; running it during device
@@ -110,6 +121,17 @@ public sealed class LlamaSharpBackend : IInferenceBackend
                     Reason: "CUDA 12 Runtime DLLs (cudart64_12.dll, cublas64_12.dll, "
                         + "cublasLt64_12.dll) not found on PATH or in bundled locations."));
             }
+#else
+            // LlamaSharp doesn't expose a pre-load Vulkan probe; the loader
+            // itself attempts vkEnumeratePhysicalDevices during LoadFromFile.
+            // Report as available and let AutoFallback demote to CPU on
+            // real driver/device failures (the log callback surfaces why).
+            probed.Add(new DeviceProbeResult(
+                InferenceDevice.LlamaSharpVulkan,
+                Available: true,
+                Reason: "Vulkan backend bundled; actual driver availability verified at load time."));
+            available.Add(InferenceDevice.LlamaSharpVulkan);
+#endif
 
             _probedDevices = probed;
             _availableDevices = available;
@@ -170,7 +192,12 @@ public sealed class LlamaSharpBackend : IInferenceBackend
         // Honour the device the dispatcher picked. GpuLayerCount = 999
         // offloads every layer to GPU; llama.cpp caps to the model's
         // actual layer count so this is safe. CPU device → 0 layers.
-        int gpuLayers = request.Device == InferenceDevice.LlamaSharpCuda ? 999 : 0;
+        int gpuLayers = request.Device switch
+        {
+            InferenceDevice.LlamaSharpCuda => 999,
+            InferenceDevice.LlamaSharpVulkan => 999,
+            _ => 0,
+        };
 
         ModelParams modelParams = new(request.ModelFilePath)
         {

@@ -70,6 +70,14 @@ public enum InferenceDevice
 
     /// <summary>NVIDIA GPU via LlamaSharp / llama.cpp's CUDA backend.</summary>
     LlamaSharpCuda,
+
+    /// <summary>
+    /// Any Vulkan-capable GPU via LlamaSharp / llama.cpp's Vulkan backend.
+    /// Cross-vendor (NVIDIA, AMD, Intel) on Windows + Linux; perf is
+    /// typically 85-95% of CUDA on the same NVIDIA hardware. Shipped only
+    /// in the standard installer variant.
+    /// </summary>
+    LlamaSharpVulkan,
 }
 
 /// <summary>

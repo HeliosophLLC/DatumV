@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -19,9 +23,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
 
       - run: dotnet restore Heliosoph.DatumV.slnx
 
-      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore
+      # SkipClientApp=true so the engine build does not require Node or
+      # the Vite frontend to be installed. The release workflow is what
+      # exercises the full Electron pipeline.
+      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true
 
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
