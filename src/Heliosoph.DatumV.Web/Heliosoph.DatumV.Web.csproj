@@ -165,6 +165,17 @@
           Condition="'$(SkipClientApp)' != 'true'"
           Inputs="ClientApp/src/**/*.ts;ClientApp/src/**/*.tsx;ClientApp/src/**/*.css;ClientApp/index.html;ClientApp/package.json;ClientApp/vite.config.ts;ClientApp/tsconfig.json"
           Outputs="wwwroot/index.html">
+    <!--
+      Clear wwwroot before re-running Vite. Vite never deletes outputs it
+      stopped emitting (renamed images, removed code-split chunks), so
+      stale files accumulate over the lifetime of the working copy. The
+      StaticWebAssets pipeline hashes the cleared set into
+      obj/.../rpswa.dswa.cache.json, then later complains
+      "No file exists for the asset" when a referenced ghost asset is
+      missing. Wiping wwwroot makes every build start from Vite's actual
+      current output set.
+    -->
+    <RemoveDir Directories="wwwroot" Condition="Exists('wwwroot')" />
     <Exec Command="npm run build" WorkingDirectory="ClientApp" />
     <!--
       Re-glob from inside the target so first-time builds (when wwwroot/
