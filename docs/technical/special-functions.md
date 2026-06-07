@@ -605,11 +605,12 @@ TABLESAMPLE composes naturally with all query clauses:
 
 ```sql
 -- Balanced sample → sort → limit → output
-SELECT * FROM training_data
-TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
-ORDER BY label, id
-LIMIT 5000
-INTO 'balanced_train.parquet'
+COPY (
+  SELECT * FROM training_data
+  TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
+  ORDER BY label, id
+  LIMIT 5000
+) TO 'balanced_train.parquet'
 ```
 
 ### When to use STRATIFIED vs. BALANCED

@@ -78,28 +78,22 @@ WHERE total_spent > 0
 ORDER BY avg_order_value DESC
 ```
 
-### Step 3: Export (INTO)
+### Step 3: Export (COPY)
 
-Write results to a file. The format is inferred from the extension:
+Wrap the query in `COPY (...) TO '<path>'` to write results to a file. The format is inferred from the extension (Parquet today; CSV / JSONL / `.datum` / HDF5 staged as follow-ups):
 
 ```bash
-datumv query "SELECT * FROM customers INTO 'output.parquet'" --source "customers=./customers.csv"
+datumv query "COPY (SELECT * FROM customers) TO 'output.parquet'" --source "customers=./customers.csv"
 ```
 
-Supported output formats:
-
-| Extension | Format | Best for |
-|-----------|--------|----------|
-| `.csv` | CSV | Spreadsheets, simple tools |
-| `.parquet` | Parquet | ML frameworks, columnar analytics |
-| `.h5` / `.hdf5` | HDF5 | NumPy, TensorFlow, PyTorch |
-
-For large exports, shard the output into manageable chunks:
+Pass options through an optional trailing block:
 
 ```sql
-SELECT * FROM data INTO 'output.parquet' SHARD ON sample_count 50000
--- Creates: output_shard_00000.parquet, output_shard_00001.parquet, ...
+COPY (SELECT * FROM data) TO 'output.parquet'
+  (FORMAT parquet, ROW_GROUP_SIZE 10000, COMPRESSION 'zstd')
 ```
+
+See [COPY and Export](technical/copy-and-export.md) for the full option set and typed-media encoding rules.
 
 ## Interactive Mode (Shell)
 
@@ -206,8 +200,9 @@ FROM (
 
 ```bash
 datumv query "
-  SELECT ...  -- (the query above)
-  INTO 'customer_features.parquet'
+  COPY (
+    SELECT ...  -- (the query above)
+  ) TO 'customer_features.parquet'
 " --source "orders=./orders.csv" --source "customers=./customers.csv"
 ```
 
@@ -219,19 +214,20 @@ You have a ZIP of images and a JSON annotations file. You want to resize all ima
 
 ```bash
 datumv query "
-  SELECT
-    resize(img.file_bytes, 224, 224) AS image,
-    cap.label
-  FROM images AS img
-  INNER JOIN annotations AS cap ON get_filename(img.file_name) = cap.filename
-  WHERE cap.label IS NOT NULL
-  INTO 'training_data.h5'
+  COPY (
+    SELECT
+      resize(img.file_bytes, 224, 224) AS image,
+      cap.label
+    FROM images AS img
+    INNER JOIN annotations AS cap ON get_filename(img.file_name) = cap.filename
+    WHERE cap.label IS NOT NULL
+  ) TO 'training_data.parquet'
 " \
   --source "images=./train2017.zip" \
   --source "json:annotations=./labels.json"
 ```
 
-That's it — no Python script, no intermediate files, no memory issues. DatumV streams through the ZIP, joins with annotations, resizes each image, and writes directly to HDF5.
+That's it — no Python script, no intermediate files, no memory issues. DatumV streams through the ZIP, joins with annotations, resizes each image, and writes the result directly to Parquet.
 
 ## Sampling and Cross-Validation
 
@@ -246,19 +242,21 @@ SELECT * FROM training_data TABLESAMPLE BERNOULLI(1)
 
 ```sql
 -- Exactly 1000 rows per class
-SELECT * FROM training_data
-TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
-INTO 'balanced_train.parquet'
+COPY (
+  SELECT * FROM training_data
+  TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
+) TO 'balanced_train.parquet'
 ```
 
 ### Set up k-fold cross-validation
 
 ```sql
 -- Tag each row with a fold number (0-4), then export
-SELECT *, fold
-FROM training_data
-CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
-INTO 'training_with_folds.parquet'
+COPY (
+  SELECT *, fold
+  FROM training_data
+  CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
+) TO 'training_with_folds.parquet'
 ```
 
 ## What's Next?

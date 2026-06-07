@@ -93,7 +93,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
                 Elapsed: _scanResult.Elapsed);
         }
 
-        await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using Stream stream = await CsvStreamPrefilter.OpenAsync(_descriptor, cancellationToken).ConfigureAwait(false);
 
         string[] names;
         DataKind[] kinds;
@@ -127,6 +127,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
         }
 
         ColumnLookup columnLookup = new(names);
+        string? nullToken = CsvTypeScanner.GetNullToken(_descriptor.Options);
 
         // Stream is at position 0 after open. Create line reader.
         using LineReader lineReader = new(stream);
@@ -161,7 +162,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
                         if (currentFieldIndex == columnIndex)
                         {
                             ReadOnlySpan<char> fieldSpan = lineSpan[fieldStart..charIndex].Trim();
-                            values[columnIndex] = ParseField(fieldSpan, kinds[columnIndex], columnIndex, temporalCache, batch.Arena);
+                            values[columnIndex] = ParseField(fieldSpan, kinds[columnIndex], columnIndex, temporalCache, batch.Arena, nullToken);
                             columnIndex++;
                         }
 
@@ -182,7 +183,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
                 // common case (fully-quoted fields without embedded `""`) stays
                 // zero-allocation. A thread-static char buffer is used only when a
                 // field contains an escaped quote and must be unescaped.
-                ParseQuotedLineIntoValues(lineSpan, delimiter, kinds, names, values, batch.Arena, temporalCache);
+                ParseQuotedLineIntoValues(lineSpan, delimiter, kinds, names, values, batch.Arena, temporalCache, nullToken);
             }
 
             batch.Add(values);
@@ -233,7 +234,8 @@ public sealed class CsvDeserializer : IFormatDeserializer
         string[] names,
         DataValue[] values,
         IValueStore store,
-        TemporalFormatCache temporalCache)
+        TemporalFormatCache temporalCache,
+        string? nullToken)
     {
         int position = 0;
         int columnIndex = 0;
@@ -320,7 +322,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
             }
 
         ProcessField:
-            values[columnIndex] = ParseField(fieldSpan.Trim(), kinds[columnIndex], columnIndex, temporalCache, store);
+            values[columnIndex] = ParseField(fieldSpan.Trim(), kinds[columnIndex], columnIndex, temporalCache, store, nullToken);
             columnIndex++;
         }
 
@@ -352,9 +354,10 @@ public sealed class CsvDeserializer : IFormatDeserializer
         DataKind kind,
         int columnIndex,
         TemporalFormatCache temporalCache,
-        IValueStore store)
+        IValueStore store,
+        string? nullToken)
     {
-        if (field.IsEmpty || CsvParser.IsNullLiteral(field))
+        if (field.IsEmpty || CsvParser.IsNullLiteral(field) || CsvTypeScanner.MatchesNullToken(field, nullToken))
         {
             return DataValue.Null(kind);
         }

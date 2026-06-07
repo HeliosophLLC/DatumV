@@ -222,6 +222,25 @@ public readonly partial struct DataValue
     }
 
     /// <summary>
+    /// Creates a value from a Postgres-compatible <see cref="Interval"/>:
+    /// months at <c>_p0</c>, days at <c>_p1</c>, microseconds packed across
+    /// <c>_p2</c>+<c>_p3</c>. Total 16 bytes inline — no arena allocation.
+    /// </summary>
+    public static DataValue FromInterval(Interval value) =>
+        new(DataKind.Interval, flags: 0,
+            p0: value.Months,
+            p1: value.Days,
+            p2: (int)value.Microseconds,
+            p3: (int)(value.Microseconds >> 32));
+
+    /// <summary>
+    /// Creates an <see cref="Interval"/> value from its three independent
+    /// components. Convenience for callers that already have the fields in hand.
+    /// </summary>
+    public static DataValue FromInterval(int months, int days, long microseconds) =>
+        FromInterval(new Interval(months, days, microseconds));
+
+    /// <summary>
     /// Creates a type tag value that describes another <see cref="DataKind"/>. When
     /// <paramref name="typeId"/> is non-zero, the tag carries a <see cref="TypeRegistry"/>
     /// id describing the rich shape (struct field names, nested array element types).

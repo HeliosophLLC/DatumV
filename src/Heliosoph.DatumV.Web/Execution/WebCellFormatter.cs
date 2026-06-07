@@ -43,14 +43,38 @@ internal static class WebCellFormatter
             return new JsonCell("media_array", Items: items);
         }
 
-        // Image / Audio / Video → base64 data so the browser can render them.
-        // The legacy byte-array column path (UInt8 + IsArray) carries image
-        // payloads from older datasets; treat it as image media too.
-        if (value.Kind == DataKind.Image || value.IsByteArrayKind)
+        // Typed Image: always renders as media — even when we don't recognise
+        // the magic, the producer's intent was an image and the browser may
+        // still handle a format we don't know.
+        if (value.Kind == DataKind.Image)
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
             string mime = DetectImageMime(bytes);
             return new JsonCell("media", Mime: mime, DataB64: Convert.ToBase64String(bytes));
+        }
+
+        // Generic UInt8[] (open_parquet of an exported byte column, or any
+        // third-party Parquet with binary columns). Older code routed every
+        // UInt8[] through the image-media path on the assumption it was an
+        // image — that misrenders the .glb / .ply / .wav payloads our own
+        // typed-media export produces. Sniff for media magic first; only
+        // emit a media cell when one of the recognised image / audio / video
+        // formats matches. Bytes that don't match fall through to a text
+        // summary that names the format (glTF / PLY / unknown) and points
+        // at the matching `_from_X` importer so the user can wrap the
+        // column for a proper viewer instead of staring at a broken image
+        // placeholder.
+        if (value.IsByteArrayKind)
+        {
+            ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
+            string? mediaMime = DetectImageMimeOrNull(bytes)
+                ?? DetectAudioMimeOrNull(bytes)
+                ?? DetectVideoMimeOrNull(bytes);
+            if (mediaMime is not null)
+            {
+                return new JsonCell("media", Mime: mediaMime, DataB64: Convert.ToBase64String(bytes));
+            }
+            return new JsonCell("text", Text: DescribeBinaryBytes(bytes));
         }
 
         if (value.Kind == DataKind.Audio)
@@ -917,6 +941,69 @@ internal static class WebCellFormatter
             parts[i] = format(span[i]);
         }
         return "[" + string.Join(", ", parts) + "]";
+    }
+
+    /// <summary>
+    /// Sentinel used by the original <see cref="DetectImageMime"/> /
+    /// <see cref="DetectAudioMime"/> / <see cref="DetectVideoMime"/> trio
+    /// when no magic-byte match fires. Centralised so the
+    /// <c>OrNull</c> wrappers can recognise it without restating the
+    /// literal.
+    /// </summary>
+    private const string UnknownMime = "application/octet-stream";
+
+    /// <summary>
+    /// Returns <see cref="DetectImageMime"/>'s match, or <see langword="null"/>
+    /// when the bytes don't match any image format we recognise. Used by the
+    /// generic UInt8[] path so unknown bytes can fall through to a text
+    /// summary instead of being mis-rendered as a broken image.
+    /// </summary>
+    private static string? DetectImageMimeOrNull(ReadOnlySpan<byte> bytes)
+    {
+        string mime = DetectImageMime(bytes);
+        return mime == UnknownMime ? null : mime;
+    }
+
+    /// <summary>Audio counterpart of <see cref="DetectImageMimeOrNull"/>.</summary>
+    private static string? DetectAudioMimeOrNull(ReadOnlySpan<byte> bytes)
+    {
+        string mime = DetectAudioMime(bytes);
+        return mime == UnknownMime ? null : mime;
+    }
+
+    /// <summary>Video counterpart of <see cref="DetectImageMimeOrNull"/>.</summary>
+    private static string? DetectVideoMimeOrNull(ReadOnlySpan<byte> bytes)
+    {
+        string mime = DetectVideoMime(bytes);
+        return mime == UnknownMime ? null : mime;
+    }
+
+    /// <summary>
+    /// Builds the placeholder text for a UInt8[] cell whose bytes don't
+    /// match any known media format. When the magic matches an interchange
+    /// format we ship a matching importer for (.glb / PLY today), surface
+    /// the importer name so the user knows how to view the column properly
+    /// — typically <c>SELECT mesh_from_gltf(col) FROM open_parquet(...)</c>.
+    /// </summary>
+    private static string DescribeBinaryBytes(ReadOnlySpan<byte> bytes)
+    {
+        // glTF 2.0 binary container: 4-byte ASCII "glTF" magic at offset 0.
+        if (bytes.Length >= 4
+            && bytes[0] == 0x67 && bytes[1] == 0x6C
+            && bytes[2] == 0x54 && bytes[3] == 0x46)
+        {
+            return $"<glTF 2.0 binary: {bytes.Length:N0} bytes — wrap the column with "
+                + "mesh_from_gltf(col) to view as a Mesh>";
+        }
+        // PLY (binary or ASCII): magic line "ply" followed by LF or CRLF.
+        if (bytes.Length >= 4
+            && bytes[0] == 0x70 && bytes[1] == 0x6C && bytes[2] == 0x79
+            && (bytes[3] == 0x0A || bytes[3] == 0x0D))
+        {
+            return $"<PLY: {bytes.Length:N0} bytes — wrap the column with "
+                + "pointcloud_from_ply(col) to view as a PointCloud>";
+        }
+        return $"<binary: {bytes.Length:N0} bytes>";
     }
 
     private static string DetectImageMime(ReadOnlySpan<byte> bytes)

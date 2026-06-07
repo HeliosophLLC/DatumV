@@ -11,7 +11,7 @@ Table-valued functions produce multiple rows and are used in FROM, CROSS JOIN, a
 
 ### unnest
 
-`unnest(array_col)` -> Rows | QU: 1
+`unnest(array_col)` -> Rows
 
 Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays.
 
@@ -24,21 +24,42 @@ CROSS JOIN LATERAL UNNEST(t.scores) AS s
 
 ### range
 
-`range(start, end[, step])` -> Rows | QU: 1
+`range(start, stop[, step])` -> Rows
+`range(start, stop, stride)` -> Rows (temporal)
 
-Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1.
+Generate a half-open sequence `[start, stop)` as rows with a single `value` column. The upper bound is **excluded** — `range(0, 5)` yields `0, 1, 2, 3, 4`. For an inclusive sequence, use [`generate_series`](temporal.md#generate_series).
+
+Numeric form accepts `Int32`, `Int64`, or `Float64` arguments; mixed kinds widen to the widest input. The default step is `1` and must be non-zero. A step that points away from `stop` (positive step with `start > stop`, or negative step with `start < stop`) yields zero rows — not an error.
+
+Temporal form accepts `Timestamp` or `TimestampTz` bounds with an `Interval` stride. Month strides walk calendar months (28–31 days each). Stride sign selects direction; a zero stride is rejected.
+
+Any `NULL` argument yields zero rows.
+
+```sql
+-- Half-open numeric sequence
+SELECT value FROM range(0, 5)              -- 0, 1, 2, 3, 4
+SELECT value FROM range(0.0, 1.0, 0.25)    -- 0.0, 0.25, 0.5, 0.75
+
+-- Half-open time window
+SELECT value FROM range(
+    TIMESTAMP '2026-06-11 00:00:00',
+    TIMESTAMP '2026-06-11 03:00:00',
+    INTERVAL '1 hour')                     -- 00:00, 01:00, 02:00
+```
 
 See [SQL Reference -- LATERAL JOIN / APPLY](../sql/joins.md#lateral-join--apply) for full syntax and examples.
 
 ### video_unnest_frames
 
-`video_unnest_frames(source [, start_frame [, stride [, max_frames]]])` -> Rows | QU: 1
+`video_unnest_frames(source [, start_frame [, stride [, max_frames]]])` -> Rows
 
 Enumerates frames of a video as lazy `VideoFrame` handles. Each output row is `(frame_index Int32, frame VideoFrame)`. The function does no decoding — it opens the source once to read container metadata, then emits one handle per frame in stride order. Pixels are materialised only when a downstream consumer (typically `video_frame_to_image`) routes the handle back through the per-query video registry.
 
 `source` is either a STRING file path or a `Video` column value. Sidecar-backed Video columns are read directly from the `.datum-blob` window via a seekable stream — no full-file copy. Arena-backed Video values are read into a managed buffer once and fed to FFmpeg via an in-memory stream.
 
 `start_frame` defaults to 0; `stride` to 1; `max_frames` defaults to the container's reported frame count (when known — falls back to "all frames" semantics where the function emits handles until the source returns end-of-stream).
+
+`frame_index` is **0-based** — frame 0 is the first frame of the container. This is the FFmpeg / ffprobe / video-tooling convention and deliberately departs from PostgreSQL's 1-based ordinality (`generate_series`, `WITH ORDINALITY`, array subscripts): aligning with PG would force `start_frame` and `max_frames` to disagree with every external video tool the user compares against. If a recipe wants a 1-based row number that's distinct from the underlying frame address, layer `ROW_NUMBER() OVER ()` over the output.
 
 ```sql
 -- All frames of a stored video, decoded at source resolution
@@ -63,7 +84,7 @@ See [Examples — Video frames as a queryable column](../sql/examples.md#video-f
 
 ### open_archive
 
-`open_archive(source [, path_pattern])` -> Rows | QU: 1
+`open_archive(source [, path_pattern])` -> Rows
 
 Opens a ZIP / TAR / TAR.GZ / TAR.BZ2 archive and yields one row per regular-file entry. Streams N rows per batch with the body bytes materialized into the query arena — no temp extraction, no managed `byte[]` per entry. The load-bearing primitive behind SQL dataset recipes: compose with `read_csv`, `audio_decode`, `image_decode`, joins, and CTAS to shape raw archives into typed tables.
 
@@ -110,7 +131,7 @@ JOIN open_archive('LJSpeech-1.1.tar.gz', path_pattern := 'LJSpeech-1.1/wavs/%.wa
 
 ### open_folder
 
-`open_folder(source [, recursion_depth [, path_pattern]])` -> Rows | QU: 1
+`open_folder(source [, recursion_depth [, path_pattern]])` -> Rows
 
 Walks a filesystem directory and yields one row per regular file. The on-disk analogue of `open_archive` — same output schema (`path STRING, size INT64, modified TIMESTAMPTZ, bytes Array<UInt8>`), same streaming-into-arena memory shape, same path-pattern filter — so recipes built for archive sources port to directory sources by swapping the call. Use when the source dataset is already extracted, a scratch directory of in-progress media, or a drop folder being staged for ingest.
 
@@ -155,7 +176,7 @@ JOIN open_folder('D:\corpora\LJSpeech-1.1',
 
 ### list_folder
 
-`list_folder(source [, recursion_depth [, path_pattern]])` -> Rows | QU: 1
+`list_folder(source [, recursion_depth [, path_pattern]])` -> Rows
 
 Yields one row per regular file under a filesystem directory with metadata only — `path`, `size`, `modified`, no bytes. The no-body counterpart to `open_folder`. Use for listings, file-count queries, size audits, finding the biggest files, or generating a manifest to feed into a subsequent `open_folder` + `JOIN`. Cheap: no file open, no arena pressure, no IO beyond the directory enumeration itself — a recursive walk of hundreds of thousands of files completes in seconds.
 
@@ -188,7 +209,7 @@ JOIN open_folder('D:\corpora', recursion_depth := -1, path_pattern := '%.flac') 
 
 ### read_csv
 
-`read_csv(bytes [, delimiter])` -> Rows | QU: 1
+`read_csv(bytes [, delimiter])` -> Rows
 
 Parses CSV bytes into rows of `Array<String>` — each input line becomes one row whose single `fields` column carries the split field values. Designed for composition with `open_archive` / `open_folder` so SQL recipes can read a manifest from inside an archive (or a sibling `metadata.csv` on disk) without ever touching the bytes from a separate file path.
 
@@ -198,11 +219,11 @@ Output column: `fields Array<String>`. Project named columns positionally — `f
 SELECT fields[1] AS clip_id, fields[2] AS transcript FROM read_csv(...)
 ```
 
-**Why `Array<String>` rather than named columns.** Named-column output would require the planner to know the column count and names at plan time, but for a runtime-bound `bytes` argument neither is available until execute. Returning `Array<String>` sidesteps a planner enhancement (constant-fold-at-validate for TVF arguments) and lets recipes ship today. A schema-bearing overload can be added alongside this one once the planner grows that hook — existing recipes continue to work unchanged.
+**Why `Array<String>` rather than named columns.** Named-column output would require the planner to know the column count and names at plan time, but for a runtime-bound `bytes` argument neither is available until execute. Returning `Array<String>` sidesteps a planner enhancement (constant-fold-at-validate for TVF arguments) and lets recipes ship today. If a schema is required, use `open_csv_typed` instead.
 
 `delimiter` is an optional single-character STRING (`,` by default). Common values: `','` for CSV, `'\t'` for TSV, `'|'` for LJSpeech-style pipe-delimited manifests. Multi-character delimiters throw — composite separators aren't supported in v1.
 
-**Parser scope (v1).** Simple split by delimiter — no RFC 4180 quoting, no embedded-newline support inside quoted fields, no escape handling. Most flat manifests (LJSpeech `metadata.csv`, Common Voice `train.tsv`, AudioSet TSVs) work fine. CSV payloads with `"`-quoted fields containing embedded delimiters won't split correctly until a richer parser lands; route those through the file-path CSV ingest path instead.
+**Parser scope.** RFC 4180 quoted fields are honoured: wrapping `"..."` is stripped, embedded `""` collapses to a single `"`, and delimiters inside quotes are preserved (`"a,b","c"` → `["a,b", "c"]`). Embedded newlines inside quoted fields are **not** supported — the surrounding loop breaks the payload on bare `\n` before quote state is considered, so a multi-line cell arrives broken into parts. For multi-line CSV cells, reach for the typed file-path ingest path.
 
 Line endings: `\n` is the separator; trailing `\r` on each line is stripped (`\r\n` payloads parse cleanly). Empty fields between delimiters are preserved (`a,,c` yields `["a", "", "c"]`). NULL bytes input yields no rows.
 
@@ -215,6 +236,123 @@ FROM read_csv(:manifest_bytes, delimiter := '|')
 SELECT fields[1] AS client_id, fields[2] AS path, fields[3] AS sentence
 FROM read_csv(:tsv_bytes, delimiter := '\t')
 WHERE fields[1] != 'client_id'
+```
+
+### open_csv
+
+`open_csv(path [, delimiter])` -> Rows
+
+Streams a CSV file from disk and yields one row per line, each row carrying a single `fields Array<String>` column. The file-path analogue of `read_csv` — same single-column output, same positional projection pattern, same line-splitter — for the case where the manifest is a loose file rather than bytes inside an archive. Avoids the byte-materialisation hop and stays bounded regardless of file size.
+
+Output column: `fields Array<String>`. Project named columns positionally — `fields[1]` is the first field, `fields[2]` the second, etc. — combine with `AS` aliases for readable downstream SQL.
+
+`delimiter` is an optional single-character STRING (`,` by default). Multi-character delimiters throw.
+
+**Parser scope.** Same as `read_csv`: RFC 4180 quoting handled, embedded newlines inside quoted fields not. Recipes that work against `read_csv` swap to `open_csv` without touching downstream projections.
+
+Line endings: `\n` is the separator; trailing `\r` is stripped (`\r\n` payloads parse cleanly). Empty interior fields are preserved. UTF-8 decoding is assumed; non-UTF-8 payloads come through with garbled characters rather than throwing.
+
+The file is opened with `FileShare.ReadWrite | FileShare.Delete` so the reader coexists with a manifest being appended to or rotated.
+
+```sql
+-- Pipe-delimited LJSpeech manifest sitting next to an extracted dataset
+SELECT fields[1] AS clip_id, fields[2] AS transcript
+FROM open_csv('D:\corpora\LJSpeech-1.1\metadata.csv', delimiter := '|')
+
+-- TSV with header (caller filters the header line via WHERE)
+SELECT fields[1] AS client_id, fields[2] AS path
+FROM open_csv('C:\datasets\common_voice\train.tsv', delimiter := '\t')
+WHERE fields[1] != 'client_id'
+```
+
+### open_csv_typed
+
+`open_csv_typed(path)` -> Rows
+
+Opens a CSV file with **plan-time type inference** and yields typed, named rows — the schema-bearing sibling of `open_csv`. Where `open_csv` returns a single `fields Array<String>` column and leaves projection positional, `open_csv_typed` runs the ingest-grade CSV scanner at plan time, builds a real per-column schema (narrowed integers, dates, leading-zero codes preserved as strings, etc.), and surfaces the columns by their CSV header names.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time (literal in source, or a `$parameter` reference the parameter binder has substituted). The validator runs a full file pass — the same authoritative inference path the dataset ingest pipeline uses — and builds a real `Schema`, so `SELECT date, primary_type FROM open_csv_typed(...)` type-checks against the actual CSV columns. Calling with a non-constant argument throws — recipe writers must inline the path or pass it as a bound parameter.
+
+The scan result is cached for the subsequent execute pass so the actual query doesn't pay twice. For interactive `LIMIT 5` exploration on multi-GB CSVs the scan still dominates wall time — reach for `open_csv` instead if you only want a quick look without per-column types.
+
+**Uncompressed only.** Compressed CSVs (`.csv.gz`, `.csv.bz2`) are not supported: scanning a compressed file at plan time would require full decompression-to-temp on the planner thread, which doesn't match the cheap-plan-time contract `ValidateArguments` is expected to honour. Decompress to a `.csv` first and pass the uncompressed path.
+
+```sql
+-- Real typed columns, no positional indexing
+SELECT clip_id, transcript
+FROM open_csv_typed('D:\corpora\LJSpeech-1.1\metadata.csv');
+
+-- Chicago crimes: the typed schema includes a real TIMESTAMPTZ for the date column,
+-- so date arithmetic works without per-row casting
+SELECT "Primary Type", COUNT(*) AS n
+FROM open_csv_typed('D:\datasets\chicago\Crimes_-_2001_to_Present.csv')
+WHERE EXTRACT(year FROM "Date") = 2024
+GROUP BY "Primary Type"
+ORDER BY n DESC;
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_csv_typed($manifest_path);
+```
+
+### open_json
+
+`open_json(path)` -> Rows
+
+Opens a JSON file with **plan-time type inference** and yields typed, named rows. Accepts two root shapes — a single object (1 row) or an array of objects (N rows) — and rejects primitive or array-of-non-object roots. The schema is the union of keys across rows with per-column kinds inferred from observed values.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time (literal in source, or a `$parameter` reference the parameter binder has substituted). The validator parses the document, runs the shared JSON type scanner over every row, and builds a real `Schema` — so `SELECT id, name FROM open_json(...)` type-checks against the actual keys. Calling with a non-constant argument throws — inline the path or pass it as a bound parameter.
+
+**Type inference.** Each column's kind is the most-specific family that holds for every non-null value: integers narrow to the smallest fitting width (`UInt8`, `Int16`, …, `Int64`, `UInt128`, `Int128`); fractional numbers narrow to `Float32` when every value round-trips through single precision, else `Float64`; pure JSON-`true`/`false` columns become `Boolean`; pure JSON-string columns become `String`. Columns whose values mix scalar families across rows, or hold nested objects / arrays, fall through to `Json` so the original shape stays queryable.
+
+**Nullability.** JSON `null` and key absence are treated identically — a column present in some rows and missing in others becomes nullable.
+
+**Memory.** The document is parsed in full once at plan time (scan) and again at execute time (emit), so peak memory is one document's worth of parsed tape. For multi-GB feeds prefer `open_jsonl`, which streams line-by-line.
+
+Compressed inputs (`.json.gz`, `.json.bz2`) route through the same descriptor as the file-format ingest path, so a gzipped JSON file works without manual decompression.
+
+```sql
+-- Typed columns straight from a root-array document
+SELECT id, name, score
+FROM open_json('D:\datasets\users.json');
+
+-- Nested values land as Json — query them with the json_* function family
+SELECT id, json_extract_path(metadata, 'tags', 0) AS first_tag
+FROM open_json('D:\datasets\events.json');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_json($feed_path);
+```
+
+### open_jsonl
+
+`open_jsonl(path)` -> Rows
+
+Opens a newline-delimited JSON file (`.jsonl` / `.ndjson`) with **plan-time type inference** and yields one row per non-empty line. Each line is one independent JSON value. The file's shape is locked on the first non-empty line:
+
+- If line 1 is a JSON object → **object-mode**. Schema is the union of keys across all lines with narrowed per-column kinds (same inference as `open_json`).
+- If line 1 is any other JSON value (array, string, number, true/false, null) → **single-column-mode**. Schema is a single `value Json` column; each line lands as one `Json` cell.
+
+Mid-file shape mismatches (an object line in a single-column-mode file, or a non-object line in an object-mode file) throw with the offending line number. Empty / whitespace-only lines are skipped.
+
+**Plan-time scan.** `path` must be a constant STRING at plan time. The validator walks the file once to detect shape and infer the schema — same authoritative inference path the JSONL ingester uses. Calling with a non-constant argument throws.
+
+**Streaming.** Both the scan pass and the emit pass walk lines one at a time, parsing each as its own JSON document and disposing it before reading the next. Peak memory stays bounded to a single line's parsed shape regardless of file size — preferred over `open_json` for large feeds.
+
+```sql
+-- Typed columns from an object-mode JSONL log
+SELECT timestamp, user_id, event
+FROM open_jsonl('D:\logs\events.jsonl')
+WHERE event = 'login';
+
+-- Single-column-mode: each line is a JSON array, kept whole
+SELECT json_array_length(value) AS row_width
+FROM open_jsonl('D:\datasets\rows.jsonl');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT *
+FROM open_jsonl($feed_path);
 ```
 
 ### open_fits_hdus
@@ -271,7 +409,7 @@ Output columns:
 | `hdu_index` | `INT64` | Source HDU index (preserved across skipped non-image HDUs) |
 | `extname` | `STRING?` | `EXTNAME` card value |
 | `image` | `IMAGE?` | PNG-encoded grayscale preview, min/max-stretched. Populated only when `NAXIS == 2`. NULL for 1-D spectra and higher-rank cubes. |
-| `sci` | `FLOAT32[]?` | Per-pixel scientific value with BSCALE/BZERO applied. Populated whenever the HDU has pixel data. Shape is flat — read NAXIS / NAXISn from the `header` column to reshape. |
+| `sci` | `FLOAT32[]?` | Per-pixel scientific value with BSCALE/BZERO applied. Populated whenever the HDU has pixel data. For NAXIS ≥ 2 the cell is a multi-dim `FLOAT32` with shape `[NAXISn, …, NAXIS2, NAXIS1]` (slowest-axis-first, NumPy convention) — so `sci[y, x]` indexes a 2-D pixel directly, `sci[z, y, x]` indexes a 3-D spectral cube voxel, etc. For NAXIS = 1 (1-D spectrum) the cell is flat. |
 | `header` | `JSON` | Full card list, same shape as `open_fits_hdus` |
 
 **`image` vs `sci`.** Two columns, two audiences. The `image` column is a browser-displayable thumbnail — handy for chat UIs, dataset previews, sanity checks. The `sci` column carries the *actual* per-pixel scientific values in physical units (BSCALE/BZERO applied during decode), suitable for SQL math, NaN masks, per-pixel filtering, statistics. A query that just wants to look at a frame reads `image`; a query that wants to compute on the pixels reads `sci`.
@@ -338,10 +476,358 @@ SELECT * FROM open_fits_table('/data/catalog.fits', 1);
 
 -- Bound parameter (substituted to a literal at plan time)
 SELECT *
-FROM open_fits_table($archive, 'CATALOG');
+FROM open_fits_table($artifact, 'CATALOG');
 ```
 
 **Ingest path.** Dropping a `.fits` file into the dataset pipeline lands it through `FitsFileFormat`, which emits the same shape `open_fits_hdus` does — the most informative default for an unknown file. Recipes that want pixel previews or catalog rows directly should use the corresponding TVF inside an SQL recipe.
+
+### open_h5_meta
+
+`open_h5_meta(path)` -> Rows
+
+Opens an HDF5 file and yields **one row per group and dataset** in the file's tree, including the root. The interrogation TVF for HDF5: read this first to see what's inside an unknown file before pulling rows out with `open_h5_dataset`.
+
+HDF5 files are hierarchical — datasets live at paths inside groups, like a tiny in-file filesystem. ML pipelines, Python tooling, and scientific software all use this structure heavily (e.g. `/embeddings/train/x`, `/metadata/instrument/filter`). The walker visits every node depth-first, so the row stream mirrors the file's logical layout.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `path` | `STRING` | Full in-file path, slash-separated. Root is `/`. |
+| `kind` | `STRING` | `'group'` or `'dataset'` |
+| `element_kind` | `STRING?` | Dataset element type name (e.g. `'Float32'`, `'Int64'`, `'String'`). NULL for groups. `'Unknown'` for datasets whose dtype isn't supported in v1. |
+| `dimensions` | `INT64[]?` | Dataset shape. `[N]` for 1-D, `[R, C]` for 2-D, etc. Empty array for scalar datasets. NULL for groups. |
+| `is_scalar` | `BOOLEAN` | TRUE for scalar (rank-0) datasets, FALSE otherwise. FALSE for groups. |
+| `is_supported` | `BOOLEAN` | TRUE when `open_h5_dataset` can read this dataset in v1. FALSE for compound, opaque, reference, bit-field, and enumerated dtypes. |
+| `attribute_count` | `INT32` | Number of attributes attached to this object. |
+| `attributes` | `JSON` | Array of `{name, kind, value}` objects, materialised so callers can filter / extract without going back to the file. |
+
+**Supported element kinds (v1):** signed and unsigned 8/16/32/64-bit integers, IEEE single / double floats, fixed-width and variable-length strings, booleans, and **compound dtypes** (HDF5 "struct" cells — see the [compound dtype notes](#compound-dtypes) below). Opaque, reference, bit field, enumerated, and ragged variable-length classes still surface as `element_kind = 'Unknown'` and `is_supported = false`.
+
+**Attributes column.** Every HDF5 object can carry metadata attributes — units, descriptions, instrument state, processing history. The TVF reads them eagerly into managed primitives, then renders as a JSON array so SQL can query them with the same JSON operators used for any other JSON column.
+
+```sql
+-- Survey a file: what does it contain?
+SELECT path, kind, element_kind, dimensions, attribute_count
+FROM open_h5_meta('/data/embeddings.h5');
+
+-- Find every supported dataset whose name ends in 'flux'
+SELECT path, dimensions
+FROM open_h5_meta('/data/spectra.h5')
+WHERE kind = 'dataset'
+  AND is_supported
+  AND path LIKE '%/flux';
+
+-- Pull a specific attribute value from every dataset
+SELECT
+    path,
+    (SELECT attr->>'value' FROM jsonb_array_elements(attributes) AS attr
+     WHERE attr->>'name' = 'units') AS units
+FROM open_h5_meta('/data/spectra.h5')
+WHERE kind = 'dataset';
+```
+
+### open_h5_dataset
+
+`open_h5_dataset(path, dataset_path)` -> Rows
+
+Opens a single HDF5 dataset by its in-file path and yields its rows with one typed column. The output schema is the dataset's real schema — the validator peeks the file at plan time to discover the element kind and shape, so projections type-check against actual data:
+
+```sql
+SELECT labels FROM open_h5_dataset('/data/cifar.h5', '/labels') WHERE labels > 0;
+```
+
+The `labels` column above is typed as `INT32` (or whatever the on-disk dtype really is) at plan time, not at first row.
+
+**Output shape.**
+
+| Source dataset | Yields |
+|---|---|
+| Scalar (rank-0) | One row, one cell with the scalar value |
+| 1-D, length N | N rows, one element per row |
+| 2-D, shape (R, C) | R rows, each carrying the C-element row slice as a typed 1-D array |
+| 3-D, shape (D₀, D₁, D₂) | D₀ rows, each carrying a multi-dim cell of shape `[D₁, D₂]` |
+| 4-D and higher, shape (D₀, D₁, …, Dₙ) | D₀ rows, each carrying a multi-dim cell of shape `[D₁, …, Dₙ]` |
+
+The schema's column carries `FixedShape = [D₁, …, Dₙ]` for rank ≥ 3 datasets, so `cell[i, j, k]` indexing type-checks at plan time. Multi-dim cells are supported across every element kind `open_h5_meta` reports as `is_supported = true` — numerics (signed/unsigned 8-64 bit integers, Float32, Float64, Boolean) and String. The canonical ML shapes work directly:
+
+- MNIST `(60000, 28, 28)` UInt8 → 60000 rows, each a multi-dim UInt8 cell with shape `[28, 28]`
+- CIFAR-10 `(50000, 32, 32, 3)` UInt8 → 50000 rows, each shape `[32, 32, 3]`
+- Sentence embeddings `(50000, 768)` Float32 → 50000 rows, each a flat 768-element Float32 array (2-D case)
+
+The output column is named after the dataset's leaf segment: `/labels` → column `labels`, `/spectra/flux` → column `flux`. For rank ≥ 3 datasets the column is multi-dim — the `FixedShape` carries the per-row tensor shape so SQL projections can index into it with type-checked bracket access.
+
+**Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, looks up the dataset, and reads its dtype + dimensions to produce a real `Schema`. Calling with a non-constant argument throws — recipe writers must inline the paths or pass bound parameters.
+
+**Supported element kinds (v1):** same set as `open_h5_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, strings (both fixed-width and variable-length), and **compound dtypes** (see below). Other classes still throw at validation; recipes can use `open_h5_meta` to detect them ahead of time.
+
+#### Compound dtypes
+
+HDF5 compound dtypes — the "struct" element kind, used for catalog rows in astronomy, event lists in particle physics, single-cell genomics feature records, and many other structured data shapes — are supported in v1 for **scalar and 1-D datasets**. Each row carries the dataset's compound element as a `STRUCT` cell with the on-disk member layout exposed as typed fields:
+
+```sql
+-- Catalog row dataset: each row is one struct with named fields
+SELECT * FROM open_h5_dataset('catalog.h5', '/sources');
+-- Yields rows of shape (sources STRUCT<id INT32, ra FLOAT64, dec FLOAT64, mag FLOAT64>)
+```
+
+Project fields via dotted access — `SELECT sources.id, sources.ra FROM ...` — same as any struct-valued column. The schema is real at plan time: column types are inferred from the compound member dtypes at validate, so `WHERE sources.mag < 20.0` type-checks before any data is read.
+
+**v1 limits:**
+
+| Aspect | Status |
+|---|---|
+| Scalar + 1-D compound datasets | Supported |
+| 2-D and higher-rank compound datasets | Throws `FunctionArgumentException` at validation (rare in practice; deferred) |
+| Primitive member kinds (signed/unsigned 8-64 bit integers, Float32/64, fixed-width string, boolean) | Supported |
+| Nested compound members (struct-in-struct) | Member surfaces as `Unknown` → whole dataset becomes `is_supported = false` |
+| Variable-length string members | Same — refused at the dataset level until follow-up |
+| Variable-length array members (ragged) | Same |
+| Byte order | Little-endian assumed (every mainstream HDF5 producer writes LE) |
+
+Compound child datasets inside `open_h5_group` follow the same rules — included as `ARRAY<STRUCT>` columns for 1-D, single `STRUCT` for scalar, silently dropped for 2-D+.
+
+```sql
+-- 1-D labels column from a CIFAR-shaped file
+SELECT labels FROM open_h5_dataset('/data/cifar.h5', '/labels');
+
+-- 2-D embeddings: one row per training sample, embedding as a Float32 array
+SELECT idx.value AS sample_id, e.embeddings
+FROM range(0, 1000) AS idx
+JOIN open_h5_dataset('/data/embeddings.h5', '/train/x') AS e
+  ON idx.value < (SELECT COUNT(*) FROM open_h5_dataset('/data/embeddings.h5', '/train/x'));
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_h5_dataset($artifact, '/labels');
+```
+
+**Performance.** v1 reads the entire dataset into memory at the start of execution, then iterates rows from the in-memory buffer. Fine for the typical ML dataset (tens to hundreds of MB); a chunked-streaming follow-up will land for files bigger than RAM. The downstream operator pipeline batches the row stream into the planner's standard batch size regardless of how we feed it.
+
+**Ingest path.** Dropping a `.h5` / `.hdf5` / `.hdf` file into the dataset pipeline lands it through `Hdf5FileFormat`, which emits the same shape `open_h5_meta` does. Magic-byte detection picks up extensionless or mislabelled HDF5 files too. Recipes that want specific dataset rows directly should use `open_h5_dataset` inside an SQL recipe.
+
+### open_h5_group
+
+`open_h5_group(path, group_path)` -> Rows
+
+Opens an HDF5 group and yields a **single row** with one column per direct-child dataset, each cell carrying the full dataset shape. The pivot-mode companion to `open_h5_dataset`: when a group represents a logical record made of related-but-different-shaped datasets that you want side-by-side — bitmasks plus their descriptions, parallel label arrays, scalar metadata plus a 1-D array — this lifts them all into one row.
+
+**Shape preservation per cell.**
+
+| Child dataset rank | Yields as a cell |
+|---|---|
+| Scalar (rank-0) | Scalar of the dataset's element kind |
+| 1-D, length N | Flat 1-D array (length N) |
+| 2-D, shape (R, C) | Multi-dim cell with `FixedShape = [R, C]` |
+| N-D, shape (D₀, …, Dₙ₋₁) | Multi-dim cell with `FixedShape = [D₀, …, Dₙ₋₁]` |
+
+**Direct children only.** Sub-groups are silently skipped — recursive descent isn't in scope here because the row width would explode on deep trees. The natural cross-group access pattern is composition: `open_h5_meta` for discovery, then multiple `open_h5_group` / `open_h5_dataset` calls per record. Datasets whose dtype isn't supported in v1 (compound, opaque, reference, bit field, enumerated, ragged variable-length) are also silently skipped — use `open_h5_meta` and filter by `is_supported = false` if you want to know they're there.
+
+**Plan-time schema peek.** Both arguments must be constants at plan time (literals in source, or `$parameter` references that the parameter binder has substituted). The validator opens the file, walks the group's direct children, and produces a real `Schema` of typed, named columns. Non-constant arguments throw.
+
+**Group-as-record use cases.**
+
+LIGO gravitational-wave data: `/quality/simple` holds nine-element string arrays describing each data-quality bit, plus a 4096-element UInt32 bitmask, plus a scalar metadata string. The four are different shapes but logically one record — `open_h5_group` puts them in one row so SQL can decode bits against their descriptions in a single query.
+
+10x Genomics single-cell `/matrix/features`: three same-length 1-D arrays (`id`, `name`, `feature_type`) that act as parallel columns of a feature table. `open_h5_group` returns one row whose three array columns are the three datasets; downstream `UNNEST` joins them per index if you want per-feature rows.
+
+ML model checkpoint layers: a Keras `/conv1/kernel` group might pair a 4-D weight tensor with a 1-D bias array and a few scalar attribute datasets. `open_h5_group` packages the whole layer as one record.
+
+**Empty group → throws with sub-group suggestions.** Calling `open_h5_group` on a group that has no direct-child datasets — only sub-groups underneath — throws a helpful error listing the sub-groups so you can drill in:
+
+> *"HDF5 group `/quality` has no direct-child datasets. It contains sub-groups: `/quality/detail`, `/quality/injections`, `/quality/simple`. Pass one of those to open_h5_group, or use open_h5_meta to explore the full tree."*
+
+This is the LIGO-shaped case: their `/quality` is a logical container made of `/quality/simple` (data-quality bits) and `/quality/injections` (injection flags), so the user gets pointed at the actual record groups. Truly empty groups (no children at all) get a different message pointing at `open_h5_meta` for tree exploration.
+
+```sql
+-- LIGO data-quality bit dictionary: descriptions, short names, bitmask, metadata
+SELECT DQDescriptions, DQShortnames, DQmask, GWOSCmeta
+FROM open_h5_group('strain.hdf5', '/quality/simple');
+
+-- 10x parallel arrays — yields one row of three arrays, then unnest by index
+WITH features AS (
+    SELECT id, name, feature_type
+    FROM open_h5_group('pbmc.h5', '/matrix/features')
+)
+SELECT
+    id[i + 1] AS gene_id,
+    name[i + 1] AS gene_name,
+    feature_type[i + 1] AS kind
+FROM features, range(0, 1000) AS i;
+
+-- Layer-as-record from a Keras checkpoint
+SELECT kernel, bias
+FROM open_h5_group('model.h5', '/dense_1');
+```
+
+**Bound parameter:**
+
+```sql
+SELECT * FROM open_h5_group($artifact, $group_path);
+```
+
+### open_parquet_meta
+
+`open_parquet_meta(path)` -> Rows
+
+Opens an Apache Parquet file and yields **one row per leaf column** with its parsed type metadata, row group count, and total row count. The interrogation TVF for Parquet — call this first to see what's inside an unfamiliar file before pulling rows with `open_parquet`.
+
+Parquet is the dominant on-disk format for HuggingFace datasets (every dataset that doesn't ship as JSONL or raw archives is Parquet), Spark output, dlt pipelines, and pandas `.to_parquet()` exports. The schema is hierarchical — primitives at the leaves, optional nested `LIST<T>` and `STRUCT<…>` groupings — but `open_parquet_meta` flattens to one row per leaf column with the dotted path as the identifier.
+
+Output columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `column_path` | `STRING` | Leaf path in dotted form (e.g. `image.bytes` for a struct child) |
+| `element_kind` | `STRING` | DataKind name for the leaf (e.g. `Int32`, `String`, `Float64`). `Unknown` for unsupported logical types. |
+| `is_array` | `BOOLEAN` | True for `LIST<T>` columns; false for scalars |
+| `is_nullable` | `BOOLEAN` | True when the column allows nulls (optional/repeated repetition) |
+| `is_supported` | `BOOLEAN` | True when `open_parquet` can read this column in v1 |
+| `logical_type` | `STRING` | Short description of the column's logical type (CLR-name based) |
+| `row_group_count` | `INT32` | Number of row groups in the file |
+| `total_rows` | `INT64` | Total row count across all row groups |
+
+**Supported element kinds (v1):** booleans, signed and unsigned 8/16/32/64-bit integers, IEEE Float32 / Float64, UTF-8 strings, byte arrays (raw `BYTE_ARRAY`), plus `Decimal` / `Timestamp` / `TimestampTz` / `Date` / `Time` / `Uuid` when Parquet.Net surfaces them as the corresponding CLR type. Nested `STRUCT<…>` columns surface as flat leaves with dotted paths in v1 — they're queryable as `SELECT "image.bytes" FROM …`; a typed `STRUCT` projection is a planned follow-up.
+
+```sql
+-- Inspect a HuggingFace dataset shard before querying
+SELECT column_path, element_kind, is_array, total_rows
+FROM open_parquet_meta('/data/imdb-train-00000-of-00004.parquet');
+
+-- Find every text-like column in a multi-shard dataset
+SELECT column_path
+FROM open_parquet_meta('/data/wiki-shard-0.parquet')
+WHERE element_kind = 'String';
+
+-- Bound parameter
+SELECT * FROM open_parquet_meta($shard_path);
+```
+
+### open_parquet
+
+`open_parquet(path)` -> Rows
+
+Opens an Apache Parquet file and yields its rows with one column per leaf field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
+
+```sql
+SELECT label, text FROM open_parquet('/data/imdb-train.parquet') WHERE label = 1;
+```
+
+The `label` column above is typed as `INT32` (or whatever the on-disk type really is) at plan time, not at first row.
+
+**Plan-time schema peek.** The `path` argument must be a constant at plan time (literal in source, or a `$parameter` reference that the parameter binder has substituted). The validator opens the file, reads the Parquet schema, and produces a real `Schema` per leaf column. Non-constant arguments throw — recipe writers must inline the path or pass a bound parameter.
+
+**Supported types (v1):** same set as `open_parquet_meta`'s `is_supported` filter — booleans, signed / unsigned integers (8/16/32/64-bit), Float32, Float64, strings, byte arrays, Decimal / Timestamp / Date / Time / UUID when Parquet.Net surfaces them. Plus 1-D arrays of any supported primitive via `LIST<T>` (token sequences, embedding vectors stored as `LIST<FLOAT>`).
+
+**Nested types (v1 limits):**
+
+| Aspect | Status |
+|---|---|
+| Primitive scalar columns | Supported |
+| 1-D arrays (`LIST<T>`) | Supported |
+| Nested STRUCT children | Surfaced as flat leaf columns with dotted paths (e.g. `image.bytes`, `image.path`) — typed STRUCT projection is a follow-up |
+| `LIST<LIST<T>>` / multi-axis tensor columns | Deferred (defer until a real file demands it; would use the multi-dim cell path) |
+| `MAP<K, V>` | Deferred |
+
+**Memory.** v1 reads each row group fully into memory before emitting rows. Fine for typical HF shards (tens to hundreds of MB per row group); larger-than-RAM files land via the chunked-streaming follow-up — the architecture supports it, the reader hasn't been refactored yet.
+
+```sql
+-- Pull rows from a HuggingFace classification dataset
+SELECT label, text
+FROM open_parquet('/data/imdb-train.parquet')
+WHERE label = 1
+LIMIT 100;
+
+-- Token-sequence dataset: each row's tokens column is a typed Int32 array
+SELECT array_length(tokens) AS token_count
+FROM open_parquet('/data/c4-tokenized.parquet');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_parquet($shard_path);
+```
+
+**Ingest path.** Dropping a `.parquet` (or `.pq`) file into the dataset pipeline lands it through `ParquetFileFormat`, which emits the same typed shape `open_parquet` does. Magic-byte detection (`PAR1`) picks up extensionless or mislabelled Parquet files — common with Spark / dlt output that uses `part-00000-*.snappy` naming.
+
+### open_arrow_meta
+
+`open_arrow_meta(path)` -> Rows
+
+Opens an Apache Arrow IPC file (also Feather v2) and yields **one row per top-level column** with its parsed type metadata, record batch count, and total row count. The interrogation TVF for Arrow — call this first to see what's inside an unfamiliar `.arrow` / `.feather` file before pulling rows with `open_arrow`.
+
+Arrow IPC is the native on-disk format for the HuggingFace `datasets` library (the Python-side cache shape), Polars cache writes, DuckDB exports, and pandas `.to_feather()`. The schema is flat at the top level — Arrow does have nested `StructType` columns, but the dominant HF-dataset shape (text + label + embedding) is flat — and `open_arrow_meta` surfaces every top-level column with its mapped element kind.
+
+| Column | Type | Description |
+|---|---|---|
+| `column_name` | `STRING` | Top-level field name from the Arrow schema |
+| `element_kind` | `STRING` | Mapped `DataKind` (`Int32`, `String`, `Float64`, `Timestamp`, …); `Unknown` when not yet wired |
+| `is_array` | `BOOLEAN` | True for `ListType` / `LargeListType` / `FixedSizeListType` columns |
+| `is_nullable` | `BOOLEAN` | From the Arrow field's nullable flag |
+| `is_supported` | `BOOLEAN` | True when `open_arrow` can read this column in v1 |
+| `logical_type` | `STRING` | Arrow logical type description (e.g. `Timestamp[Microsecond, UTC]`, `FixedSizeList<Float>[768]`) |
+| `batch_count` | `INT32` | Number of record batches in the file |
+| `total_rows` | `INT64` | Sum of record batch lengths |
+
+```sql
+-- Quick look at a HuggingFace dataset cache shard
+SELECT column_name, element_kind, is_array, logical_type
+FROM open_arrow_meta('/data/hf-cache/squad/train-00000-of-00001.arrow');
+
+-- Only the columns we can actually pull rows from
+SELECT column_name, element_kind
+FROM open_arrow_meta('/data/polars-cache.feather')
+WHERE is_supported;
+
+-- Via a bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_arrow_meta($shard_path);
+```
+
+Dictionary-encoded columns (Arrow's compact encoding for low-cardinality string columns — HF label columns, language codes) are transparently unwrapped: `element_kind` reflects the dictionary's value type, not the index type.
+
+### open_arrow
+
+`open_arrow(path)` -> Rows
+
+Opens an Apache Arrow IPC / Feather v2 file and yields its rows with one column per top-level field. The output schema is the file's real typed schema — the validator peeks at plan time so projections type-check against the file's actual columns:
+
+```sql
+SELECT label, text FROM open_arrow('/data/squad-train.arrow') WHERE label = 1;
+```
+
+The `label` column above is typed as `INT32` (or whatever the on-disk type really is) at plan time, not at first row.
+
+**Plan-time schema peek.** The `path` argument must be a constant at plan time (literal in source, or a `$parameter` reference that the parameter binder has substituted). The validator opens the file, reads the Arrow schema, and produces a real `Schema` per top-level column. Non-constant arguments throw — recipe writers must inline the path or pass a bound parameter.
+
+**Supported types (v1):** booleans, signed / unsigned integers (8/16/32/64-bit), Float32 (including HalfFloat / Float16 promoted), Float64, UTF-8 strings, and 1-D arrays of any supported primitive via `ListType` (variable-length) or `FixedSizeListType` (fixed-length — embeddings stored as `FixedSizeList<Float>[768]` land as typed Float32 arrays). Dictionary-encoded columns decode through to their value type transparently.
+
+**Nested types (v1 limits):**
+
+| Aspect | Status |
+|---|---|
+| Primitive scalar columns | Supported |
+| 1-D arrays (`List<T>`, `FixedSizeList<T>`) | Supported |
+| Dictionary-encoded columns | Supported (transparently unwrapped) |
+| `Timestamp` / `Date` / `Decimal` / `Time` row values | Surfaced by `open_arrow_meta` but row decoding is a follow-up |
+| `Struct<...>` children | Deferred — typed struct surface lands with the same multi-format struct-fields rollout |
+| Multi-level list nesting (`List<List<T>>`) | Deferred (would use the multi-dim cell path) |
+| `Map<K, V>` / `Union` / `Decimal256` | Deferred |
+
+**Memory.** v1 reads each record batch fully into memory before emitting rows. Fine for typical HF shards (record batches are usually well under a hundred MB); larger-than-RAM batches land via the chunked-streaming follow-up — the architecture supports it, the reader hasn't been refactored yet.
+
+```sql
+-- Pull rows from a HuggingFace dataset cache shard
+SELECT label, text
+FROM open_arrow('/data/hf-cache/imdb/train-00000-of-00001.arrow')
+WHERE label = 1
+LIMIT 100;
+
+-- Embedding column stored as FixedSizeList<Float>[768]
+SELECT array_length(embedding) AS dim
+FROM open_arrow('/data/embeddings.feather');
+
+-- Bound parameter (substituted to a literal at plan time)
+SELECT * FROM open_arrow($shard_path);
+```
+
+**Ingest path.** Dropping a `.arrow` (or `.feather`) file into the dataset pipeline lands it through `ArrowFileFormat`, which emits the same typed shape `open_arrow` does. Magic-byte detection (`ARROW1\0\0` at offset 0) picks up extensionless or mislabelled Arrow files — common with HF / Polars cache writes that strip the suffix.
 
 ## See Also
 

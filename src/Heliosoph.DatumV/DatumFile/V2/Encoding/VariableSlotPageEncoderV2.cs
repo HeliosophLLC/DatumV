@@ -437,7 +437,9 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
     private static bool IsReferenceTypeArray(DataValue value)
     {
         if (!value.IsArray) return false;
-        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct;
+        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct
+            or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
+            or DataKind.Mesh;
     }
 
     /// <summary>
@@ -458,11 +460,23 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
         IBlobSink sidecar,
         ITypeIdAllocator? typeIdAllocator)
     {
+        // Multi-dim reference arrays prepend [int32 × ndim] to the slot block on
+        // the wire (decoder peeks the column's FixedShape.Length to compute ndim
+        // and skip the prefix). 1-D arrays write only the slot block.
+        ReadOnlySpan<int> shape = value.IsMultiDim
+            ? value.GetShape(store)
+            : ReadOnlySpan<int>.Empty;
+
         return value.Kind switch
         {
-            DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), sidecar),
-            DataKind.Image => EncodeImageArrayToSidecar(value.AsImageArray(store), sidecar),
-            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), store, sidecar, typeIdAllocator),
+            DataKind.String => EncodeStringArrayToSidecar(value.AsStringArray(store), shape, sidecar),
+            DataKind.Image => EncodeBlobArrayToSidecar(value.AsImageArray(store), shape, sidecar),
+            DataKind.Audio => EncodeBlobArrayToSidecar(value.AsAudioArray(store), shape, sidecar),
+            DataKind.Video => EncodeBlobArrayToSidecar(value.AsVideoArray(store), shape, sidecar),
+            DataKind.Json => EncodeBlobArrayToSidecar(value.AsJsonArray(store), shape, sidecar),
+            DataKind.PointCloud => EncodeBlobArrayToSidecar(value.AsPointCloudArray(store), shape, sidecar),
+            DataKind.Mesh => EncodeBlobArrayToSidecar(value.AsMeshArray(store), shape, sidecar),
+            DataKind.Struct => EncodeStructArrayToSidecar(value.AsStructArray(store), shape, store, sidecar, typeIdAllocator),
             _ => throw new NotSupportedException(
                 $"EncodeReferenceArrayToSidecar does not handle Array<{value.Kind}>."),
         };
@@ -470,31 +484,50 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
     private static (long offset, long length) EncodeStringArrayToSidecar(
         string[] elements,
+        ReadOnlySpan<int> shape,
         IBlobSink sidecar)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(elements[i]);
             (long elementOffset, long elementLength) = sidecar.Append(utf8);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength);
         }
         return sidecar.Append(slotBlock);
     }
 
-    private static (long offset, long length) EncodeImageArrayToSidecar(
+    /// <summary>
+    /// Shared encoder for blob-element reference arrays — Image, Audio, Video,
+    /// Json, PointCloud. Each element's bytes are appended to <paramref name="sidecar"/>
+    /// individually; the resulting (offset, length) pairs populate a slot block
+    /// optionally prefixed by an <c>int32 × ndim</c> shape header (multi-dim
+    /// only). The combined block is appended as one atomic write.
+    /// </summary>
+    private static (long offset, long length) EncodeBlobArrayToSidecar(
         byte[][] elements,
+        ReadOnlySpan<int> shape,
         IBlobSink sidecar)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             (long elementOffset, long elementLength) = sidecar.Append(elements[i]);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength);
         }
@@ -503,11 +536,17 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
     private static (long offset, long length) EncodeStructArrayToSidecar(
         DataValue[] elements,
+        ReadOnlySpan<int> shape,
         IValueStore store,
         IBlobSink sidecar,
         ITypeIdAllocator? typeIdAllocator)
     {
-        byte[] slotBlock = new byte[elements.Length * ArraySlot.SizeBytes];
+        int prefixBytes = shape.Length * sizeof(int);
+        byte[] slotBlock = new byte[prefixBytes + elements.Length * ArraySlot.SizeBytes];
+        if (prefixBytes > 0)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(shape).CopyTo(slotBlock);
+        }
         for (int i = 0; i < elements.Length; i++)
         {
             // Each element is a self-describing Struct DataValue carrying its own
@@ -523,7 +562,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
                 ? elements[i].TypeId
                 : typeIdAllocator.AllocateOrLookup(elements[i].TypeId);
             ArraySlot.Write(
-                slotBlock.AsSpan(i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                slotBlock.AsSpan(prefixBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
                 elementOffset,
                 elementLength,
                 onDiskTypeId);

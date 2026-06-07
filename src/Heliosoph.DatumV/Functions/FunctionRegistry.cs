@@ -735,7 +735,48 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias<Scalar.Strings.TrimFunction>("btrim");
         registry.RegisterScalar<Scalar.Strings.LtrimFunction>();
         registry.RegisterScalar<Scalar.Strings.RtrimFunction>();
+        registry.RegisterScalar<Scalar.Strings.InitcapFunction>();
+        registry.RegisterScalar<Scalar.Strings.PositionFunction>();
+        registry.RegisterScalarAlias<Scalar.Strings.PositionFunction>("strpos");
+        registry.RegisterScalar<Scalar.Strings.StartsWithFunction>();
+        registry.RegisterScalar<Scalar.Strings.EndsWithFunction>();
+        registry.RegisterScalar<Scalar.Strings.ContainsFunction>();
+        registry.RegisterScalar<Scalar.Strings.ReplaceFunction>();
+        registry.RegisterScalar<Scalar.Strings.SplitPartFunction>();
+        registry.RegisterScalar<Scalar.Strings.LpadFunction>();
+        registry.RegisterScalar<Scalar.Strings.RpadFunction>();
+        registry.RegisterScalar<Scalar.Strings.SubstringFunction>();
+        registry.RegisterScalarAlias<Scalar.Strings.SubstringFunction>("substr");
+        registry.RegisterScalar<Scalar.Strings.MidFunction>();
+        registry.RegisterScalar<Scalar.Strings.LeftFunction>();
+        registry.RegisterScalar<Scalar.Strings.RightFunction>();
+        registry.RegisterScalar<Scalar.Strings.OverlayFunction>();
+        registry.RegisterScalar<Scalar.Strings.ReverseFunction>();
+        registry.RegisterScalar<Scalar.Strings.RepeatFunction>();
         registry.RegisterScalar<Scalar.Strings.RegexpReplaceFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpLikeFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpMatchFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpCountFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpExtractFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpInstrFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpSplitToArrayFunction>();
+        registry.RegisterScalar<Scalar.Strings.AsciiFunction>();
+        registry.RegisterScalar<Scalar.Strings.ChrFunction>();
+        registry.RegisterScalar<Scalar.Strings.TranslateFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToHexFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToBinFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToOctFunction>();
+        registry.RegisterScalar<Scalar.Strings.NormalizeFunction>();
+        registry.RegisterScalar<Scalar.Strings.ToAsciiFunction>();
+        registry.RegisterScalar<Scalar.Strings.UnistrFunction>();
+        registry.RegisterScalar<Scalar.Strings.CasefoldFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteIdentFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteLiteralFunction>();
+        registry.RegisterScalar<Scalar.Strings.QuoteNullableFunction>();
+        registry.RegisterScalar<Scalar.Strings.ParseIdentFunction>();
+        registry.RegisterScalar<Scalar.Strings.StringToArrayFunction>();
+        registry.RegisterScalar<Scalar.Strings.FormatFunction>();
+        registry.RegisterScalar<Scalar.Strings.RegexpSubstrFunction>();
 
         // Fulltext family
         registry.RegisterScalar<Scalar.Fulltext.PlainToTsqueryFunction>();
@@ -1004,6 +1045,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.MeshToGltfFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshToObjFunction>();
         registry.RegisterScalar<Scalar.Spatial.MeshToStlFunction>();
+        registry.RegisterScalar<Scalar.Spatial.MeshFromGltfFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromPlyFunction>();
 
         // Encoding
         registry.RegisterScalar<Scalar.Encoding.EncodeFunction>();
@@ -1017,11 +1060,20 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Crypto.Sha512Function>();
         registry.RegisterScalar<Scalar.Crypto.DigestFunction>();
 
-        // Activations — softmax / sigmoid. ReLU + GELU + tanh land when a
-        // model actually needs them post-graph (most are baked into the
-        // ONNX export).
+        // Activations. All accept Float32 scalar or Float32[] vector.
         registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
         registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
+        registry.RegisterScalar<Scalar.Activation.ReluFunction>();
+        registry.RegisterScalar<Scalar.Activation.LeakyReluFunction>();
+        registry.RegisterScalar<Scalar.Activation.EluFunction>();
+        registry.RegisterScalar<Scalar.Activation.SeluFunction>();
+        registry.RegisterScalar<Scalar.Activation.GeluFunction>();
+        registry.RegisterScalar<Scalar.Activation.SwishFunction>();
+        registry.RegisterScalar<Scalar.Activation.SoftplusFunction>();
+        registry.RegisterScalar<Scalar.Activation.SoftsignFunction>();
+        registry.RegisterScalar<Scalar.Activation.MishFunction>();
+        registry.RegisterScalar<Scalar.Activation.HardSigmoidFunction>();
+        registry.RegisterScalar<Scalar.Activation.HardSwishFunction>();
         registry.RegisterScalar<Scalar.Activation.MultilabelClassifyFunction>();
 
         // Vector reductions + normalization + detection postprocess.
@@ -1030,6 +1082,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
         registry.RegisterScalar<Scalar.Vector.MeanPoolMaskedFunction>();
         registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
+        registry.RegisterScalar<Scalar.Vector.DotProductFunction>();
         registry.RegisterScalar<Scalar.Vector.NmsFunction>();
         registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
 
@@ -1072,6 +1125,15 @@ public sealed class FunctionRegistry
         // Temporal — current time, date/time arithmetic, extraction.
         registry.RegisterScalar<Scalar.Temporal.NowFunction>();
         registry.RegisterScalar<Scalar.Temporal.CyclicalEncodeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeIntervalFunction>();
+        registry.RegisterScalar<Scalar.Temporal.IntervalQualifiedFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyHoursFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyDaysFunction>();
+        registry.RegisterScalar<Scalar.Temporal.JustifyIntervalFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DatePartFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateTruncFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateBinFunction>();
+        registry.RegisterScalar<Scalar.Temporal.AgeFunction>();
 
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();
@@ -1108,12 +1170,17 @@ public sealed class FunctionRegistry
         // UNNEST retired pending the reference-type-array consolidation; will be
         // rebuilt on the new typed-array surface when a demand actually requires it.
         registry.RegisterTableValued<TableValued.RangeFunction>();
+        registry.RegisterTableValued<TableValued.GenerateSeriesFunction>();
         registry.RegisterTableValued<TableValued.VideoUnnestFramesFunction>();
         registry.RegisterTableValued<TableValued.UnnestFunction>();
         registry.RegisterTableValued<TableValued.OpenArchiveFunction>();
         registry.RegisterTableValued<TableValued.OpenFolderFunction>();
         registry.RegisterTableValued<TableValued.ListFolderFunction>();
         registry.RegisterTableValued<TableValued.ReadCsvFunction>();
+        registry.RegisterTableValued<TableValued.OpenCsvFunction>();
+        registry.RegisterTableValued<TableValued.OpenCsvTypedFunction>();
+        registry.RegisterTableValued<TableValued.OpenJsonFunction>();
+        registry.RegisterTableValued<TableValued.OpenJsonLinesFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxImagesFunction>();
         registry.RegisterTableValued<TableValued.OpenIdxLabelsFunction>();
         registry.RegisterTableValued<TableValued.OpenCifar10Function>();
@@ -1121,6 +1188,13 @@ public sealed class FunctionRegistry
         registry.RegisterTableValued<TableValued.OpenFitsHdusFunction>();
         registry.RegisterTableValued<TableValued.OpenFitsImagesFunction>();
         registry.RegisterTableValued<TableValued.OpenFitsTableFunction>();
+        registry.RegisterTableValued<TableValued.OpenH5MetaFunction>();
+        registry.RegisterTableValued<TableValued.OpenH5DatasetFunction>();
+        registry.RegisterTableValued<TableValued.OpenH5GroupFunction>();
+        registry.RegisterTableValued<TableValued.OpenParquetMetaFunction>();
+        registry.RegisterTableValued<TableValued.OpenParquetFunction>();
+        registry.RegisterTableValued<TableValued.OpenArrowMetaFunction>();
+        registry.RegisterTableValued<TableValued.OpenArrowFunction>();
 
         // Inference toolkit. Lives in its own `inference` schema so the
         // introspection surface (onnx_inspect, devices, ...) doesn't

@@ -27,7 +27,7 @@ public static class SqlKeywordRegistry
         "SELECT", "INTO", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "OUTER",
         "CROSS", "INNER", "LATERAL", "APPLY", "ON", "WHERE", "AND", "OR",
         "NOT", "IN", "BETWEEN", "LIKE", "ILIKE", "REGEXP", "ESCAPE", "IS",
-        "AS", "SHARD", "GROUP", "HAVING", "QUALIFY", "ORDER", "BY", "ASC",
+        "AS", "GROUP", "HAVING", "QUALIFY", "ORDER", "BY", "ASC",
         "DESC", "LIMIT", "OFFSET", "CAST", "EXTRACT", "AT", "TIME", "ZONE",
         "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP",
 
@@ -61,6 +61,9 @@ public static class SqlKeywordRegistry
 
         // DML keywords
         "INSERT", "VALUES", "RETURNING", "UPDATE", "SET", "DELETE",
+
+        // Export
+        "COPY",
 
         // Direct invocation
         "CALL",

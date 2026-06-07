@@ -110,7 +110,6 @@ public static class TemporalConstantFolder
         return new SelectStatement(
             columns,
             from,
-            statement.Into,
             joins,
             where,
             groupBy,

@@ -42,7 +42,7 @@ vae_encoder/
 3. Save the fused pipeline to a temp directory.
 4. `optimum-cli export onnx --model <temp> <output>`.
 
-Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-dreamshaper-hyper.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-dreamshaper-hyper.ps1).
+Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-dreamshaper-hyper.ps1`](https://github.com/HeliosophLLC/DatumV/blob/main/scripts/export-dreamshaper-hyper.ps1).
 
 ## Inference notes
 

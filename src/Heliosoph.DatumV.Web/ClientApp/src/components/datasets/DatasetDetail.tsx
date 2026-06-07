@@ -19,6 +19,7 @@ import {
   type DatasetVariantSnapshot,
 } from '@/state/datasets';
 import { CodeBlock } from '@/components/markdown/CodeBlock';
+import { InlineMarkdown } from '@/components/markdown/InlineMarkdown';
 import { isExternalUrl, openExternalUrl } from '@/lib/openExternal';
 import { DownloadProgressBar } from '@/components/shared/DownloadProgressBar';
 import { ModalityChipLabel, TaskChipLabel } from '@/components/shared/TaskChip';
@@ -84,7 +85,9 @@ export function DatasetDetail({ entry }: { entry: DatasetEntrySnapshot }) {
         <header className="min-w-0">
           <h1 className="text-base font-medium">{entry.name}</h1>
           {entry.summary && (
-            <p className="text-muted-foreground mt-1 text-sm">{entry.summary}</p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              <InlineMarkdown>{entry.summary}</InlineMarkdown>
+            </p>
           )}
         </header>
 
@@ -138,8 +141,8 @@ export function DatasetDetail({ entry }: { entry: DatasetEntrySnapshot }) {
           <EntryCardBody markdown={entryCard} entryName={entry.name} />
         ) : entry.description ? (
           <section>
-            <p className="text-foreground text-sm leading-relaxed whitespace-pre-line">
-              {entry.description}
+            <p className="text-foreground text-sm leading-relaxed">
+              <InlineMarkdown>{entry.description}</InlineMarkdown>
             </p>
           </section>
         ) : null}
@@ -286,7 +289,9 @@ function ActiveVariantCard({
             {variant.displayName ?? variantId}
           </h2>
           {variant.summary && (
-            <p className="text-muted-foreground mt-1 text-sm">{variant.summary}</p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              <InlineMarkdown>{variant.summary}</InlineMarkdown>
+            </p>
           )}
         </div>
         <VariantActionButton

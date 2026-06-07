@@ -308,6 +308,10 @@ public readonly struct ValueRef
     public static ValueRef FromDuration(TimeSpan value) =>
         new(DataValue.FromDuration(value), null);
 
+    /// <summary>Postgres-interval inline value (months, days, microseconds).</summary>
+    public static ValueRef FromInterval(Interval value) =>
+        new(DataValue.FromInterval(value), null);
+
     /// <summary>UUID inline value.</summary>
     public static ValueRef FromUuid(Guid value) =>
         new(DataValue.FromUuid(value), null);
@@ -1026,6 +1030,8 @@ public readonly struct ValueRef
     public TimeOnly AsTime() => _inline.AsTime();
     /// <summary>Duration accessor (inline only).</summary>
     public TimeSpan AsDuration() => _inline.AsDuration();
+    /// <summary>Postgres-interval accessor (inline only).</summary>
+    public Interval AsInterval() => _inline.AsInterval();
     /// <summary>UUID accessor (inline only).</summary>
     public Guid AsUuid() => _inline.AsUuid();
     /// <summary>DataKind tag accessor (inline only).</summary>
@@ -1085,6 +1091,7 @@ public readonly struct ValueRef
             DataKind.TimestampTz => AsTimestampTz(),
             DataKind.Time => AsTime(),
             DataKind.Duration => AsDuration(),
+            DataKind.Interval => AsInterval(),
             DataKind.Point2D => AsPoint2D(),
             DataKind.Point3D => AsPoint3D(),
             _ => throw new InvalidOperationException(

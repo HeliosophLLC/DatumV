@@ -92,6 +92,14 @@ public readonly partial struct DataValue
             DataKind.UInt128 or DataKind.Int128
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
 
+            // Interval: (months, days, micros) packed across 16 bytes inline;
+            // field-equality. PG's interval comparison is technically anchor-
+            // dependent for cross-field semantics, but Equals here is the
+            // representation predicate consumed by GROUP BY / DISTINCT /
+            // dictionary keying — those want byte-identity, not anchor math.
+            DataKind.Interval
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
+
             // Points: per-component IEEE float compare so NaN != NaN and -0 == 0.
             DataKind.Point2D
                 => BitConverter.Int32BitsToSingle(_p0) == BitConverter.Int32BitsToSingle(other._p0)
@@ -194,6 +202,10 @@ public readonly partial struct DataValue
 
             // 128-bit integers: same — four-int hash.
             DataKind.UInt128 or DataKind.Int128
+                => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
+
+            // Interval: 16 bytes inline; hash all four payload words to match Equals.
+            DataKind.Interval
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
 
             // Points: hash via float to mirror IEEE equality (-0 == 0).

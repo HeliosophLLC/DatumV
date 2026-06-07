@@ -244,6 +244,11 @@ public sealed record GithubReleaseSource(
     IReadOnlyList<string> Files) : CatalogSource;
 
 public sealed record HttpsSource(
-    IReadOnlyList<HttpsFile> Urls) : CatalogSource;
+    IReadOnlyList<HttpsFile> Urls,
+    // Per-source User-Agent override. SEC EDGAR rejects the default UA with 403
+    // because it lacks a contact identifier; sources hosted there set this to
+    // a "Name email@domain" string per https://www.sec.gov/os/accessing-edgar-data.
+    // Null falls back to HttpsSourceClient's global default.
+    string? UserAgent = null) : CatalogSource;
 
 public sealed record HttpsFile(string Url, string DestFile);

@@ -14,6 +14,9 @@ public enum SqlToken
     /// <summary>The INTO keyword.</summary>
     Into,
 
+    /// <summary>The COPY keyword (top-level export statement: <c>COPY (query) TO 'path' (FORMAT x, ...)</c>).</summary>
+    Copy,
+
     /// <summary>The FROM keyword.</summary>
     From,
 
@@ -86,9 +89,6 @@ public enum SqlToken
     /// <summary>The AS keyword (alias).</summary>
     As,
 
-    /// <summary>The SHARD keyword (sharding clause).</summary>
-    Shard,
-
     /// <summary>The GROUP keyword (grouping clause).</summary>
     Group,
 
@@ -101,7 +101,7 @@ public enum SqlToken
     /// <summary>The ORDER keyword (ordering clause).</summary>
     Order,
 
-    /// <summary>The BY keyword (used with ORDER, GROUP, and SHARD).</summary>
+    /// <summary>The BY keyword (used with ORDER and GROUP).</summary>
     By,
 
     /// <summary>The ASC keyword (ascending sort direction).</summary>

@@ -2756,6 +2756,7 @@ export interface GithubReleaseSource extends CatalogSource {
 
 export interface HttpsSource extends CatalogSource {
     urls?: HttpsFile[];
+    userAgent?: string | undefined;
 }
 
 export interface HttpsFile {
@@ -2767,8 +2768,8 @@ export interface CatalogIngestJob {
     tableName?: string;
     sourcePath?: string | undefined;
     sqlFile?: string | undefined;
-    archive?: string | undefined;
-    archives?: { [key: string]: string; } | undefined;
+    artifact?: string | undefined;
+    artifacts?: { [key: string]: string; } | undefined;
 }
 
 export type DatasetInstallState = "notDownloaded" | "partial" | "installed";

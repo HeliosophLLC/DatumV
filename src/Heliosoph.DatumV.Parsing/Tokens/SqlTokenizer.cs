@@ -282,6 +282,7 @@ public static class SqlTokenizer
             // for clarity, although requireDelimiters makes this safe either way.
             .Match(Span.EqualToIgnoreCase("SELECT"), SqlToken.Select, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("INTO"), SqlToken.Into, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("COPY"), SqlToken.Copy, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FROM"), SqlToken.From, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("INNER"), SqlToken.Inner, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("JOIN"), SqlToken.Join, requireDelimiters: true)
@@ -310,7 +311,6 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("ESCAPE"), SqlToken.Escape, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IS"), SqlToken.Is, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("AS"), SqlToken.As, requireDelimiters: true)
-            .Match(Span.EqualToIgnoreCase("SHARD"), SqlToken.Shard, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("BY"), SqlToken.By, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ASC"), SqlToken.Asc, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DESC"), SqlToken.Desc, requireDelimiters: true)

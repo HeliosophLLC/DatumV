@@ -514,9 +514,10 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
 
     // SQL-shape ingest. Reads the script from `<manifestDir>/<job.SqlFile>`
     // and binds either:
-    //   - `$archive` + `$archive_stem` for single-archive jobs (legacy
-    //     shape, used by LJSpeech), or
-    //   - `$<name>` for each entry in `archives` for multi-archive jobs
+    //   - `$artifact` + `$artifact_stem` for single-artifact jobs (the
+    //     downloaded file can be an archive, a raw CSV, or anything else
+    //     the recipe consumes via a TVF), or
+    //   - `$<name>` for each entry in `artifacts` for multi-artifact jobs
     //     (used by MNIST / Fashion-MNIST).
     // Streams rows from the planner straight into a fresh .datum. The
     // IngestionResult uses synthetic stats — Manifest and Schema stay
@@ -540,43 +541,43 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
 
         Dictionary<string, ParameterValue> parameters = new(StringComparer.Ordinal);
 
-        if (!string.IsNullOrWhiteSpace(job.Archive))
+        if (!string.IsNullOrWhiteSpace(job.Artifact))
         {
-            string archivePath = Path.Combine(rawDir, job.Archive);
-            if (!File.Exists(archivePath))
+            string artifactPath = Path.Combine(rawDir, job.Artifact);
+            if (!File.Exists(artifactPath))
             {
                 throw new FileNotFoundException(
-                    $"Ingest job '{job.TableName}' SQL targets archive '{job.Archive}' " +
-                    $"but the file '{archivePath}' is missing after download.",
-                    archivePath);
+                    $"Ingest job '{job.TableName}' SQL targets artifact '{job.Artifact}' " +
+                    $"but the file '{artifactPath}' is missing after download.",
+                    artifactPath);
             }
-            parameters["archive"] = new StringParameter(archivePath);
-            // Only bind $archive_stem if the recipe references it — the
+            parameters["artifact"] = new StringParameter(artifactPath);
+            // Only bind $artifact_stem if the recipe references it — the
             // ParameterBinder rejects unreferenced parameters as a typo guard,
             // and folder-of-classes recipes (EuroSAT, Oxford Pets) don't need
-            // a stem since the class lives inside the path, not the archive
+            // a stem since the class lives inside the path, not the artifact
             // basename. Substring check is good enough — the token is unique.
-            if (sql.Contains("$archive_stem", StringComparison.Ordinal))
+            if (sql.Contains("$artifact_stem", StringComparison.Ordinal))
             {
-                string archiveStem = StripCompoundArchiveExtensions(job.Archive);
-                parameters["archive_stem"] = new StringParameter(archiveStem);
+                string artifactStem = StripCompoundArtifactExtensions(job.Artifact);
+                parameters["artifact_stem"] = new StringParameter(artifactStem);
             }
         }
         else
         {
-            // Multi-archive shape — manifest validator guarantees Archives
-            // is non-null and non-empty when Archive is absent.
-            foreach ((string paramName, string archiveRel) in job.Archives!)
+            // Multi-artifact shape — manifest validator guarantees Artifacts
+            // is non-null and non-empty when Artifact is absent.
+            foreach ((string paramName, string artifactRel) in job.Artifacts!)
             {
-                string archivePath = Path.Combine(rawDir, archiveRel);
-                if (!File.Exists(archivePath))
+                string artifactPath = Path.Combine(rawDir, artifactRel);
+                if (!File.Exists(artifactPath))
                 {
                     throw new FileNotFoundException(
-                        $"Ingest job '{job.TableName}' SQL targets archives['{paramName}'] = " +
-                        $"'{archiveRel}' but the file '{archivePath}' is missing after download.",
-                        archivePath);
+                        $"Ingest job '{job.TableName}' SQL targets artifacts['{paramName}'] = " +
+                        $"'{artifactRel}' but the file '{artifactPath}' is missing after download.",
+                        artifactPath);
                 }
-                parameters[paramName] = new StringParameter(archivePath);
+                parameters[paramName] = new StringParameter(artifactPath);
             }
         }
 
@@ -628,15 +629,15 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
             IngestPass: ingestPass);
     }
 
-    // Strip compound archive extensions in the order they appear, so
+    // Strip compound artifact extensions in the order they appear, so
     // `LJSpeech-1.1.tar.gz` → `LJSpeech-1.1`. Single extensions handled
     // by ChangeExtension. Anything not on the recognised list is left
     // alone (the manifest validator should reject those at load time
     // once we tighten the schema; for now, pass-through is safer than
     // partial stripping).
-    private static string StripCompoundArchiveExtensions(string archiveName)
+    private static string StripCompoundArtifactExtensions(string artifactName)
     {
-        string name = Path.GetFileName(archiveName);
+        string name = Path.GetFileName(artifactName);
         string[] doubleExtensions = [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"];
         foreach (string ext in doubleExtensions)
         {

@@ -163,4 +163,24 @@ public readonly partial struct DataValue
         }
         return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
     }
+
+    /// <summary>
+    /// Returns the encoded video bytes as a fresh <see cref="byte"/>[] (raw
+    /// MP4 / WebM / etc. bytes as ingested). For arena-backed values, reads
+    /// from <paramref name="store"/>; for sidecar-backed values, looks up
+    /// the value's <c>storeId</c> in <paramref name="registry"/>. Mirrors
+    /// <see cref="AsAudio"/> — the inline metadata accessors
+    /// (<see cref="VideoWidth"/>, etc.) cover the header-peek case, this
+    /// returns the full payload.
+    /// </summary>
+    public byte[] AsVideo(IValueStore store, SidecarRegistry? registry = null)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Video);
+
+        if (IsInSidecar)
+        {
+            return ReadSidecarBytes(registry).ToArray();
+        }
+        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+    }
 }

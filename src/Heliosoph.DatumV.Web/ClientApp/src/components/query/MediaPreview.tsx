@@ -93,7 +93,7 @@ export function MediaPreview({
             <X className="size-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-auto p-3">{children}</div>
+        <div className="flex-1 overflow-auto">{children}</div>
       </div>
     </div>,
     document.body,

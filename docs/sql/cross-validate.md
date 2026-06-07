@@ -22,10 +22,11 @@ The simplest use: tag every row with a fold, export once, and let your training 
 
 ```sql
 -- Tag each row with one of 5 folds, export to Parquet
-SELECT *, fold
-FROM training_data
-CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
-INTO 'training_with_folds.parquet'
+COPY (
+  SELECT *, fold
+  FROM training_data
+  CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
+) TO 'training_with_folds.parquet'
 ```
 
 In Python, your training loop becomes:
@@ -148,12 +149,13 @@ CROSS VALIDATE(k = 3, seed = 2) ON id AS inner_fold
 
 ```sql
 -- Filter, assign folds, sort, and output
-SELECT *, fold
-FROM training_data
-WHERE is_valid = 1
-CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
-ORDER BY fold, id
-INTO 'training_with_folds.parquet'
+COPY (
+  SELECT *, fold
+  FROM training_data
+  WHERE is_valid = 1
+  CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
+  ORDER BY fold, id
+) TO 'training_with_folds.parquet'
 
 -- Use fold in downstream LET computation
 SELECT

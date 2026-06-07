@@ -3,42 +3,84 @@ using Heliosoph.DatumV.Catalog;
 namespace Heliosoph.DatumV.Tests.Catalog;
 
 /// <summary>
-/// Multi-dim arrays (ndim ≥ 2) only support fixed-width primitive element
-/// kinds — byte / reference / blob kinds collide with the multi-dim
-/// metadata packing. The validation fires at <c>CREATE TABLE</c> time so
-/// users see the error before any INSERT touches the column.
+/// Multi-dim arrays (ndim ≥ 2) are now supported for every element kind. This
+/// file used to gate the DDL rejection set; remaining tests assert
+/// acceptance across the kind matrix and serve as a regression net against
+/// re-introducing a guard.
 /// </summary>
 public sealed class MultiDimDdlRejectionTests : ServiceTestBase
 {
-    private InvalidOperationException ExpectRejection(string ddl)
+
+    [Fact]
+    public void StringMultiDim_AcceptedAtDdl()
+    {
+        // Slice A: multi-dim Array<String> is supported via
+        // FromArenaMultiDimStringArray + a shape-prefix-aware encoder/decoder.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s Array<String>(2,3))");
+    }
+
+    [Fact]
+    public void ByteArrayMultiDim_AcceptedAtDdl()
+    {
+        // Slice B: multi-dim Array<UInt8> is supported. The byte-count path in
+        // ElementCount subtracts the shape prefix; AsUInt8Array / AsByteSpan
+        // skip the prefix when IsMultiDim is set.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (b Array<UInt8>(2,3))");
+    }
+
+    [Fact]
+    public void ImageMultiDim_AcceptedAtDdl()
+    {
+        // Multi-dim Array<Image> is supported via
+        // FromArenaMultiDimImageArray + a shape-prefix-aware encoder/decoder
+        // path. The original user request (Array<Image>(2,4)) works as of this
+        // slice.
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (m Array<Image>(2,3))");
+    }
+
+    [Fact]
+    public void AudioMultiDim_AcceptedAtDdl()
     {
         using TableCatalog catalog = CreateCatalog();
-        return Assert.Throws<InvalidOperationException>(() => catalog.Plan(ddl));
+        catalog.Plan("CREATE TEMP TABLE t (a Array<Audio>(2,3))");
     }
 
     [Fact]
-    public void StringMultiDim_RejectedAtDdl()
+    public void VideoMultiDim_AcceptedAtDdl()
     {
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (s Array<String>(2,3))");
-        Assert.Contains("multi-dim", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("String", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (v Array<Video>(2,3))");
     }
 
     [Fact]
-    public void ByteArrayMultiDim_RejectedAtDdl()
+    public void JsonMultiDim_AcceptedAtDdl()
     {
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (b Array<UInt8>(2,3))");
-        Assert.Contains("UInt8", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (j Array<Json>(2,3))");
     }
 
     [Fact]
-    public void ImageMultiDim_RejectedAtDdl()
+    public void PointCloudMultiDim_AcceptedAtDdl()
     {
-        InvalidOperationException ex = ExpectRejection(
-            "CREATE TEMP TABLE t (m Array<Image>(2,3))");
-        Assert.Contains("Image", ex.Message);
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (p Array<PointCloud>(2,3))");
+    }
+
+    [Fact]
+    public void StructMultiDim_AcceptedAtDdl()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (s Array<Struct>(2,3))");
+    }
+
+    [Fact]
+    public void MeshMultiDim_AcceptedAtDdl()
+    {
+        using TableCatalog catalog = CreateCatalog();
+        catalog.Plan("CREATE TEMP TABLE t (m Array<Mesh>(2,3))");
     }
 
     [Fact]

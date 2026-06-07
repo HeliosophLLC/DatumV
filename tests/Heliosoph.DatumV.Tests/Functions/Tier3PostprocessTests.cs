@@ -173,6 +173,32 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
             InvokeAsync(new CosineSimilarityFunction(), F32(1f, 2f), F32(1f, 2f, 3f)));
     }
 
+    // ─── dot_product ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DotProduct_KnownInputs_MatchesExpectedSum()
+    {
+        // [1,2,3] · [4,5,6] = 4 + 10 + 18 = 32
+        ValueRef result = await InvokeAsync(new DotProductFunction(),
+            F32(1f, 2f, 3f), F32(4f, 5f, 6f));
+        Assert.Equal(32f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task DotProduct_Orthogonal_Returns0()
+    {
+        ValueRef result = await InvokeAsync(new DotProductFunction(),
+            F32(1f, 0f, 0f), F32(0f, 1f, 0f));
+        Assert.Equal(0f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task DotProduct_LengthMismatch_Throws()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new DotProductFunction(), F32(1f, 2f), F32(1f, 2f, 3f)));
+    }
+
     // ─── nms ─────────────────────────────────────────────────────────────────
 
     [Fact]

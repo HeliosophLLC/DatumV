@@ -27,18 +27,18 @@ public sealed class ProjectionSetReturningTests : ServiceTestBase
     }
 
     [Fact]
-    public async Task Range_InProjection_NoFrom_ExpandsToRows()
+    public async Task GenerateSeries_InProjection_NoFrom_ExpandsToRows()
     {
         TableCatalog catalog = CreateCatalog();
 
         List<Row> results = await ExecuteQueryAsync(
-            "SELECT RANGE(0, 4)",
+            "SELECT GENERATE_SERIES(0, 4)",
             catalog);
 
         Assert.Equal(5, results.Count);
         for (int i = 0; i < 5; i++)
         {
-            Assert.Equal(i, results[i]["Value"].AsInt32());
+            Assert.Equal(i, results[i]["value"].AsInt32());
         }
     }
 

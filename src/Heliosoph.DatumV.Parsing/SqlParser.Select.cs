@@ -556,29 +556,6 @@ public static partial class SqlParser
         from condition in ExpressionParser
         select condition;
 
-    // ───────────────────── INTO clause ─────────────────────
-
-    /// <summary>SHARD ON sample_count|byte_size value</summary>
-    private static readonly TokenListParser<SqlToken, ShardClause> ShardClauseParser =
-        from shardKw in Token.EqualTo(SqlToken.Shard)
-        from onKw in Token.EqualTo(SqlToken.On)
-        from mode in Token.EqualTo(SqlToken.Identifier)
-        from value in Token.EqualTo(SqlToken.NumberLiteral)
-            .Apply(Numerics.DecimalDouble)
-        select new ShardClause(
-            ParseShardMode(GetTokenText(mode)),
-            (long)value);
-
-    /// <summary>INTO 'path' [SHARD ON ...]</summary>
-    private static readonly TokenListParser<SqlToken, IntoClause> IntoClauseParser =
-        from intoKw in Token.EqualTo(SqlToken.Into)
-        from path in Token.EqualTo(SqlToken.StringLiteral)
-        from shard in ShardClauseParser.OptionalOrDefault()
-        select new IntoClause(
-            InferOutputFormat(UnquoteString(path)),
-            UnquoteString(path),
-            shard);
-
     // ───────────────────── GROUP BY clause ─────────────────────
 
     /// <summary>GROUP BY ALL | GROUP BY expr1, expr2, ...</summary>
@@ -1023,14 +1000,12 @@ public static partial class SqlParser
         from assertions in AssertClausesParser
         from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
-        from intoClause in IntoClauseParser.OptionalOrDefault()
         from orderByClause in OrderByClauseParser.OptionalOrDefault()
         from limitValue in LimitParser.OptionalOrDefault()
         from offsetValue in OffsetParser.OptionalOrDefault()
         select new SelectStatement(
             columns,
             fromClause,
-            intoClause,
             CombineJoins(commaJoins, joinClauses),
             whereClause,
             groupByClause,
@@ -1048,11 +1023,9 @@ public static partial class SqlParser
 
     /// <summary>
     /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
-    /// before ORDER BY, LIMIT, and OFFSET. INTO is still parsed here since it is
-    /// a Heliosoph.DatumV-specific output clause that applies to individual SELECTs.
-    /// Used by <see cref="QueryPrimary"/> so that trailing ORDER BY/LIMIT/OFFSET
-    /// bind to the compound level rather than to an individual SELECT branch
-    /// in set operations.
+    /// before ORDER BY, LIMIT, and OFFSET. Used by <see cref="QueryPrimary"/> so
+    /// that trailing ORDER BY/LIMIT/OFFSET bind to the compound level rather
+    /// than to an individual SELECT branch in set operations.
     /// </summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> BareSelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
@@ -1070,11 +1043,9 @@ public static partial class SqlParser
         from assertions in AssertClausesParser
         from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
-        from intoClause in IntoClauseParser.OptionalOrDefault()
         select new SelectStatement(
             columns,
             fromClause,
-            intoClause,
             CombineJoins(commaJoins, joinClauses),
             whereClause,
             groupByClause,
@@ -1161,7 +1132,7 @@ public static partial class SqlParser
 
     /// <summary>
     /// Full query expression parser: compound query optionally followed by ORDER BY, LIMIT,
-    /// OFFSET, and INTO that apply to the entire combined result. For a single SELECT without
+    /// and OFFSET that apply to the entire combined result. For a single SELECT without
     /// set operations, these trailing clauses are already parsed on the SelectStatement itself.
     /// </summary>
     private static readonly TokenListParser<SqlToken, QueryExpression> QueryExpressionParser =
@@ -1169,7 +1140,6 @@ public static partial class SqlParser
         from orderBy in OrderByClauseParser.OptionalOrDefault()
         from limit in LimitParser.OptionalOrDefault()
         from offset in OffsetParser.OptionalOrDefault()
-        from intoClause in IntoClauseParser.OptionalOrDefault()
-        select ApplyTrailingClauses(query, orderBy, limit, offset, intoClause);
+        select ApplyTrailingClauses(query, orderBy, limit, offset);
 
 }

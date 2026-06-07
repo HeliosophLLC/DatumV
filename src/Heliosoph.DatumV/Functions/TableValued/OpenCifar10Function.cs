@@ -22,7 +22,7 @@ namespace Heliosoph.DatumV.Functions.TableValued;
 /// tar.gz containing multiple per-batch <c>.bin</c> files. Path-based TVFs
 /// would force the install pipeline to first extract those files to the raw
 /// cache; the bytes overload lets a recipe pull them straight out of
-/// <c>open_archive($archive)</c> via an (implicit-LATERAL) function source
+/// <c>open_archive($artifact)</c> via an (implicit-LATERAL) function source
 /// in the <c>FROM</c> clause.
 /// </para>
 /// <para>

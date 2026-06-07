@@ -33,7 +33,8 @@ internal static class HttpFileDownloader
         string destPath,
         IProgress<DownloadByteProgress>? progress,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? userAgentOverride = null)
     {
         string partPath = destPath + ".part";
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
@@ -66,6 +67,11 @@ internal static class HttpFileDownloader
         if (existing > 0)
         {
             req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existing, null);
+        }
+        if (userAgentOverride is not null)
+        {
+            req.Headers.UserAgent.Clear();
+            req.Headers.UserAgent.ParseAdd(userAgentOverride);
         }
 
         using HttpResponseMessage resp = await http.SendAsync(

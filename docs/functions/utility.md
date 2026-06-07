@@ -20,16 +20,6 @@ SELECT cast(score, UInt8) AS byte_score FROM data
 SELECT CAST(score AS UInt8) AS byte_score FROM data  -- equivalent
 ```
 
-### to_epoch
-
-`to_epoch(val)` → Float32 | QU: 1
-
-Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Float32.
-
-```sql
-SELECT to_epoch(date_col) AS epoch_days FROM data
-```
-
 ### typeof
 
 `typeof(val)` → Type | QU: 1

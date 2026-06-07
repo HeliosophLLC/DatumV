@@ -61,21 +61,6 @@ internal static class ColumnDefinitionResolver
                     "suffixed with [] for typed-array columns.");
             }
 
-            // Multi-dim (ndim ≥ 2) arrays only support fixed-width primitive
-            // element kinds — byte arrays and reference / blob kinds (String,
-            // Struct, Image, Audio, Video, Json, PointCloud) collide with the
-            // _charCount packing used for the multi-dim ndim. Reject at DDL
-            // time so users see the error on CREATE TABLE rather than on the
-            // first INSERT.
-            if (isArray && fixedShape is { Length: >= 2 } && IsMultiDimIncompatibleElementKind(kind))
-            {
-                throw new InvalidOperationException(
-                    $"Column '{d.Name}': multi-dimensional shape (ndim={fixedShape.Length}) is " +
-                    $"not supported for element kind {kind}. Multi-dim arrays only support " +
-                    "fixed-width primitive element kinds (Int*, UInt*, Float*, Decimal, Date, " +
-                    "Time, Duration, Uuid, Point*, Boolean). Use a 1-D array " +
-                    $"(Array<{kind}>) or denormalize the row.");
-            }
 
             Expression? defaultExpression = null;
             if (d.DefaultValue is not null)
@@ -586,21 +571,4 @@ internal static class ColumnDefinitionResolver
         }
     }
 
-    /// <summary>
-    /// True when <paramref name="kind"/> cannot carry an <c>IsMultiDim</c> flag —
-    /// byte arrays (the byte-count <c>ElementCount</c> path collides with the
-    /// shape-prefix bytes) and reference / blob kinds (the
-    /// <c>_charCount</c> field is already claimed for storeId / TypeId / etc.).
-    /// Mirrors <c>DataValue.RejectReferenceElementKind</c>; we duplicate the
-    /// list here to surface the error at DDL time rather than first INSERT.
-    /// </summary>
-    private static bool IsMultiDimIncompatibleElementKind(DataKind kind) =>
-        kind is DataKind.UInt8
-              or DataKind.String
-              or DataKind.Struct
-              or DataKind.Image
-              or DataKind.Audio
-              or DataKind.Video
-              or DataKind.Json
-              or DataKind.PointCloud;
 }

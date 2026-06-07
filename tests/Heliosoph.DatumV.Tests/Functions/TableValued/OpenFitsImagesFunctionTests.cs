@@ -75,6 +75,13 @@ public sealed class OpenFitsImagesFunctionTests : ServiceTestBase
             Assert.Equal(0, rows[0]["hdu_index"].AsInt64());
             Assert.True(rows[0]["extname"].IsNull);
 
+            // 2-D sci column carries shape [NAXIS2, NAXIS1] = [height, width] so
+            // sci[y, x] indexes pixel (y, x) directly. AsArraySpan<float> remains
+            // the flat row-major view.
+            Assert.True(rows[0]["sci"].IsMultiDim);
+            ReadOnlySpan<int> sciShape = rows[0]["sci"].GetShape(ctx.Store);
+            Assert.Equal(new int[] { height, width }, sciShape.ToArray());
+
             ReadOnlySpan<float> sci = rows[0]["sci"].AsArraySpan<float>(ctx.Store);
             Assert.Equal(expected.Length, sci.Length);
             for (int i = 0; i < expected.Length; i++)

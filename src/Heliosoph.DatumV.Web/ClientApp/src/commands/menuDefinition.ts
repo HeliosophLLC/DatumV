@@ -28,6 +28,7 @@ export type MenuLabelKey =
   | 'menu.file.exit'
   | 'menu.run.label'
   | 'menu.run.run'
+  | 'menu.run.export'
   | 'menu.edit.label'
   | 'menu.view.label'
   | 'menu.view.resetZoom'
@@ -168,6 +169,7 @@ export function buildMenu(opts: {
     ]),
     submenu('menu.run.label', [
       item('menu.run.run', 'query.run', 'CmdOrCtrl+Enter'),
+      item('menu.run.export', 'query.export', 'CmdOrCtrl+Shift+E'),
     ]),
     submenu('menu.edit.label', [
       role('undo'),

@@ -438,9 +438,10 @@ This creates both `data.csv.datum-index` and `data.csv.datum-manifest` in a sing
 
 ```bash
 datumv query "
-  SELECT id, normalize(value) AS norm_value
-  FROM data
-  INTO 'output/result.csv' SHARD ON sample_count 10000
+  COPY (
+    SELECT id, normalize(value) AS norm_value
+    FROM data
+  ) TO 'output/result.parquet'
 " --source "csv:data=./data.csv" --with-index
 ```
 

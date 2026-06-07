@@ -23,6 +23,12 @@
     "arrayBanner": "Showing the first {shown, number} of {total, number} {total, plural, one {item} other {items}}. Use unnest() to materialize the full array as rows.",
     "objectBanner": "Showing the first {shown, number} of {total, number} {total, plural, one {field} other {fields}}."
   },
+  "numericArrayInspector": {
+    "firstOf": "first {shown, number} of {total, number}",
+    "firstOfWithShape": "first {shown, number} of {total, number} · shape {shape}",
+    "loadMore": "Load {step, number} more",
+    "loadRest": "Load remaining {rest, number}"
+  },
   "newTab": "New tab",
   "newTabSql": "SQL Query",
   "newTabFunction": "Execute Function",
@@ -65,6 +71,9 @@
   "cancel": "Cancel",
   "explain": "Explain",
   "explaining": "Explaining…",
+  "export": "Export results to file",
+  "exporting": "Exporting…",
+  "cancelExport": "Cancel export",
   "explainRunning": "Building plan…",
   "explainReady": "EXPLAIN ready",
   "explainFailed": "EXPLAIN failed",

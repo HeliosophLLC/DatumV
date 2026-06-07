@@ -43,12 +43,24 @@ public sealed class JsonLinesDeserializer : IFormatDeserializer
     private const int DefaultBatchSize = 1024;
 
     private readonly FileFormatDescriptor _descriptor;
+    private readonly JsonLinesScanResult? _precomputedScan;
     private PassMetrics? _scanMetrics;
 
     /// <summary>Creates a JSONL deserializer for the given source descriptor.</summary>
     public JsonLinesDeserializer(FileFormatDescriptor descriptor)
     {
         _descriptor = descriptor;
+    }
+
+    /// <summary>
+    /// Creates a deserializer from a pre-computed <see cref="JsonLinesScanResult"/>.
+    /// Use when pass 1 was performed separately (e.g. at plan time by a TVF) so
+    /// the emit pass skips the second file walk.
+    /// </summary>
+    public JsonLinesDeserializer(FileFormatDescriptor descriptor, JsonLinesScanResult precomputedScan)
+    {
+        _descriptor = descriptor;
+        _precomputedScan = precomputedScan;
     }
 
     /// <inheritdoc/>
@@ -60,79 +72,20 @@ public sealed class JsonLinesDeserializer : IFormatDeserializer
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // ───────── Pass 1: scan ─────────
-        Stopwatch scanSw = Stopwatch.StartNew();
-        long bytesRead;
-        JsonLinesMode mode;
-        JsonScanResult? objectScan = null;
-        long observedRowCount;
+        JsonLinesScanResult scan = _precomputedScan
+            ?? await ScanAsync(_descriptor, cancellationToken).ConfigureAwait(false);
 
-        await using (Stream scanStream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false))
-        {
-            bytesRead = TryGetLength(scanStream);
-            using StreamReader scanReader = new(scanStream);
-            mode = DetectShape(scanReader, _descriptor.FilePath, out long firstLineNumber, out string? firstLine);
-
-            // If the file held no non-empty lines, yield nothing — the descriptor
-            // is well-formed (an empty .jsonl is valid), there's just nothing to
-            // emit.
-            if (firstLine is null)
-            {
-                _scanMetrics = new PassMetrics(0, 0, bytesRead, 0, scanSw.Elapsed);
-                yield break;
-            }
-
-            if (mode == JsonLinesMode.Object)
-            {
-                // Run the shared scanner over every line's root object.
-                objectScan = JsonTypeScanner.Scan(
-                    EnumerateObjectLines(scanReader, _descriptor.FilePath, firstLine, firstLineNumber, cancellationToken),
-                    cancellationToken);
-                observedRowCount = objectScan.RowCount;
-            }
-            else
-            {
-                // Single-column mode: parse each remaining line to validate it's
-                // well-formed JSON and not a stray object that would be a shape
-                // mismatch. Counting in pass 1 catches errors before any row
-                // is yielded — better than discovering them mid-emit.
-                long count = 1;
-                long currentLine = firstLineNumber;
-                while (TryReadNonEmptyLine(scanReader, ref currentLine, out string? line, out long _))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    JsonValueKind kind;
-                    try
-                    {
-                        using JsonDocument doc = JsonDocument.Parse(line!);
-                        kind = doc.RootElement.ValueKind;
-                    }
-                    catch (JsonException ex)
-                    {
-                        throw new InvalidDataException(
-                            $"JSONL file '{_descriptor.FilePath}' line {currentLine}: malformed JSON ({ex.Message}).", ex);
-                    }
-                    if (kind == JsonValueKind.Object)
-                    {
-                        throw new InvalidDataException(
-                            $"JSONL file '{_descriptor.FilePath}' line {currentLine}: got object, but "
-                            + "the file is single-column-mode based on the first line. Mid-file shape "
-                            + "switches aren't supported — split into separate files.");
-                    }
-                    count++;
-                }
-                observedRowCount = count;
-            }
-        }
-
-        scanSw.Stop();
         _scanMetrics = new PassMetrics(
-            RowCount: observedRowCount,
+            RowCount: scan.ObservedRowCount,
             BatchCount: 0,
-            BytesRead: bytesRead,
+            BytesRead: scan.BytesRead,
             ArenaBytesWritten: 0,
-            Elapsed: scanSw.Elapsed);
+            Elapsed: scan.Elapsed);
 
-        if (observedRowCount == 0) yield break;
+        if (scan.ObservedRowCount == 0) yield break;
+
+        JsonLinesMode mode = scan.Mode;
+        JsonScanResult? objectScan = scan.ObjectScan;
 
         // ───────── Pass 2: emit ─────────
         await using Stream emitStream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -209,6 +162,77 @@ public sealed class JsonLinesDeserializer : IFormatDeserializer
         {
             yield return batch;
         }
+    }
+
+    // ────────────────────── Public scan helper ──────────────────────
+
+    /// <summary>
+    /// Runs the JSONL pass-1 scan: detects shape from the first non-empty line,
+    /// then either runs <see cref="JsonTypeScanner"/> over every line's root
+    /// object (object-mode) or validates and counts every line (single-column-mode).
+    /// Used by callers that need the schema before <see cref="DeserializeAsync"/>
+    /// — e.g. <c>open_jsonl</c> at plan time.
+    /// </summary>
+    public static async Task<JsonLinesScanResult> ScanAsync(
+        FileFormatDescriptor descriptor,
+        CancellationToken cancellationToken = default)
+    {
+        Stopwatch scanSw = Stopwatch.StartNew();
+
+        await using Stream scanStream = await descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);
+        long bytesRead = TryGetLength(scanStream);
+        using StreamReader scanReader = new(scanStream);
+
+        JsonLinesMode mode = DetectShape(scanReader, descriptor.FilePath, out long firstLineNumber, out string? firstLine);
+
+        if (firstLine is null)
+        {
+            scanSw.Stop();
+            return new JsonLinesScanResult(JsonLinesMode.Object, ObjectScan: null, ObservedRowCount: 0, BytesRead: bytesRead, Elapsed: scanSw.Elapsed);
+        }
+
+        JsonScanResult? objectScan = null;
+        long observedRowCount;
+
+        if (mode == JsonLinesMode.Object)
+        {
+            objectScan = JsonTypeScanner.Scan(
+                EnumerateObjectLines(scanReader, descriptor.FilePath, firstLine, firstLineNumber, cancellationToken),
+                cancellationToken);
+            observedRowCount = objectScan.RowCount;
+        }
+        else
+        {
+            long count = 1;
+            long currentLine = firstLineNumber;
+            while (TryReadNonEmptyLine(scanReader, ref currentLine, out string? line, out long _))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                JsonValueKind kind;
+                try
+                {
+                    using JsonDocument doc = JsonDocument.Parse(line!);
+                    kind = doc.RootElement.ValueKind;
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException(
+                        $"JSONL file '{descriptor.FilePath}' line {currentLine}: malformed JSON ({ex.Message}).", ex);
+                }
+                if (kind == JsonValueKind.Object)
+                {
+                    throw new InvalidDataException(
+                        $"JSONL file '{descriptor.FilePath}' line {currentLine}: got object, but "
+                        + "the file is single-column-mode based on the first line. Mid-file shape "
+                        + "switches aren't supported — split into separate files.");
+                }
+                count++;
+            }
+            observedRowCount = count;
+        }
+
+        scanSw.Stop();
+        return new JsonLinesScanResult(mode, objectScan, observedRowCount, bytesRead, scanSw.Elapsed);
     }
 
     // ────────────────────── Shape detection ──────────────────────
@@ -352,10 +376,24 @@ public sealed class JsonLinesDeserializer : IFormatDeserializer
 /// <summary>
 /// Locked shape of a JSONL file, determined by inspecting the first non-empty line.
 /// </summary>
-internal enum JsonLinesMode
+public enum JsonLinesMode
 {
     /// <summary>Every line is a JSON object; columns come from union-of-keys.</summary>
     Object,
     /// <summary>Every line is a non-object JSON value; single column named <c>value</c>.</summary>
     SingleColumn,
 }
+
+/// <summary>
+/// Result of <see cref="JsonLinesDeserializer.ScanAsync"/>. Captures the shape
+/// locked by the first non-empty line, the per-column inference for object-mode
+/// files (<see langword="null"/> in single-column-mode), and the total row count
+/// observed. Passed back into <see cref="JsonLinesDeserializer"/> via its
+/// precomputed-scan constructor so pass 2 skips redoing the line walk.
+/// </summary>
+public sealed record JsonLinesScanResult(
+    JsonLinesMode Mode,
+    JsonScanResult? ObjectScan,
+    long ObservedRowCount,
+    long BytesRead,
+    TimeSpan Elapsed);

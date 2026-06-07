@@ -171,6 +171,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
             new DateTime(2026, 4, 15, 10, 30, 0, DateTimeKind.Unspecified)),
         DataKind.Time     => DataValue.FromTime(new TimeOnly(14, 30, 59, 123)),
         DataKind.Duration => DataValue.FromDuration(TimeSpan.FromSeconds(90.5)),
+        DataKind.Interval => DataValue.FromInterval(new Interval(months: 14, days: 3, microseconds: 14_706_000_000L)),
         DataKind.Uuid     => DataValue.FromUuid(Guid.Parse("12345678-1234-1234-1234-123456789abc")),
         // Sidecar pointers carry no payload; cheap test-side construction
         // for the unsupported-kinds path (we only need a DataValue with
@@ -273,6 +274,9 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
                 break;
             case DataKind.Duration:
                 Assert.Equal(expected.AsDuration(), actual.AsDuration());
+                break;
+            case DataKind.Interval:
+                Assert.Equal(expected.AsInterval(), actual.AsInterval());
                 break;
             case DataKind.Uuid:
                 Assert.Equal(expected.AsUuid(), actual.AsUuid());

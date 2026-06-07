@@ -212,7 +212,7 @@ public static class TypeCoercion
             DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64 or
             DataKind.Boolean or
             DataKind.Date or DataKind.Timestamp or DataKind.TimestampTz or DataKind.Time or
-            DataKind.Duration or DataKind.Uuid;
+            DataKind.Duration or DataKind.Interval or DataKind.Uuid;
     }
 
     /// <summary>
@@ -272,6 +272,9 @@ public static class TypeCoercion
 
             DataKind.Duration when TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out TimeSpan duration)
                 => DataValue.FromDuration(duration),
+
+            DataKind.Interval when Interval.TryParse(text, out Interval interval)
+                => DataValue.FromInterval(interval),
 
             DataKind.Uuid when Guid.TryParse(text, out Guid uuid)
                 => DataValue.FromUuid(uuid),

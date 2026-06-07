@@ -312,7 +312,15 @@ public sealed class QuerySchemaResolver
             }
         }
 
-        Schema schema = _catalog[tableReference.Name].GetSchema();
+        // Honor explicit schema qualifiers — `datasets.foo`, `system.udfs`, etc.
+        // Previously this path dropped `SchemaName` and routed every lookup
+        // through the `public.<name>` default in `QualifiedName.Parse`, which
+        // silently broke COPY / CTAS / CREATE VIEW bodies that reference a
+        // mounted non-public schema (datasets / system / information_schema).
+        QualifiedName qn = tableReference.SchemaName is not null
+            ? new QualifiedName(tableReference.SchemaName, tableReference.Name)
+            : QualifiedName.Parse(tableReference.Name);
+        Schema schema = _catalog[qn].GetSchema();
 
         string sourceIdentifier = tableReference.Alias ?? tableReference.Name;
         return ToResolvedColumns(schema, sourceIdentifier);
@@ -351,6 +359,9 @@ public sealed class QuerySchemaResolver
         List<ResolvedColumn> outputColumns = new();
         HashSet<int> aliasedPositions = new();
 
+        AppendLetBindingProjections(
+            leftmostStatement.LetBindings, flatSourceSchema, sourceIdentifier, outputColumns, aliasedPositions);
+
         foreach (SelectColumn selectColumn in leftmostStatement.Columns)
         {
             switch (selectColumn)
@@ -376,13 +387,23 @@ public sealed class QuerySchemaResolver
                     (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, flatSourceSchema, _functionRegistry);
 
+                    // Surface struct-literal field metadata so downstream
+                    // consumers (notably ExportPlan / Parquet sink) can build
+                    // a real STRUCT column instead of a fields-less Struct
+                    // ColumnInfo that the encoder factory has to reject.
+                    IReadOnlyList<ColumnInfo>? structFields = ResolveStructFields(
+                        selectColumn.Expression, flatSourceSchema);
+
                     outputColumns.Add(new ResolvedColumn(
                         outputName,
                         shape?.Kind ?? DataKind.String,
                         Nullable: true,
                         sourceIdentifier,
                         IsArray: shape?.IsArray ?? false,
-                        IsMultiDim: shape?.IsMultiDim ?? false));
+                        IsMultiDim: shape?.IsMultiDim ?? false)
+                    {
+                        Fields = structFields,
+                    });
 
                     if (selectColumn.Alias is not null)
                     {
@@ -461,6 +482,14 @@ public sealed class QuerySchemaResolver
         List<ResolvedColumn> outputColumns = new();
         HashSet<int> aliasedPositions = new();
 
+        // LET bindings with an OutputAlias (`LET x = expr AS name`) project
+        // into the output schema ahead of the explicit SELECT columns —
+        // matches how ModelInvocationHoister and the runtime ProjectOperator
+        // build the projection. Without this, exports (COPY) and CTAS that
+        // wrap a LET-projecting query miss those columns entirely.
+        AppendLetBindingProjections(
+            subquery.Query.LetBindings, innerSchema, subquery.Alias, outputColumns, aliasedPositions);
+
         foreach (SelectColumn selectColumn in subquery.Query.Columns)
         {
             switch (selectColumn)
@@ -489,13 +518,19 @@ public sealed class QuerySchemaResolver
                     (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ExpressionTypeResolver.ResolveTypeShape(
                         selectColumn.Expression, innerSchema, _functionRegistry);
 
+                    IReadOnlyList<ColumnInfo>? structFields = ResolveStructFields(
+                        selectColumn.Expression, innerSchema);
+
                     outputColumns.Add(new ResolvedColumn(
                         outputName,
                         shape?.Kind ?? DataKind.String,
                         Nullable: true,
                         subquery.Alias,
                         IsArray: shape?.IsArray ?? false,
-                        IsMultiDim: shape?.IsMultiDim ?? false));
+                        IsMultiDim: shape?.IsMultiDim ?? false)
+                    {
+                        Fields = structFields,
+                    });
                     if (selectColumn.Alias is not null)
                     {
                         aliasedPositions.Add(outputColumns.Count - 1);
@@ -630,6 +665,41 @@ public sealed class QuerySchemaResolver
     }
 
     /// <summary>
+    /// Appends one <see cref="ResolvedColumn"/> per LET binding whose
+    /// <see cref="LetBinding.OutputAlias"/> is non-null, in declaration
+    /// order. Mirrors <c>ModelInvocationHoister.RewriteProjectionWithLet</c>
+    /// — aliased LET bindings project ahead of the explicit SELECT columns.
+    /// No-op when <paramref name="letBindings"/> is null or contains no
+    /// aliased entries.
+    /// </summary>
+    private void AppendLetBindingProjections(
+        IReadOnlyList<LetBinding>? letBindings,
+        Schema sourceSchema,
+        string sourceIdentifier,
+        List<ResolvedColumn> outputColumns,
+        HashSet<int> aliasedPositions)
+    {
+        if (letBindings is null || letBindings.Count == 0) return;
+        foreach (LetBinding binding in letBindings)
+        {
+            if (binding.OutputAlias is null) continue;
+
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape =
+                ExpressionTypeResolver.ResolveTypeShape(
+                    binding.Expression, sourceSchema, _functionRegistry);
+
+            outputColumns.Add(new ResolvedColumn(
+                binding.OutputAlias,
+                shape?.Kind ?? DataKind.String,
+                Nullable: true,
+                sourceIdentifier,
+                IsArray: shape?.IsArray ?? false,
+                IsMultiDim: shape?.IsMultiDim ?? false));
+            aliasedPositions.Add(outputColumns.Count - 1);
+        }
+    }
+
+    /// <summary>
     /// Builds a flat <see cref="Schema"/> from a <see cref="ResolvedQuerySchema"/>,
     /// using both qualified and unqualified column names so that
     /// <see cref="ExpressionTypeResolver"/> can resolve either form.
@@ -647,26 +717,83 @@ public sealed class QuerySchemaResolver
                 string qualifiedName = $"{resolved.SourceTableOrAlias}.{resolved.ColumnName}";
                 if (seen.Add(qualifiedName))
                 {
-                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable)
-                    {
-                        IsArray = resolved.IsArray,
-                        IsMultiDim = resolved.IsMultiDim,
-                    });
+                    columns.Add(BuildColumnInfo(qualifiedName, resolved));
                 }
             }
 
             // Add unqualified name (first occurrence wins).
             if (seen.Add(resolved.ColumnName))
             {
-                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable)
-                {
-                    IsArray = resolved.IsArray,
-                    IsMultiDim = resolved.IsMultiDim,
-                });
+                columns.Add(BuildColumnInfo(resolved.ColumnName, resolved));
             }
         }
 
         return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="ColumnInfo"/> from a <see cref="ResolvedColumn"/>
+    /// under <paramref name="name"/>. Routes <see cref="DataKind.Struct"/>
+    /// columns that carry resolved field metadata to the struct constructor
+    /// so the children round-trip into the schema; everything else uses the
+    /// flat scalar constructor with <see cref="ColumnInfo.IsArray"/> /
+    /// <see cref="ColumnInfo.IsMultiDim"/> set.
+    /// </summary>
+    private static ColumnInfo BuildColumnInfo(string name, ResolvedColumn resolved)
+    {
+        if (resolved.Kind == DataKind.Struct && resolved.Fields is { } fields)
+        {
+            // Preserve IsArray so Array<Struct> column shapes survive the
+            // round trip through this helper.
+            return new ColumnInfo(name, resolved.Nullable, fields)
+            {
+                IsArray = resolved.IsArray,
+                IsMultiDim = resolved.IsMultiDim,
+            };
+        }
+        return new ColumnInfo(name, resolved.Kind, resolved.Nullable)
+        {
+            IsArray = resolved.IsArray,
+            IsMultiDim = resolved.IsMultiDim,
+        };
+    }
+
+    /// <summary>
+    /// Extracts struct field metadata from a projection expression when the
+    /// shape is statically known. Today this is the struct-literal case
+    /// (<c>{ a: 1, b: 'x' }</c>); the resolver builds a transient
+    /// <see cref="ColumnInfo"/> via <see cref="ExpressionTypeResolver.ResolveOutputColumnInfo"/>
+    /// and forwards its <see cref="ColumnInfo.Fields"/>. Returns
+    /// <see langword="null"/> for non-struct expressions and for struct
+    /// expressions whose fields don't fully resolve — downstream consumers
+    /// treat the column as <see cref="DataKind.Struct"/> without children.
+    /// </summary>
+    private IReadOnlyList<ColumnInfo>? ResolveStructFields(Expression expression, Schema sourceSchema)
+    {
+        // Direct struct literal — most common case (`SELECT { a:1, b:'x' }`).
+        if (expression is StructLiteralExpression literal)
+        {
+            ColumnInfo info = ExpressionTypeResolver.ResolveOutputColumnInfo(
+                literal, outputName: "_struct_probe", nullable: true, sourceSchema, _functionRegistry);
+            return info.Fields;
+        }
+
+        // Array literal `[{ ... }, ...]` desugars to `array({ ... }, ...)`.
+        // The element kind is the first arg's kind; pull child Fields from
+        // the first struct-literal element. ArrayConstructorFunction enforces
+        // homogeneity at ValidateArguments time, so peeking at element 0 is
+        // sufficient for static shape recovery.
+        if (expression is FunctionCallExpression call
+            && string.Equals(call.CallName, "array", StringComparison.OrdinalIgnoreCase)
+            && call.Arguments.Count > 0
+            && call.Arguments[0] is StructLiteralExpression elementLiteral)
+        {
+            ColumnInfo info = ExpressionTypeResolver.ResolveOutputColumnInfo(
+                elementLiteral, outputName: "_struct_array_probe", nullable: true, sourceSchema, _functionRegistry);
+            return info.Fields;
+        }
+
+        return null;
     }
 
     /// <summary>

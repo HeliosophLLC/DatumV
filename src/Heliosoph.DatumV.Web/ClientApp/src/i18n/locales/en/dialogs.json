@@ -74,6 +74,79 @@
     "confirm": "Delete",
     "cancel": "Cancel"
   },
+  "export": {
+    "title": "Export query results",
+    "subtitle": "Pick a format and tune its options. You'll choose the file location next.",
+    "cancel": "Cancel",
+    "continue": "Continue…",
+    "defaultSuffix": "(default)",
+    "format": {
+      "legend": "Format",
+      "parquet": {
+        "title": "Parquet",
+        "subtitle": "Lossless, round-trips through open_parquet. Best for typed media."
+      },
+      "csv": {
+        "title": "CSV",
+        "subtitle": "Plain text. Opens in Excel; round-trips scalars through open_csv_typed."
+      },
+      "json": {
+        "title": "JSON",
+        "subtitle": "Structured. Struct / array / json columns become nested objects, not strings."
+      },
+      "arrow": {
+        "title": "Arrow",
+        "subtitle": "Columnar IPC. Fastest handoff to pandas / Polars; round-trips through open_arrow."
+      }
+    },
+    "parquet": {
+      "legend": "Parquet options",
+      "compression": "Compression",
+      "compressionHint": "Algorithm used to compress each column chunk.",
+      "compressionLevel": "Compression level",
+      "compressionLevelHint": "Only applies to gzip, zstd, and brotli.",
+      "compressionLevelDefault": "Codec default",
+      "levelNone": "No compression",
+      "levelFastest": "Fastest",
+      "levelOptimal": "Optimal",
+      "levelSmallest": "Smallest",
+      "rowGroupSize": "Row group size",
+      "rowGroupSizeHint": "Rows per row group. Leave blank for the default (50,000)."
+    },
+    "csv": {
+      "legend": "CSV options",
+      "header": "Write column header row",
+      "headerHint": "First line is the comma-separated column names.",
+      "delimiter": "Delimiter",
+      "delimiterHint": "Character separating fields on each line.",
+      "delim": {
+        "comma": "Comma (,)",
+        "semicolon": "Semicolon (;)",
+        "tab": "Tab",
+        "pipe": "Pipe (|)",
+        "custom": "Custom…"
+      },
+      "lineEnding": "Line ending",
+      "lineEndingHint": "Newline style at the end of each row.",
+      "nullString": "NULL representation",
+      "nullStringHint": "Text written for SQL NULL values. Empty means an empty field.",
+      "nullStringPlaceholder": "(empty by default)"
+    },
+    "arrow": {
+      "legend": "Arrow options",
+      "noOptions": "Arrow has no configurable options in this version. The file is written in the Arrow IPC file format (Feather v2); typed-media columns carry datumv.* field metadata that round-trips through open_arrow."
+    },
+    "json": {
+      "legend": "JSON options",
+      "shape": "Shape",
+      "shapeHint": "Array is friendlier for JSON.parse; JSONL is the streaming-friendly shape ML pipelines expect.",
+      "shape.array": "Array of objects",
+      "shape.lines": "JSONL (one object per line)",
+      "indent": "Pretty-print (indent)",
+      "indentHint": "Inflates the file but makes it easier to inspect by eye.",
+      "indentDisabled": "Not available in JSONL mode — one object per line."
+    }
+  },
   "about": {
     "title": "About DatumV",
     "tagline": "DatumV™ — Heliosoph",

@@ -42,6 +42,7 @@
   </ItemGroup>
   
   <ItemGroup>
+    <PackageReference Include="Apache.Arrow" Version="23.0.0" />
     <PackageReference Include="CardinalityEstimation" Version="1.14.0" />
     <PackageReference Include="LLamaSharp" Version="0.27.0" />
     <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />

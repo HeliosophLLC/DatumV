@@ -71,7 +71,8 @@
     },
     "run": {
       "label": "&Run",
-      "run": "&Run Query"
+      "run": "&Run Query",
+      "export": "&Export Results…"
     },
     "edit": {
       "label": "&Edit"

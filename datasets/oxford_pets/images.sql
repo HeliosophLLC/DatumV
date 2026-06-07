@@ -10,5 +10,5 @@ SELECT
     regexp_replace(path, '^images/([A-Za-z_]+)_\d+\.[A-Za-z]+$', '\1') AS breed,
     size AS file_bytes,
     modified
-FROM open_archive($archive)
+FROM open_archive($artifact)
 WHERE get_filename_ext(path) IN ('jpg', 'jpeg', 'JPG', 'JPEG')

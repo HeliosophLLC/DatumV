@@ -383,10 +383,6 @@ public sealed class CompletionProvider
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
-            case CompletionZoneKind.AfterInto:
-                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
-                break;
-
             case CompletionZoneKind.AfterAs:
                 // No schema-based completions — user is typing an alias name.
                 break;
@@ -421,6 +417,28 @@ public sealed class CompletionProvider
                 {
                     AddEnumValuesForStringParameter(items, sql, cursorOffset);
                 }
+                break;
+
+            // ───────────────────── COPY zones ─────────────────────
+
+            case CompletionZoneKind.AfterCopy:
+            case CompletionZoneKind.AfterCopySource:
+            case CompletionZoneKind.AfterCopyTo:
+                // Keyword nudges along the COPY shape — '(' for the source /
+                // option block, 'TO' between source and path. KeywordRegistry
+                // owns the per-zone strings so adding CSV / JSON later
+                // doesn't ripple into the provider.
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
+            case CompletionZoneKind.InCopyOptions:
+                // Option keys come from the format registry so future formats
+                // (CSV / JSON) plug in cleanly without touching this switch —
+                // they just register additional entries in
+                // CopyFormatOptions.OptionKeysByFormat. No format-detection
+                // walk in v1 (would need to scan the option block for the
+                // FORMAT key + value); offer the union plus FORMAT itself.
+                AddKeywords(items, CopyFormatOptions.GetOptionKeys(formatName: null));
                 break;
 
             case CompletionZoneKind.AfterCall:

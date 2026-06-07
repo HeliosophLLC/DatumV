@@ -154,8 +154,8 @@ export function PointCloudViewerBody({
   }, [decoded]);
 
   return (
-    <div className="flex h-full w-full flex-col gap-2">
-      <div className="text-muted-foreground flex items-center gap-3 px-2 text-xs">
+    <div className="flex h-full w-full flex-col">
+      <div className="text-muted-foreground flex items-center gap-3 px-2 py-1 text-xs">
         {decoded && (
           <>
             <span>

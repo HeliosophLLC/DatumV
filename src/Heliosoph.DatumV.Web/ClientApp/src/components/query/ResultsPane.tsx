@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
@@ -108,7 +108,7 @@ export function ResultsPane({ leafId }: { leafId: string }) {
   // them. Cells with only errors / chunks (no table) sit at content
   // height regardless.
   const tableCount = visibleCells.filter(
-    (c) => c.schema !== null && c.rows.length > 0,
+    (c) => c.schema !== null && c.rowCount > 0,
   ).length;
   const tableMode: TableMode = tableCount === 1 ? 'fill' : 'capped';
 
@@ -387,7 +387,10 @@ function CellBlock({
   tableMode: TableMode;
 }) {
   const settings = useSnapshot(settingsState);
-  const hasTable = cell.schema !== null && cell.rows.length > 0;
+  // `rowCount` (rather than `cell.rows.length`) is the reactive signal:
+  // `cell.rows` is ref()'d in the proxy, so reads through it don't
+  // subscribe to length changes. See CellResult in state/execution.ts.
+  const hasTable = cell.schema !== null && cell.rowCount > 0;
   // Single-value detection: 1 row × 1 column, and this is the only
   // table in the pane (`tableMode === 'fill'`). Function-tab runs that
   // return a single SELECT result land here, but the path is generic —
@@ -396,7 +399,7 @@ function CellBlock({
   const isSingleValue =
     hasTable
     && tableMode === 'fill'
-    && cell.rows.length === 1
+    && cell.rowCount === 1
     && cell.rows[0].length === 1
     && cell.schema!.length === 1;
   // Image-gallery fork: when every column is a single Image and the
@@ -475,7 +478,7 @@ function SingleValueView({
           {column.isArray ? '[]' : ''}
         </Badge>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
         <SingleValueBody cell={cell} />
       </div>
     </div>
@@ -531,7 +534,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </span>
     );
   }
-  if (
+  else if (
     cell.kind === 'media'
     || cell.kind === 'image'
     || cell.kind === 'audio'
@@ -569,7 +572,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </span>
     );
   }
-  if (cell.kind === 'media_array' && cell.items) {
+  else if (cell.kind === 'media_array' && cell.items) {
     return (
       <div className="grid w-full max-h-full grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2 overflow-auto">
         {cell.items.map((it, i) => (
@@ -584,13 +587,13 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
       </div>
     );
   }
-  if (cell.kind === 'pointcloud') {
+  else if (cell.kind === 'pointcloud') {
     return <SingleValuePointCloud cell={cell} />;
   }
-  if (cell.kind === 'mesh') {
+  else if (cell.kind === 'mesh') {
     return <SingleValueMesh cell={cell} />;
   }
-  if (cell.kind === 'numeric_array') {
+  else if (cell.kind === 'numeric_array') {
     if (
       (cell.elementKind === 'u8' || cell.elementKind === 'i8')
       && (cell.count ?? 0) <= 64
@@ -606,7 +609,7 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
     }
     return <SingleValueNumericArray cell={cell} />;
   }
-  if (cell.kind === 'struct') {
+  else if (cell.kind === 'struct') {
     return <SingleValueStruct cell={cell} />;
   }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
@@ -1154,6 +1157,122 @@ function ColumnModeChip({
   );
 }
 
+// Memoised row used by CellTable's virtualiser. Selection-drag and scroll
+// are the two interactions that fire many parent re-renders per second;
+// without memo every visible row would repaint on every tick even when
+// only the range bounds moved. We pass the per-row range mask as
+// primitives (rowInRange / selColMin / selColMax) so React.memo's default
+// shallow comparison short-circuits cheaply, and stabilise the callbacks
+// in the parent so they don't bust the memo.
+type VirtualRowProps = {
+  rowIndex: number;
+  row: readonly JsonCell[];
+  rowSize: number;
+  rowStart: number;
+  gridTemplateColumns: string;
+  largeMedia: boolean;
+  resolvedModes: readonly (string | undefined)[];
+  rowInRange: boolean;
+  // Inclusive column-range of the active selection. Read only when
+  // rowInRange is true; -1 sentinel otherwise.
+  selColMin: number;
+  selColMax: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  dragModeRef: React.MutableRefObject<SelectionMode | null>;
+  beginSelection: (mode: SelectionMode, row: number, col: number, shiftKey: boolean) => void;
+  extendSelection: (row: number, col: number) => void;
+  onContextMenu: (
+    e: React.MouseEvent<HTMLElement>,
+    sourceMode: SelectionMode,
+    row: number,
+    col: number,
+  ) => void;
+};
+
+const VirtualRow = memo(function VirtualRow({
+  rowIndex,
+  row,
+  rowSize,
+  rowStart,
+  gridTemplateColumns,
+  largeMedia,
+  resolvedModes,
+  rowInRange,
+  selColMin,
+  selColMax,
+  scrollRef,
+  dragModeRef,
+  beginSelection,
+  extendSelection,
+  onContextMenu,
+}: VirtualRowProps) {
+  const rowNumber = rowIndex + 1;
+  return (
+    <div
+      data-index={rowIndex}
+      className="border-border bg-table-row absolute inset-x-0 grid border-b"
+      style={{
+        gridTemplateColumns,
+        height: rowSize,
+        transform: `translateY(${rowStart}px)`,
+      }}
+    >
+      <div
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          scrollRef.current?.focus();
+          beginSelection('row', rowIndex, 0, e.shiftKey);
+        }}
+        onMouseEnter={() => {
+          if (dragModeRef.current === 'row') {
+            extendSelection(rowIndex, 0);
+          }
+        }}
+        onContextMenu={(e) => onContextMenu(e, 'row', rowIndex, 0)}
+        className={cn(
+          'bg-muted border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-start justify-end border-r px-1.5 py-1 font-medium tabular-nums select-none',
+          rowInRange
+            && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
+        )}
+        title={String(rowNumber)}
+      >
+        <span className="relative truncate">{rowNumber}</span>
+      </div>
+      {row.map((c, colIdx) => (
+        <div
+          key={colIdx}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            scrollRef.current?.focus();
+            beginSelection('cell', rowIndex, colIdx, e.shiftKey);
+          }}
+          onMouseEnter={() => {
+            if (dragModeRef.current !== null) {
+              extendSelection(rowIndex, colIdx);
+            }
+          }}
+          onContextMenu={(e) => onContextMenu(e, 'cell', rowIndex, colIdx)}
+          title={cellTooltip(c)}
+          className={cn(
+            'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
+            largeMedia
+              ? 'flex items-start overflow-hidden'
+              : 'truncate align-top',
+            rowInRange && colIdx >= selColMin && colIdx <= selColMax
+              && 'bg-foreground/10 group-focus-within:bg-primary/25',
+          )}
+        >
+          <CellValue
+            cell={c}
+            largeMedia={largeMedia}
+            mode={resolvedModes[colIdx]}
+          />
+        </div>
+      ))}
+    </div>
+  );
+});
+
 function CellTable({ cell }: { cell: CellResult }) {
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
@@ -1167,7 +1286,12 @@ function CellTable({ cell }: { cell: CellResult }) {
   // is — a streaming query with 1000s of rows shouldn't pay an O(rows)
   // scan on every appended row. SAMPLE_ROWS is plenty to spot the
   // first media cell, after which the dep stabilises.
-  const sampleSize = Math.min(cell.rows.length, SAMPLE_ROWS);
+  // `cell.rows` is ref()'d in the proxy, so reading its length doesn't
+  // create a snapshot dep. `rowCount` is the reactive tap that the
+  // streaming flush bumps after each batch; once it crosses
+  // SAMPLE_ROWS, the value stabilises and the dependent memos stop
+  // re-running.
+  const sampleSize = Math.min(cell.rowCount, SAMPLE_ROWS);
   const largeMedia = useMemo(
     () => rowsContainImageOrVideo(cell.rows.slice(0, sampleSize)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1176,7 +1300,7 @@ function CellTable({ cell }: { cell: CellResult }) {
   const rowHeight = largeMedia ? ROW_HEIGHT_MEDIA : ROW_HEIGHT;
 
   const rowVirtualizer = useVirtualizer({
-    count: cell.rows.length,
+    count: cell.rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 12,
@@ -1264,6 +1388,19 @@ function CellTable({ cell }: { cell: CellResult }) {
     if (!def) return undefined;
     return resolveColumnMode(def, columnModes[colIdx], settings.columnDisplayModeDefaults);
   };
+  // Pre-resolved per-column mode ids passed to the memoised row. Stable
+  // identity (memoised) means rows skip re-renders for selection-only
+  // changes; new identity (mode picker / settings change) means every
+  // visible row repaints to honour the new render mode.
+  const resolvedModes = useMemo<(string | undefined)[]>(
+    () =>
+      columnModeDefs.map((def, idx) =>
+        def === null
+          ? undefined
+          : resolveColumnMode(def, columnModes[idx], settings.columnDisplayModeDefaults),
+      ),
+    [columnModeDefs, columnModes, settings.columnDisplayModeDefaults],
+  );
   const setColumnMode = (colIdx: number, modeId: string) => {
     setColumnModes((prev) => ({ ...prev, [colIdx]: modeId }));
   };
@@ -1473,6 +1610,23 @@ function CellTable({ cell }: { cell: CellResult }) {
     [selection, cell.rows, cell.schema],
   );
 
+  // Stable identity wrapper around handleContextMenu so we can hand it to
+  // the memoised VirtualRow without busting its memo every time selection
+  // changes (handleContextMenu itself rebinds on each selection tick).
+  // The ref-then-stable-callback pattern preserves the latest closure
+  // while keeping the function reference fixed across renders.
+  const handleContextMenuRef = useRef(handleContextMenu);
+  handleContextMenuRef.current = handleContextMenu;
+  const stableHandleContextMenu = useCallback(
+    (
+      e: React.MouseEvent<HTMLElement>,
+      sourceMode: SelectionMode,
+      row: number,
+      col: number,
+    ) => handleContextMenuRef.current(e, sourceMode, row, col),
+    [],
+  );
+
   if (cell.schema === null) return null;
 
   // Leading row-number gutter + data columns. Sticky-left only on the
@@ -1484,13 +1638,13 @@ function CellTable({ cell }: { cell: CellResult }) {
   const totalWidth = ROW_NUMBER_WIDTH + effectiveColWidths.reduce((s, w) => s + w, 0);
   const virtualRows = rowVirtualizer.getVirtualItems();
 
-  const numRows = cell.rows.length;
+  const numRows = cell.rowCount;
   const numCols = cell.schema.length;
   const range = selection ? selectionRange(selection, numRows, numCols) : null;
-  const isInRange = (r: number, c: number): boolean =>
-    range !== null
-    && r >= range.rowMin && r <= range.rowMax
-    && c >= range.colMin && c <= range.colMax;
+  // Per-cell isInRange lives inside VirtualRow now (it derives from the
+  // primitive (rowInRange, selColMin, selColMax) row props). The two
+  // helpers below still serve the header and gutter loops in this
+  // component, which aren't memoised per-row.
   const isRowInRange = (r: number): boolean =>
     range !== null && r >= range.rowMin && r <= range.rowMax;
   const isColInRange = (c: number): boolean =>
@@ -1618,82 +1772,30 @@ function CellTable({ cell }: { cell: CellResult }) {
         }}
       >
         {virtualRows.map((virtualRow) => {
-          const row = cell.rows[virtualRow.index];
-          const rowNumber = virtualRow.index + 1;
+          const idx = virtualRow.index;
+          const rowInRange = isRowInRange(idx);
+          // Primitives, not the closure-captured range object: keeps the
+          // VirtualRow memo's shallow comparison cheap and lets it skip
+          // re-renders on selection drags that don't touch this row.
           return (
-            <div
+            <VirtualRow
               key={virtualRow.key}
-              data-index={virtualRow.index}
-              className="border-border bg-table-row absolute inset-x-0 grid border-b"
-              style={{
-                gridTemplateColumns,
-                height: virtualRow.size,
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              {/* Row-number gutter. Styled like a header cell
-                  (bg-muted + font-medium) and sticky-left so it acts as
-                  the row's identity column during horizontal scroll.
-                  Click+drag here selects rows; mouseenter only extends
-                  during a row-mode drag (cell/col drags route their
-                  extension through the data cells the cursor crosses). */}
-              <div
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
-                  scrollRef.current?.focus();
-                  beginSelection('row', virtualRow.index, 0, e.shiftKey);
-                }}
-                onMouseEnter={() => {
-                  if (dragModeRef.current === 'row') {
-                    extendSelection(virtualRow.index, 0);
-                  }
-                }}
-                onContextMenu={(e) =>
-                  handleContextMenu(e, 'row', virtualRow.index, 0)
-                }
-                className={cn(
-                  'bg-muted border-border text-muted-foreground sticky left-0 z-10 flex min-w-0 cursor-cell items-start justify-end border-r px-1.5 py-1 font-medium tabular-nums select-none',
-                  isRowInRange(virtualRow.index)
-                    && 'before:absolute before:inset-0 before:bg-foreground/15 group-focus-within:before:bg-primary/40',
-                )}
-                title={String(rowNumber)}
-              >
-                <span className="relative truncate">{rowNumber}</span>
-              </div>
-              {row.map((c, colIdx) => (
-                <div
-                  key={colIdx}
-                  onMouseDown={(e) => {
-                    if (e.button !== 0) return;
-                    scrollRef.current?.focus();
-                    beginSelection('cell', virtualRow.index, colIdx, e.shiftKey);
-                  }}
-                  onMouseEnter={() => {
-                    if (dragModeRef.current !== null) {
-                      extendSelection(virtualRow.index, colIdx);
-                    }
-                  }}
-                  onContextMenu={(e) =>
-                    handleContextMenu(e, 'cell', virtualRow.index, colIdx)
-                  }
-                  title={cellTooltip(c)}
-                  className={cn(
-                    'border-border min-w-0 cursor-cell border-r px-2 py-1 font-mono last:border-r-0',
-                    largeMedia
-                      ? 'flex items-start overflow-hidden'
-                      : 'truncate align-top',
-                    isInRange(virtualRow.index, colIdx)
-                      && 'bg-foreground/10 group-focus-within:bg-primary/25',
-                  )}
-                >
-                  <CellValue
-                    cell={c}
-                    largeMedia={largeMedia}
-                    mode={resolveModeForColumn(colIdx)}
-                  />
-                </div>
-              ))}
-            </div>
+              rowIndex={idx}
+              row={cell.rows[idx]}
+              rowSize={virtualRow.size}
+              rowStart={virtualRow.start}
+              gridTemplateColumns={gridTemplateColumns}
+              largeMedia={largeMedia}
+              resolvedModes={resolvedModes}
+              rowInRange={rowInRange}
+              selColMin={rowInRange && range !== null ? range.colMin : -1}
+              selColMax={rowInRange && range !== null ? range.colMax : -1}
+              scrollRef={scrollRef}
+              dragModeRef={dragModeRef}
+              beginSelection={beginSelection}
+              extendSelection={extendSelection}
+              onContextMenu={stableHandleContextMenu}
+            />
           );
         })}
       </div>
@@ -2256,8 +2358,10 @@ const MATRIX_DECODE_CAP = 16384;
  * The decode is bounded — we never materialise the full array unless
  * the matrix path explicitly needs it.
  */
+const PREVIEW_STEP = 64;
+
 function NumericArrayInspector({ cell }: { cell: JsonCell }) {
-  const PREVIEW_COUNT = 64;
+  const { t } = useTranslation('query');
   const kind = cell.elementKind ?? '?';
   const count = cell.count ?? 0;
   const shape = cell.shape;
@@ -2266,7 +2370,8 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
     && shape.length === 2
     && count > 0
     && count <= MATRIX_DECODE_CAP;
-  const decodeCount = renderMatrix ? count : PREVIEW_COUNT;
+  const [previewCount, setPreviewCount] = useState(PREVIEW_STEP);
+  const decodeCount = renderMatrix ? count : previewCount;
   const values = useMemo(
     () => decodeNumericArrayHead(cell, decodeCount),
     [cell, decodeCount],
@@ -2279,6 +2384,9 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
   if (cell.min !== undefined) stats.push({ label: 'min', value: formatStat(cell.min) });
   if (cell.max !== undefined) stats.push({ label: 'max', value: formatStat(cell.max) });
   if (cell.mean !== undefined) stats.push({ label: 'mean', value: formatStat(cell.mean) });
+  const remaining = values ? count - values.length : 0;
+  const canLoadMore = !renderMatrix && values !== null && remaining > 0;
+  const nextStep = Math.min(PREVIEW_STEP, remaining);
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
@@ -2295,13 +2403,41 @@ function NumericArrayInspector({ cell }: { cell: JsonCell }) {
         values && values.length > 0 && (
           <div className="flex flex-col gap-1">
             <div className="text-muted-foreground text-xs">
-              first {values.length.toLocaleString()} of {count.toLocaleString()}
-              {shape && shape.length > 2 ? ` · shape ${shape.join(' × ')}` : ''}
+              {shape && shape.length > 2
+                ? t('numericArrayInspector.firstOfWithShape', {
+                    shown: values.length,
+                    total: count,
+                    shape: shape.join(' × '),
+                  })
+                : t('numericArrayInspector.firstOf', {
+                    shown: values.length,
+                    total: count,
+                  })}
             </div>
             <pre className="bg-muted/40 border-border max-h-96 overflow-auto rounded-xs border p-2 font-mono text-xs whitespace-pre-wrap">
               {values.map((v) => formatStat(v)).join(', ')}
               {count > values.length ? ', …' : ''}
             </pre>
+            {canLoadMore && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewCount((c) => c + PREVIEW_STEP)}
+                  className="border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer rounded-sm border px-2 py-0.5 text-xs"
+                >
+                  {t('numericArrayInspector.loadMore', { step: nextStep })}
+                </button>
+                {remaining > PREVIEW_STEP && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCount(count)}
+                    className="border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer rounded-sm border px-2 py-0.5 text-xs"
+                  >
+                    {t('numericArrayInspector.loadRest', { rest: remaining })}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )
       )}
@@ -2540,6 +2676,7 @@ function JsonTreeView({
       <div className="min-h-0 flex-1 overflow-auto">
         <JsonView
           value={rootValue}
+          className='w-full min-h-full'
           style={isDark ? darkTheme : lightTheme}
           collapsed={3}
           displayDataTypes={false}
@@ -2552,45 +2689,28 @@ function JsonTreeView({
 }
 
 function SingleValueStruct({ cell }: { cell: JsonCell }) {
-  const fields = cell.fields ?? [];
+  const { theme } = useSnapshot(settingsState);
+  const isDark =
+    theme === 'dark'
+    || (theme === 'system'
+      && typeof document !== 'undefined'
+      && document.documentElement.classList.contains('dark'));
+  const value = useMemo(() => cellToJsonValue(cell), [cell]);
+  const rootValue =
+    value !== null && typeof value === 'object'
+      ? (value as object)
+      : { value };
   return (
-    <div className="flex max-h-full w-full max-w-4xl flex-col overflow-auto p-4">
-      <StructFieldTable fields={fields} />
-    </div>
-  );
-}
-
-/**
- * Two-column key/value tree. Field names left, the recursively-rendered
- * child cell right. CellValue carries the dispatch — nested numeric
- * arrays / images / sub-structs reuse the same renderers used in the
- * grid. We pass `largeMedia` so image/video children render at their
- * larger inline size, which is the right default in an expanded view.
- */
-function StructFieldTable({
-  fields,
-}: {
-  fields: { name: string; cell: JsonCell }[];
-}) {
-  if (fields.length === 0) {
-    return (
-      <span className="text-muted-foreground font-mono text-sm italic">
-        empty struct
-      </span>
-    );
-  }
-  return (
-    <div className="grid grid-cols-[auto,1fr] items-start gap-x-4 gap-y-2 text-sm">
-      {fields.map((f, i) => (
-        <div key={`${f.name}-${i}`} className="contents">
-          <div className="text-muted-foreground py-0.5 pr-2 font-mono">
-            {f.name}
-          </div>
-          <div className="min-w-0 font-mono break-words">
-            <CellValue cell={f.cell} largeMedia={true} />
-          </div>
-        </div>
-      ))}
+    <div className="h-full w-full overflow-auto">
+      <JsonView
+        className='w-full min-h-full'
+        style={isDark ? darkTheme : lightTheme}
+        value={rootValue}
+        collapsed={3}
+        displayDataTypes={false}
+        enableClipboard={true}
+        shortenTextAfterLength={120}
+      />
     </div>
   );
 }

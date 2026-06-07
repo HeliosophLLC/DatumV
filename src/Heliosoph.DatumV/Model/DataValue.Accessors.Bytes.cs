@@ -25,11 +25,23 @@ public readonly partial struct DataValue
             throw new InvalidOperationException("Value is null.");
         }
 
+        int shapePrefix = ShapePrefixByteCount;
         if (IsInSidecar)
         {
-            return ReadSidecarBytes(registry).ToArray();
+            ReadOnlySpan<byte> all = ReadSidecarBytes(registry);
+            return all[shapePrefix..].ToArray();
         }
-        return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        if (shapePrefix == 0)
+        {
+            return store.RetrieveBytes(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        }
+        // Multi-dim byte array on arena: skip the shape prefix at the head of the
+        // payload. RetrieveBytes doesn't take an in-store slice offset, so read the
+        // full span via RetrieveUtf8Span (returns ReadOnlySpan<byte>) and copy past
+        // the prefix.
+        ReadOnlySpan<byte> span = store.RetrieveUtf8Span(
+            new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        return span[shapePrefix..].ToArray();
     }
 
     /// <summary>
@@ -75,11 +87,16 @@ public readonly partial struct DataValue
                 $"AsByteSpan is only valid for byte-content kinds (Image/Audio/Video/Json/PointCloud/Mesh or UInt8 + IsArray); got {_kind}.");
         }
 
+        // Multi-dim byte arrays carry an [int32 × ndim] shape prefix at the head
+        // of their payload; skip it so callers see element bytes only. Blob kinds
+        // never carry a shape prefix today (no multi-dim factory yet), so
+        // ShapePrefixByteCount is zero for them.
+        int shapePrefix = ShapePrefixByteCount;
         if (IsInSidecar)
         {
-            return ReadSidecarBytes(registry);
+            return ReadSidecarBytes(registry)[shapePrefix..];
         }
-        return store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength));
+        return store.RetrieveUtf8Span(new ArenaOffset(BackedOffset), new ArenaLength(BackedLength))[shapePrefix..];
     }
 
     /// <summary>
@@ -286,19 +303,34 @@ public readonly partial struct DataValue
     {
         get
         {
-            // Byte arrays are not allowed to carry IsMultiDim (asserted at construction);
-            // BackedLength is the raw byte count which equals the element count.
-            if (IsByteArrayKind) return checked((int)BackedLength);
+            // Byte arrays (UInt8 + IsArray): one byte per element, so element count
+            // is the byte count minus any shape prefix (zero on flat 1-D arrays;
+            // 4×ndim on multi-dim values).
+            if (IsByteArrayKind) return checked((int)(BackedLength - ShapePrefixByteCount));
             if (IsInlineArray) return InlineArrayElementCount;
             if (!IsArray) return -1;
-            if ((_flags & DataValueFlags.InArena) != 0)
+            // Reference-element arrays store one 16-byte ArraySlot per element
+            // after the optional shape prefix; element count derives from slot
+            // count, not ScalarByteSize (which has no fixed answer for these
+            // kinds). All reference-element kinds (String, Image, Audio, Video,
+            // Json, PointCloud, Mesh, Struct) share the same slot-block layout
+            // and support multi-dim.
+            if (_kind is DataKind.String or DataKind.Image
+                or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
+                or DataKind.Mesh or DataKind.Struct)
+            {
+                long blockBytes = ((_flags & DataValueFlags.InArena) != 0 ? BackedLength : SidecarLength)
+                    - ShapePrefixByteCount;
+                return checked((int)(blockBytes / ArraySlot.SizeBytes));
+            }
+            else if ((_flags & DataValueFlags.InArena) != 0)
             {
                 int elementSize = ScalarByteSize(_kind);
                 if (elementSize <= 0) return -1;
                 long elementBytes = BackedLength - ShapePrefixByteCount;
                 return checked((int)(elementBytes / elementSize));
             }
-            if (IsInSidecar)
+            else if (IsInSidecar)
             {
                 int elementSize = ScalarByteSize(_kind);
                 if (elementSize <= 0) return -1;

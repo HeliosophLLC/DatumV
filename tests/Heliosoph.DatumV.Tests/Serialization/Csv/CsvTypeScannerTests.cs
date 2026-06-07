@@ -284,11 +284,142 @@ public sealed class CsvTypeScannerTests : ServiceTestBase
         Assert.Equal(new DateOnly(2024, 3, 1), d);
     }
 
+    // ──────────────── Custom null token ────────────────
+
+    [Fact]
+    public async Task NullTokenDot_StillInfersFloatForFredStyleSeries()
+    {
+        // FRED's fredgraph.csv writes "." for missing observations. Without
+        // a null_token, the dot eliminates every numeric candidate and the
+        // value column lands as String. With null_token = ".", the dots are
+        // counted as nulls and the column narrows correctly.
+        const string csv = "DATE,VALUE\n2020-01-02,3257.85\n2020-01-03,.\n2020-01-06,3246.28\n";
+        CsvScanResult scan = await ScanAsync(csv,
+            options: new Dictionary<string, string> { ["null_token"] = "." });
+
+        int idx = Array.IndexOf(scan.ColumnNames, "VALUE");
+        Assert.True(idx >= 0);
+        // VALUE narrows to a float kind (Float32 if round-trip-safe, else Float64).
+        Assert.True(scan.Kinds[idx] is DataKind.Float32 or DataKind.Float64,
+            $"expected float, got {scan.Kinds[idx]}");
+        Assert.Equal(1L, scan.NullCountsPerColumn[idx]);
+    }
+
+    [Fact]
+    public async Task NullTokenDot_OmittedFromScan_FallsBackToString()
+    {
+        // Sanity: without null_token, the same payload lands as String (the
+        // regression this feature exists to fix).
+        const string csv = "DATE,VALUE\n2020-01-02,3257.85\n2020-01-03,.\n2020-01-06,3246.28\n";
+        CsvScanResult scan = await ScanAsync(csv);
+
+        int idx = Array.IndexOf(scan.ColumnNames, "VALUE");
+        Assert.True(idx >= 0);
+        Assert.Equal(DataKind.String, scan.Kinds[idx]);
+    }
+
+    [Fact]
+    public async Task NullTokenNA_TreatsRStyleExportMarkerAsNull()
+    {
+        // R's write.csv emits "NA" for missing values. Same pattern, different token.
+        const string csv = "n\n1\nNA\n3\n";
+        CsvScanResult scan = await ScanAsync(csv,
+            options: new Dictionary<string, string> { ["null_token"] = "NA" });
+
+        AssertColumn(scan, "n", DataKind.UInt8, SchemaInferenceReason.NarrowedByObservedRange);
+        Assert.Equal(1L, scan.NullCountsPerColumn[0]);
+    }
+
+    // ──────────────── skip_lines + comment (EDGAR-shaped preambles) ────────────────
+
+    [Fact]
+    public async Task SkipLinesAndComment_LandsCikColumnAsInt32_OnEdgarShapedInput()
+    {
+        // Synthesised in the actual EDGAR master.idx shape: 5 description
+        // lines + 4 blank lines (9 total to skip), the pipe-delimited
+        // header on line 10, a dashes separator on line 11, then real
+        // data. skip_lines=9 + comment='-' should land CIK as an
+        // unsigned integer.
+        const string csv =
+            "Description:           Master Index\n" +
+            "Last Data Received:    March 31, 2024\n" +
+            "Comments:              webmaster@sec.gov\n" +
+            "Anonymous FTP:         ftp://ftp.sec.gov/\n" +
+            "Cloud HTTP:            https://www.sec.gov/\n" +
+            "\n\n\n\n" +
+            "CIK|Company Name|Form Type|Date Filed|Filename\n" +
+            "--------------------------------------------------------------------------------\n" +
+            "1000045|NICHOLAS FINANCIAL INC|10-Q|2024-02-13|edgar/data/1000045/x.txt\n" +
+            "1000228|HENRY SCHEIN INC|10-K|2024-02-13|edgar/data/1000228/y.txt\n" +
+            "1000275|ROYAL BANK OF CANADA|FWP|2024-02-13|edgar/data/1000275/z.txt\n";
+        CsvScanResult scan = await ScanAsync(csv,
+            options: new Dictionary<string, string>
+            {
+                ["skip_lines"] = "9",
+                ["comment"] = "-",
+            });
+
+        Assert.Equal(5, scan.ColumnNames.Length);
+        Assert.Equal("CIK", scan.ColumnNames[0]);
+        Assert.Equal("Company Name", scan.ColumnNames[1]);
+        Assert.Equal("Form Type", scan.ColumnNames[2]);
+        Assert.Equal("Date Filed", scan.ColumnNames[3]);
+        Assert.Equal("Filename", scan.ColumnNames[4]);
+        // Without comment='-' the dashes line would corrupt the CIK column
+        // (a single-field row that adds nulls to the other four columns
+        // and a non-numeric dash to column 0). With it, CIK narrows to
+        // an unsigned 32-bit integer — every CIK is non-negative and the
+        // observed max fits in UInt32, so the scanner picks the tightest
+        // fit. Asserts the kind family rather than the exact name so a
+        // future change from UInt32 → UInt16 / etc. doesn't fail spuriously.
+        Assert.True(scan.Kinds[0] is DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.Int32,
+            $"expected an integer kind for CIK, got {scan.Kinds[0]}");
+        Assert.Equal(DataKind.Date, scan.Kinds[3]);
+    }
+
+    [Fact]
+    public async Task SkipLines_PreambleAlone_KeepsHeaderNamesAndDataRows()
+    {
+        const string csv =
+            "# generated by some tool\n" +
+            "# at 2024-01-01\n" +
+            "id,score\n" +
+            "1,0.5\n" +
+            "2,0.9\n";
+        CsvScanResult scan = await ScanAsync(csv,
+            options: new Dictionary<string, string> { ["skip_lines"] = "2" });
+
+        Assert.Equal(2, scan.ColumnNames.Length);
+        Assert.Equal("id", scan.ColumnNames[0]);
+        Assert.Equal("score", scan.ColumnNames[1]);
+        Assert.Equal(2, scan.RowCount);
+    }
+
+    [Fact]
+    public async Task Comment_DropsHashLinesInTheMiddleOfData()
+    {
+        const string csv =
+            "id,name\n" +
+            "1,alice\n" +
+            "# end of batch 1\n" +
+            "2,bob\n" +
+            "# end of batch 2\n" +
+            "3,carol\n";
+        CsvScanResult scan = await ScanAsync(csv,
+            options: new Dictionary<string, string> { ["comment"] = "#" });
+
+        Assert.Equal(3, scan.RowCount);
+        Assert.Equal("id", scan.ColumnNames[0]);
+        Assert.Equal(DataKind.UInt8, scan.Kinds[0]); // narrows 1..3
+    }
+
     // ──────────────── Helpers ────────────────
 
-    private static async Task<CsvScanResult> ScanAsync(string csvContent)
+    private static async Task<CsvScanResult> ScanAsync(
+        string csvContent,
+        IReadOnlyDictionary<string, string>? options = null)
     {
-        MemoryFileDescriptor source = new(csvContent, fileName: "test.csv");
+        MemoryFileDescriptor source = new(csvContent, fileName: "test.csv", options: options);
         return await CsvTypeScanner.ScanAsync(source);
     }
 

@@ -407,7 +407,7 @@
                 {
                   "type": "huggingface",
                   "repoType": "dataset",
-                  "repo": "DatumV/LJ-Speech-Dataset",
+                  "repo": "Heliosoph/LJ-Speech-Dataset",
                   "revision": "81d7ce28576278f81036034a94b4cf87180daf17",
                   "include": ["LJSpeech-1.1.tar.gz"]
                 }
@@ -415,7 +415,7 @@
               "ingest": [
                 {
                   "tableName": "audio",
-                  "archive": "LJSpeech-1.1.tar.gz",
+                  "artifact": "LJSpeech-1.1.tar.gz",
                   "sqlFile": "ljspeech_audio/audio.sql"
                 }
               ]
@@ -472,7 +472,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-images-idx3-ubyte.gz",
                     "labels": "train-labels-idx1-ubyte.gz"
                   }
@@ -511,7 +511,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-images-idx3-ubyte.gz",
                     "labels": "t10k-labels-idx1-ubyte.gz"
                   }
@@ -569,7 +569,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "fashion_mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-images-idx3-ubyte.gz",
                     "labels": "train-labels-idx1-ubyte.gz"
                   }
@@ -608,7 +608,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "fashion_mnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-images-idx3-ubyte.gz",
                     "labels": "t10k-labels-idx1-ubyte.gz"
                   }
@@ -667,7 +667,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "kmnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "train-imgs.gz",
                     "labels": "train-labels.gz"
                   }
@@ -706,10 +706,63 @@
                 {
                   "tableName": "images",
                   "sqlFile": "kmnist/split.sql",
-                  "archives": {
+                  "artifacts": {
                     "images": "t10k-imgs.gz",
                     "labels": "t10k-labels.gz"
                   }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "MedNIST",
+      "summary": "58,954 64×64 grayscale medical thumbnails labelled with one of six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). The medical-imaging counterpart to MNIST.",
+      "description": "Compiled by Bradley Erickson (Mayo Clinic) from CT, MRI, and X-ray slices drawn from the Cancer Imaging Archive (TCIA), the RSNA Bone Age Challenge, and the NIH ChestX-ray14 release, then packaged by the MONAI team as a small drop-in benchmark for medical image classification. ~10,000 thumbnails per class (BreastMRI is slightly smaller at 8,954), all rendered to uniform 64×64 grayscale JPEG. Plays the same role for medical imaging that MNIST plays for handwritten digits — small enough to ingest in under a minute, easy enough that a tiny CNN converges to ~99% test accuracy in a few epochs, but realistic enough that the modality boundaries actually correspond to clinical categories. Folder layout is one class per directory under a top-level `MedNIST/` prefix; the class label is the folder name verbatim.",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-sa-4.0"],
+      "attributions": [
+        "Bradley J. Erickson, MD, PhD (Mayo Clinic — MedNIST compilation)",
+        "MONAI Consortium (packaging and hosting via MONAI-extra-test-data)",
+        "The Cancer Imaging Archive (TCIA), RSNA Bone Age Challenge, NIH ChestX-ray14 (source corpora)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "cardFile": "cards/mednist/index.md",
+      "heroImageFile": "cards/mednist/hero.jpg",
+      "variants": [
+        {
+          "id": "mednist_classes",
+          "displayName": "classes (6 modalities)",
+          "summary": "58,954 64×64 grayscale JPEGs across six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). Each row carries the decoded image plus the modality class name extracted from the source folder.",
+          "approxArchiveBytes": 61000000,
+          "approxIngestedBytes": 75000000,
+          "expectedRowCounts": { "images": 58954 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "0.8.1",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://github.com/Project-MONAI/MONAI-extra-test-data/releases/download/0.8.1/MedNIST.tar.gz",
+                      "destFile": "MedNIST.tar.gz"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "mednist/classes.sql",
+                  "artifact": "MedNIST.tar.gz"
                 }
               ]
             }
@@ -761,7 +814,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "eurosat/rgb.sql",
-                  "archive": "EuroSAT.zip"
+                  "artifact": "EuroSAT.zip"
                 }
               ]
             }
@@ -813,7 +866,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "oxford_pets/images.sql",
-                  "archive": "images.tar.gz"
+                  "artifact": "images.tar.gz"
                 }
               ]
             }
@@ -865,7 +918,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar10/train.sql",
-                  "archive": "cifar-10-binary.tar.gz"
+                  "artifact": "cifar-10-binary.tar.gz"
                 }
               ]
             }
@@ -897,7 +950,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar10/test.sql",
-                  "archive": "cifar-10-binary.tar.gz"
+                  "artifact": "cifar-10-binary.tar.gz"
                 }
               ]
             }
@@ -949,7 +1002,7 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar100/train.sql",
-                  "archive": "cifar-100-binary.tar.gz"
+                  "artifact": "cifar-100-binary.tar.gz"
                 }
               ]
             }
@@ -981,7 +1034,144 @@
                 {
                   "tableName": "images",
                   "sqlFile": "cifar100/test.sql",
-                  "archive": "cifar-100-binary.tar.gz"
+                  "artifact": "cifar-100-binary.tar.gz"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Chicago Crimes",
+      "summary": "8M+ Chicago Police Department incident reports from 2001 to the present. The reach-for big-tabular benchmark for time-series, geospatial, and categorical analytics over a single municipal stream.",
+      "description": "Published by the Chicago Police Department through the City of Chicago Open Data Portal (Socrata-hosted). Each row is one reported incident: timestamp, block-level address, FBI / IUCR offense codes, arrest + domestic flags, lat/lng (Socrata rounds to the city block to protect privacy), and the beat / district / ward / community-area administrative codes. The corpus refreshes daily with a roughly 7-day reporting lag, so the headline row count and on-disk size drift over time. The ingest recipe drives `open_csv_typed` at plan time so the schema lands with real per-column types (TIMESTAMPTZ for the date columns, FLOAT for lat/lng, narrowed integers for the FBI code) rather than the `Array<String>` shape `open_csv` yields — queries can write `WHERE \"Primary Type\" = 'THEFT' AND \"Year\" = 2024` against typed columns directly.",
+      "modalities": ["Tabular", "Geospatial"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "Chicago Police Department (incident report data)",
+        "City of Chicago Open Data Portal (hosting + Socrata distribution)"
+      ],
+      "suitableForTasks": [
+        "TabularClassifier",
+        "TimeSeriesForecaster",
+        "TimeSeriesAnomalyDetector"
+      ],
+      "variants": [
+        {
+          "id": "chicago_crimes_live",
+          "displayName": "live (daily-updated)",
+          "summary": "Direct CSV from the City of Chicago Open Data Portal. Counts and bytes drift with each daily update — reach for this variant for freshness-sensitive work (recent-trend dashboards, current-quarter analysis) rather than reproducible benchmarks. As of mid-2026, ~8.2M rows and ~1.8 GB on the wire; both grow on the order of 5k–10k rows per day.",
+          "approxArchiveBytes": 1800000000,
+          "approxIngestedBytes": 1500000000,
+          "expectedRowCounts": { "crimes": 8200000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "live",
+              "sources": [
+                {
+                  "type": "https",
+                  "urls": [
+                    {
+                      "url": "https://data.cityofchicago.org/api/views/ijzp-q8t2/rows.csv?accessType=DOWNLOAD",
+                      "destFile": "crimes.csv"
+                    }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "crimes",
+                  "artifact": "crimes.csv",
+                  "sqlFile": "chicago_crimes/crimes.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SEC EDGAR Filings Index",
+      "summary": "Every regulatory filing the SEC received between 2021 Q1 and 2025 Q4 — roughly 7 million 10-Ks, 10-Qs, 8-Ks, S-1s, and the long tail of less-famous form types — landed as one unified `edgar_filings` table with typed CIK, form-type, and date-filed columns. Reach-for big-tabular substrate for company-level, time-windowed, and form-type queries against a real regulatory firehose.",
+      "description": "Published by the U.S. Securities and Exchange Commission under public-domain access at https://www.sec.gov/Archives/edgar/full-index/. Each quarter's `master.idx` is a pipe-delimited filings list — CIK | Company Name | Form Type | Date Filed | Filename — that the recipe parses with `open_csv` (delimiter='|'), filters via `regexp_like(fields[0], '^[0-9]+$')` to drop the preamble + header + dashes lines, types the CIK as Int32 and the filed date as DATE, and stamps each row with a `quarter` literal so cross-quarter queries can group by era. The Filename column points at the actual filing document under `https://www.sec.gov/Archives/<filename>` — not ingested here (those are megabytes apiece), but the index is the join key for fetching them later. SEC's access policy requires a contact-bearing User-Agent on every request; the source declares one via the per-source `userAgent` field. The window stops at 2025 Q4 to give a clean 5-year boundary; if you want deeper history reach back through 1993 Q1, the source URL pattern just changes the year folder.",
+      "modalities": ["Tabular"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "U.S. Securities and Exchange Commission (EDGAR dissemination feed)"
+      ],
+      "suitableForTasks": [
+        "TabularClassifier",
+        "TimeSeriesForecaster",
+        "TimeSeriesAnomalyDetector"
+      ],
+      "variants": [
+        {
+          "id": "edgar_filings_5y",
+          "displayName": "5-year window (2021 Q1 – 2025 Q4)",
+          "summary": "Twenty quarterly master.idx files pulled fresh from www.sec.gov, unioned through a single ingest recipe into one `edgar_filings` table. ~660 MB on the wire, ~7M rows, ~150–200 MB ingested footprint after columnar typing. The 2021–2025 window is a clean five-year cut — recent enough that current-day queries land against familiar companies, deep enough to cover the COVID-era SPAC boom and bust.",
+          "approxArchiveBytes": 660000000,
+          "approxIngestedBytes": 180000000,
+          "expectedRowCounts": { "edgar_filings": 7000000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "5y-2021-2025",
+              "sources": [
+                {
+                  "type": "https",
+                  "userAgent": "Heliosoph.DatumV/0.1 (support@heliosoph.net)",
+                  "urls": [
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR1/master.idx", "destFile": "master_2021Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR2/master.idx", "destFile": "master_2021Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR3/master.idx", "destFile": "master_2021Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2021/QTR4/master.idx", "destFile": "master_2021Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR1/master.idx", "destFile": "master_2022Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR2/master.idx", "destFile": "master_2022Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR3/master.idx", "destFile": "master_2022Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2022/QTR4/master.idx", "destFile": "master_2022Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR1/master.idx", "destFile": "master_2023Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR2/master.idx", "destFile": "master_2023Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR3/master.idx", "destFile": "master_2023Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2023/QTR4/master.idx", "destFile": "master_2023Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR1/master.idx", "destFile": "master_2024Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR2/master.idx", "destFile": "master_2024Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR3/master.idx", "destFile": "master_2024Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2024/QTR4/master.idx", "destFile": "master_2024Q4.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR1/master.idx", "destFile": "master_2025Q1.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR2/master.idx", "destFile": "master_2025Q2.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR3/master.idx", "destFile": "master_2025Q3.idx" },
+                    { "url": "https://www.sec.gov/Archives/edgar/full-index/2025/QTR4/master.idx", "destFile": "master_2025Q4.idx" }
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "edgar_filings",
+                  "artifacts": {
+                    "y2021q1": "master_2021Q1.idx",
+                    "y2021q2": "master_2021Q2.idx",
+                    "y2021q3": "master_2021Q3.idx",
+                    "y2021q4": "master_2021Q4.idx",
+                    "y2022q1": "master_2022Q1.idx",
+                    "y2022q2": "master_2022Q2.idx",
+                    "y2022q3": "master_2022Q3.idx",
+                    "y2022q4": "master_2022Q4.idx",
+                    "y2023q1": "master_2023Q1.idx",
+                    "y2023q2": "master_2023Q2.idx",
+                    "y2023q3": "master_2023Q3.idx",
+                    "y2023q4": "master_2023Q4.idx",
+                    "y2024q1": "master_2024Q1.idx",
+                    "y2024q2": "master_2024Q2.idx",
+                    "y2024q3": "master_2024Q3.idx",
+                    "y2024q4": "master_2024Q4.idx",
+                    "y2025q1": "master_2025Q1.idx",
+                    "y2025q2": "master_2025Q2.idx",
+                    "y2025q3": "master_2025Q3.idx",
+                    "y2025q4": "master_2025Q4.idx"
+                  },
+                  "sqlFile": "edgar_filings/index.sql"
                 }
               ]
             }

@@ -112,20 +112,6 @@ export function MeshViewerBody({
 
   return (
     <div className="flex h-full w-full flex-col gap-2">
-      <div className="text-muted-foreground flex items-center gap-3 px-2 text-xs">
-        {decoded && (
-          <>
-            <span>
-              {decoded.vertexCount.toLocaleString()} {t('meshVerticesLabel')}
-            </span>
-            <span>
-              · {decoded.triangleCount.toLocaleString()} {t('meshTrianglesLabel')}
-            </span>
-            {decoded.hasColor && <span>· {t('meshColored')}</span>}
-            {decoded.hasNormals && <span>· {t('meshShaded')}</span>}
-          </>
-        )}
-      </div>
       <div className="bg-[#1a1a1a] relative flex-1 overflow-hidden rounded-md">
         {error && (
           <div className="text-destructive absolute inset-0 flex items-center justify-center text-sm">

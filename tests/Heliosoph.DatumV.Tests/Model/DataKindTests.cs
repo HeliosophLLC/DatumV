@@ -59,13 +59,13 @@ public class DataKindTests : ServiceTestBase
         // Tally: Unknown, Type, Boolean,
         // UInt8/16/32/64/128, Int8/16/32/64/128 (10),
         // Float16/32/64, Decimal (4),
-        // Date, Time, Timestamp, TimestampTz, Duration (5),
+        // Date, Time, Timestamp, TimestampTz, Duration, Interval (6),
         // String, Uuid (2),
         // Image, Audio, AudioSlice, Video, VideoFrame, VideoSlice, Json (7 media + lazy handles),
         // Struct (1),
-        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 36 total.
+        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 40 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(39, allValues.Length);
+        Assert.Equal(40, allValues.Length);
     }
 
     [Fact]

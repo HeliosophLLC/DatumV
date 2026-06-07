@@ -162,25 +162,29 @@ public readonly partial struct DataValue
     private const int MultiDimMaxNdim = byte.MaxValue;
 
     /// <summary>
-    /// Rejects element kinds for which multi-dim is not supported: byte arrays
-    /// (UInt8 collides with the byte-count ElementCount path) and reference /
-    /// blob kinds (already use <c>_charCount</c> for storeId / TypeId).
+    /// Rejects element kinds for which the fixed-width multi-dim factory does not
+    /// apply: reference / blob kinds whose multi-dim form lives in a slot block,
+    /// not a flat byte run. Reference-element multi-dim has its own factory
+    /// (<see cref="FromArenaMultiDimStringArray"/> for String); kinds without a
+    /// dedicated factory still reject here. Byte arrays (<see cref="DataKind.UInt8"/>
+    /// + <see cref="DataValueFlags.IsArray"/>) pass through — accessors subtract the
+    /// shape prefix when reading.
     /// </summary>
     private static void RejectReferenceElementKind(DataKind elementKind)
     {
-        if (elementKind == DataKind.UInt8)
-        {
-            throw new ArgumentException(
-                "Multi-dim is not supported for byte arrays (UInt8 + IsArray); the byte-count " +
-                "path in ElementCount assumes a raw byte payload with no shape prefix.",
-                nameof(elementKind));
-        }
+        // Reference-element kinds use a slot-block layout (one 16-byte ArraySlot
+        // per element), not a flat byte run, so the fixed-width factory can't
+        // produce them. Every reference kind has its own per-kind multi-dim
+        // factory; callers must use that one. Cleaner error than the downstream
+        // "no fixed element byte size" from ScalarByteSize.
         if (elementKind is DataKind.String or DataKind.Struct
-            or DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
+            or DataKind.Image or DataKind.Audio or DataKind.Video
+            or DataKind.Json or DataKind.PointCloud or DataKind.Mesh)
         {
             throw new ArgumentException(
-                $"Multi-dim is not supported for reference-element kind {elementKind} in this version. " +
-                "Reference arrays already use _charCount for storeId / TypeId.",
+                $"Multi-dim {elementKind} arrays use a slot-block layout. " +
+                $"Use FromArenaMultiDim{elementKind}Array(elements, shape, store, ...) instead of " +
+                "the fixed-width factory.",
                 nameof(elementKind));
         }
     }
@@ -382,14 +386,6 @@ public readonly partial struct DataValue
                 nameof(ndim), ndim,
                 $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
         }
-        if (elementKind == DataKind.UInt8
-            || elementKind is DataKind.String or DataKind.Struct
-            or DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud)
-        {
-            throw new ArgumentException(
-                $"Multi-dim is not supported for element kind {elementKind} (byte / reference / blob kinds).",
-                nameof(elementKind));
-        }
 
         if (offset < 0)
         {
@@ -412,6 +408,91 @@ public readonly partial struct DataValue
             p2: (int)length,
             p3: (int)((length >> 32) & 0xFF),
             charCount: cc);
+    }
+
+    /// <summary>
+    /// Creates an arena-backed multi-dimensional <c>Array&lt;String&gt;</c> value.
+    /// Each element's UTF-8 bytes are written to <paramref name="store"/>; a slot
+    /// block of <c>elements.Length × 16 bytes</c> is then prepended with an
+    /// <c>int32 × ndim</c> shape prefix and stored as a single contiguous block.
+    /// The resulting <see cref="DataValue"/> carries
+    /// <see cref="DataValueFlags.InArena"/> | <see cref="DataValueFlags.IsArray"/> |
+    /// <see cref="DataValueFlags.IsMultiDim"/>, with <c>ndim</c> in the high byte
+    /// of <c>_charCount</c>. <see cref="AsStringArray"/> transparently skips the
+    /// shape prefix when reading; <see cref="GetShape"/> exposes the dims.
+    /// </summary>
+    /// <remarks>
+    /// Inline multi-dim String is impossible by construction — minimum shape
+    /// (2×2 = 4 slots × 16 bytes) already exceeds the 16-byte inline payload.
+    /// There is no inline counterpart to this factory.
+    /// </remarks>
+    public static DataValue FromArenaMultiDimStringArray(
+        ReadOnlySpan<string> elements,
+        ReadOnlySpan<int> shape,
+        IValueStore store)
+    {
+        if (shape.Length < 2 || shape.Length > MultiDimMaxNdim)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(shape), shape.Length,
+                $"Multi-dim ndim must be in [2, {MultiDimMaxNdim}].");
+        }
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++)
+        {
+            int dim = shape[i];
+            if (dim <= 0)
+            {
+                throw new ArgumentException(
+                    $"Shape dimension {i} must be positive; got {dim}.", nameof(shape));
+            }
+            product *= dim;
+            if (product > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shape), product,
+                    "Product of shape dimensions overflows Int32.");
+            }
+        }
+        if (product != elements.Length)
+        {
+            throw new ArgumentException(
+                $"Product of shape dimensions ({product}) does not equal element count ({elements.Length}).",
+                nameof(shape));
+        }
+
+        int shapeBytes = shape.Length * sizeof(int);
+        int slotBlockBytes = elements.Length * ArraySlot.SizeBytes;
+        byte[] buffer = new byte[shapeBytes + slotBlockBytes];
+        MemoryMarshal.AsBytes(shape).CopyTo(buffer);
+
+        // Element bytes go to the store first; the resulting (offset, length) pairs
+        // populate slot bytes 0..15. Slot block sits immediately after the shape
+        // prefix in the same buffer so the whole [shape][slots] block lands in one
+        // contiguous arena allocation — the (_p0, _p1) the DataValue records.
+        for (int i = 0; i < elements.Length; i++)
+        {
+            string? element = elements[i];
+            if (element is null)
+            {
+                throw new ArgumentException(
+                    $"Element {i} is null. Array<String> elements must be non-null; " +
+                    "use a typed null DataValue for SQL NULL semantics at the column level.",
+                    nameof(elements));
+            }
+            var (elementP0, elementP1) = store.StoreString(element);
+            ArraySlot.Write(
+                buffer.AsSpan(shapeBytes + i * ArraySlot.SizeBytes, ArraySlot.SizeBytes),
+                elementP0.Value,
+                elementP1.Value);
+        }
+
+        var (blockP0, blockP1) = store.StoreBytes(buffer);
+        ushort cc = (ushort)(shape.Length << 8);
+        return new(
+            DataKind.String,
+            flags: DataValueFlags.InArena | DataValueFlags.IsArray | DataValueFlags.IsMultiDim,
+            offset: blockP0.Value, length: blockP1.Value, charCount: cc);
     }
 
     /// <summary>

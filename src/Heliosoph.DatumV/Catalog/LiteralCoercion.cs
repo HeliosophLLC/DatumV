@@ -118,6 +118,50 @@ internal static class LiteralCoercion
         // are left alone — their shape is already in the bytes.
         if (shape.Length >= 2 && !source.IsMultiDim && arena is not null)
         {
+            // Reference-element kinds have a slot-block layout, not a flat
+            // element-byte run — they need a kind-specific multi-dim factory
+            // rather than FromArenaMultiDimArrayBytes. Each supported kind
+            // routes through its own per-kind factory; remaining reference
+            // kinds reject at DDL via IsMultiDimIncompatibleElementKind and
+            // never reach this branch.
+            if (source.IsArray)
+            {
+                switch (source.Kind)
+                {
+                    case DataKind.String:
+                        return DataValue.FromArenaMultiDimStringArray(source.AsStringArray(arena), shape, arena);
+                    case DataKind.Image:
+                        return DataValue.FromArenaMultiDimImageArray(source.AsImageArray(arena), shape, arena);
+                    case DataKind.Audio:
+                        return DataValue.FromArenaMultiDimAudioArray(source.AsAudioArray(arena), shape, arena);
+                    case DataKind.Video:
+                        return DataValue.FromArenaMultiDimVideoArray(source.AsVideoArray(arena), shape, arena);
+                    case DataKind.Json:
+                        return DataValue.FromArenaMultiDimJsonArray(source.AsJsonArray(arena), shape, arena);
+                    case DataKind.PointCloud:
+                        return DataValue.FromArenaMultiDimPointCloudArray(source.AsPointCloudArray(arena), shape, arena);
+                    case DataKind.Mesh:
+                        return DataValue.FromArenaMultiDimMeshArray(source.AsMeshArray(arena), shape, arena);
+                    case DataKind.Struct:
+                        // Container Array<Struct> doesn't carry a TypeId — the per-element
+                        // TypeId rides in each slot's bytes. Materialise the elements (each
+                        // is a Struct DataValue), unpack each to its field array, then call
+                        // the per-kind factory. The shared TypeId is taken from the first
+                        // element (struct arrays are uniformly-shaped within a column).
+                        DataValue[] structElements = source.AsStructArray(arena);
+                        DataValue[][] structFields = new DataValue[structElements.Length][];
+                        for (int i = 0; i < structElements.Length; i++)
+                        {
+                            structFields[i] = structElements[i].AsStruct(arena);
+                        }
+                        ushort elementTypeId = structElements.Length > 0
+                            ? structElements[0].TypeId
+                            : (ushort)TypeRegistry.NoType;
+                        return DataValue.FromArenaMultiDimStructArray(
+                            structFields, shape, arena, elementTypeId);
+                }
+            }
+
             // Inline arrays expose element bytes via InlineArrayBytes (count × elementSize,
             // prefix-skipping if any); arena/sidecar use AsArraySpan<byte>, which casts
             // through MemoryMarshal so element-count vs. byte-count semantics align.

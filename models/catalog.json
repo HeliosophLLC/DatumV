@@ -4161,6 +4161,117 @@
           ]
         }
       ]
+    },
+    {
+      "name": "BiomedCLIP",
+      "summary": "CLIP for biomedical figures — embed radiology, histology, microscopy, and PMC paper figures into the same vector space as their captions. The biomedical counterpart to OpenAI CLIP.",
+      "description": "Microsoft BiomedCLIP. ViT-B/16 vision tower + PubMedBERT text tower projected into a shared 512-d space. Use for biomedical zero-shot classification, caption retrieval, and cross-modal search. Pick fp32 for the reference build; fp16 for half-disk GPU deployments.",
+      "tasks": [
+        "ImageTextEmbedder"
+      ],
+      "tags": [
+        "embeddings",
+        "vision",
+        "cross-modal",
+        "biomedical",
+        "medical"
+      ],
+      "licenseIds": [
+        "mit"
+      ],
+      "attributions": [
+        "Microsoft Research — BiomedCLIP (Zhang, Xu, Usuyama et al., 2023)",
+        "Heliosoph (open_clip + torch.onnx export from the upstream open_clip checkpoint)"
+      ],
+      "cardFile": "cards/biomedclip.md",
+      "variants": [
+        {
+          "id": "biomedclip-vit-base-patch16-224",
+          "displayName": "fp32",
+          "summary": "Embed biomedical images and captions into a shared 512-d space. Pair with cosine_similarity / dot_product for zero-shot diagnosis labels, figure retrieval, and cross-modal search.",
+          "tags": [
+            "fp32"
+          ],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 750,
+          "versions": [
+            {
+              "version": "2026-06-09",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/biomedclip-vit-base-patch16-224-onnx",
+                  "revision": "4b09e56f7797b93f90b65a0710bbd940693e69b8",
+                  "include": [
+                    "onnx/vision_model.onnx",
+                    "onnx/text_model.onnx",
+                    "vocab.txt",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/biomedclip-vit-base-patch16-224/2026-06-09.sql",
+              "models": [
+                {
+                  "identifier": "biomedclip_image_embed"
+                },
+                {
+                  "identifier": "biomedclip_text_embed"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "biomedclip-vit-base-patch16-224-fp16",
+          "displayName": "fp16",
+          "summary": "Same biomedical image-text embedder as BiomedCLIP fp32, half the disk. Wire boundary stays Float32; only internal weights and activations run in half precision.",
+          "tags": [
+            "fp16"
+          ],
+          "hardware": {
+            "minRamMb": 1024,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 380,
+          "versions": [
+            {
+              "version": "2026-06-09",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/biomedclip-vit-base-patch16-224-onnx",
+                  "revision": "4b09e56f7797b93f90b65a0710bbd940693e69b8",
+                  "include": [
+                    "onnx/vision_model_fp16.onnx",
+                    "onnx/text_model_fp16.onnx",
+                    "vocab.txt",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/biomedclip-vit-base-patch16-224-fp16/2026-06-09.sql",
+              "models": [
+                {
+                  "identifier": "biomedclip_image_embed_fp16"
+                },
+                {
+                  "identifier": "biomedclip_text_embed_fp16"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

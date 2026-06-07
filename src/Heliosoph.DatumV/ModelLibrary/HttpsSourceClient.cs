@@ -82,7 +82,8 @@ internal sealed class HttpsSourceClient : IModelSourceClient
         _logger.LogDebug("HTTPS fetch: {Url}", entry.Url);
 
         return await HttpFileDownloader.DownloadAsync(
-            _http, entry.Url, destPath, progress, _logger, ct).ConfigureAwait(false);
+            _http, entry.Url, destPath, progress, _logger, ct,
+            userAgentOverride: https.UserAgent).ConfigureAwait(false);
     }
 
     private static HttpsSource Cast(CatalogSource source) =>

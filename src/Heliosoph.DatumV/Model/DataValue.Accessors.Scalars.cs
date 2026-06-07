@@ -390,6 +390,18 @@ public readonly partial struct DataValue
         return new TimeSpan(ReadLong());
     }
 
+    /// <summary>
+    /// Returns the Postgres <see cref="Interval"/> payload. Months ride in
+    /// <c>_p0</c>, days in <c>_p1</c>, microseconds across <c>_p2</c>+<c>_p3</c>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Interval AsInterval()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Interval);
+        long micros = (uint)_p2 | ((long)_p3 << 32);
+        return new Interval(_p0, _p1, micros);
+    }
+
     /// <summary>Returns the <see cref="DataKind"/> that this type tag describes.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public DataKind AsType()

@@ -218,17 +218,6 @@ public sealed class CompletionContextTests : ServiceTestBase
         Assert.Null(zone.Prefix);
     }
 
-    // ───────────────────── INTO zone ─────────────────────
-
-    [Fact]
-    public void Classify_AfterInto_ReturnsAfterInto()
-    {
-        CompletionZone zone = CompletionContext.Classify("SELECT * FROM t INTO ", 21);
-
-        Assert.Equal(CompletionZoneKind.AfterInto, zone.Kind);
-        Assert.Null(zone.Prefix);
-    }
-
     // ───────────────────── AS zone ─────────────────────
 
     [Fact]

@@ -29,6 +29,18 @@ namespace Heliosoph.DatumV.Functions.TableValued;
 /// reference 1080p H.264 clip). Out-of-order access pays a seek-to-head
 /// penalty per non-sequential read.
 /// </para>
+/// <para>
+/// <strong>Zero-based frame indices.</strong> <c>frame_index</c> is the
+/// container-native frame address — the same coordinate FFmpeg, ffprobe,
+/// and <see cref="VideoRegistry.Materialize"/> use, where frame 0 is the
+/// first frame. This intentionally departs from PostgreSQL's 1-based
+/// ordinality convention (<c>generate_series</c>, <c>WITH ORDINALITY</c>,
+/// array subscripts): shifting it would force <c>start_frame</c> and
+/// <c>max_frames</c> to disagree with every external video tool the user
+/// compares against. Callers who want a 1-based row number can layer
+/// <c>ROW_NUMBER() OVER ()</c> over the output — that produces an
+/// ordinality column distinct from the underlying frame address.
+/// </para>
 /// </remarks>
 public sealed class VideoUnnestFramesFunction : ITableValuedFunctionMetadata, ITableValuedFunction
 {

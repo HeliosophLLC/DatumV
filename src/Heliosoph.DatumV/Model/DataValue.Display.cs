@@ -86,6 +86,7 @@ public readonly partial struct DataValue
             DataKind.TimestampTz => AsTimestampTz(),
             DataKind.Time      => AsTime(),
             DataKind.Duration  => AsDuration(),
+            DataKind.Interval  => AsInterval(),
             DataKind.Uuid      => AsUuid(),
             DataKind.Point2D   => AsPoint2D(),
             DataKind.Point3D   => AsPoint3D(),
@@ -149,6 +150,7 @@ public readonly partial struct DataValue
             DataKind.TimestampTz => AsTimestampTz().ToString("O"),
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
+            DataKind.Interval => AsInterval().Format(),
             DataKind.Uuid     => AsUuid().ToString("D"),
             DataKind.Point2D  => FormatPoint2D(),
             DataKind.Point3D  => FormatPoint3D(),
@@ -197,6 +199,7 @@ public readonly partial struct DataValue
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
+            DataKind.Interval => AsInterval().Format(),
             // Sidecar-backed values pack the 64-bit offset across _p0/_p1
             // and the 40-bit length across _p2/_p3, so reading _p0/_p1 as
             // offset/length only works for arena-backed values. Branching

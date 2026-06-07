@@ -124,6 +124,26 @@ public sealed class ReferenceArrayBlobKindsTests : ServiceTestBase
         Assert.Equal(cloud1, recovered[1]);
     }
 
+    // ───────────────────────── Mesh ─────────────────────────
+
+    [Fact]
+    public void Mesh_MultipleElements_RoundTrips()
+    {
+        Arena arena = CreateArena();
+        // Mesh blob bytes are opaque to the array storage tier (the encoded
+        // mesh format is parsed elsewhere); any bytes round-trip cleanly.
+        byte[] mesh0 = [0x67, 0x6C, 0x54, 0x46];   // "glTF"
+        byte[] mesh1 = [0x76, 0x20, 0x31, 0x2E, 0x30];  // "v 1.0" OBJ-ish
+
+        DataValue value = DataValue.FromMeshArray([mesh0, mesh1], arena);
+        byte[][] recovered = value.AsMeshArray(arena);
+
+        Assert.Equal(DataKind.Mesh, value.Kind);
+        Assert.Equal(2, recovered.Length);
+        Assert.Equal(mesh0, recovered[0]);
+        Assert.Equal(mesh1, recovered[1]);
+    }
+
     // ───────────────────────── Cross-arena round-trip ─────────────────────────
 
     [Fact]

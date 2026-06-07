@@ -243,11 +243,15 @@ Euclidean (L2) distance between two vectors.
 
 Manhattan (L1) distance between two vectors.
 
-### dot
+### dot_product
 
-`dot(a, b)` → Float32 | QU: 2
+`dot_product(a, b)` → Float32 | QU: 2
 
-Dot product of two vectors.
+Dot product of two Float32 vectors of equal length. Equivalent to `cosine_similarity` when both inputs are unit-normalised, and the preferred similarity primitive for pre-normalised embedding stores where the per-row sqrt is wasted work.
+
+```sql
+SELECT dot_product(query_vec, doc_vec) AS score FROM search_results
+```
 
 ### hamming_distance
 

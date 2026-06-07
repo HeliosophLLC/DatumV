@@ -785,64 +785,6 @@ public class SqlParserTests : ServiceTestBase
         Assert.Equal("i", joined.Alias);
     }
 
-    // ————————————————————— INTO clause —————————————————————
-
-    [Fact]
-    public void IntoParquet()
-    {
-        SelectStatement result = Parse(
-            "SELECT a FROM t INTO 'output.parquet'");
-
-        Assert.NotNull(result.Into);
-        Assert.Equal(OutputFormat.Parquet, result.Into.Format);
-        Assert.Equal("output.parquet", result.Into.Path);
-        Assert.Null(result.Into.Shard);
-    }
-
-    [Fact]
-    public void IntoHdf5()
-    {
-        SelectStatement result = Parse(
-            "SELECT a FROM t INTO 'output.h5'");
-
-        Assert.NotNull(result.Into);
-        Assert.Equal(OutputFormat.Hdf5, result.Into.Format);
-    }
-
-    [Fact]
-    public void IntoCsv()
-    {
-        SelectStatement result = Parse(
-            "SELECT a FROM t INTO 'output.csv'");
-
-        Assert.NotNull(result.Into);
-        Assert.Equal(OutputFormat.Csv, result.Into.Format);
-    }
-
-    [Fact]
-    public void IntoWithShardOnSampleCount()
-    {
-        SelectStatement result = Parse(
-            "SELECT a FROM t INTO 'out.parquet' SHARD ON sample_count 1000");
-
-        Assert.NotNull(result.Into);
-        Assert.NotNull(result.Into.Shard);
-        Assert.Equal(ShardMode.SampleCount, result.Into.Shard.Mode);
-        Assert.Equal(1000L, result.Into.Shard.Value);
-    }
-
-    [Fact]
-    public void IntoWithShardOnByteSize()
-    {
-        SelectStatement result = Parse(
-            "SELECT a FROM t INTO 'out.h5' SHARD ON byte_size 104857600");
-
-        Assert.NotNull(result.Into);
-        Assert.NotNull(result.Into.Shard);
-        Assert.Equal(ShardMode.ByteSize, result.Into.Shard.Mode);
-        Assert.Equal(104857600L, result.Into.Shard.Value);
-    }
-
     // ————————————————————— ORDER BY —————————————————————
 
     [Fact]
@@ -1520,12 +1462,14 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
-    public void IntervalLiteral_ThrowsNotYetSupported()
+    public void IntervalLiteral_LowersToCastToInterval()
     {
-        ParseException ex = Assert.Throws<ParseException>(
-            () => Parse("SELECT INTERVAL '1 day' FROM t"));
-        Assert.Contains("INTERVAL", ex.Message);
-        Assert.Contains("not yet supported", ex.Message);
+        SelectStatement result = Parse("SELECT INTERVAL '1 day' FROM t");
+
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Interval", cast.TargetType);
+        LiteralExpression inner = Assert.IsType<LiteralExpression>(cast.Expression);
+        Assert.Equal("1 day", inner.Value);
     }
 
     [Fact]
@@ -1547,7 +1491,6 @@ public class SqlParserTests : ServiceTestBase
             + "FROM (SELECT file_name, file_bytes FROM images) AS inner_q "
             + "LEFT JOIN captions ON inner_q.file_name = captions.file_name "
             + "WHERE length(caption) > 10 "
-            + "INTO 'output.parquet' SHARD ON sample_count 5000 "
             + "ORDER BY file_name ASC "
             + "LIMIT 100 OFFSET 0");
 
@@ -1559,10 +1502,6 @@ public class SqlParserTests : ServiceTestBase
         Assert.Single(result.Joins);
         Assert.Equal(JoinType.Left, result.Joins[0].Type);
         Assert.NotNull(result.Where);
-        Assert.NotNull(result.Into);
-        Assert.Equal(OutputFormat.Parquet, result.Into.Format);
-        Assert.NotNull(result.Into.Shard);
-        Assert.Equal(ShardMode.SampleCount, result.Into.Shard.Mode);
         Assert.NotNull(result.OrderBy);
         Assert.Equal(100, Convert.ToInt32(((LiteralExpression)result.Limit!).Value));
         Assert.Equal(0, Convert.ToInt32(((LiteralExpression)result.Offset!).Value));

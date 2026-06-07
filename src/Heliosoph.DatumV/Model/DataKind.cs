@@ -140,6 +140,25 @@ public enum DataKind : byte
     /// </summary>
     TimestampTz = 44,
 
+    /// <summary>
+    /// A PostgreSQL-compatible <c>interval</c>: a three-field calendar-aware
+    /// span with independent months, days, and microseconds components. The
+    /// split is load-bearing — <c>'1 month'</c> resolves to month arithmetic at
+    /// <em>apply</em> time (against an anchor date), not parse time, so a value
+    /// like <c>timestamp + interval '1 month'</c> can produce 28-, 29-, 30-, or
+    /// 31-day shifts depending on the source month. Distinct from
+    /// <see cref="Duration"/>, which carries pure elapsed time (totally ordered,
+    /// sortable); <c>Interval</c> is not totally ordered because
+    /// <c>'30 days'</c> vs <c>'1 month'</c> only resolves against an anchor.
+    /// <para>
+    /// 16-byte inline payload at <c>_p0</c>–<c>_p3</c>:
+    /// <c>(int32 months, int32 days, int64 micros)</c>. <see cref="Duration"/>
+    /// widens to <c>Interval</c> via explicit <c>CAST</c>; the reverse direction
+    /// is lossy (a month is not a fixed number of seconds) and is rejected.
+    /// </para>
+    /// </summary>
+    Interval = 45,
+
     // ───────────────────────── Text &amp; identifiers (48–55) ─────────────────────────
 
     /// <summary>A Unicode text string.</summary>

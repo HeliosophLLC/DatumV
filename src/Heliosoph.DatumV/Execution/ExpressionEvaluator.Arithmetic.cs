@@ -124,6 +124,16 @@ public sealed partial class ExpressionEvaluator
             if (temporal is not null) return temporal.Value;
         }
 
+        // PG interval × double / interval / double → interval. Routed before
+        // the generic numeric promotion so a make_interval(...) * 2 expression
+        // doesn't degrade to Float64.
+        if (op is BinaryOperator.Multiply or BinaryOperator.Divide)
+        {
+            if (left == DataKind.Interval && DataValue.IsNumericScalarKind(right)) return DataKind.Interval;
+            if (op == BinaryOperator.Multiply && right == DataKind.Interval && DataValue.IsNumericScalarKind(left))
+                return DataKind.Interval;
+        }
+
         // Time / Duration arithmetic falls back to float seconds for the
         // mixed cases (Duration + Duration is special-cased in the caller).
         if (left == DataKind.Time || right == DataKind.Time
@@ -161,7 +171,8 @@ public sealed partial class ExpressionEvaluator
 
     /// <summary>
     /// PG temporal arithmetic promotion table. Returns the result kind for
-    /// the supported (timestamp, duration) and (timestamp, timestamp) pairs;
+    /// the supported (timestamp, duration), (timestamp, interval), (date,
+    /// interval), (interval, interval), and (timestamp, timestamp) pairs;
     /// returns null when the pair isn't a supported temporal combination so
     /// the caller can fall through to numeric promotion.
     /// </summary>
@@ -181,6 +192,24 @@ public sealed partial class ExpressionEvaluator
             if (left == DataKind.TimestampTz && right == DataKind.TimestampTz) return DataKind.Duration;
             if (left == DataKind.Timestamp   && right == DataKind.Timestamp)   return DataKind.Duration;
         }
+
+        // Interval ± Interval → Interval (carry not normalised).
+        if (left == DataKind.Interval && right == DataKind.Interval) return DataKind.Interval;
+
+        // Timestamp(tz) ± Interval → Timestamp(tz). Commutative on Add.
+        if (left == DataKind.TimestampTz && right == DataKind.Interval) return DataKind.TimestampTz;
+        if (left == DataKind.Timestamp   && right == DataKind.Interval) return DataKind.Timestamp;
+        if (op == BinaryOperator.Add)
+        {
+            if (right == DataKind.TimestampTz && left == DataKind.Interval) return DataKind.TimestampTz;
+            if (right == DataKind.Timestamp   && left == DataKind.Interval) return DataKind.Timestamp;
+        }
+
+        // PG: date + interval = timestamp; date - interval = timestamp.
+        if (left == DataKind.Date && right == DataKind.Interval) return DataKind.Timestamp;
+        if (op == BinaryOperator.Add && left == DataKind.Interval && right == DataKind.Date)
+            return DataKind.Timestamp;
+
         return null;
     }
 

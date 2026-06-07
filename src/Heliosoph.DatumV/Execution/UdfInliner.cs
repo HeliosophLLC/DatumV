@@ -112,8 +112,7 @@ public static class UdfInliner
                 RewriteQuery(compound.Right),
                 compound.OrderBy is { } ob ? RewriteOrderBy(ob) : null,
                 compound.Limit,
-                compound.Offset,
-                compound.Into),
+                compound.Offset),
             _ => query,
         };
 

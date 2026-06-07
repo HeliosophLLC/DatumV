@@ -18,7 +18,7 @@ ONNX exports of [SwinIR](https://github.com/JingyunLiang/SwinIR) — Swin Transf
 
 Re-exported from upstream PyTorch weights. Provenance trail: Liang et al. → JingyunLiang/SwinIR (cloned source) + pinned `.pth` checkpoints from the v0.0 GitHub release → `torch.onnx.export` (one pass per variant) → these files.
 
-Toolchain: `torch 2.4.x` (CUDA 12.4), `timm` latest, `onnx` latest, `onnxruntime>=1.17`, opset 17, `do_constant_folding=True`, `dynamo=False` (forces the legacy TorchScript-based exporter; SwinIR's `.type_as()` buffer coercions trip the dynamo path's name-lineage tracking on torch >=2.5). Full conversion script: [`scripts/export-swinir.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-swinir.ps1) in the Heliosoph repo.
+Toolchain: `torch 2.4.x` (CUDA 12.4), `timm` latest, `onnx` latest, `onnxruntime>=1.17`, opset 17, `do_constant_folding=True`, `dynamo=False` (forces the legacy TorchScript-based exporter; SwinIR's `.type_as()` buffer coercions trip the dynamo path's name-lineage tracking on torch >=2.5). Full conversion script: [`scripts/export-swinir.ps1`](https://github.com/HeliosophLLC/DatumV/blob/main/scripts/export-swinir.ps1) in the Heliosoph repo.
 
 Credit: Jingyun Liang, Jiezhang Cao, Guolei Sun, Kai Zhang, Luc Van Gool, Radu Timofte (ETH Zurich and collaborators). Paper: *"SwinIR: Image Restoration Using Swin Transformer"*, ICCV 2021.
 

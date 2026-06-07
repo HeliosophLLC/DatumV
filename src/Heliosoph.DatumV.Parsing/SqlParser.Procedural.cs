@@ -690,7 +690,8 @@ public static partial class SqlParser
     /// "unexpected CREATE at column 1".
     /// </remarks>
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
-        CreateFunctionParser
+        CopyStatementParser
+            .Or(CreateFunctionParser)
             .Or(DropFunctionParser.Try())
             .Or(CreateProcedureParser)
             .Or(DropProcedureParser.Try())
@@ -784,7 +785,6 @@ public static partial class SqlParser
         SqlToken.Define,
         SqlToken.Pivot,
         SqlToken.Unpivot,
-        SqlToken.Into,
         SqlToken.Order,
         SqlToken.Limit,
         SqlToken.Offset,

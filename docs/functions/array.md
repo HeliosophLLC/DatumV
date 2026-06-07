@@ -11,13 +11,16 @@ Typed array construction, inspection, search, manipulation, and string conversio
 
 ## Multi-dim arrays
 
-Columns declared with multiple dimensions (`Array<Float32>(2, 3)`) and function outputs whose ONNX tensor rank is ≥ 2 (e.g. `infer()` for a `[1, H, W]` depth map) carry an explicit shape — the multi-dim flag survives across SQL expressions and round-trips through `.datum`. Each function below behaves in one of three ways on multi-dim input:
+Columns declared with multiple dimensions (`Array<Float32>(2, 3)`) and function outputs whose ONNX tensor rank is ≥ 2 (e.g. `infer()` for a `[1, H, W]` depth map) carry an explicit shape — the multi-dim flag survives across SQL expressions and round-trips through `.datum`.
+
+**Supported element kinds.** Multi-dim is supported for **every** element kind in the type system: fixed-width primitives (`Int*`, `UInt*`, `Float*`, `Decimal`, `Date`, `Time`, `Duration`, `Uuid`, `Point*`, `Boolean`), byte arrays (`UInt8`), `String`, the blob-element kinds (`Image`, `Audio`, `Video`, `Json`, `PointCloud`, `Mesh`), and `Struct`. `Array<String>(m, n)` stores one UTF-8-encoded slot per cell; the blob kinds each store one encoded payload per cell; `Array<Struct>(m, n)` stores one field-array slot per cell with a per-element TypeId in the slot bytes.
+
+Each function below behaves in one of two ways on multi-dim input:
 
 | Behavior | Meaning | Functions |
 |---|---|---|
 | **Shape-aware** | Reads the shape and operates per-dim. | `cardinality`, `array_length`, `array_ndims`, `array_shape`, `array_get`, `m[y, x]` bracket syntax |
-| **Shape-agnostic (flatten)** | Iterates the flat element span; the per-dim shape is irrelevant. The output is a flat 1-D array of the same total length. | `array_concat`, `array_contains`, `array_to_string` (input is `Array<String>` so multi-dim is impossible) |
-| **Reject** | Multi-dim is rejected at DDL time, no runtime check needed. | `Array<String>(m, n)`, `Array<Image>(m, n)`, `Array<Struct>(m, n)`, `Array<UInt8>(m, n)` — see [CREATE TABLE](../sql/create-table.md) |
+| **Shape-agnostic (flatten)** | Iterates the flat element span; the per-dim shape is irrelevant. The output is a flat 1-D array of the same total length. | `array_concat`, `array_contains`, `array_to_string` |
 
 The shape-agnostic functions intentionally "drop" the multi-dim shape on output — the result is always a flat 1-D array. This is what model-pipeline SQL expects: e.g. Florence-2's `array_concat(visual_features, prompt_embeds)` stitches the flat element spans regardless of source rank. If you need shape-preserving multi-dim operations, decompose with `array_get` / `array_shape` and rebuild.
 

@@ -79,6 +79,22 @@ Population standard deviation of pixel values. Same signature as `image_pixel_me
 
 ## Loading & Decode
 
+### image_decode
+
+`image_decode(bytes)` → Image
+`image_decode(path)` → Image
+
+Wraps a raw encoded-image source as a typed `Image` value. The first form takes a `UInt8[]` of encoded bytes (PNG / JPEG / WebP / BMP / TIFF — anything SkiaSharp recognises); the second takes a `String` filesystem path and reads the file. No pixel decoding happens — the bytes pass through verbatim with the kind flipped to `Image`, and width/height parsing stays lazy at the materialization boundary so `image_width()` and friends keep their fast inline-metadata path. Returns `NULL` when the argument is `NULL`.
+
+```sql
+-- Lift an archive entry into the typed-Image surface
+SELECT image_decode(o.bytes) AS img
+FROM open_archive(:source, '%.jpg') AS o
+
+-- One-off file lookup
+SELECT image_width(image_decode('C:/data/sample.png'))
+```
+
 ### image_to_bytes
 
 `image_to_bytes(img)` → UInt8[]

@@ -44,7 +44,7 @@ optimum-cli export onnx \
     <output>
 ```
 
-Conversion script: [`scripts/export-vit-gpt-image-captioning.ps1`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-vit-gpt-image-captioning.ps1) in the Heliosoph repo.
+Conversion script: [`scripts/export-vit-gpt-image-captioning.ps1`](https://github.com/HeliosophLLC/DatumV/blob/main/scripts/export-vit-gpt-image-captioning.ps1) in the Heliosoph repo.
 
 Toolchain: `optimum 1.24.0`, `transformers 4.45.2`, `torch 2.4.x`.
 

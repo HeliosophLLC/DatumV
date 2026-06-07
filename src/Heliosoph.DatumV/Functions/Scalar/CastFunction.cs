@@ -279,6 +279,22 @@ public sealed class CastFunction : IFunction, IScalarFunction
             case (DataKind.Duration, DataKind.String):
                 result = ValueRef.FromString(input.AsDuration().ToString("c"));
                 return true;
+            case (DataKind.String, DataKind.Interval):
+                if (Interval.TryParse(input.AsString(), out Interval iv))
+                {
+                    result = ValueRef.FromInterval(iv);
+                    return true;
+                }
+                return false;
+            case (DataKind.Interval, DataKind.String):
+                result = ValueRef.FromString(input.AsInterval().Format());
+                return true;
+            case (DataKind.Duration, DataKind.Interval):
+                // Lossless: pure elapsed time → days + microseconds, no months.
+                // The reverse direction (Interval → Duration) is intentionally
+                // omitted: a months component has no fixed conversion to ticks.
+                result = ValueRef.FromInterval(Interval.FromTimeSpan(input.AsDuration()));
+                return true;
             case (DataKind.String, DataKind.Uuid):
                 if (Guid.TryParse(input.AsString(), out Guid g))
                 {

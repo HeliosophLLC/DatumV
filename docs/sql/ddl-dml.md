@@ -103,7 +103,7 @@ CREATE TABLE active_users AS
     SELECT id, name, last_seen FROM users WHERE active = TRUE
 
 -- TEMP target (in-memory)
-CREATE TEMP TABLE scratch AS SELECT Value FROM RANGE(1, 1000)
+CREATE TEMP TABLE scratch AS SELECT value FROM generate_series(1, 1000)
 
 -- Schema-qualified
 CREATE TABLE reports.monthly AS SELECT month, total FROM orders

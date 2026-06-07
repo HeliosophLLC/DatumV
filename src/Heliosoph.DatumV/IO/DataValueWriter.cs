@@ -108,6 +108,14 @@ internal static class DataValueWriter
             case DataKind.Date:     writer.Write(value.AsDate().DayNumber); break;
             case DataKind.Time:     writer.Write(value.AsTime().Ticks); break;
             case DataKind.Duration: writer.Write(value.AsDuration().Ticks); break;
+            case DataKind.Interval:
+            {
+                Interval iv = value.AsInterval();
+                writer.Write(iv.Months);
+                writer.Write(iv.Days);
+                writer.Write(iv.Microseconds);
+                break;
+            }
             case DataKind.Uuid:     writer.Write(value.AsUuid().ToByteArray()); break;
 
             case DataKind.Point2D:
@@ -251,6 +259,15 @@ internal static class DataValueWriter
                 writer.Write(value.AsDuration().Ticks);
                 break;
 
+            case DataKind.Interval:
+            {
+                Interval iv = value.AsInterval();
+                writer.Write(iv.Months);
+                writer.Write(iv.Days);
+                writer.Write(iv.Microseconds);
+                break;
+            }
+
             // Byte arrays + Image / Audio / Video / Json aren't supported
             // in the no-store wire format. Indexed keys are inline-only
             // (≤16 byte values) per the indexable rule, and zone maps
@@ -393,6 +410,15 @@ internal static class DataValueWriter
             case DataKind.Duration:
                 writer.Write(value.AsDuration().Ticks);
                 break;
+
+            case DataKind.Interval:
+            {
+                Interval iv = value.AsInterval();
+                writer.Write(iv.Months);
+                writer.Write(iv.Days);
+                writer.Write(iv.Microseconds);
+                break;
+            }
 
             // Byte arrays + Image / Audio / Video / Json aren't supported
             // in the no-store wire format. Indexed keys are inline-only

@@ -44,7 +44,7 @@ vae_encoder/
 
 `optimum-cli export onnx --model RunDiffusion/Juggernaut-XL-Lightning --task text-to-image --library diffusers --device cuda --no-post-process <output>`
 
-via [`scripts/export-batch-onnx.ps1 -Models juggernaut-xl-lightning`](https://github.com/HeliosophLLC/Heliosoph/blob/main/scripts/export-batch-onnx.ps1).
+via [`scripts/export-batch-onnx.ps1 -Models juggernaut-xl-lightning`](https://github.com/HeliosophLLC/DatumV/blob/main/scripts/export-batch-onnx.ps1).
 
 Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4).
 

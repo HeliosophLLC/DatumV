@@ -184,21 +184,27 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     }
 
     [Fact]
-    public void Validate_RejectsByteArrayKind()
+    public void Validate_AcceptsByteArrayKind()
     {
+        // Slice B: multi-dim UInt8 is supported. The byte-count ElementCount path
+        // subtracts the shape prefix; accessors do the same.
         Arena arena = CreateArena();
-        Assert.Throws<ArgumentException>(() =>
-            DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.UInt8, arena));
+        DataValue value = DataValue.FromArenaMultiDimArray<byte>(
+            [1, 2, 3, 4], [2, 2], DataKind.UInt8, arena);
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.UInt8, value.Kind);
+        Assert.Equal(4, value.ElementCount);
     }
 
     [Fact]
-    public void Validate_RejectsReferenceElementKinds()
+    public void Validate_RejectsStructAsFixedWidthMultiDim()
     {
+        // Struct is the only reference-element kind without a dedicated
+        // multi-dim factory; the fixed-width factory still rejects it.
+        // All other blob kinds (String / Image / Audio / Video / Json /
+        // PointCloud / Mesh) route through their per-kind factories.
         Arena arena = CreateArena();
-        Assert.Throws<ArgumentException>(() =>
-            DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.String, arena));
-        Assert.Throws<ArgumentException>(() =>
-            DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Image, arena));
         Assert.Throws<ArgumentException>(() =>
             DataValue.FromArenaMultiDimArray<byte>(new byte[4], [2, 2], DataKind.Struct, arena));
     }
@@ -227,9 +233,623 @@ public sealed class MultiDimArrayTests : ServiceTestBase
     }
 
     [Fact]
-    public void Sidecar_Factory_RejectsByteArrayKind()
+    public void Sidecar_Factory_AcceptsByteArrayKind()
     {
+        // Slice B: UInt8 sidecar multi-dim is supported. AsUInt8Array / AsByteSpan
+        // skip the shape prefix when IsMultiDim is set.
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.UInt8, offset: 0, length: 8 + 4, ndim: 2, storeId: 2);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsInSidecar);
+        Assert.Equal(DataKind.UInt8, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsString()
+    {
+        // String got its own multi-dim factory in Slice A; the sidecar variant
+        // accepts String too (the slot block lives in the sidecar; AsStringArray
+        // resolves elements via the registry).
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.String, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 3);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsInSidecar);
+        Assert.Equal(DataKind.String, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
+    // ───────────────────── Multi-dim String[] (Slice A) ─────────────────────
+
+    [Fact]
+    public void Arena_String_2x2_RoundTripsShapeAndElements()
+    {
+        string[] data = ["alpha", "beta", "gamma", "delta"];
+        int[] shape = [2, 2];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimStringArray(data, shape, arena);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.False(value.IsInlineArray);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(DataKind.String, value.Kind);
+        Assert.Equal(2, value.Ndim);
+
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(4, value.ElementCount);
+
+        string[] recovered = value.AsStringArray(arena);
+        Assert.Equal(data, recovered);
+    }
+
+    [Fact]
+    public void Arena_String_2x3_LargerStrings_RoundTrip()
+    {
+        // Longer strings exercise the per-element store.StoreString path and
+        // make sure the slot block decodes each element's (offset, length)
+        // correctly after the shape prefix.
+        string[] data = [
+            "the quick brown fox jumps over the lazy dog",
+            "lorem ipsum dolor sit amet",
+            "",   // empty string mid-array
+            "α β γ δ ε ζ η",   // multi-byte UTF-8
+            "single",
+            "🐉🌊",   // 4-byte UTF-8 each
+        ];
+        int[] shape = [2, 3];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimStringArray(data, shape, arena);
+
+        Assert.Equal(6, value.ElementCount);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(data, value.AsStringArray(arena));
+    }
+
+    [Fact]
+    public void Arena_String_3D_2x2x2()
+    {
+        string[] data = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        int[] shape = [2, 2, 2];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimStringArray(data, shape, arena);
+
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(data, value.AsStringArray(arena));
+    }
+
+    [Fact]
+    public void Arena_String_RejectsNdimLessThanTwo()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DataValue.FromArenaMultiDimStringArray(["a", "b", "c"], [3], arena));
+    }
+
+    [Fact]
+    public void Arena_String_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
         Assert.Throws<ArgumentException>(() =>
-            DataValue.FromMultiDimArrayInSidecar(DataKind.UInt8, offset: 0, length: 16, ndim: 2));
+            DataValue.FromArenaMultiDimStringArray(["a", "b", "c"], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_String_RejectsNonPositiveDim()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStringArray([], [2, 0], arena));
+    }
+
+    [Fact]
+    public void Arena_String_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStringArray(["a", null!, "c", "d"], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_String_SameShapeSameElements_AreEqual()
+    {
+        // Same allocation → byte-identical → equal. Cross-arena equality for
+        // Array<String> is currently conservative-false (no content hash stamped),
+        // matching 1-D Array<String> behavior — covered in MultiDimEqualityTests.
+        Arena arena = CreateArena();
+        DataValue a = DataValue.FromArenaMultiDimStringArray(["x", "y", "z", "w"], [2, 2], arena);
+        Assert.Equal(a, a);
+        Assert.Equal(a.GetHashCode(), a.GetHashCode());
+    }
+
+    [Fact]
+    public void Arena_String_DifferentShape_NotEqual()
+    {
+        // [2,3] and [3,2] of the same elements live at different arena offsets
+        // so the offset-based equality fast path already separates them; ndim
+        // also differs in _charCount's high byte.
+        Arena arena = CreateArena();
+        string[] data = ["a", "b", "c", "d", "e", "f"];
+        DataValue v23 = DataValue.FromArenaMultiDimStringArray(data, [2, 3], arena);
+        DataValue v32 = DataValue.FromArenaMultiDimStringArray(data, [3, 2], arena);
+
+        Assert.NotEqual(v23, v32);
+        Assert.NotEqual(2, v32.Ndim - v23.Ndim);   // both rank 2
+        Assert.Equal([2, 3], v23.GetShape(arena).ToArray());
+        Assert.Equal([3, 2], v32.GetShape(arena).ToArray());
+    }
+
+    [Fact]
+    public void Arena_String_FlatVsMultiDim_NotEqual()
+    {
+        // Same element strings, one flat, one multi-dim — IsMultiDim flag differs
+        // → _flags differs → not equal. (Mirrors the primitive multi-dim invariant.)
+        Arena arena = CreateArena();
+        string[] data = ["a", "b", "c", "d"];
+
+        DataValue flat = DataValue.FromStringArray(data, arena);
+        DataValue multi = DataValue.FromArenaMultiDimStringArray(data, [2, 2], arena);
+
+        Assert.NotEqual(flat, multi);
+        Assert.False(flat.IsMultiDim);
+        Assert.True(multi.IsMultiDim);
+    }
+
+    // ───────────────────── Multi-dim UInt8[] (Slice B) ─────────────────────
+
+    [Fact]
+    public void Arena_UInt8_2x3_RoundTripsShapeAndElements()
+    {
+        byte[] data = [10, 20, 30, 40, 50, 60];
+        int[] shape = [2, 3];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimArray<byte>(data, shape, DataKind.UInt8, arena);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsByteArrayKind);
+        Assert.Equal(DataKind.UInt8, value.Kind);
+        Assert.Equal(2, value.Ndim);
+
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(6, value.ElementCount);
+        Assert.Equal(data, value.AsArraySpan<byte>(arena).ToArray());
+        Assert.Equal(data, value.AsUInt8Array(arena));
+        Assert.Equal(data, value.AsByteSpan(arena).ToArray());
+    }
+
+    [Fact]
+    public void Arena_UInt8_3D_2x2x2()
+    {
+        byte[] data = [0, 1, 2, 3, 4, 5, 6, 7];
+        int[] shape = [2, 2, 2];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimArray<byte>(data, shape, DataKind.UInt8, arena);
+
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal(8, value.ElementCount);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(data, value.AsUInt8Array(arena));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsImage()
+    {
+        // Image sidecar multi-dim is supported. AsImageArray skips the
+        // shape prefix when IsMultiDim is set.
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.Image, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 5);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsInSidecar);
+        Assert.Equal(DataKind.Image, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
+    // ───────────────────── Multi-dim Image[] (Slice C) ─────────────────────
+
+    /// <summary>Synthesizes a tiny 1×1 PNG byte payload distinguishable by a tag byte.</summary>
+    private static byte[] FakeImageBytes(byte tag) =>
+        [0x89, 0x50, 0x4E, 0x47, tag, 0x00, 0x01, 0x02];
+
+    [Fact]
+    public void Arena_Image_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [
+            FakeImageBytes(1), FakeImageBytes(2),
+            FakeImageBytes(3), FakeImageBytes(4),
+        ];
+        int[] shape = [2, 2];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimImageArray(data, shape, arena);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(DataKind.Image, value.Kind);
+        Assert.Equal(2, value.Ndim);
+
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(4, value.ElementCount);
+
+        byte[][] recovered = value.AsImageArray(arena);
+        Assert.Equal(data.Length, recovered.Length);
+        for (int i = 0; i < data.Length; i++)
+        {
+            Assert.Equal(data[i], recovered[i]);
+        }
+    }
+
+    [Fact]
+    public void Arena_Image_2x3_VariousSizes()
+    {
+        // Mixed-length payloads exercise per-element offset/length math after
+        // the shape prefix.
+        byte[][] data = [
+            [0xFF],                                     // 1 byte
+            [0xFF, 0xD8, 0xFF],                         // 3 bytes (JPEG SOI-ish)
+            FakeImageBytes(0xA),
+            new byte[1024],                             // 1 KiB
+            [0x47, 0x49, 0x46, 0x38, 0x39, 0x61],       // "GIF89a"
+            [0x00],
+        ];
+        int[] shape = [2, 3];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimImageArray(data, shape, arena);
+
+        Assert.Equal(6, value.ElementCount);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+
+        byte[][] recovered = value.AsImageArray(arena);
+        for (int i = 0; i < data.Length; i++) Assert.Equal(data[i], recovered[i]);
+    }
+
+    [Fact]
+    public void Arena_Image_3D_2x2x2()
+    {
+        byte[][] data = new byte[8][];
+        for (int i = 0; i < 8; i++) data[i] = FakeImageBytes((byte)i);
+        int[] shape = [2, 2, 2];
+        Arena arena = CreateArena();
+
+        DataValue value = DataValue.FromArenaMultiDimImageArray(data, shape, arena);
+
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(8, value.ElementCount);
+    }
+
+    [Fact]
+    public void Arena_Image_RejectsNdimLessThanTwo()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DataValue.FromArenaMultiDimImageArray(
+                [FakeImageBytes(1), FakeImageBytes(2), FakeImageBytes(3)], [3], arena));
+    }
+
+    [Fact]
+    public void Arena_Image_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimImageArray(
+                [FakeImageBytes(1), FakeImageBytes(2), FakeImageBytes(3)], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_Image_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimImageArray(
+                [FakeImageBytes(1), null!, FakeImageBytes(3), FakeImageBytes(4)],
+                [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_Image_FlatVsMultiDim_NotEqual()
+    {
+        Arena arena = CreateArena();
+        byte[][] data = [FakeImageBytes(1), FakeImageBytes(2), FakeImageBytes(3), FakeImageBytes(4)];
+
+        DataValue flat = DataValue.FromImageArray(data, arena);
+        DataValue multi = DataValue.FromArenaMultiDimImageArray(data, [2, 2], arena);
+
+        Assert.NotEqual(flat, multi);
+        Assert.False(flat.IsMultiDim);
+        Assert.True(multi.IsMultiDim);
+    }
+
+    // ───────────────── Multi-dim Audio/Video/Json/PointCloud[] ─────────────────
+    //
+    // These four kinds share the same blob-element slot-block layout as Image
+    // and route through the BuildArenaMultiDimBlobArray / ReadBlobArray shared
+    // helpers; the round-trip path is structurally identical so the
+    // per-kind coverage focuses on the kind discriminator surviving and
+    // ElementCount + GetShape returning the right values.
+
+    private static void AssertMultiDimBlobRoundTrips(
+        DataKind expectedKind,
+        DataValue value,
+        byte[][] expectedElements,
+        int[] expectedShape,
+        Arena arena,
+        Func<DataValue, byte[][]> accessor)
+    {
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(expectedKind, value.Kind);
+        Assert.Equal(expectedShape.Length, value.Ndim);
+        Assert.Equal(expectedShape, value.GetShape(arena).ToArray());
+        Assert.Equal(expectedElements.Length, value.ElementCount);
+        byte[][] recovered = accessor(value);
+        Assert.Equal(expectedElements.Length, recovered.Length);
+        for (int i = 0; i < expectedElements.Length; i++) Assert.Equal(expectedElements[i], recovered[i]);
+    }
+
+    [Fact]
+    public void Arena_Audio_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [[0xAA, 0xBB], [0xCC], [0xDD, 0xEE, 0xFF], [0x00]];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimAudioArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Audio, value, data, [2, 2], arena,
+            v => v.AsAudioArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Video_3D_2x2x2()
+    {
+        byte[][] data = new byte[8][];
+        for (int i = 0; i < 8; i++) data[i] = [(byte)i, (byte)(i + 100)];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimVideoArray(data, [2, 2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Video, value, data, [2, 2, 2], arena,
+            v => v.AsVideoArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Json_2x3_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [
+            [(byte)'{', (byte)'}'],
+            [(byte)'[', (byte)']'],
+            [(byte)'1'],
+            [(byte)'2'],
+            [(byte)'3'],
+            [(byte)'4'],
+        ];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimJsonArray(data, [2, 3], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Json, value, data, [2, 3], arena,
+            v => v.AsJsonArray(arena));
+    }
+
+    [Fact]
+    public void Arena_PointCloud_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimPointCloudArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.PointCloud, value, data, [2, 2], arena,
+            v => v.AsPointCloudArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Audio_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimAudioArray([[1], null!, [3], [4]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Arena_Json_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimJsonArray([[1], [2], [3]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsAudioVideoJsonPointCloud()
+    {
+        // All four route through FromMultiDimArrayInSidecar without being rejected.
+        foreach (DataKind kind in (DataKind[])[DataKind.Audio, DataKind.Video, DataKind.Json, DataKind.PointCloud])
+        {
+            DataValue value = DataValue.FromMultiDimArrayInSidecar(
+                kind, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 1);
+            Assert.True(value.IsMultiDim);
+            Assert.Equal(kind, value.Kind);
+            Assert.Equal(2, value.Ndim);
+        }
+    }
+
+    // ───────────────────── Multi-dim Mesh[] ─────────────────────
+
+    [Fact]
+    public void Arena_Mesh_2x2_RoundTripsShapeAndElements()
+    {
+        byte[][] data = [
+            [0x67, 0x6C, 0x54, 0x46],   // "glTF"
+            [0x76, 0x20, 0x31, 0x2E, 0x30],
+            [0x4F, 0x42, 0x4A],         // "OBJ"
+            [0x53, 0x54, 0x4C],         // "STL"
+        ];
+        Arena arena = CreateArena();
+        DataValue value = DataValue.FromArenaMultiDimMeshArray(data, [2, 2], arena);
+        AssertMultiDimBlobRoundTrips(DataKind.Mesh, value, data, [2, 2], arena,
+            v => v.AsMeshArray(arena));
+    }
+
+    [Fact]
+    public void Arena_Mesh_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimMeshArray([[1], [2], [3]], [2, 2], arena));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsMesh()
+    {
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.Mesh, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 4);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.Mesh, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
+    // ───────────────────── Multi-dim Struct[] ─────────────────────
+
+    [Fact]
+    public void Arena_Struct_2x2_RoundTripsShapeAndElements()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1), DataValue.FromFloat32(1.5f)],
+            [DataValue.FromInt32(2), DataValue.FromFloat32(2.5f)],
+            [DataValue.FromInt32(3), DataValue.FromFloat32(3.5f)],
+            [DataValue.FromInt32(4), DataValue.FromFloat32(4.5f)],
+        ];
+        int[] shape = [2, 2];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, shape, arena, typeId: 7);
+
+        Assert.True(value.IsArray);
+        Assert.True(value.IsMultiDim);
+        Assert.True(value.IsArenaBacked);
+        Assert.Equal(DataKind.Struct, value.Kind);
+        Assert.Equal(2, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(4, value.ElementCount);
+
+        DataValue[] recovered = value.AsStructArray(arena);
+        Assert.Equal(4, recovered.Length);
+        for (int i = 0; i < recovered.Length; i++)
+        {
+            // Per-element TypeId is the same id we stamped at construction.
+            Assert.Equal(7, recovered[i].TypeId);
+            DataValue[] fields = recovered[i].AsStruct(arena);
+            Assert.Equal(i + 1, fields[0].AsInt32());
+            Assert.Equal(i + 1.5f, fields[1].AsFloat32());
+        }
+    }
+
+    [Fact]
+    public void Arena_Struct_3D_2x2x2()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = new DataValue[8][];
+        for (int i = 0; i < 8; i++)
+        {
+            elements[i] = [DataValue.FromInt32(i)];
+        }
+        int[] shape = [2, 2, 2];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, shape, arena, typeId: 0);
+
+        Assert.Equal(3, value.Ndim);
+        Assert.Equal(shape, value.GetShape(arena).ToArray());
+        Assert.Equal(8, value.ElementCount);
+    }
+
+    [Fact]
+    public void Arena_Struct_WithStringField_RoundTrips()
+    {
+        // Each struct element carries an arena-backed String field. Multi-dim
+        // doesn't change the per-element field semantics; the shape prefix
+        // sits ahead of the slot block, the slots reference field-array
+        // offsets in the same arena, and field bytes (the String) live wherever
+        // store.StoreString put them.
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromString("alpha", arena), DataValue.FromInt32(1)],
+            [DataValue.FromString("beta", arena),  DataValue.FromInt32(2)],
+            [DataValue.FromString("gamma", arena), DataValue.FromInt32(3)],
+            [DataValue.FromString("delta", arena), DataValue.FromInt32(4)],
+        ];
+
+        DataValue value = DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 11);
+
+        DataValue[] recovered = value.AsStructArray(arena);
+        Assert.Equal(4, recovered.Length);
+        string[] expectedNames = ["alpha", "beta", "gamma", "delta"];
+        for (int i = 0; i < recovered.Length; i++)
+        {
+            DataValue[] fields = recovered[i].AsStruct(arena);
+            Assert.Equal(expectedNames[i], fields[0].AsString(arena));
+            Assert.Equal(i + 1, fields[1].AsInt32());
+        }
+    }
+
+    [Fact]
+    public void Arena_Struct_RejectsShapeProductMismatch()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1)],
+            [DataValue.FromInt32(2)],
+            [DataValue.FromInt32(3)],
+        ];
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 0));
+    }
+
+    [Fact]
+    public void Arena_Struct_RejectsNullElement()
+    {
+        Arena arena = CreateArena();
+        DataValue[][] elements = [
+            [DataValue.FromInt32(1)],
+            null!,
+            [DataValue.FromInt32(3)],
+            [DataValue.FromInt32(4)],
+        ];
+        Assert.Throws<ArgumentException>(() =>
+            DataValue.FromArenaMultiDimStructArray(elements, [2, 2], arena, typeId: 0));
+    }
+
+    [Fact]
+    public void Sidecar_Factory_AcceptsStruct()
+    {
+        DataValue value = DataValue.FromMultiDimArrayInSidecar(
+            DataKind.Struct, offset: 0, length: 8 + 4 * ArraySlot.SizeBytes, ndim: 2, storeId: 6);
+        Assert.True(value.IsMultiDim);
+        Assert.Equal(DataKind.Struct, value.Kind);
+        Assert.Equal(2, value.Ndim);
+    }
+
+    [Fact]
+    public void Arena_UInt8_FlatVsMultiDim_NotEqual()
+    {
+        // Same byte content, one flat (no shape prefix), one multi-dim (with
+        // prefix). IsMultiDim flag → _flags differ → not equal.
+        Arena arena = CreateArena();
+        byte[] data = [1, 2, 3, 4];
+
+        DataValue flat = DataValue.FromByteArray(data, arena);
+        DataValue multi = DataValue.FromArenaMultiDimArray<byte>(data, [2, 2], DataKind.UInt8, arena);
+
+        Assert.NotEqual(flat, multi);
+        Assert.False(flat.IsMultiDim);
+        Assert.True(multi.IsMultiDim);
+        Assert.Equal(4, flat.ElementCount);
+        Assert.Equal(4, multi.ElementCount);   // both report 4 elements (prefix excluded)
     }
 }
