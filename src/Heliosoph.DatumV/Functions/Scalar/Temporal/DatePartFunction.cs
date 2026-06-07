@@ -14,10 +14,13 @@ namespace Heliosoph.DatumV.Functions.Scalar.Temporal;
 /// <remarks>
 /// <para>
 /// Field names are matched case-insensitively and follow the PG canonical
-/// set: <c>year</c>, <c>month</c>, <c>day</c>, <c>hour</c>, <c>minute</c>,
-/// <c>second</c>, <c>millisecond</c>, <c>microsecond</c>, <c>epoch</c>,
-/// <c>dow</c>, <c>isodow</c>, <c>doy</c>, <c>quarter</c>, <c>week</c>,
-/// <c>decade</c>, <c>century</c>, <c>millennium</c>.
+/// set: <c>year</c>, <c>isoyear</c>, <c>month</c>, <c>day</c>, <c>hour</c>,
+/// <c>minute</c>, <c>second</c>, <c>millisecond</c>, <c>microsecond</c>,
+/// <c>epoch</c>, <c>dow</c>, <c>isodow</c>, <c>doy</c>, <c>quarter</c>,
+/// <c>week</c>, <c>decade</c>, <c>century</c>, <c>millennium</c>,
+/// <c>julian</c>. DatumV extensions: <c>day_of_week</c> (= <c>dow</c>),
+/// <c>day_of_year</c> (= <c>doy</c>), <c>week_of_year</c> (= <c>week</c>),
+/// <c>is_weekend</c> (1 for Saturday/Sunday, 0 otherwise).
 /// </para>
 /// <para>
 /// For <c>Interval</c>, the semantics follow PG: <c>year</c> = <c>months / 12</c>,
@@ -90,10 +93,11 @@ public sealed class DatePartFunction : IFunction, IScalarFunction
         "month"      => d.Month,
         "day"        => d.Day,
         "quarter"    => (d.Month + 2) / 3,
-        "dow"        => (int)d.DayOfWeek,
-        "isodow"     => ((int)d.DayOfWeek + 6) % 7 + 1,
-        "doy"        => d.DayOfYear,
-        "week"       => System.Globalization.ISOWeek.GetWeekOfYear(d.ToDateTime(TimeOnly.MinValue)),
+        "dow" or "day_of_week"       => (int)d.DayOfWeek,
+        "isodow"                     => ((int)d.DayOfWeek + 6) % 7 + 1,
+        "doy" or "day_of_year"       => d.DayOfYear,
+        "week" or "week_of_year"     => System.Globalization.ISOWeek.GetWeekOfYear(d.ToDateTime(TimeOnly.MinValue)),
+        "is_weekend"                 => IsWeekend(d.DayOfWeek),
         "decade"     => d.Year / 10,
         "century"    => (d.Year - 1) / 100 + 1,
         "millennium" => (d.Year - 1) / 1000 + 1,
@@ -125,10 +129,11 @@ public sealed class DatePartFunction : IFunction, IScalarFunction
         "millisecond" => dt.Second * 1000.0 + dt.Millisecond + (dt.Ticks % 10_000) / 10_000.0,
         "microsecond" => dt.Second * 1_000_000.0 + (dt.Ticks % 10_000_000L) / 10.0,
         "quarter"     => (dt.Month + 2) / 3,
-        "dow"         => (int)dt.DayOfWeek,
-        "isodow"      => ((int)dt.DayOfWeek + 6) % 7 + 1,
-        "doy"         => dt.DayOfYear,
-        "week"        => System.Globalization.ISOWeek.GetWeekOfYear(dt),
+        "dow" or "day_of_week"       => (int)dt.DayOfWeek,
+        "isodow"                     => ((int)dt.DayOfWeek + 6) % 7 + 1,
+        "doy" or "day_of_year"       => dt.DayOfYear,
+        "week" or "week_of_year"     => System.Globalization.ISOWeek.GetWeekOfYear(dt),
+        "is_weekend"                 => IsWeekend(dt.DayOfWeek),
         "decade"      => dt.Year / 10,
         "century"     => (dt.Year - 1) / 100 + 1,
         "millennium"  => (dt.Year - 1) / 1000 + 1,
@@ -143,6 +148,13 @@ public sealed class DatePartFunction : IFunction, IScalarFunction
         "timezone" or "timezone_hour" or "timezone_minute" => 0.0,
         _ => 0.0,
     };
+
+    /// <summary>
+    /// DatumV extension: returns 1.0 on Saturday or Sunday, 0.0 otherwise.
+    /// No PG equivalent; documented in <c>docs/functions/temporal.md</c>.
+    /// </summary>
+    private static double IsWeekend(DayOfWeek dow) =>
+        dow == DayOfWeek.Saturday || dow == DayOfWeek.Sunday ? 1.0 : 0.0;
 
     /// <summary>
     /// Computes the Julian Day Number for a Gregorian date using Fliegel

@@ -577,6 +577,74 @@ public sealed class IntervalSqlTests : ServiceTestBase
         Assert.Equal(2026.0, rows[0]["iy"].AsFloat64());
     }
 
+    // ─── DatumV-extension aliases for date_part ───────────────────────
+
+    [Fact]
+    public async Task DatePart_DayOfWeekAlias_MatchesDow()
+    {
+        // 2026-06-11 is a Thursday → dow = 4 (PG: 0 = Sunday).
+        TableCatalog catalog = SingleRow(
+            ("ts", DataValue.FromTimestamp(new DateTime(2026, 6, 11))));
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT date_part('dow', ts) AS canonical, " +
+            "       date_part('day_of_week', ts) AS alias " +
+            "FROM data", catalog);
+        Assert.Equal(4.0, rows[0]["canonical"].AsFloat64());
+        Assert.Equal(rows[0]["canonical"].AsFloat64(), rows[0]["alias"].AsFloat64());
+    }
+
+    [Fact]
+    public async Task DatePart_DayOfYearAlias_MatchesDoy()
+    {
+        TableCatalog catalog = SingleRow(
+            ("ts", DataValue.FromTimestamp(new DateTime(2026, 6, 11))));
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT date_part('doy', ts) AS canonical, " +
+            "       date_part('day_of_year', ts) AS alias " +
+            "FROM data", catalog);
+        Assert.Equal(rows[0]["canonical"].AsFloat64(), rows[0]["alias"].AsFloat64());
+        Assert.Equal(162.0, rows[0]["canonical"].AsFloat64());
+    }
+
+    [Fact]
+    public async Task DatePart_WeekOfYearAlias_MatchesWeek()
+    {
+        TableCatalog catalog = SingleRow(
+            ("ts", DataValue.FromTimestamp(new DateTime(2026, 6, 11))));
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT date_part('week', ts) AS canonical, " +
+            "       date_part('week_of_year', ts) AS alias " +
+            "FROM data", catalog);
+        Assert.Equal(rows[0]["canonical"].AsFloat64(), rows[0]["alias"].AsFloat64());
+    }
+
+    [Theory]
+    // 2026-06-11 is a Thursday → 0.
+    [InlineData(2026, 6, 11, 0.0)]
+    // 2026-06-13 is a Saturday → 1.
+    [InlineData(2026, 6, 13, 1.0)]
+    // 2026-06-14 is a Sunday → 1.
+    [InlineData(2026, 6, 14, 1.0)]
+    public async Task DatePart_IsWeekend(int y, int m, int d, double expected)
+    {
+        TableCatalog catalog = SingleRow(
+            ("ts", DataValue.FromTimestamp(new DateTime(y, m, d))));
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT date_part('is_weekend', ts) AS w FROM data", catalog);
+        Assert.Equal(expected, rows[0]["w"].AsFloat64());
+    }
+
+    [Fact]
+    public async Task DatePart_IsWeekend_OnDateKind()
+    {
+        // Confirm the alias works against a Date column, not just Timestamp.
+        TableCatalog catalog = SingleRow(
+            ("d", DataValue.FromDate(new DateOnly(2026, 6, 13))));
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT date_part('is_weekend', d) AS w FROM data", catalog);
+        Assert.Equal(1.0, rows[0]["w"].AsFloat64());
+    }
+
     // ─── Slice 3: generate_series for timestamps ──────────────────────
 
     [Fact]
