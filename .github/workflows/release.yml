@@ -117,6 +117,7 @@ jobs:
           path: |
             src/Heliosoph.DatumV.Web/electron/out/*.exe
             src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+            src/Heliosoph.DatumV.Web/electron/out/*.zip
             src/Heliosoph.DatumV.Web/electron/out/*.blockmap
             src/Heliosoph.DatumV.Web/electron/out/latest*.yml
 
@@ -127,6 +128,7 @@ jobs:
           files: |
             src/Heliosoph.DatumV.Web/electron/out/*.exe
             src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+            src/Heliosoph.DatumV.Web/electron/out/*.zip
             src/Heliosoph.DatumV.Web/electron/out/*.blockmap
             src/Heliosoph.DatumV.Web/electron/out/latest*.yml
           fail_on_unmatched_files: true

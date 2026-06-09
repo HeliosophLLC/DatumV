@@ -9,10 +9,11 @@
     "typecheck": "tsc --noEmit",
     "electron:dev": "npm run build && concurrently --kill-others --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "build:clientapp": "npm --prefix ../ClientApp run build",
-    "publish:dotnet:win:cuda": "dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
-    "publish:dotnet:win:standard": "dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
-    "publish:dotnet:linux:cuda": "dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
-    "publish:dotnet:linux:standard": "dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
+    "clean:backend": "rimraf ./build/backend",
+    "publish:dotnet:win:cuda": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
+    "publish:dotnet:win:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
+    "publish:dotnet:linux:cuda": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
+    "publish:dotnet:linux:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
     "dist:win:cuda": "npm run build:clientapp && npm run publish:dotnet:win:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --win",
     "dist:win:standard": "npm run build:clientapp && npm run publish:dotnet:win:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --win",
     "dist:linux:cuda": "npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux",
@@ -26,6 +27,7 @@
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
+    "rimraf": "^6.0.1",
     "typescript": "^5.7.2",
     "wait-on": "^8.0.1"
   }

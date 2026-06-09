@@ -25,6 +25,23 @@
       as plain <Content> (which bypasses RID-based pruning).
     -->
     <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+    <!--
+      The Web SDK auto-globs **/*.json, **/*.config, etc. for Content and
+      StaticWebAssets. Without these exclusions it walks the entire project
+      tree, which here contains:
+        - ClientApp/node_modules — thousands of irrelevant package.json files
+        - electron/node_modules — same
+        - electron/dist — compiled TS output, no business with MSBuild
+        - electron/build — `npm run publish:dotnet:*` writes here, so MSBuild
+          sees prior publish output (including its own
+          staticwebassets.endpoints.json) and tries to track it as Content
+          on the next build, failing with MSB3030 "could not copy" when the
+          recursive path it built up no longer resolves
+        - electron/out — electron-builder's install-staging dir; same story,
+          one level deeper inside resources/backend/
+      Excluding the four directories breaks the recursion at the root.
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);ClientApp\node_modules\**;electron\node_modules\**;electron\dist\**;electron\build\**;electron\out\**</DefaultItemExcludes>
   </PropertyGroup>
 
 
@@ -43,6 +60,30 @@
   -->
   <ItemGroup>
     <EmbeddedResource Include="Migrations\*.sql" />
+  </ItemGroup>
+
+  <!--
+    Bundled runtime data: the central license registry, the model catalog,
+    and the dataset catalog all live at the repo root and the engine
+    resolves them via `<AppContext.BaseDirectory>/<folder>/<manifest>`
+    (with a parent-walk fallback that only fires in dev mode where
+    bin/Debug/netN.N/ sits beneath the repo root). For a published build
+    we need the files alongside the .exe — `CopyToPublishDirectory` does
+    that without dirtying bin/ during normal dev builds (the parent-walk
+    handles dev's bin/Debug layout). Total payload ~3 MB across all three.
+    The `Link` metadata flattens the `..\..\` prefix so files land under
+    just `licenses\` / `models\` / `datasets\` in the publish output.
+  -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\licenses\**\*"
+          Link="licenses\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\models\**\*"
+          Link="models\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\datasets\**\*"
+          Link="datasets\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

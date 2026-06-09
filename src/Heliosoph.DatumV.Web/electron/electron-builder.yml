@@ -32,13 +32,22 @@ extraResources:
 
 win:
   target:
+    # nsis: traditional Windows installer for users who want Start Menu
+    #   integration, Add/Remove Programs, future file associations.
+    # portable: self-extracting single .exe — runs anywhere, no install.
+    #   Good for "try without committing" and locked-down machines.
+    # zip: raw archive for users who want to extract and run by hand
+    #   (USB stick, network share, custom install path).
     - target: nsis
-      arch:
-        - x64
-  # DATUMV_VARIANT_SUFFIX is set by the dist:win:* npm scripts ("" for the
-  # standard variant, "-cuda" for the CUDA edition). Keeps both installers
-  # distinguishable on the GitHub Release page.
-  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}-setup.${ext}
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  # Default artifactName for win targets — overridden per-target below
+  # so each filename clearly says which kind it is. DATUMV_VARIANT_SUFFIX
+  # is set by the dist:win:* npm scripts ("" for standard, "-cuda" for CUDA).
+  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}.${ext}
 
 nsis:
   oneClick: false
@@ -46,6 +55,10 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}-setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}-portable.${ext}
 
 mac:
   target:
