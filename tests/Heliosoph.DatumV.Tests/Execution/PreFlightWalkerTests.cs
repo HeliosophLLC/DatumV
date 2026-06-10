@@ -161,6 +161,50 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     }
 
     [Fact]
+    public void SiblingIdentifiers_SameEntry_DedupedToOneRequirement()
+    {
+        // Two identifiers exported by the same catalog version (e.g.
+        // BiomedCLIP's text-embed + image-embed pair) installing the
+        // entry once satisfies both, so pre-flight should emit a single
+        // row, not two prompts for the same install.
+        CatalogVersion v = new(
+            Version: "2026-05-29",
+            Sources: [new HuggingFaceSource("repo", "main", [])],
+            InstallSql: "sql/biomedclip/2026-05-29.sql",
+            Models: [
+                new CatalogVersionModel("biomedclip_text_embed", null),
+                new CatalogVersionModel("biomedclip_image_embed", null),
+            ]);
+        CatalogVariant variant = new(
+            Id: "biomedclip",
+            DisplayName: "BiomedCLIP",
+            Summary: "Test entry.",
+            Tags: [],
+            Hardware: new CatalogHardware(MinRamMb: 0, MinVramMb: 0, Preferred: "cpu"),
+            ApproxSizeMb: 42,
+            Versions: [v]);
+        CatalogEntry entry = new(
+            Name: "biomedclip",
+            Summary: "Test entry.",
+            Description: "Test.",
+            Tasks: ["TextEmbedder"],
+            Tags: [],
+            LicenseIds: [],
+            Attributions: [],
+            Variants: [variant]);
+        CatalogManifest manifest = new(SchemaVersion: 3, Entries: [entry]);
+        ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
+        FunctionRegistry functions = new();
+
+        QueryExpression q = Parse(
+            "SELECT models.biomedclip_text_embed(t), models.biomedclip_image_embed(i)");
+        PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
+
+        PreFlightModelRequirement req = Assert.Single(result.Models);
+        Assert.Equal("biomedclip", req.CatalogEntryId);
+    }
+
+    [Fact]
     public void Cte_BodyReference_EmitsModelNotInstalled()
     {
         CatalogManifest manifest = BuildManifestWithEntry(
