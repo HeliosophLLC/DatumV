@@ -98,9 +98,13 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
         {
             if (entry.Type != "file") continue;
             if (!matcher.Match(new[] { entry.Path }).HasMatches) continue;
+            // Prefer the LFS-reported size when present: the top-level
+            // `size` on a tree entry is the git-blob size, which for an
+            // LFS pointer is ~135 bytes rather than the real payload.
+            long size = entry.Lfs is { Size: > 0 } lfs ? lfs.Size : entry.Size;
             result.Add(new SourceFile(
                 Path: entry.Path,
-                Size: entry.Size,
+                Size: size,
                 Sha256: entry.Lfs?.Sha256Hex));
         }
         return result;

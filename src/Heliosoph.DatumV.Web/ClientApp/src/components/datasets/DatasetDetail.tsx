@@ -385,13 +385,17 @@ function InFlightProgress({ variantId }: { variantId: string }) {
 
   if (entry.phase === 'downloading' || entry.phase === 'starting') {
     const statusText =
-      entry.phase === 'starting' || entry.fileCount === 0
+      entry.phase === 'starting'
         ? t('progress.starting')
-        : t('progress.downloading', {
-            current: shortenPath(entry.currentFile || '—'),
-            fileIndex: entry.fileIndex,
-            fileCount: entry.fileCount,
-          });
+        : entry.fileCount > 0
+          ? t('progress.downloading', {
+              current: shortenPath(entry.currentFile || '—'),
+              fileIndex: entry.fileIndex,
+              fileCount: entry.fileCount,
+            })
+          : t('progress.downloadingNoCount', {
+              current: shortenPath(entry.currentFile || '—'),
+            });
     return (
       <DownloadProgressBar
         bytesRead={entry.bytesReadTotal}
