@@ -306,13 +306,19 @@ function ModelHeroBand({ entryName }: { entryName: string }) {
 
 function DownloadProgress({ download }: { download: ActiveDownload }) {
   const { t } = useTranslation('models');
-  const statusText = download.fileCount > 0
-    ? t('card.downloadingFile', {
-        index: download.fileIndex,
-        count: download.fileCount,
-        file: shortenPath(download.currentFile),
-      })
-    : t('card.downloadingStarting');
+  const isStarting =
+    download.bytesReadTotal === 0 && download.bytesTotalAcrossModel === 0;
+  const statusText = isStarting
+    ? t('card.downloadingStarting')
+    : download.fileCount > 0
+      ? t('card.downloadingFile', {
+          index: download.fileIndex,
+          count: download.fileCount,
+          file: shortenPath(download.currentFile),
+        })
+      : t('card.downloadingNoCount', {
+          file: shortenPath(download.currentFile || '—'),
+        });
   return (
     <DownloadProgressBar
       bytesRead={download.bytesReadTotal}

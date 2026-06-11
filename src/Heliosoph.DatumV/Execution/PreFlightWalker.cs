@@ -151,8 +151,16 @@ internal static class PreFlightWalker
         private readonly List<PreFlightSuggestion> _suggestions = [];
         // Dedupe by typed reference so the same call site appearing
         // twice in a query (`SELECT models.foo(a), models.foo(b)`)
-        // emits one requirement, not two.
+        // short-circuits the catalog lookup the second time around.
         private readonly HashSet<string> _seenRefs = new(StringComparer.OrdinalIgnoreCase);
+        // Second-level dedupe by actual install identity
+        // (CatalogEntryId | Version | Reason) so two identifiers
+        // exported by the same catalog entry — e.g.
+        // `models.biomedclip_text_embed` + `models.biomedclip_image_embed`
+        // — collapse to one row instead of prompting the user twice for
+        // the same install. The sibling identifier still shows up on the
+        // surviving row via SiblingIdentifiers.
+        private readonly HashSet<string> _seenInstalls = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenTypos = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _seenDatasetRefs = new(StringComparer.OrdinalIgnoreCase);
 
@@ -471,6 +479,10 @@ internal static class PreFlightWalker
             CatalogVocabularyVersion recommended = entry.Versions[0];
             CatalogVariant ownerVariant = entry.OwnerVariant;
             CatalogEntry ownerEntry = entry.OwnerEntry;
+            if (!_seenInstalls.Add($"{entry.VariantId}|{recommended.VersionString}|{PreFlightReason.ModelNotInstalled}"))
+            {
+                return;
+            }
             _reqs.Add(new PreFlightModelRequirement(
                 TypedReference: $"models.{identifier}",
                 Identifier: identifier,
@@ -496,6 +508,10 @@ internal static class PreFlightWalker
             {
                 CatalogVocabularyVersion vv = pin.Version;
                 CatalogVocabularyEntry pinEntry = pin.Entry;
+                if (!_seenInstalls.Add($"{pinEntry.VariantId}|{vv.VersionString}|{PreFlightReason.PinnedVersionNotInstalled}"))
+                {
+                    return;
+                }
                 _reqs.Add(new PreFlightModelRequirement(
                     TypedReference: $"models.{typed}",
                     Identifier: bareName,
@@ -533,6 +549,10 @@ internal static class PreFlightWalker
                 && _vocabulary.ByIdentifier.TryGetValue(bareName, out CatalogVocabularyEntry? bareEntry))
             {
                 CatalogVocabularyVersion recommended = bareEntry.Versions[0];
+                if (!_seenInstalls.Add($"{bareEntry.VariantId}||{PreFlightReason.PinnedVersionUnknown}"))
+                {
+                    return;
+                }
                 _reqs.Add(new PreFlightModelRequirement(
                     TypedReference: $"models.{typed}",
                     Identifier: bareName,

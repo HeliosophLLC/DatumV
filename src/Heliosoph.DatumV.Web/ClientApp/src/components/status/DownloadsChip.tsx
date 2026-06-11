@@ -344,8 +344,12 @@ function ActiveRow({ active }: { active: ActiveDownload }) {
     <div className="flex flex-col gap-0.5 text-xs">
       <div className="flex items-baseline justify-between font-mono tabular-nums">
         <span className="truncate">{active.modelId}</span>
-        <span className="text-muted-foreground inline-block w-10 shrink-0 pl-2 text-right">
-          {percent != null ? `${percent}%` : t('downloadsChip.rowQueued')}
+        <span className="text-muted-foreground shrink-0 pl-2 text-right">
+          {percent != null
+            ? `${percent}%`
+            : active.bytesReadTotal > 0
+              ? t('downloadsChip.rowDownloading')
+              : t('downloadsChip.rowQueued')}
         </span>
       </div>
       <ProgressBar percent={percent} tone="blue" />

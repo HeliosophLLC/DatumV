@@ -12,10 +12,10 @@ namespace Heliosoph.DatumV.ModelLibrary;
 // GitHub's release-download endpoint serves a 302 to a github-objects.com
 // presigned URL — HttpClient follows redirects transparently. No tree/list
 // API call: the catalog entry's `Files` field IS the inventory, so
-// ListFilesAsync just projects each name onto the download URL and reports
-// size as 0 (we don't pre-flight a HEAD here — the size only matters for
-// progress display, and we surface it once Content-Length comes back on
-// the GET).
+// ListFilesAsync projects each name onto the download URL and HEADs it in
+// parallel to populate Size from Content-Length. A failed HEAD (timeout,
+// 4xx, missing header) degrades to Size: 0 and the UI shows an
+// indeterminate bar for that file.
 //
 // No hash verification beyond HTTPS — GitHub releases don't expose a
 // per-asset checksum API. Catalog-side per-file sha256 declarations are a
@@ -45,21 +45,65 @@ internal sealed class GithubReleaseSourceClient : IModelSourceClient
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
     }
 
-    public ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
+    // Per-probe deadline. Github.com/{owner}/{repo}/releases/download/...
+    // 302s to an objects.githubusercontent.com URL; HttpClient follows
+    // transparently. 10s is generous enough for the chained handshake on
+    // a slow link while still capping a hung host.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+
+    public async ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
         CatalogSource source, CancellationToken ct)
     {
         GithubReleaseSource gh = Cast(source);
 
-        // No tree call — the manifest's Files list is the inventory.
-        // Size is unknown until we hit the GET; report 0 here. Progress
-        // events will populate the real total once Content-Length lands.
-        // Sha256 is null because GitHub releases don't surface checksums.
-        List<SourceFile> files = new(gh.Files.Count);
-        foreach (string name in gh.Files)
+        // HEAD each asset's redirect URL in parallel so we have a total
+        // before any GET starts. Failures (HEAD refused, timeout, 4xx)
+        // degrade to Size: 0, and the UI falls back to indeterminate
+        // progress display for that file.
+        Task<SourceFile>[] probes = new Task<SourceFile>[gh.Files.Count];
+        for (int i = 0; i < gh.Files.Count; i++)
         {
-            files.Add(new SourceFile(Path: name, Size: 0, Sha256: null));
+            probes[i] = ProbeAsync(gh.Repo, gh.Tag, gh.Files[i], ct);
         }
-        return ValueTask.FromResult<IReadOnlyList<SourceFile>>(files);
+        return await Task.WhenAll(probes).ConfigureAwait(false);
+    }
+
+    private async Task<SourceFile> ProbeAsync(
+        string repo, string tag, string name, CancellationToken ct)
+    {
+        string url = $"{repo}/releases/download/{tag}/{name}";
+        long size = 0;
+        using CancellationTokenSource probeCts = CancellationTokenSource
+            .CreateLinkedTokenSource(ct);
+        probeCts.CancelAfter(ProbeTimeout);
+        try
+        {
+            using HttpRequestMessage req = new(HttpMethod.Head, url);
+            using HttpResponseMessage resp = await _http
+                .SendAsync(req, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
+                .ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+            {
+                size = resp.Content.Headers.ContentLength ?? 0;
+                _logger.LogDebug("HEAD {Url} → Size={Size}", url, size);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "HEAD {Url} returned {Status}; falling back to Size=0",
+                    url, (int)resp.StatusCode);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("HEAD {Url} timed out after {Timeout}; falling back to Size=0",
+                url, ProbeTimeout);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "HEAD {Url} failed; falling back to Size=0", url);
+        }
+        return new SourceFile(Path: name, Size: size, Sha256: null);
     }
 
     public async ValueTask<string> DownloadFileAsync(
