@@ -1,0 +1,18 @@
+# Tell github/linguist that the /licenses tree is a registry of upstream
+# OSS license texts referenced by catalog manifests (datasets / models) —
+# NOT the repo's own license. Without this, GitHub:
+#   - surfaces every text in /licenses as a separate "License" tab next to
+#     the README on the repo and folder views, because each file's content
+#     matches a known license pattern;
+#   - inflates the language-stats bar with thousands of lines of license
+#     prose that aren't project code.
+# The repo's actual license is the top-level LICENSE file, detected from
+# the root unaffected by these rules. `linguist-vendored` keeps the files
+# visible and browsable; they just don't drive license / language UI.
+licenses/** linguist-vendored
+
+# Same treatment for the dataset + model catalog cards. The .md cards are
+# upstream-authored docs (HuggingFace / GitHub release READMEs); counting
+# them as Markdown skews the language bar and they're not project source.
+datasets/**/*.md linguist-vendored
+models/**/*.md   linguist-vendored
