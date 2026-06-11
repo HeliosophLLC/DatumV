@@ -5,6 +5,7 @@ import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
 import type { WindowChromeKind } from '@/components/window/WindowChrome';
 import { MenuBar } from './MenuBar';
+import { UpdateAvailableChip } from './UpdateAvailableChip';
 import favicon from './favicon.png';
 
 // Win11-flavored: 32px tall, app title left, [-][□/❐][×] right, square buttons,
@@ -43,7 +44,8 @@ export function WindowsTitleBar({
         <div className="relative z-10 px-3 text-xs text-muted-foreground">{title}</div>
       )}
       {showMenu && <MenuBar className="relative z-10 h-full" />}
-      <div className="app-no-drag relative z-10 ml-auto flex">
+      <div className="app-no-drag relative z-10 ml-auto flex items-center">
+        {showMenu && <UpdateAvailableChip className="mr-2" />}
         {showWindowControls && (
           <>
             <WinButton onClick={minimize} aria-label={t('window.minimize')}>

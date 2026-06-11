@@ -29,6 +29,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `attach_glob` is the per-job file list for both upload-artifact
+          # and the Release attach step. fail_on_unmatched_files requires
+          # every pattern to match at least one file, so each matrix slot
+          # carries only the extensions its electron-builder target emits
+          # — Windows never produces .AppImage, Linux never produces .exe.
+          #
+          # Update manifests are per-channel: the npm dist scripts pass
+          # `-c.publish.channel=<variant>` to electron-builder, which both
+          # writes a per-channel yml (e.g. `cuda.yml` instead of `latest.yml`)
+          # and bakes the channel into the installer's embedded app-update.yml.
+          # The installed app then reads only its variant's feed, so a CUDA
+          # installer never auto-updates from the standard channel and vice
+          # versa. Windows files: `<channel>.yml`. Linux: `<channel>-linux.yml`.
           # Standard variants ship the cross-vendor stack (DirectML on Windows,
           # Vulkan for LLamaSharp everywhere). Smaller installers; work on
           # NVIDIA, AMD, and Intel. ~70-95% of CUDA perf on NVIDIA.
@@ -36,10 +49,19 @@ jobs:
             label: Windows standard
             script: dist:win:standard
             artifact: windows-standard-installer
+            attach_glob: |
+              src/Heliosoph.DatumV.Web/electron/out/*.exe
+              src/Heliosoph.DatumV.Web/electron/out/*.zip
+              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+              src/Heliosoph.DatumV.Web/electron/out/standard.yml
           - os: ubuntu-latest
             label: Linux standard
             script: dist:linux:standard
             artifact: linux-standard-appimage
+            attach_glob: |
+              src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+              src/Heliosoph.DatumV.Web/electron/out/standard-linux.yml
           # CUDA variants bundle the NVIDIA-only stack
           # (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12.*). Peak
           # perf on NVIDIA; CPU fallback on non-NVIDIA hardware. ~750 MB larger.
@@ -47,10 +69,19 @@ jobs:
             label: Windows CUDA
             script: dist:win:cuda
             artifact: windows-cuda-installer
+            attach_glob: |
+              src/Heliosoph.DatumV.Web/electron/out/*.exe
+              src/Heliosoph.DatumV.Web/electron/out/*.zip
+              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+              src/Heliosoph.DatumV.Web/electron/out/cuda.yml
           - os: ubuntu-latest
             label: Linux CUDA
             script: dist:linux:cuda
             artifact: linux-cuda-appimage
+            attach_glob: |
+              src/Heliosoph.DatumV.Web/electron/out/*.AppImage
+              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
+              src/Heliosoph.DatumV.Web/electron/out/cuda-linux.yml
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -114,21 +145,11 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           if-no-files-found: error
-          path: |
-            src/Heliosoph.DatumV.Web/electron/out/*.exe
-            src/Heliosoph.DatumV.Web/electron/out/*.AppImage
-            src/Heliosoph.DatumV.Web/electron/out/*.zip
-            src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-            src/Heliosoph.DatumV.Web/electron/out/latest*.yml
+          path: ${{ matrix.attach_glob }}
 
       - name: Attach to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            src/Heliosoph.DatumV.Web/electron/out/*.exe
-            src/Heliosoph.DatumV.Web/electron/out/*.AppImage
-            src/Heliosoph.DatumV.Web/electron/out/*.zip
-            src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-            src/Heliosoph.DatumV.Web/electron/out/latest*.yml
+          files: ${{ matrix.attach_glob }}
           fail_on_unmatched_files: true

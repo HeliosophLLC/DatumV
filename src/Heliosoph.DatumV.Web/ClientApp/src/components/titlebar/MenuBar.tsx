@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
+import { useSnapshot } from 'valtio';
 import { buildMenu, type MenuNode } from '@/commands/menuDefinition';
 import { runCommand } from '@/commands/registry';
+import { updaterState } from '@/state/updater';
 import { cn } from '@/lib/utils';
 
 // In-titlebar menu bar for Windows/Linux. macOS uses the native
@@ -96,7 +98,12 @@ function formatAccelerator(accel: string): string {
 
 export function MenuBar({ className }: { className?: string }) {
   const { t } = useTranslation();
-  const tree = useMemo(() => buildMenu({ isMac: false }), []);
+  const updaterSnap = useSnapshot(updaterState);
+  const isCheckingForUpdates = updaterSnap.status.kind === 'checking';
+  const tree = useMemo(
+    () => buildMenu({ isMac: false, isCheckingForUpdates }),
+    [isCheckingForUpdates],
+  );
 
   // Top-level menus actually rendered here. We drop:
   //   - macRole'd submenus (App / Edit / Window) — macOS-only, kept

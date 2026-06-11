@@ -214,4 +214,18 @@ contextBridge.exposeInMainWorld('electronHost', {
     chrome: process.versions.chrome ?? '',
     node: process.versions.node ?? '',
   },
+
+  // Update checker — notify-only. Main owns the actual electron-updater
+  // probe; renderer asks for a check, subscribes to status transitions,
+  // and synchronously fetches the most-recent status on mount so a
+  // status pushed before the renderer subscribed isn't lost.
+  updater: {
+    checkNow: () => ipcRenderer.invoke('updater:check'),
+    getLastStatus: () => ipcRenderer.sendSync('updater:status.sync'),
+    onStatus: (cb: (status: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: unknown) => cb(status);
+      ipcRenderer.on('updater:status', handler);
+      return () => ipcRenderer.off('updater:status', handler);
+    },
+  },
 });

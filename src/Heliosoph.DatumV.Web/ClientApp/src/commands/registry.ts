@@ -21,6 +21,7 @@ import { runFunctionTab } from '@/state/functionForm';
 import { resolveRunSql } from '@/state/activeEditor';
 import { beginExport } from '@/state/export';
 import { resetZoom, zoomIn, zoomOut } from '@/state/zoom';
+import { checkForUpdates } from '@/state/updater';
 
 export type CommandId =
   | 'file.newQuery'
@@ -34,7 +35,8 @@ export type CommandId =
   | 'view.zoomIn'
   | 'view.zoomOut'
   | 'view.zoomReset'
-  | 'help.about';
+  | 'help.about'
+  | 'help.checkForUpdates';
 
 // Recent-catalog rows ship as `file.openRecent:<path>` — the path is
 // encoded into the id rather than carried as a separate menu-item
@@ -89,6 +91,12 @@ const handlers: Record<CommandId, CommandHandler> = {
   'view.zoomReset': () => resetZoom(),
   'help.about': () => {
     openDialog({ kind: 'about' });
+  },
+  'help.checkForUpdates': () => {
+    // Fire-and-forget; result arrives via state/updater.ts's status
+    // subscription. The Help menu reads `updaterState.status` to swap
+    // its label between "Check for updates…" / "Checking…" / etc.
+    checkForUpdates();
   },
 };
 

@@ -2,6 +2,18 @@ appId: com.heliosoph.datumv
 productName: DatumV
 copyright: Copyright © 2026
 
+# Where electron-updater reads the latest.yml manifest from. Also what
+# the workflow's release upload populates. While the repo is private,
+# the GitHub Releases API requires an auth token — electron-updater
+# will return a 404 to the renderer (visible as "check failed" in the
+# notify-only UX). Once the repo flips public (or we cut over to a new
+# public repo), no client-side change is needed; the same URL works
+# anonymously and the notify path lights up.
+publish:
+  - provider: github
+    owner: HeliosophLLC
+    repo: DatumV
+
 directories:
   # build/ holds intermediate artifacts (dotnet publish output, etc).
   # out/ is the final installer destination, kept separate so the

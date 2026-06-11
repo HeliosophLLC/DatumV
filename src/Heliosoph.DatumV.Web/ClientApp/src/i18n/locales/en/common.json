@@ -56,6 +56,14 @@
     "startingBackend": "Starting backend…",
     "loadingWorkspace": "Loading workspace…"
   },
+  "updater": {
+    "available": "Update available: {version}",
+    "availableTitle": "Update available",
+    "viewRelease": "View release notes",
+    "checking": "Checking for updates…",
+    "upToDate": "You're up to date (v{version})",
+    "checkFailed": "Update check failed"
+  },
   "menu": {
     "app": "DatumV",
     "file": {
@@ -88,7 +96,8 @@
     },
     "help": {
       "label": "&Help",
-      "about": "&About DatumV"
+      "about": "&About DatumV",
+      "checkForUpdates": "Check for &Updates…"
     }
   }
 }

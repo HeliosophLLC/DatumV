@@ -1,3 +1,8 @@
+// Electron shell for Heliosoph DatumV. Owns the main BrowserWindow,
+// dialog windows, the .NET subprocess lifecycle, the update checker,
+// and the navigation lock that keeps every renderer pinned to the
+// app's own origin.
+
 import {
   app,
   BrowserWindow,
@@ -8,6 +13,7 @@ import {
   dialog as electronDialog,
 } from 'electron';
 import type { IpcMainEvent } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +26,15 @@ import {
   touchRecent,
   type RecentCatalog,
 } from './catalog-recents';
+
+// Shape pushed to renderers on every updater state transition. Mirrored
+// exactly by ClientApp/src/state/updater.ts — keep both in sync.
+type UpdateStatus =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'available'; version: string; releaseUrl: string }
+  | { kind: 'not-available'; currentVersion: string }
+  | { kind: 'error'; message: string };
 
 const DEV_VITE_URL = 'http://localhost:5173';
 const DEV_KESTREL_URL = 'http://127.0.0.1:5050';
@@ -244,7 +259,57 @@ function createWindow(opts: { dialog?: boolean; parent?: BrowserWindow; modal?: 
   win.on('maximize', () => win.webContents.send('window.maximizedChanged', true));
   win.on('unmaximize', () => win.webContents.send('window.maximizedChanged', false));
 
+  lockNavigation(win);
+
   return win;
+}
+
+// Allow only navigations that stay within the app's own renderer URLs.
+// Concretely: http(s) on localhost or 127.0.0.1 (covers dev Vite at 5173,
+// dev Kestrel at 5050, and prod Kestrel on its dynamic port). Anything
+// else — a malicious script setting location.href to evil.com, a stray
+// <a href="https://…">, a server-side 30x to an external host — is
+// canceled before the renderer commits to it. New-window requests
+// (window.open, target="_blank") are denied uniformly; external http(s)
+// URLs are routed to the user's default browser via shell.openExternal
+// so legitimate link clicks still feel right. New BrowserWindows for
+// tab tear-out and dialogs go through explicit ipcMain handlers, never
+// through window.open.
+function isAppOriginUrl(raw: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(raw); }
+  catch { return false; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+}
+
+function lockNavigation(win: BrowserWindow): void {
+  const blockExternal = (
+    event: Electron.Event,
+    url: string,
+    kind: 'navigate' | 'redirect',
+  ): void => {
+    if (isAppOriginUrl(url)) return;
+    event.preventDefault();
+    console.warn(`[security] blocked ${kind} to`, url);
+  };
+  win.webContents.on('will-navigate', (event, url) => blockExternal(event, url, 'navigate'));
+  win.webContents.on('will-redirect', (event, url) => blockExternal(event, url, 'redirect'));
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+        parsed.hostname !== 'localhost' &&
+        parsed.hostname !== '127.0.0.1'
+      ) {
+        void shell.openExternal(url);
+      }
+    } catch {
+      // Unparseable URL: just deny without forwarding.
+    }
+    return { action: 'deny' };
+  });
 }
 
 // References to the currently-live main window and any torn-out tab
@@ -934,6 +999,97 @@ ipcMain.handle('shell.openExternal', async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
+// ---------------------------------------------------------------------
+// Update checking. Notify-only: we never auto-download or auto-install.
+// The renderer (state/updater.ts) listens on `updater:status` and surfaces
+// "v0.1.1 available" in the Help menu + a chip in the title bar; clicking
+// the chip opens the GitHub Release page in the user's default browser.
+// Manual checks come in via the IPC channel below.
+//
+// While the publish-target repo is private, the GitHub Releases API
+// requires an auth token and electron-updater's anonymous probe will get
+// a 404 — surfaces as an `error` status with the underlying message.
+// Once the repo is public (or migration to a public repo lands), the
+// same code lights up automatically.
+// ---------------------------------------------------------------------
+let lastUpdateStatus: UpdateStatus = { kind: 'idle' };
+
+function buildReleaseUrl(version: string): string {
+  // electron-updater's GitHub provider doesn't surface the canonical
+  // release page URL on update-available — construct it from owner +
+  // repo + tag (the tag is `v<version>` per release.yml's convention).
+  return `https://github.com/HeliosophLLC/DatumIngest/releases/tag/v${version}`;
+}
+
+function broadcastUpdateStatus(status: UpdateStatus): void {
+  lastUpdateStatus = status;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    w.webContents.send('updater:status', status);
+  }
+}
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.logger = {
+  info: (m: unknown) => console.log('[updater]', m),
+  warn: (m: unknown) => console.warn('[updater]', m),
+  error: (m: unknown) => console.error('[updater]', m),
+  debug: () => undefined,
+};
+
+autoUpdater.on('checking-for-update', () => {
+  broadcastUpdateStatus({ kind: 'checking' });
+});
+autoUpdater.on('update-available', (info) => {
+  broadcastUpdateStatus({
+    kind: 'available',
+    version: info.version,
+    releaseUrl: buildReleaseUrl(info.version),
+  });
+});
+autoUpdater.on('update-not-available', () => {
+  broadcastUpdateStatus({
+    kind: 'not-available',
+    currentVersion: app.getVersion(),
+  });
+});
+autoUpdater.on('error', (err) => {
+  broadcastUpdateStatus({
+    kind: 'error',
+    message: err instanceof Error ? err.message : String(err),
+  });
+});
+
+function runUpdateCheck(): void {
+  if (!app.isPackaged) {
+    // electron-updater refuses to probe in dev (no embedded
+    // app-update.yml). Tell the renderer so the menu/chip don't sit
+    // in `checking` forever during local dev runs.
+    broadcastUpdateStatus({
+      kind: 'error',
+      message: 'Update check is disabled in development builds.',
+    });
+    return;
+  }
+  void autoUpdater.checkForUpdates().catch((err: unknown) => {
+    broadcastUpdateStatus({
+      kind: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+ipcMain.handle('updater:check', () => {
+  runUpdateCheck();
+});
+// Synchronous accessor so a window mounting after a status broadcast
+// can immediately pick up the most recent state instead of waiting
+// for the next event.
+ipcMain.on('updater:status.sync', (event) => {
+  event.returnValue = lastUpdateStatus;
+});
+
 app.whenReady().then(async () => {
   setPlaceholderApplicationMenu();
   const win = createMainWindow();
@@ -947,6 +1103,13 @@ app.whenReady().then(async () => {
   // their existing catalog in the recents list.
   seedLegacyRecentsIfNeeded(globalDataPath);
   await loadLoader(win, 'welcome');
+
+  // Initial update check. Delayed so the welcome screen renders first —
+  // a network probe at the exact moment the user is staring at the
+  // window is the wrong time to surface anything. The renderer reads
+  // the most recent status via the sync IPC when it mounts so this
+  // delay doesn't leave the UI in `idle` if the check resolves fast.
+  setTimeout(runUpdateCheck, 5_000);
 
   // Mac dock re-activation: if the user closed every window
   // (window-all-closed doesn't quit on darwin), reopen the welcome

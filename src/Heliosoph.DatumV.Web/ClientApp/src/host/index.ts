@@ -14,6 +14,16 @@ export interface RecentCatalog {
   lastOpenedAt: string;
 }
 
+// Update-checker status shape pushed from main on every transition.
+// Mirrors the `UpdateStatus` discriminated union in electron/main.ts —
+// keep both in sync.
+export type UpdateStatus =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'available'; version: string; releaseUrl: string }
+  | { kind: 'not-available'; currentVersion: string }
+  | { kind: 'error'; message: string };
+
 export interface HostBridge {
   minimize(): void;
   toggleMaximize(): void;
@@ -54,6 +64,15 @@ export interface HostBridge {
   // events.
   setZoomLevel(level: number): void;
   getZoomLevel(): number;
+  // Update checker — fire-and-forget request to re-probe GitHub
+  // Releases; the result arrives via the status subscription below.
+  // No await; the IPC resolves as soon as main kicks off the probe.
+  checkForUpdates(): void;
+  // Synchronous read of the most-recent status. Useful at mount so a
+  // status pushed before the renderer subscribed isn't missed.
+  getUpdateStatus(): UpdateStatus;
+  // Subscribe to every status transition. Returns an unsubscribe.
+  onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
 }
 
 declare global {
@@ -168,6 +187,15 @@ declare global {
         chrome: string;
         node: string;
       };
+
+      // electron-updater bridge — see electron/preload.ts and main.ts.
+      // `getLastStatus` is `sendSync` so it returns the most recent
+      // status without an async hop; harmless at mount-time.
+      updater: {
+        checkNow(): Promise<void>;
+        getLastStatus(): UpdateStatus;
+        onStatus(cb: (status: UpdateStatus) => void): () => void;
+      };
     };
   }
 }
@@ -243,6 +271,12 @@ function createHostBridge(): HostBridge {
       eh.setZoomLevel(level);
     },
     getZoomLevel: () => eh.getZoomLevel(),
+    checkForUpdates: () => {
+      console.log('[host] → updater.check');
+      void eh.updater.checkNow();
+    },
+    getUpdateStatus: () => eh.updater.getLastStatus(),
+    onUpdateStatus: (cb) => eh.updater.onStatus(cb),
   };
 }
 

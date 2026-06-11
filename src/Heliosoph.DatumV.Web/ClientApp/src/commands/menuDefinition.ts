@@ -36,7 +36,8 @@ export type MenuLabelKey =
   | 'menu.view.zoomOut'
   | 'menu.window.label'
   | 'menu.help.label'
-  | 'menu.help.about';
+  | 'menu.help.about'
+  | 'menu.help.checkForUpdates';
 
 export type ElectronRole =
   | 'appMenu'
@@ -149,11 +150,17 @@ function recentChildren(recents: RecentCatalog[]): MenuNode[] {
 // re-running buildMenu + republishing. isMac branches only on where
 // the App / Window menus sit and on whether the exit/quit item lives
 // in File (Win/Linux) vs the App menu (macOS, supplied by appMenu).
+//
+// `isCheckingForUpdates` greys out the Help > "Check for Updates…" item
+// while a probe is in flight. Both menu surfaces (in-window MenuBar and
+// the native macOS / Win-keyboard-accelerator menu) consume this same
+// build, so the disable propagates everywhere.
 export function buildMenu(opts: {
   isMac: boolean;
   recentCatalogs?: RecentCatalog[];
+  isCheckingForUpdates?: boolean;
 }): MenuNode[] {
-  const { isMac, recentCatalogs = [] } = opts;
+  const { isMac, recentCatalogs = [], isCheckingForUpdates = false } = opts;
   return [
     ...(isMac ? [submenu('menu.app', [], 'appMenu')] : []),
     submenu('menu.file.label', [
@@ -196,6 +203,15 @@ export function buildMenu(opts: {
       role('togglefullscreen'),
     ]),
     ...(isMac ? [submenu('menu.window.label', [], 'windowMenu')] : []),
-    submenu('menu.help.label', [item('menu.help.about', 'help.about')]),
+    submenu('menu.help.label', [
+      item('menu.help.about', 'help.about'),
+      sep,
+      {
+        kind: 'item',
+        labelKey: 'menu.help.checkForUpdates',
+        commandId: 'help.checkForUpdates',
+        enabled: !isCheckingForUpdates,
+      },
+    ]),
   ];
 }

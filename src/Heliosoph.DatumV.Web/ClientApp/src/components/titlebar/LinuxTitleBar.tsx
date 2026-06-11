@@ -5,6 +5,7 @@ import { windowState, minimize, toggleMaximize, close } from '@/state/window';
 import { cn } from '@/lib/utils';
 import type { WindowChromeKind } from '@/components/window/WindowChrome';
 import { MenuBar } from './MenuBar';
+import { UpdateAvailableChip } from './UpdateAvailableChip';
 import favicon from './favicon.png';
 
 // GNOME-flavored: 36px tall, title centered, controls right. GNOME tends to
@@ -47,7 +48,8 @@ export function LinuxTitleBar({
         />
       )}
       {showMenu && <MenuBar className="relative z-10 h-full ml-2" />}
-      <div className="app-no-drag relative z-10 ml-auto flex">
+      <div className="app-no-drag relative z-10 ml-auto flex items-center">
+        {showMenu && <UpdateAvailableChip className="mr-2" />}
         {showWindowControls && (
           <>
             <LinuxButton onClick={minimize} aria-label={t('window.minimize')}>

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { minimize, toggleMaximize, close } from '@/state/window';
 import type { WindowChromeKind } from '@/components/window/WindowChrome';
+import { UpdateAvailableChip } from './UpdateAvailableChip';
 
 // macOS-flavored: 28px tall, three circular "traffic lights" left
 // (close/minimize/zoom), title centered to the full bar (not the remaining
@@ -25,6 +26,7 @@ export function MacTitleBar({
 } = {}) {
   const { t } = useTranslation();
   const showWindowControls = kind !== 'dialog';
+  const showUpdateChip = kind === 'main';
   return (
     <header className="app-drag relative flex h-9 items-center gap-3 border-b bg-background px-3 select-none">
       <div className="app-no-drag relative z-10 flex items-center gap-2">
@@ -56,6 +58,7 @@ export function MacTitleBar({
           {title}
         </div>
       )}
+      {showUpdateChip && <UpdateAvailableChip className="relative z-10 ml-auto" />}
     </header>
   );
 }

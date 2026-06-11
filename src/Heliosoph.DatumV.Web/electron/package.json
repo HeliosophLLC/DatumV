@@ -2,7 +2,7 @@
   "name": "heliosoph-datumv-electron",
   "private": true,
   "version": "0.1.0",
-  "description": "Electron shell for Heliosoph DatumV. Owns the main BrowserWindow, dialog windows, and the .NET subprocess lifecycle.",
+  "description": "DatumV",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
@@ -14,12 +14,15 @@
     "publish:dotnet:win:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
     "publish:dotnet:linux:cuda": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
     "publish:dotnet:linux:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
-    "dist:win:cuda": "npm run build:clientapp && npm run publish:dotnet:win:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --win",
-    "dist:win:standard": "npm run build:clientapp && npm run publish:dotnet:win:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --win",
-    "dist:linux:cuda": "npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux",
-    "dist:linux:standard": "npm run build:clientapp && npm run publish:dotnet:linux:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --linux",
+    "dist:win:cuda": "npm run build:clientapp && npm run publish:dotnet:win:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --win -c.publish.channel=cuda",
+    "dist:win:standard": "npm run build:clientapp && npm run publish:dotnet:win:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --win -c.publish.channel=standard",
+    "dist:linux:cuda": "npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux -c.publish.channel=cuda",
+    "dist:linux:standard": "npm run build:clientapp && npm run publish:dotnet:linux:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --linux -c.publish.channel=standard",
     "dist:win": "npm run dist:win:cuda",
     "dist:linux": "npm run dist:linux:cuda"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -16,6 +16,7 @@ import {
 } from '@/commands/menuDefinition';
 import { runCommand } from '@/commands/registry';
 import { catalogRecentsState, refreshCatalogRecents } from '@/state/catalogRecents';
+import { updaterState } from '@/state/updater';
 
 // Strip mnemonic-marker ampersands for the macOS native menu, where
 // `&` would render as a literal character instead of underlining the
@@ -71,6 +72,7 @@ function publish(): void {
     buildMenu({
       isMac: os === 'macos',
       recentCatalogs: catalogRecentsState.recents,
+      isCheckingForUpdates: updaterState.status.kind === 'checking',
     }),
   );
   host.setApplicationMenu(tree);
@@ -96,6 +98,15 @@ export function initMenu(): void {
   // flows touch the file via main and refreshCatalogRecents() syncs
   // us back).
   subscribe(catalogRecentsState, publish);
+
+  // Re-publish when the updater enters / leaves the `checking` state so
+  // Help > "Check for Updates…" greys out while a probe is in flight.
+  // Status transitions through other kinds (idle / available / error /
+  // not-available) are also handled by this same subscribe — re-running
+  // publish is cheap (the wire shape is JSON, main rebuilds the native
+  // Menu in one shot), so we don't bother filtering for the specific
+  // checking-edge.
+  subscribe(updaterState, publish);
 
   // First publish: deferred a microtask so i18next has finished its
   // synchronous init() before t() runs against it. The recents fetch
