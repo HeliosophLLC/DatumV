@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a new capability or improvement
+title: "[Feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you spend time writing this up: most useful feature
+        requests describe a *real workflow* that doesn't work today.
+        "DatumV should support X" is harder to act on than "I'm trying
+        to do X and the closest thing today is Y, which falls short
+        because Z."
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The user-facing workflow or pain point. Not the proposed solution yet.
+      placeholder: "I want to ingest a folder of medical images and run a depth model over each one, then export the results back to a parquet file."
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What does this look like today?
+      description: The current path (even if it doesn't work) and what falls short. Skip if it's literally not possible.
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed direction
+      description: Your suggestion, if you have one. SQL syntax, UI sketch, behavior change — any level of detail is fine.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried or other tools you've used for this. Helps frame the value.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Roughly how big does this feel?
+      description: Your best guess; nobody's going to hold you to it.
+      options:
+        - Small (configuration / quality-of-life)
+        - Medium (a new SQL function, panel kind, model adapter)
+        - Large (subsystem-level — new file format, new backend, new dispatch)
+        - I have no idea
+    validations:
+      required: true

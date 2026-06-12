@@ -1,0 +1,102 @@
+name: Bug report
+description: Something works, but not the way it should
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The fields below
+        capture the information that's almost always needed to triage —
+        if you skip any, expect a back-and-forth before anyone can act
+        on the report.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: One or two paragraphs describing the bug in your own words.
+      placeholder: "When I…, the app…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps an outsider could follow on a fresh install. Include the SQL, the dataset, the model name — whatever is needed.
+      placeholder: |
+        1. Open DatumV
+        2. Create a new catalog at C:\foo
+        3. Run `SELECT * FROM …`
+        4. Observe X
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you think would happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (Ubuntu / Debian)
+        - Linux (other)
+        - macOS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Installer variant
+      description: Which installer did you download?
+      options:
+        - CUDA (NVIDIA)
+        - Standard (DirectML / Vulkan)
+        - Portable
+        - Zip archive
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: DatumV version
+      description: "From Help → About, or the installer filename. e.g. 0.1.0, 0.1.0-cuda."
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU + driver (if relevant)
+      description: "Brand + model + driver version. Skip if the bug clearly isn't GPU-related."
+      placeholder: "NVIDIA RTX 3090, driver 555.85"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / console output
+      description: |
+        Paste relevant log output if you have it. Logs live at:
+        - Windows: `%LOCALAPPDATA%\Heliosoph.DatumV\logs\`
+        - Linux: `~/.local/share/Heliosoph.DatumV/logs/`
+        Press Ctrl+Shift+I to open DevTools and copy from the Console tab.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, video, related issues, your guess at the cause — anything that might help.

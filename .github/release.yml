@@ -1,0 +1,44 @@
+# Groups GitHub's auto-generated release notes by PR label.
+#
+# When you draft a new release in the GitHub UI and click
+# "Generate release notes", GitHub walks every merged PR since the
+# previous release tag and slots it into the categories below based on
+# its labels. The 'Other changes' bucket at the bottom catches any PR
+# that doesn't carry a categorized label, so nothing gets dropped.
+#
+# To rely on this you need to actually label PRs. The labels below
+# match the ones used by the issue templates so a PR closing a bug
+# inherits the right grouping naturally if you tag it the same way.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - dependencies # Dependabot PRs get their own section via the GH UI
+    authors:
+      - dependabot
+  categories:
+    - title: New features
+      labels:
+        - feature
+        - enhancement
+    - title: Bug fixes
+      labels:
+        - bug
+        - fix
+    - title: Performance
+      labels:
+        - performance
+    - title: Documentation
+      labels:
+        - docs
+        - documentation
+    - title: Build / CI
+      labels:
+        - ci
+        - build
+    - title: Security
+      labels:
+        - security
+    - title: Other changes
+      labels:
+        - "*"

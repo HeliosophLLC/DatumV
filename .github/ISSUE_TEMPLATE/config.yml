@@ -1,0 +1,11 @@
+# Closes off the "blank issue" link so every report lands in one of the
+# two templates above. Discussions stays available as the catch-all for
+# open-ended questions that don't fit a bug or feature request.
+blank_issues_enabled: false
+contact_links:
+  - name: Questions / discussion
+    url: https://github.com/HeliosophLLC/DatumV/discussions
+    about: General questions, ideas, and conversation that aren't a bug or feature request.
+  - name: Security vulnerability
+    url: https://github.com/HeliosophLLC/DatumV/security/advisories/new
+    about: Report a security issue privately (do NOT use the public issue tracker for security bugs).

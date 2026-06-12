@@ -1,0 +1,87 @@
+# Dependabot keeps dependencies fresh and surfaces known-vulnerable
+# transitive packages as PRs instead of just sitting silently in the
+# tree. Each ecosystem-section below scans its own manifest and opens
+# PRs against `main` on the cadence in `schedule.interval`.
+#
+# `groups` collapses minor / patch bumps for related packages into a
+# single PR — without this, an OpenTelemetry minor bump fans out into
+# ~10 PRs that all rev together anyway.
+version: 2
+updates:
+  # ──────────────── .NET / NuGet ────────────────
+  # Walks every csproj in the repo (src/, tests/, benchmarks/, etc.)
+  # and opens PRs against the central package versions.
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+      onnx-runtime:
+        patterns:
+          - "Microsoft.ML.OnnxRuntime*"
+      llamasharp:
+        patterns:
+          - "LLamaSharp*"
+      sharpgltf:
+        patterns:
+          - "SharpGLTF*"
+      nswag:
+        patterns:
+          - "NSwag*"
+
+  # ──────────────── ClientApp (React / Vite) ────────────────
+  - package-ecosystem: npm
+    directory: "/src/Heliosoph.DatumV.Web/ClientApp"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-*"
+          - "@types/react*"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+      monaco:
+        patterns:
+          - "monaco-*"
+      lucide:
+        patterns:
+          - "lucide-react"
+
+  # ──────────────── Electron shell ────────────────
+  - package-ecosystem: npm
+    directory: "/src/Heliosoph.DatumV.Web/electron"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      electron:
+        patterns:
+          - "electron"
+          - "electron-*"
+          - "@types/node"
+
+  # ──────────────── GitHub Actions workflow versions ────────────────
+  # Catches `uses: actions/checkout@v4` → @v5 bumps, security-relevant
+  # updates to third-party actions, etc.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
