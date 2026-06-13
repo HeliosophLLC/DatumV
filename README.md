@@ -1,5 +1,9 @@
 # DatumV™
 
+[![CI](https://github.com/HeliosophLLC/DatumV/actions/workflows/ci.yml/badge.svg)]
+[![Release](https://img.shields.io/github/v/release/HeliosophLLC/DatumV)]
+[![License](https://img.shields.io/github/license/HeliosophLLC/DatumV)]
+
 DatumV runs ML models on your data — locally, batched, no Python. You describe what you want in SQL, and the engine handles inference, batching, calibration, and I/O across dozens of vision, audio, and text models from a built-in catalog.
 
 ![Search for people](docs/figures/search_person.jpg)
@@ -73,9 +77,24 @@ dotnet build
 dotnet test
 ```
 
+## Built with
+
+**DatumV is built with Llama.** Use of Llama models is subject to Meta's [Llama Community License](https://llama.meta.com/llama3_1/license/) and [Acceptable Use Policy](https://llama.meta.com/llama3/use-policy/).
+
+DatumV's catalog references third-party models — Llama, Stable Diffusion, MiDaS, YOLOX, the Florence family, MobileSAM, U²-Net, Bark, and others — that are downloaded from their publishers at install time. Each model retains its upstream license; you can review the license for any model before downloading via the install dialog, or browse the bundled set in [licenses/](licenses/).
+
+DatumV is built on:
+
+- [Llama](https://llama.meta.com/) and [LLamaSharp](https://github.com/SciSharp/LLamaSharp) — LLM inference
+- [ONNX Runtime](https://onnxruntime.ai/) — vision, audio, and embedding model inference
+- [FFmpeg](https://ffmpeg.org/) — media decoding
+- [Apache Arrow](https://arrow.apache.org/) — columnar in-memory format
+- [Electron](https://www.electronjs.org/) — desktop shell
+- [.NET 10](https://dotnet.microsoft.com/) — engine runtime
+
 ## License
 
-MIT.
+DatumV's source code, the Electron shell, and the catalog manifests are MIT-licensed. Third-party models referenced from the catalog are subject to their own upstream licenses (see [Built with](#built-with) above) and are not redistributed by this project.
 
 ---
 
