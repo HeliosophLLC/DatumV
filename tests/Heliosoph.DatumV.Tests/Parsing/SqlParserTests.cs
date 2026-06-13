@@ -188,6 +188,21 @@ public class SqlParserTests : ServiceTestBase
     }
 
     [Fact]
+    public void Replace_UsableAsFunctionName()
+    {
+        // PG-conformant `replace(string, from, to)`. `REPLACE` is also a
+        // soft keyword for `CREATE OR REPLACE ...` and `SELECT * REPLACE (...)`,
+        // but neither shape applies in function-call position.
+        SelectStatement result = Parse("SELECT replace('hello world', 'world', 'there')");
+
+        Assert.Single(result.Columns);
+        SelectColumn column = result.Columns[0];
+        FunctionCallExpression call = Assert.IsType<FunctionCallExpression>(column.Expression);
+        Assert.Equal("replace", call.CallName);
+        Assert.Equal(3, call.Arguments.Count);
+    }
+
+    [Fact]
     public void SelectWithAlias()
     {
         SelectStatement result = Parse("SELECT name AS n FROM users");

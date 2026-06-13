@@ -475,7 +475,12 @@ public static partial class SqlParser
             .Or(Token.EqualTo(SqlToken.Step))
             .Or(Token.EqualTo(SqlToken.Unit))
             .Or(Token.EqualTo(SqlToken.Comment))
-            .Or(Token.EqualTo(SqlToken.Check));
+            .Or(Token.EqualTo(SqlToken.Check))
+            // REPLACE is a soft keyword used by `CREATE OR REPLACE ...` DDL
+            // and `SELECT * REPLACE (...)` projection; neither shape applies
+            // in function-call position, so it's safe to surface here as the
+            // name of PostgreSQL's `replace(string, from, to)` scalar.
+            .Or(Token.EqualTo(SqlToken.Replace));
 
     private static readonly TokenListParser<SqlToken, (string? Namespace, Superpower.Model.Token<SqlToken> Name)> NamespacedFunctionName =
         (from ns in Token.EqualTo(SqlToken.Identifier)
@@ -490,7 +495,8 @@ public static partial class SqlParser
         .Or(Token.EqualTo(SqlToken.Step).Select(name => ((string?)null, name)))
         .Or(Token.EqualTo(SqlToken.Unit).Select(name => ((string?)null, name)))
         .Or(Token.EqualTo(SqlToken.Comment).Select(name => ((string?)null, name)))
-        .Or(Token.EqualTo(SqlToken.Check).Select(name => ((string?)null, name)));
+        .Or(Token.EqualTo(SqlToken.Check).Select(name => ((string?)null, name)))
+        .Or(Token.EqualTo(SqlToken.Replace).Select(name => ((string?)null, name)));
 
     /// <summary>
     /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] )
