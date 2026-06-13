@@ -86,13 +86,20 @@ Population standard deviation of pixel values. Same signature as `image_pixel_me
 
 Wraps a raw encoded-image source as a typed `Image` value. The first form takes a `UInt8[]` of encoded bytes (PNG / JPEG / WebP / BMP / TIFF — anything SkiaSharp recognises); the second takes a `String` filesystem path and reads the file. No pixel decoding happens — the bytes pass through verbatim with the kind flipped to `Image`, and width/height parsing stays lazy at the materialization boundary so `image_width()` and friends keep their fast inline-metadata path. Returns `NULL` when the argument is `NULL`.
 
+`image_decode` is intentionally **permissive** on unrecognised input: bytes that don't match any known image signature still produce a non-NULL `Image` value, just with zero-sentinel inline metadata, so downstream `image_width()` / `image_height()` return `NULL` rather than throwing. For a validated conversion that throws at the call site with a hex-byte preview of the mismatch, use **`CAST(bytes AS Image)`** instead — see [Type System](../sql/type-system.md). The validated form accepts PNG / JPEG / WebP / GIF / BMP / TIFF magic signatures; `try_cast(bytes AS Image)` returns typed `NULL` on failure, and `can_cast(bytes, Image)` returns a boolean usable as a `WHERE`-clause filter to drop bad rows in a folder scan.
+
 ```sql
--- Lift an archive entry into the typed-Image surface
+-- Lift an archive entry into the typed-Image surface (permissive)
 SELECT image_decode(o.bytes) AS img
 FROM open_archive(:source, '%.jpg') AS o
 
 -- One-off file lookup
 SELECT image_width(image_decode('C:/data/sample.png'))
+
+-- Validated form — drops files whose bytes aren't a recognised image
+SELECT path, CAST(bytes AS Image) AS img
+FROM open_folder('C:/data/screenshots')
+WHERE can_cast(bytes, Image) = true
 ```
 
 ### image_to_bytes

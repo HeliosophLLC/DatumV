@@ -1,5 +1,8 @@
 using System.Globalization;
+using System.Text;
 using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Functions.Audio;
+using Heliosoph.DatumV.Functions.Image;
 using Heliosoph.DatumV.Manifest;
 using Heliosoph.DatumV.Model;
 
@@ -89,8 +92,13 @@ public sealed class CastFunction : IFunction, IScalarFunction
                 + "Use string_split / array_map to construct an array from non-array sources.");
         }
 
-        // Scalar target: arrays cannot be flattened to a scalar via cast.
-        if (input.IsArray)
+        // Scalar target: arrays cannot be flattened to a scalar via cast,
+        // except for the one principled exception — `Array<UInt8>` → encoded
+        // media blob (Image / Audio / Video / PointCloud / Mesh). The bytes
+        // ARE the encoded payload in those kinds; the conversion is a
+        // zero-copy tag flip, identical to what image_decode() does. Allowed
+        // through to TryCastCore which handles the conversion.
+        if (input.IsArray && !IsByteArrayToBlobConversion(input, targetKind))
         {
             throw new InvalidOperationException(
                 $"cast() cannot convert Array<{input.Kind}> to scalar {targetKind}. "
@@ -110,6 +118,12 @@ public sealed class CastFunction : IFunction, IScalarFunction
         if (TryCastCore(input, targetKind, out ValueRef result))
         {
             return new ValueTask<ValueRef>(result);
+        }
+
+        if (IsByteArrayToBlobConversion(input, targetKind))
+        {
+            throw new InvalidOperationException(
+                $"cast() to {targetKind}: {FormatBlobValidationError(targetKind, input.AsByteSpan())}");
         }
 
         throw new InvalidOperationException(
@@ -155,6 +169,80 @@ public sealed class CastFunction : IFunction, IScalarFunction
     }
 
     /// <summary>
+    /// Returns <see langword="true"/> when the pair is a zero-copy byte-array
+    /// → encoded-media-blob conversion: source <c>Array&lt;UInt8&gt;</c>, target
+    /// scalar <see cref="DataKind.Image"/> / <see cref="DataKind.Audio"/> /
+    /// <see cref="DataKind.Video"/> / <see cref="DataKind.PointCloud"/> /
+    /// <see cref="DataKind.Mesh"/>. The DataValue tag flips; the byte payload
+    /// passes through verbatim — same operation <c>image_decode</c> performs.
+    /// <see cref="DataKind.Json"/> is intentionally excluded: Json bytes are
+    /// CBOR-encoded in this runtime, so a raw <c>UInt8[]</c> coming from
+    /// disk / network is overwhelmingly likely to be JSON text (use
+    /// <c>CAST(string AS Json)</c>) rather than valid CBOR.
+    /// </summary>
+    internal static bool IsByteArrayToBlobConversion(ValueRef input, DataKind targetKind) =>
+        input.IsArray && input.Kind == DataKind.UInt8
+        && targetKind is DataKind.Image or DataKind.Audio or DataKind.Video
+            or DataKind.PointCloud or DataKind.Mesh;
+
+    /// <summary>
+    /// Sniffs the supplied byte payload's magic bytes against the encoded-blob
+    /// formats this engine recognises for <paramref name="targetKind"/>. Returns
+    /// <see langword="true"/> when the bytes look like a real instance of the
+    /// kind, <see langword="false"/> when they don't.
+    /// Used by CAST / try_cast / can_cast and the model-invocation auto-coerce
+    /// to catch obvious garbage at the cast site rather than ~10 frames deep
+    /// in SkiaSharp / FFmpeg / glTF decoders.
+    /// </summary>
+    /// <remarks>
+    /// Constant-time for <see cref="DataKind.Image"/> (12-byte signature check)
+    /// and bounded-prefix for <see cref="DataKind.Audio"/> (container header
+    /// walk). <see cref="DataKind.Video"/> is intentionally a passthrough — the
+    /// only validator we have spins up an FFmpeg format context plus a full
+    /// payload copy, far too expensive for a per-row CAST. <see cref="DataKind.PointCloud"/>
+    /// and <see cref="DataKind.Mesh"/> have no lightweight header sniffer; the
+    /// codec is sniffed lazily at materialization today.
+    /// </remarks>
+    internal static bool TryValidateBlobBytes(DataKind targetKind, ReadOnlySpan<byte> bytes) =>
+        targetKind switch
+        {
+            DataKind.Image => ImageHeaderParser.DetectFormat(bytes) != ImageFormat.Unknown,
+            DataKind.Audio => AudioHeaderParser.TryParseHeader(bytes) is not null,
+            _ => true,
+        };
+
+    /// <summary>
+    /// Builds the error-message tail for a failed blob validation: hex preview
+    /// of the leading bytes and the format list the engine expected. Failure
+    /// is the cold path, so the allocation is fine.
+    /// </summary>
+    internal static string FormatBlobValidationError(DataKind targetKind, ReadOnlySpan<byte> bytes)
+    {
+        int previewLen = System.Math.Min(12, bytes.Length);
+        StringBuilder preview = new(previewLen * 3 + 8);
+        if (previewLen == 0)
+        {
+            preview.Append("<empty>");
+        }
+        else
+        {
+            for (int i = 0; i < previewLen; i++)
+            {
+                if (i > 0) preview.Append(' ');
+                preview.Append(bytes[i].ToString("X2"));
+            }
+            if (bytes.Length > previewLen) preview.Append(" ...");
+        }
+        string supported = targetKind switch
+        {
+            DataKind.Image => "PNG / JPEG / WebP / GIF / BMP / TIFF",
+            DataKind.Audio => "WAV / FLAC / MP3 / OGG (Vorbis or Opus)",
+            _ => targetKind.ToString(),
+        };
+        return $"bytes [{preview}] don't match a known {targetKind} header (expected {supported}).";
+    }
+
+    /// <summary>
     /// Returns <see langword="true"/> with a populated <paramref name="result"/>
     /// when the conversion succeeds. Returns <see langword="false"/> for
     /// kind pairs that aren't supported (the caller decides whether to throw
@@ -163,6 +251,13 @@ public sealed class CastFunction : IFunction, IScalarFunction
     internal static bool TryCastCore(ValueRef input, DataKind targetKind, out ValueRef result)
     {
         result = default;
+
+        if (IsByteArrayToBlobConversion(input, targetKind))
+        {
+            if (!TryValidateBlobBytes(targetKind, input.AsByteSpan())) return false;
+            result = ValueRef.FromBytes(targetKind, input.AsBytes());
+            return true;
+        }
 
         // Numeric ↔ numeric / Numeric ↔ Boolean / Numeric → String
         if (input.TryToDouble(out double inputDouble))

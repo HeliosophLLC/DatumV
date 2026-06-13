@@ -57,7 +57,9 @@ public sealed class TryCastFunction : IFunction, IScalarFunction
         // Scalar target: arrays cannot be flattened. Without this, TryCastCore
         // can succeed via the array's underlying numeric carrier (TryToDouble
         // reads the first element / offset) and emit a misleading scalar.
-        if (input.IsArray)
+        // Exception: Array<UInt8> → encoded-media-blob falls through so
+        // TryCastCore performs the zero-copy retag.
+        if (input.IsArray && !CastFunction.IsByteArrayToBlobConversion(input, targetKind))
         {
             return new ValueTask<ValueRef>(ValueRef.Null(targetKind));
         }

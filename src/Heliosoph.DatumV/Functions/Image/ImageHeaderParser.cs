@@ -94,6 +94,19 @@ public static class ImageHeaderParser
             return ImageFormat.Gif;
         }
 
+        // BMP: "BM" — DIB file header.
+        if (data[0] == (byte)'B' && data[1] == (byte)'M')
+        {
+            return ImageFormat.Bmp;
+        }
+
+        // TIFF: little-endian "II*\0" or big-endian "MM\0*".
+        if ((data[0] == 0x49 && data[1] == 0x49 && data[2] == 0x2A && data[3] == 0x00) ||
+            (data[0] == 0x4D && data[1] == 0x4D && data[2] == 0x00 && data[3] == 0x2A))
+        {
+            return ImageFormat.Tiff;
+        }
+
         return ImageFormat.Unknown;
     }
 
@@ -291,4 +304,10 @@ public enum ImageFormat
 
     /// <summary>Graphics Interchange Format (GIF87a or GIF89a, animated or static).</summary>
     Gif,
+
+    /// <summary>Windows Bitmap (BM-prefixed DIB file).</summary>
+    Bmp,
+
+    /// <summary>Tagged Image File Format (little- or big-endian).</summary>
+    Tiff,
 }

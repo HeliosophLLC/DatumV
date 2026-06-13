@@ -66,6 +66,35 @@ public sealed class ImageDecodeFunctionTests : ServiceTestBase
         Assert.Equal((ushort)30, image.ImageHeight);
     }
 
+    [Fact]
+    public async Task ImageDecode_UnknownFormatBytes_StillProducesImageWithZeroMetadata()
+    {
+        // Mirrors AudioDecode_UnknownFormatBytes_StillProducesAudioWithZeroMetadata.
+        // image_decode is the permissive form — bytes pass through verbatim
+        // even when the header doesn't match a recognised format; inline
+        // metadata is zero-sentinel and image_width() / image_height()
+        // return NULL via the zero-sentinel path. Callers that want a hard
+        // error with a hex preview at the call site should use
+        // CAST(bytes AS Image), which validates against the PNG/JPEG/WebP/GIF
+        // magic table.
+        byte[] mystery = new byte[256];
+        mystery[0] = 0xDE;
+        mystery[1] = 0xAD;
+
+        ValueRef result = await new ImageDecodeFunction().ExecuteAsync(
+            new[] { ValueRef.FromBytes(DataKind.UInt8, mystery, isArray: true) },
+            CreateEvaluationFrame(), default);
+
+        Assert.Equal(DataKind.Image, result.Kind);
+        Assert.False(result.IsNull);
+
+        using Arena store = CreateArena();
+        DataValue image = result.ToDataValue(store);
+        Assert.Equal(DataKind.Image, image.Kind);
+        Assert.Equal((ushort)0, image.ImageWidth);
+        Assert.Equal((ushort)0, image.ImageHeight);
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private static byte[] BuildSolidPng(int width, int height, byte r, byte g, byte b)

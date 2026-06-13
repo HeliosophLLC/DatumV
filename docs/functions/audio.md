@@ -29,6 +29,8 @@ Wraps a raw encoded-audio byte array as a typed `Audio` value so downstream audi
 
 No PCM decoding happens here — the bytes pass through verbatim with the kind tag flipped to `Audio`. The container header is parsed (WAV, FLAC, MP3 with optional ID3v2 prefix, OGG Vorbis, OGG Opus) so the resulting value carries inline metadata that the audio accessor family reads without a full decode. WAV and FLAC expose sample rate / channels / bit depth / frame count; MP3 and OGG are lossy so bit depth and frame count surface as 0 (sample rate and channels are still meaningful and stamped). M4A and other containers fall through to the no-metadata path until added to the parser; in those cases `audio_samples` still decodes via FFmpeg.
 
+`audio_decode` is intentionally **permissive** on unrecognised input: bytes that don't match any known container signature still produce a non-NULL `Audio` value, just with zero-sentinel inline metadata, so `audio_sample_rate()` and friends return `NULL` rather than throwing. For a validated conversion that throws at the call site with a hex-byte preview of the mismatch, use **`CAST(bytes AS Audio)`** instead — see [Type System](../sql/type-system.md). The validated form accepts WAV / FLAC / MP3 / OGG (Vorbis or Opus) headers; `try_cast(bytes AS Audio)` returns typed `NULL` on failure, and `can_cast(bytes, Audio)` returns a boolean usable as a `WHERE`-clause filter to drop bad rows in a folder scan.
+
 ```sql
 -- Lift FLAC entries out of a LibriSpeech tarball into typed Audio values
 SELECT path,
