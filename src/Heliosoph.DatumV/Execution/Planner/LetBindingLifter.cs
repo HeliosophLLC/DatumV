@@ -92,6 +92,17 @@ internal static class LetBindingLifter
                 && nameMap.TryGetValue(col.ColumnName, out string? synth):
                 return new ColumnReference(TableName: null, ColumnName: synth);
 
+            // Qualified `letname.field` — a struct-field access on a
+            // struct-valued LET binding via dot notation. Remap the
+            // qualifier so the runtime evaluator finds the lifted
+            // struct on the augmented row. Without this remap the
+            // qualified ref still names the unlifted LET and
+            // EvaluateColumn throws "Column 's.field' not found in row".
+            // Mirrors ModelInvocationHoister.RewriteExpressionWithLetRefs.
+            case ColumnReference col when col.TableName is not null
+                && nameMap.TryGetValue(col.TableName, out string? hiddenQualifier):
+                return col with { TableName = hiddenQualifier };
+
             case FunctionCallExpression fn:
                 Expression[] rewrittenArgs = new Expression[fn.Arguments.Count];
                 bool argsChanged = false;

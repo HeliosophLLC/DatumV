@@ -84,6 +84,19 @@ public sealed partial class ExpressionEvaluator
                 maybeStruct = varValue.ToDataValue(frame.Source, varValue.TypeId, frame.Types);
                 foundStruct = true;
             }
+            // Lateral correlation: the lifted LET binding sits on the
+            // outer driving row, not the current row. Without this branch
+            // a struct-valued LET referenced via dot notation in a
+            // lateral function source argument (`unnest(s.arr)` where
+            // `s = {arr: [...]}` is a LET) can't be resolved.
+            else if (frame.OuterRow is Row outer
+                && outer.TryGetValue(column.TableName, out DataValue outerStruct)
+                && outerStruct.Kind == DataKind.Struct
+                && !outerStruct.IsNull)
+            {
+                maybeStruct = outerStruct;
+                foundStruct = true;
+            }
 
             if (foundStruct)
             {

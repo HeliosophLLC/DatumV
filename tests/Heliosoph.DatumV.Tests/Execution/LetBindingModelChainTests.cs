@@ -207,6 +207,41 @@ public sealed class LetBindingModelChainTests : ServiceTestBase
         Assert.Equal("grace", rows[0]["echoed"].AsString());
     }
 
+    /// <summary>
+    /// Topo-order regression for the user-reported shape:
+    ///   <c>LET d = models.X(...), LET v = scalar_fn(d.field), …</c>.
+    /// The dep edge from <c>v</c> to <c>d</c> flows only through the
+    /// qualified ref <c>d.field</c> — the dep collector must follow
+    /// <see cref="ColumnReference.TableName"/> when it matches a hoist
+    /// key, otherwise <c>v</c> lands at the same staircase level as
+    /// <c>d</c> (or earlier) and the row evaluator throws
+    /// <c>Column '__let_d_N.field' not found in row</c>. Bracket access
+    /// (<c>d['field']</c>) already worked because the bare <c>d</c>
+    /// surfaces as a child of the IndexAccess.
+    /// </summary>
+    [Fact]
+    public async Task DotAccess_OnLetBoundStruct_FromScalarSiblingLet_TopoOrders()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "henry" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT "
+            + "  LET m = models.echo(name), "
+            + "  LET s = {a: 'hello', b: 'world'}, "
+            + "  LET v = upper(s.a), "
+            + "  v AS result, m AS echoed "
+            + "FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("HELLO", rows[0]["result"].AsString());
+        Assert.Equal("henry", rows[0]["echoed"].AsString());
+    }
+
     [Fact]
     public async Task LetWithoutModel_DoesNotLiftIntoStaircase()
     {

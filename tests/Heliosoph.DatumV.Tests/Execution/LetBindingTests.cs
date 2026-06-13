@@ -356,6 +356,56 @@ public sealed class LetBindingTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Dot-notation struct-field access on a LET-bound struct from a WHERE
+    /// predicate. The planner's WHERE-aware LET lifter detects the
+    /// qualified reference (`s.keep`) as a dependency on `s` and lifts
+    /// the binding below the FILTER so the predicate's row evaluator
+    /// finds it. Bracket access already worked because the bare LET
+    /// name surfaces as a child of the IndexAccess.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_DotAccess_OnLetBoundStruct_FromWhereClause()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["name"],
+            new object?[] { "alpha" },
+            new object?[] { "beta" });
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT LET s = {keep: name = 'alpha', label: name}, name "
+            + "FROM t WHERE s.keep",
+            catalog);
+
+        Assert.Single(results);
+        Assert.Equal("alpha", results[0]["name"].AsString());
+    }
+
+    /// <summary>
+    /// Dot-notation struct-field access on a LET-bound struct from a lateral
+    /// function source argument. The planner's LATERAL-aware LET lifter
+    /// detects the qualified reference (`s.arr`) as a dependency on `s`
+    /// and lifts the binding above the driving source so the lateral
+    /// side can read the field.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_DotAccess_OnLetBoundStruct_FromLateralSourceArg()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["name"],
+            new object?[] { "row1" });
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT LET s = {n: 3}, name, value "
+            + "FROM t CROSS JOIN LATERAL generate_series(1, s.n)",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal(1L, results[0]["value"].ToInt64());
+        Assert.Equal(2L, results[1]["value"].ToInt64());
+        Assert.Equal(3L, results[2]["value"].ToInt64());
+    }
+
+    /// <summary>
     /// Sibling LET chain via dot access on a struct-valued LET:
     /// <c>LET s = {a: 1}, LET y = s.a + 1, y</c>. The second LET's body
     /// references the first LET's struct field, exercising the

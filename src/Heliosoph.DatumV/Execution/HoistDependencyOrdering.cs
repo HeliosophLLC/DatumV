@@ -106,6 +106,23 @@ internal static class HoistDependencyOrdering
             return;
         }
 
+        // A qualified `letname.field` reference carries a dependency on the
+        // LET binding `letname` even though the full ref's fingerprint
+        // ("letname.field") doesn't match the LET binding's hoist key
+        // (the bare LET name). Without this, a binding whose body reads
+        // `s.a` from a struct-valued sibling LET `s` registers no
+        // dependency on `s` and gets scheduled at the same staircase
+        // level — runtime then fails with
+        // "Column '__let_s_N.field' not found in row." Bracket access
+        // (`s['a']`) registered the dep correctly because the descent
+        // below hit the bare `s` ColumnReference.
+        if (expr is ColumnReference col && col.TableName is not null
+            && col.TableName != skipSelf && hoists.ContainsKey(col.TableName))
+        {
+            deps.Add(col.TableName);
+            return;
+        }
+
         VisitChildren(expr, child => CollectInnerFingerprints(child, hoists, deps, skipSelf));
     }
 
