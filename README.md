@@ -18,6 +18,8 @@ WHERE c.value.label = 'person'
 LIMIT 100
 ```
 
+See [Examples — Person crops with YOLOX](examples/yolox-person-crops.md) for the full walkthrough.
+
 ## Same input, four depth models
 
 ![Depth model comparison](docs/figures/depth_comparison.jpg)
@@ -34,7 +36,7 @@ FROM datasets.coco_val2017
 LIMIT 32
 ```
 
-See [Examples — Depth model comparison](docs/examples.md#depth-model-comparison) for the full walkthrough.
+See [Examples — Depth model comparison](docs/examples/depth-comparison.md) for the full walkthrough.
 
 ## Installing
 
@@ -62,7 +64,7 @@ You can add your own ONNX models with `CREATE MODEL`. See [docs/models.md](docs/
 | | |
 |--|--|
 | [Getting Started](docs/getting-started.md) | Install, your first query, the load → transform → export pipeline |
-| [Examples](docs/examples.md) | Things you can do |
+| [Examples](docs/examples/index.md) | Things you can do |
 | [SQL Reference](docs/sql/select.md) | SELECT, JOIN, WHERE, GROUP BY, window functions, type system, DDL/DML |
 | [Functions](docs/functions/string.md) | 200+ built-in functions across math, string, image, vector, temporal, JSON |
 | [Models](docs/models.md) | Built-in catalog and how to add your own |

@@ -80,7 +80,7 @@ CROSS APPLY video_unnest_frames(v.video) AS f
 
 Sequential frame access (frame N → N+1 → N+2) hits a warm FFmpeg decoder; backward access seeks to the file head and decodes forward. Stay in `frame_index` order whenever possible.
 
-See [Examples — Video frames as a queryable column](../sql/examples.md#video-frames-as-a-queryable-column) for full pipelines.
+See [Examples — Video frames as a queryable column](../examples/video-frames.md) for full pipelines.
 
 ### open_archive
 

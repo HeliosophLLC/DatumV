@@ -41,7 +41,7 @@ FROM photos LIMIT 1
 ```
 
 End-to-end walkthroughs of these workflows live in
-[Examples — Depth maps and 3D point clouds](examples.md#depth-maps-and-3d-point-clouds).
+[Examples — Depth maps and 3D point clouds](../examples/depth-maps-and-point-clouds.md).
 
 ## Points
 
@@ -429,7 +429,7 @@ expression context like any other DataKind.
 ## See Also
 
 - [Type System](type-system.md) — overall DataKind reference; spatial entries link back here.
-- [Examples — Depth maps and 3D point clouds](examples.md#depth-maps-and-3d-point-clouds) — step-by-step workflow walkthrough.
+- [Examples — Depth maps and 3D point clouds](../examples/depth-maps-and-point-clouds.md) — step-by-step workflow walkthrough.
 - [Models](../models.md) — depth estimators (`midas-small`, `dpt-large`, `zoedepth-nyu-kitti` + metric variants, `glpn-nyu` + metric variant).
 - [Image Functions](../functions/image.md) — `apply_colormap`, `depth_map_to_image`, and the broader image-manipulation surface.
 - [`.datum` Format](../technical/datum-format.md) — blob storage layout.

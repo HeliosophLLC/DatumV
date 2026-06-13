@@ -8,9 +8,9 @@ Two example queries are already open in tabs alongside this one. Click Run on ei
 
 ## The two starter tabs
 
-**Person crops with YOLOX** runs `models.yolox_s` over the COCO val2017 dataset, takes every detection labeled `person`, and crops the original image to the bounding box. It shows model invocation inside `SELECT`, the `Array<Struct>` output shape that detection models return, and filtering / cropping based on what a model produced.
+**[Person crops with YOLOX](examples/yolox-person-crops.md)** runs `models.yolox_s` over the COCO val2017 dataset, takes every detection labeled `person`, and crops the original image to the bounding box. It shows model invocation inside `SELECT`, the `Array<Struct>` output shape that detection models return, and filtering / cropping based on what a model produced.
 
-**Same input, four depth models** runs one image through Depth Anything v2, Depth Anything v3, MiDaS Small, and DPT Large in a single query. It shows that swapping models is a column-level concern, not a pipeline concern. See [Examples — Depth model comparison](examples.md#depth-model-comparison) for discussion of the differences.
+**[Same input, four depth models](examples/depth-comparison.md)** runs one image through Depth Anything v2, Depth Anything v3, MiDaS Small, and DPT Large in a single query. It shows that swapping models is a column-level concern, not a pipeline concern.
 
 The first time you click Run, DatumV prompts you to download the models and dataset that the query needs:
 
@@ -70,5 +70,5 @@ When you need deeper reference material, follow the docs sidebar:
 |---|---|
 | Write more advanced SQL | [SQL Reference](sql/select.md) |
 | Look up a function | [Functions Reference](functions/string.md) |
-| Browse example queries | [Examples](examples.md) |
+| Browse example queries | [Examples](examples/index.md) |
 | Add my own model | [CREATE MODEL](sql/create-model.md) |

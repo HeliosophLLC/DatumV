@@ -149,7 +149,7 @@ DatumV/
     sql/                  ← SQL language reference (one file per clause/concept)
     functions/            ← function reference (one file per category)
     technical/            ← engine-internal references (file format, architecture, C# API)
-    <user-facing docs>    ← getting-started.md, examples.md, models.md, onnx.md, …
+    <user-facing docs>    ← getting-started.md, examples/, models.md, onnx.md, …
 ```
 
 - **`docs/sql/`** — one markdown file per SQL clause or concept (e.g. `select.md`, `joins.md`, `type-system.md`). Subsections within a file use `###` headings.
