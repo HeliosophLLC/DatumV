@@ -120,48 +120,4 @@ public static class SqlKeywordRegistry
         "Array",
     ];
 
-    /// <summary>
-    /// Built-in function names for syntax highlighting. Names that overlap with
-    /// SQL keywords (e.g. <c>LEFT</c>, <c>RIGHT</c>, <c>CAST</c>, <c>RANGE</c>)
-    /// are intentionally excluded — Monarch's <c>@keywords</c> case takes
-    /// precedence so they will be colored as keywords regardless.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This list mirrors the registered functions in the runtime
-    /// <c>FunctionRegistry</c>. After the function library rebuild
-    /// (<c>project_function_rebuild.md</c>) it is intentionally narrow:
-    /// the six rebuilt scalar functions (<c>concat</c>, <c>upper</c>,
-    /// <c>lower</c>, <c>try_cast</c>, <c>typeof</c>; <c>cast</c> excluded as
-    /// a keyword overlap), all aggregate functions, and all window functions.
-    /// (<c>UNNEST</c> was retired pending the reference-type-array consolidation;
-    /// will return as a recognised TVF when rebuilt.) Update this list in
-    /// lockstep when registering new functions; a lint test asserts the
-    /// registered set agrees.
-    /// </para>
-    /// </remarks>
-    public static IReadOnlyList<string> BuiltinFunctions { get; } =
-    [
-        // Aggregate functions
-        "COUNT", "SUM", "AVG", "MIN", "MAX",
-        "VARIANCE", "VAR_SAMP", "VAR_POP",
-        "STDDEV", "STDDEV_SAMP", "STDDEV_POP",
-        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC", "MODE",
-        "CORR", "COVAR_POP", "COVAR_SAMP",
-        "APPROX_MEDIAN", "APPROX_PERCENTILE",
-        "STRING_AGG", "ARRAY_AGG", "ARG_MAX", "ARG_MIN",
-
-        // Window functions
-        "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
-        "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
-
-        // Table-valued functions: UNNEST retired (see remarks above); RANGE is a
-        // SQL keyword and not registered here.
-
-        // Scalar functions (rebuilt set; cast excluded as keyword overlap)
-        "concat", "upper", "lower", "try_cast", "typeof",
-
-        // Image functions
-        "image_crop",
-    ];
 }

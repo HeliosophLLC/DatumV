@@ -116,6 +116,25 @@ export function initMonaco(): void {
     ],
   });
 
+  // Pre-register placeholder light/dark editor themes so that editors
+  // mounting before the LSP grammar+theme fetch completes still get a
+  // valid theme name. Both inherit from the matching stock theme; the
+  // LSP boot in `lsp.ts` overwrites them with the server-provided
+  // palette (function color, etc.) the moment the fetch resolves, and
+  // Monaco re-applies the new rules to every editor live.
+  monaco.editor.defineTheme('datumv-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: {},
+  });
+  monaco.editor.defineTheme('datumv-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {},
+  });
+
   // Register a dummy "no-op" language whose only purpose is to be the
   // intermediate target of the retokenization flip in initLsp. Monaco's
   // `setModelLanguage(model, sameId)` is a no-op (short-circuits when the
