@@ -37,6 +37,7 @@
   "progress": {
     "starting": "Starting download…",
     "downloading": "Downloading {current} ({fileIndex} of {fileCount})",
+    "downloadingNoCount": "Downloading {current}",
     "downloadComplete": "Download complete, preparing ingest…",
     "ingesting": "Ingesting {table} ({jobIndex} of {jobCount})",
     "ingestingWithRows": "Ingesting {table} ({jobIndex} of {jobCount}) — {rows} rows",

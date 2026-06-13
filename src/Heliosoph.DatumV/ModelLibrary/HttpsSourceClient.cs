@@ -38,20 +38,74 @@ internal sealed class HttpsSourceClient : IModelSourceClient
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
     }
 
-    public ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
+    public async ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
         CatalogSource source, CancellationToken ct)
     {
         HttpsSource https = Cast(source);
 
-        List<SourceFile> files = new(https.Urls.Count);
-        foreach (HttpsFile entry in https.Urls)
+        // HEAD each URL in parallel to learn Content-Length up front so
+        // downstream progress reporting can render a determinate bar +
+        // ETA. Hosts that refuse HEAD, omit Content-Length on chunked
+        // responses, or 403 on a HEAD-only request yield Size: 0 and the
+        // UI falls back to indeterminate display.
+        Task<SourceFile>[] probes = new Task<SourceFile>[https.Urls.Count];
+        for (int i = 0; i < https.Urls.Count; i++)
         {
-            // Path = the local destination filename. Url is held by the
-            // CatalogSource and resolved at download time by re-matching
-            // entries by DestFile. Size + Sha256 unknown until the GET.
-            files.Add(new SourceFile(Path: entry.DestFile, Size: 0, Sha256: null));
+            probes[i] = ProbeAsync(https.Urls[i], https.UserAgent, ct);
         }
-        return ValueTask.FromResult<IReadOnlyList<SourceFile>>(files);
+        return await Task.WhenAll(probes).ConfigureAwait(false);
+    }
+
+    // Per-probe deadline, independent of the install's outer CT. A host
+    // that opens a TCP connection but never responds to HEAD would
+    // otherwise block the install for the HttpClient default (100s) before
+    // any byte moves. Tight enough to feel snappy on the install path,
+    // loose enough to ride out a slow TLS handshake on a transcontinental
+    // link.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+
+    private async Task<SourceFile> ProbeAsync(
+        HttpsFile entry, string? userAgentOverride, CancellationToken ct)
+    {
+        long size = 0;
+        using CancellationTokenSource probeCts = CancellationTokenSource
+            .CreateLinkedTokenSource(ct);
+        probeCts.CancelAfter(ProbeTimeout);
+        try
+        {
+            using HttpRequestMessage req = new(HttpMethod.Head, entry.Url);
+            if (!string.IsNullOrEmpty(userAgentOverride))
+            {
+                req.Headers.UserAgent.Clear();
+                req.Headers.UserAgent.ParseAdd(userAgentOverride);
+            }
+            using HttpResponseMessage resp = await _http
+                .SendAsync(req, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
+                .ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+            {
+                size = resp.Content.Headers.ContentLength ?? 0;
+                _logger.LogDebug("HEAD {Url} → Size={Size}", entry.Url, size);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "HEAD {Url} returned {Status}; falling back to Size=0",
+                    entry.Url, (int)resp.StatusCode);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // The outer install wasn't cancelled — this was our own per-probe
+            // deadline. Treat as "size unknown" and let the GET proceed.
+            _logger.LogDebug("HEAD {Url} timed out after {Timeout}; falling back to Size=0",
+                entry.Url, ProbeTimeout);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "HEAD {Url} failed; falling back to Size=0", entry.Url);
+        }
+        return new SourceFile(Path: entry.DestFile, Size: size, Sha256: null);
     }
 
     public async ValueTask<string> DownloadFileAsync(

@@ -117,6 +117,7 @@
     "restart": "Restart",
     "remove": "Remove",
     "downloadingFile": "Downloading file {index} of {count} · {file}",
+    "downloadingNoCount": "Downloading {file}",
     "downloadingStarting": "Starting download…",
     "downloadingHint": "Downloading… you can leave this view; it will keep running.",
     "installingHint": "Registering the model in the catalog…",

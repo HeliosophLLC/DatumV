@@ -9,6 +9,7 @@
     "popoverTitle": "Downloads",
     "rowInstalling": "Installing",
     "rowQueued": "Starting",
+    "rowDownloading": "Downloading",
     "rowStalled": "Stalled",
     "rowStalledDetail": "Waiting for connection…",
     "rowFailed": "Failed",
