@@ -103,23 +103,31 @@ END;
 
 -- ---- Full bundle (every output: depth + confidence + pose matrices) -------
 --
--- Single forward pass surfacing every head DAv3 emits. Useful when
--- downstream wants more than just depth:
---   • confidence — filter low-reliability points before PointCloud
+-- Single forward pass surfacing every head DAv3 emits, aligned to the
+-- source image so downstream code can consume the bundle without
+-- per-field rescaling:
+--   • depth      — bilinear-resized from native 518×518 back to
+--                  (image_height, image_width), units = metric meters.
+--   • confidence — bilinear-resized to (image_height, image_width) so
+--                  thresholding and masking compose pixel-for-pixel with
+--                  `depth` and the source image.
 --   • intrinsics — predicted camera matrix K = [[fx, 0, cx],
 --                                                [0, fy, cy],
 --                                                [0,  0,  1]]
---                  Lets `point_cloud_from_depth_pinhole` use the model's
---                  actual focal length instead of a hardcoded fov_deg;
---                  more accurate cloud geometry.
---   • extrinsics — camera pose [R | t]. Identity / decorative for single-
---                  view input; meaningful once a multi-view body lands.
+--                  rescaled from the 518×518 input grid to image
+--                  coordinates (sx = W/518, sy = H/518; K' =
+--                  diag(sx, sy, 1) · K). Plugs straight into
+--                  `point_cloud_from_depth_pinhole_intrinsics` /
+--                  `point_cloud_from_depth_orthographic_intrinsics`
+--                  without further math.
+--   • extrinsics — camera pose [R | t]. Pass-through; world coordinates
+--                  don't depend on image resolution. Identity /
+--                  decorative for single-view input; meaningful once a
+--                  multi-view body lands.
 --
--- The depth field is returned at NATIVE 518×518 resolution to avoid the
--- bilinear-resize cost when callers don't actually need a full-res
--- depth (e.g. just want the predicted intrinsics for a separate
--- visualization pipeline). Caller resizes via `array_resize_2d` if
--- per-pixel alignment with the source image is required.
+-- For raw 518×518 outputs (e.g. chaining at native resolution, or
+-- carrying the unscaled K through to a separate pipeline) see
+-- `depth_anything_v3_large_full_native` below.
 --
 -- No `IMPLEMENTS` clause — there's no task contract for
 -- "depth + pose + confidence bundle" yet. If a second bundled-output
@@ -130,7 +138,7 @@ END;
 -- (see docs/sql/create-model.md#struct-return-types). The annotation is
 -- design-time metadata only — the LanguageServer reads it to surface
 -- hover / completion on field access (`r.intrinsics` resolves to its
--- declared `Array<Float32>(1,1,3,3)` shape), while the runtime treats
+-- declared `Array<Float32>(3, 3)` shape), while the runtime treats
 -- the value as the opaque `DataKind.Struct`. The body's
 -- `RETURN { depth: …, intrinsics: … }` literal still defines the actual
 -- per-row struct shape; the engine interns a per-query TypeId from that
@@ -139,6 +147,52 @@ END;
 -- type registry — small one-time C# addition.
 
 CREATE OR REPLACE MODEL depth_anything_v3_large_full(img Image)
+  RETURNS Struct<
+    depth Array<Float32>,
+    confidence Array<Float32>,
+    extrinsics Array<Float32>(1, 1, 3, 4),
+    intrinsics Array<Float32>(3, 3)
+  >
+USING 'depth-anything-v3-large/2026-05-29/onnx/model.onnx'
+AS BEGIN
+  DECLARE tensor Float32[] = image_to_tensor_chw(
+    img,
+    [518, 518],
+    imagenet_mean(),
+    imagenet_std());
+  DECLARE outputs Struct = infer_outputs(
+    tensor,
+    [1::Int32, 1::Int32, 3::Int32, 518::Int32, 518::Int32]);
+  DECLARE h Int32 = image_height(img);
+  DECLARE w Int32 = image_width(img);
+  DECLARE sx Float32 = w::Float32 / 518.0::Float32;
+  DECLARE sy Float32 = h::Float32 / 518.0::Float32;
+  -- intrinsics is flattened on struct extraction; row-major (1,1,3,3)
+  -- lays out as [fx, 0, cx, 0, fy, cy, 0, 0, 1], so flat 1-based indices
+  -- 1=fx, 3=cx, 5=fy, 6=cy.
+  DECLARE k Float32[] = outputs['intrinsics'];
+  RETURN {
+    depth:      array_resize_2d(outputs['predicted_depth'], h, w),
+    confidence: array_resize_2d(outputs['confidence'], h, w),
+    extrinsics: outputs['extrinsics'],
+    intrinsics: [
+      array_get(k, 1) * sx,  0.0::Float32,          array_get(k, 3) * sx,
+      0.0::Float32,          array_get(k, 5) * sy,  array_get(k, 6) * sy,
+      0.0::Float32,          0.0::Float32,          1.0::Float32
+    ]
+  }
+END;
+
+-- ---- Full bundle, native 518x518 resolution -------------------------------
+--
+-- Escape-hatch sibling of `depth_anything_v3_large_full` that returns
+-- every head at the model's native input grid, without bilinear-resizing
+-- depth/confidence or rescaling the predicted intrinsics matrix. Use when
+-- chaining at 518×518 (avoids the resize cost), debugging the raw model
+-- output, or feeding the unscaled K through to a separate pipeline that
+-- handles its own resolution mapping.
+
+CREATE OR REPLACE MODEL depth_anything_v3_large_full_native(img Image)
   RETURNS Struct<
     depth Array<Float32>(518, 518),
     confidence Array<Float32>(518, 518),
