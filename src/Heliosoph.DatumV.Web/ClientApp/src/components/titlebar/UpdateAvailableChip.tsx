@@ -42,7 +42,7 @@ export function UpdateAvailableChip({ className }: { className?: string }) {
         title={t('updater.viewRelease')}
         className={cn(
           'app-no-drag flex items-center gap-1.5 rounded-xs border px-2 py-0.5 text-[11px] transition-colors',
-          'cursor-pointer text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20',
+          'cursor-pointer border-primary bg-primary/75 text-primary-foreground hover:bg-primary',
           className,
         )}
       >
