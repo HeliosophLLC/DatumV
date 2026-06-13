@@ -1043,6 +1043,23 @@ internal sealed class SemanticAnalyzer
             return true;
         }
 
+        // OneOfMatcher describes itself as "one of A, B, C". Split the tail
+        // and recurse so each listed kind gets full compatibility treatment
+        // (numeric widening, family lookup, etc.), not just literal equality.
+        const string oneOfPrefix = "one of ";
+        if (expectedKind.StartsWith(oneOfPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            string tail = expectedKind[oneOfPrefix.Length..];
+            foreach (string candidate in tail.Split(','))
+            {
+                if (IsTypeCompatible(actualKind, candidate.Trim()))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Array-wrapped kinds: recurse on the element if both sides are
         // arrays; reject if exactly one side is. Without this branch a
         // legitimate `Array<Int32>` flowing into `Array<Float32>` would

@@ -1509,6 +1509,79 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void OneOfLabelled_ListedKind_DoesNotWarn()
+    {
+        // `OneOfMatcher` (used by e.g. `point_x(point)`) renders its Kind
+        // in the manifest as `"one of Point2D, Point3D"`. Previously the
+        // string-equality check rejected a legitimate Point3D argument
+        // with `expects one of Point2D, Point3D, got Point3D`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "p", Kind = "Point3D", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_x",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "point", Kind = "one of Point2D, Point3D" },
+                    ],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_x(p) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void OneOfLabelled_NonListedKind_StillWarns()
+    {
+        // Negative: a kind not in the `one of` list still warns.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "s", Kind = "String", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_x",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "point", Kind = "one of Point2D, Point3D" },
+                    ],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_x(s) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void FamilyLabelled_NonMemberKind_StillWarns()
     {
         // Negative test: `String` should not slip through a

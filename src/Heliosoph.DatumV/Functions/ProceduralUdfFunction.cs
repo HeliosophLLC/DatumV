@@ -85,7 +85,7 @@ public sealed class ProceduralUdfFunction : IScalarFunction
                 $"UDF '{descriptor.Name}' is not procedural; ProceduralUdfFunction only adapts BEGIN…END bodies.",
                 nameof(descriptor));
         }
-        if (descriptor.ReturnTypeName is null)
+        else if (descriptor.ReturnTypeName is null)
         {
             throw new ArgumentException(
                 $"Procedural UDF '{descriptor.Name}' has no declared return type. " +
