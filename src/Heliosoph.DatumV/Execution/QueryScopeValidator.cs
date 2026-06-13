@@ -559,15 +559,19 @@ internal sealed class QueryScopeValidator
         if (colRef.TableName is not null)
         {
             // 2-part `alias.column`. Walk local + parent scope for
-            // correlation. Only fail when the alias is truly unknown
-            // and not a procedural variable, lambda parameter, or
-            // projection alias (any of which can shadow at runtime).
+            // correlation. Only fail when the qualifier is truly
+            // unknown across every name-binding surface that could
+            // legitimately supply a value (struct, row, scalar) for
+            // the runtime to project a field from: FROM/JOIN aliases,
+            // LET bindings (commonly struct-valued — e.g.
+            // `LET d = models.depth(img)` then `d.depth`), projection
+            // aliases (visible to ORDER BY / HAVING / QUALIFY),
+            // procedural variables, and lambda parameters.
             if (ScopeKnowsAlias(scope, colRef.TableName)) return;
+            if (ScopeKnowsValueBinding(scope, colRef.TableName)) return;
+            if (ScopeKnowsProjectionAlias(scope, colRef.TableName)) return;
             if (_knownProceduralVariables.Contains(colRef.TableName)) return;
             if (LambdaParameterInScope(colRef.TableName)) return;
-            // Bare projection alias used as a struct qualifier doesn't
-            // happen in practice; if it did the runtime would resolve.
-            // No throw — accept to keep the conservative posture.
             throw new ExecutionException(
                 $"Unknown table or alias '{colRef.TableName}' in reference "
                 + $"'{colRef.TableName}.{colRef.ColumnName}'.");

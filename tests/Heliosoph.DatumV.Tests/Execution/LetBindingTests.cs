@@ -356,6 +356,29 @@ public sealed class LetBindingTests : ServiceTestBase
     }
 
     /// <summary>
+    /// Sibling LET chain via dot access on a struct-valued LET:
+    /// <c>LET s = {a: 1}, LET y = s.a + 1, y</c>. The second LET's body
+    /// references the first LET's struct field, exercising the
+    /// row-evaluator's struct-field-on-augmented-row path that
+    /// projection-side LET evaluation must keep working when the
+    /// qualifier is itself a sibling LET name.
+    /// </summary>
+    [Fact]
+    public async Task EndToEnd_DotAccess_OnLetBoundStruct_FromSiblingLet()
+    {
+        TableCatalog catalog = CreateCatalog("t",
+            columns: ["dummy"],
+            [0f]);
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT LET s = {a: 10.0, b: 20.0}, LET sum = s.a + s.b, sum AS result FROM t",
+            catalog);
+
+        Assert.Single(results);
+        Assert.Equal(30.0, results[0]["result"].ToDouble(), precision: 4);
+    }
+
+    /// <summary>
     /// Destructured names can be consumed by subsequent LET bindings (chaining).
     /// </summary>
     [Fact]

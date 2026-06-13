@@ -154,6 +154,37 @@ public sealed class QueryScopeValidatorTests : ServiceTestBase
     }
 
     [Fact]
+    public void Plan_LetBindingUsedAsStructQualifier_DoesNotThrow()
+    {
+        // A LET binding can hold a struct (e.g. `LET d = models.depth_anything(img)`)
+        // and downstream refs project struct fields via `d.depth`. The
+        // 2-part `name.field` path must check LET bindings alongside
+        // FROM/JOIN aliases — otherwise legitimate struct-field access
+        // on a LET trips "Unknown table or alias".
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+
+        QueryExpression query = Parse(
+            "SELECT LET k = id, k.field FROM items");
+
+        catalog.PlanQuery(query);
+    }
+
+    [Fact]
+    public void Plan_ProjectionAliasUsedAsStructQualifier_DoesNotThrow()
+    {
+        // Symmetric case for projection aliases: `SELECT expr AS s`
+        // followed by `s.field` in ORDER BY / HAVING / QUALIFY. The
+        // 2-part path must consult the projection-alias set so a
+        // struct-valued projection can be field-accessed downstream.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+
+        QueryExpression query = Parse(
+            "SELECT id AS s FROM items ORDER BY s.field");
+
+        catalog.PlanQuery(query);
+    }
+
+    [Fact]
     public void Plan_LetBindingReferencedInLateralTvfArg_DoesNotThrow()
     {
         // `unnest(classes)` where `classes` is a LET in the same SELECT.

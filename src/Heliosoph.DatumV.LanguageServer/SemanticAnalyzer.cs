@@ -1168,6 +1168,17 @@ internal sealed class SemanticAnalyzer
                 return;
             }
 
+            // LET bindings are virtual values that frequently hold
+            // structs (e.g. `LET d = models.depth(img)`); refs like
+            // `d.depth` are field accesses, not table.column lookups.
+            // Skip the qualifier-validation path for them — the
+            // analyzer doesn't track struct field shapes here, so any
+            // existence check would either over-reject or no-op.
+            if (_currentStatementLetNames.Contains(qualifier))
+            {
+                return;
+            }
+
             ValidateTableQualifier(qualifier, column.Span, aliasToTable, opaqueAliases, diagnostics);
 
             // If the table is opaque, skip column validation.

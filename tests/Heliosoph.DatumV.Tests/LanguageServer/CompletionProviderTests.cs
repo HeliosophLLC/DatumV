@@ -537,6 +537,54 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_AfterDot_OnLetBoundNamedStruct_OffersStructFields()
+    {
+        // `LET d = models.depth(img)` where the model's ReturnType is a
+        // named struct (here `DepthResult`). Typing `d.` should surface
+        // the struct's field names. The resolver path:
+        // cteSchemas.LetBindingKinds[d] = "DepthResult" → named-type
+        // expansion → fields. Previously the qualified-completion path
+        // only parsed inline `Struct<…>` annotations and so missed any
+        // LET bound to a value typed by a named struct.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "img", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "depth",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    ReturnType = "DepthResult",
+                },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "DepthResult",
+                    Description = "Struct<depth: Float32, confidence: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT LET d = models.depth(a.img), d. FROM items a";
+        int offset = sql.IndexOf("d. FROM", StringComparison.Ordinal) + 2;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "depth" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "confidence" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
     public void Classify_AfterFourPartDot_ExtractsThreeChainSegments()
     {
         // Sanity: verify the context classifier collects all 3 preceding

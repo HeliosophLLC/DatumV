@@ -506,6 +506,28 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_LetBindingUsedAsStructQualifier_DoesNotWarn()
+    {
+        // A LET binding can hold a struct (e.g.
+        // `LET d = models.depth(img)`) and downstream refs project
+        // struct fields via `d.depth`. The 2-part qualifier-validation
+        // path must consult the LET-name set alongside FROM/JOIN
+        // aliases — otherwise legitimate struct-field access on a LET
+        // emits a false "Unknown table or alias" diagnostic in the
+        // editor.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "img")],
+            functions: [Function("depth", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET d = depth(a.img), d.depth FROM items a",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 'd'"));
+    }
+
+    [Fact]
     public void Analyze_LetBindingInTvfArg_DoesNotWarn()
     {
         // Regression: `unnest(classes)` where `classes` is a LET binding
