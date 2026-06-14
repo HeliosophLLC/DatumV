@@ -233,8 +233,141 @@ Filters an array, keeping only elements where the lambda predicate returns true.
 SELECT array_filter(array(1, 2, 3, 4, 5), x -> x > 2) -- [3, 4, 5]
 ```
 
+## Numeric Array Primitives
+
+A small family of element-wise BLAS-flavoured primitives and shape
+transforms used heavily by SQL-defined model bodies. They aren't
+locked to ML — they're general-purpose array operations — but most
+current uses today are inside `CREATE MODEL` bodies (diffusion
+samplers, depth-map resizing, vision-language attention masks),
+where a per-element SQL loop would be orders of magnitude slower
+than the tight C# loop these functions wrap.
+
+### array_axpy
+
+`array_axpy(y, a, x)` → `Float32[]`
+
+Element-wise `y[i] + a * x[i]` over two equal-length `Float32[]`
+arrays with a `Float32` scalar `a`. Returns a fresh array of the
+same length; arrays of different lengths raise. Named after the
+[BLAS Level-1 `axpy`](https://www.netlib.org/blas/) routine that
+fills the same role.
+
+The diffusion Euler update is the canonical site:
+
+```sql
+SET latents = array_axpy(latents, sigma_next - sigma, noise_pred)
+```
+
+### array_scale
+
+`array_scale(a, s)` → `Float32[]`
+
+Multiplies every element of a `Float32[]` by a `Float32` scalar `s`;
+returns a fresh array.
+
+```sql
+-- Scale the initial diffusion latent by sigma_max:
+DECLARE latents Float32[] = array_scale(sample_normal(n), sigmas[1]);
+
+-- VAE post-decode scale-factor divide:
+SET latents = array_scale(latents, CAST(1.0 / 0.18215 AS Float32))
+```
+
+### array_clamp
+
+`array_clamp(a, min, max)` → `Float32[]`
+
+Element-wise clamp to `[min, max]`; returns a fresh `Float32[]` of
+the same length. `min > max` raises.
+
+The motivating use is keeping a Float32 activation inside the fp16
+representable range (±65504) before feeding it to an fp16 ONNX
+session — values that would otherwise become ±Inf on cast and
+NaN-poison the next attention softmax:
+
+```sql
+SET pooled = array_clamp(pooled, -65504.0::Float32, 65504.0::Float32)
+```
+
+### array_concat_last_dim
+
+`array_concat_last_dim(a, a_inner, b, b_inner)` → `Float32[]`
+
+Concatenate two flat `[outer, inner_a]` and `[outer, inner_b]`
+tensors along their inner (last) dimension, producing
+`[outer, inner_a + inner_b]` with per-row interleaving — each block
+of `inner_a + inner_b` output elements is one row of `a` followed by
+the matching row of `b`.
+
+`outer` is derived as `cardinality(a) / a_inner` and must equal
+`cardinality(b) / b_inner` or the function throws.
+
+Distinct from
+[`array_concat`](#array_concat), which flattens its inputs and
+appends end-to-end with no per-row interleaving. SDXL uses this to
+merge the two text encoders' per-token hidden states along the
+hidden dim (CLIP-L `[1, 77, 768]` + OpenCLIP-G `[1, 77, 1280]` →
+`[1, 77, 2048]`):
+
+```sql
+DECLARE combined_embeds Float32[] = array_concat_last_dim(
+    clip_l_hidden, 768::Int32, openclip_g_hidden, 1280::Int32);
+```
+
+### array_repeat
+
+`array_repeat(value, count)` → `Array<T>`
+
+Build an array of `count` copies of `value`. The element kind of the
+result matches the value's scalar kind. Supports `Int64`, `Int32`,
+`Float32`, and `Boolean` values. `count` must be non-negative;
+`count = 0` produces an empty array.
+
+Used to construct fixed-content tensors that model bodies need at
+runtime — all-ones attention masks of length matching a concatenated
+visual + prompt sequence, zero-filled mask-input tensors for SAM
+decoders, etc.
+
+```sql
+-- All-ones attention mask of length n:
+DECLARE mask Int64[] = array_repeat(1::Int64, n);
+
+-- Zero-filled SAM mask_input tensor (256 × 256 = 65536 floats):
+DECLARE mask_input Float32[] = array_repeat(0.0::Float32, 256 * 256)
+```
+
+### array_resize_2d
+
+`array_resize_2d(arr, dst_h, dst_w)` → `Array<Float32>(dst_h, dst_w)`
+
+Bilinear-resample a 2D `Float32` field onto a new pixel grid. Result
+is a shape-aware multi-dim array, so downstream consumers can read
+its dimensions via [`array_shape`](#array_shape) and index with
+[`array_get(arr, y, x)`](#array_get).
+
+Rank handling: rank-2 `(h, w)` inputs are consumed directly; rank-3
+`(1, h, w)` inputs (the typical ONNX `[batch=1, h, w]` shape for
+depth / segmentation outputs) auto-squeeze the leading dim;
+anything else raises with the observed shape.
+
+Sample positions follow the standard half-pixel convention used by
+PIL / OpenCV / SkiaSharp (`(src_y + 0.5) * src_h / dst_h - 0.5`),
+boundary samples clamp. Linear interpolation preserves the source
+value's units — metres for `models.zoedepth_nyu_kitti_meters`,
+probabilities for segmentation masks, etc.
+
+```sql
+-- Resize ZoeDepth's [1, 384, 384] metric output onto the source image grid:
+DECLARE depth_native Array<Float32> = models.zoedepth_nyu_kitti_meters(img);
+DECLARE depth_full   Array<Float32> = array_resize_2d(
+    depth_native, image_height(img), image_width(img));
+```
+
 ## See Also
 
+- [Inference Helpers](inference.md) -- ML-specific dispatch surface (`infer`, `decode_seq2seq`, ...) and the diffusion schedule / noise functions (`sd_turbo_schedule`, `sample_normal`) that pair with the numeric array primitives above
+- [CREATE MODEL](../sql/create-model.md) -- the DDL surface where most uses of `array_axpy`, `array_scale`, `array_clamp`, `array_concat_last_dim`, `array_repeat`, and `array_resize_2d` show up today
 - [String Functions](string.md) -- string_to_array, regexp_split_to_array, and array_join
 - [JSON Functions](json.md) -- json_array_length and JSON array extraction
 - [Utility & Type Conversion Functions](utility.md) -- type checks and casting
