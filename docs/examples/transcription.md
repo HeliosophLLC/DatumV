@@ -20,6 +20,6 @@ The pieces:
 - `SELECT *` keeps the original columns alongside the new transcription column.
 - `LIMIT 10` returns the first ten rows — raise or drop it to transcribe more.
 
-Whisper-Tiny is the smallest catalog variant and comfortable on CPU. Larger variants (`whisper-base`, `whisper-small`, `whisper-large-v3-turbo`) trade speed for accuracy and broader multilingual coverage. See the [Models reference](../models.md) for the full set.
+Whisper-Tiny is the smallest catalog variant and comfortable on CPU. Larger variants (`whisper-base`, `whisper-small`, `whisper-large-v3-turbo`) trade speed for accuracy and broader multilingual coverage. Open the **Model Catalog** tab for the exact set installed in your catalog.
 
 The transcription column composes with the rest of SQL — filter on contents, join against ground-truth labels, group by detected language, or feed the text into another model (an embedder, a classifier, a summariser) without leaving the query.

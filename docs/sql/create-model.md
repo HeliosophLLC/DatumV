@@ -55,6 +55,7 @@ A few non-obvious rules covered in detail below:
 - `USING` is **optional**: omitting it produces a *delegating* model that loads no weights of its own; the body produces its result by calling another model (or a UDF). See [Delegating models](#delegating-models).
 - `USING` supports multi-session bundles via aliased entries (`USING 'a' AS x, 'b' AS y`) — the body dispatches by alias.
 - Body-scoped scalars (`infer()`, `llama_chat()`, `llama_generate()`, `decode_decoder_only()`, …) are only callable from inside a model body. The planner refuses every other call site.
+- **Straight-line bodies unlock batched dispatch.** When the body is a sequence of `DECLARE` and `SET` statements ending in a single `RETURN`, the engine runs each batch of rows through the model in one columnar pass — `infer()` and friends get their packed cross-row dispatch. Bodies that use top-level control flow (`IF`, `WHILE`, `BEGIN`/`END` blocks, `BREAK`/`CONTINUE`) fall back to per-row execution because columnar evaluation can't pick a single branch for an N-row column when different rows would take different branches. Nested expressions inside `DECLARE` / `SET` / `RETURN` — `CASE`, function calls, lambda invocations — don't break the property; only top-level control flow does.
 
 ## A complete example
 
@@ -92,11 +93,7 @@ END;
 - **`file://<absolute>`** — the prefix is stripped and the rest is treated
   as an absolute path. Useful for tests and for files outside the host's
   models directory.
-- **Relative path** — resolved against the host's models directory
-  (`TableCatalog.Models.ModelDirectory`), which is configured via the
-  `--models <path>` flag on `datum-shell` or the `DATUMV_MODELS`
-  environment variable. See [Models › Setup](../models.md#setup) for
-  the full resolution order.
+- **Relative path** — resolved against the host's [models directory](#models-directory).
 
 ```sql
 -- Absolute (Linux/macOS):
@@ -123,55 +120,6 @@ path-resolution + AST cost, not per-model session-load cost. Missing
 files surface immediately as `FileNotFoundException`; invalid ONNX /
 GGUF content surfaces on the first invocation that touches the session.
 
-### Paths resolve verbatim — no implicit version injection
-
-Models installed through the catalog (the Models panel or the REST
-install endpoint) live in per-version folders on disk:
-
-```
-<models-dir>\all-minilm-l6-v2\
-  2026-05-29\
-    model.onnx
-    vocab.txt
-```
-
-**The `USING` string you write is the path that gets loaded — no
-implicit segment injection.** Catalog installSql files include the
-version segment explicitly:
-
-```sql
--- models/sql/all-minilm-l6-v2/2026-05-29.sql
-CREATE MODEL all_minilm_l6_v2(text String) RETURNS Float32[]
-USING 'all-minilm-l6-v2/2026-05-29/model.onnx'
-...
-```
-
-```
--- Resolves to:
-<models-dir>\all-minilm-l6-v2\2026-05-29\model.onnx
-```
-
-When the catalog ships a new version, the new cut's SQL file (e.g.
-`2026-06-15.sql`) writes the new version segment in its USING paths.
-Each persisted catalog row records which `(catalog_id, version)` it
-came from, so a CREATE MODEL registration always names exactly one
-on-disk weight file. There is no shared "active pointer" and no
-silent rewriting at planner time — the bug class where an ad-hoc
-`inference.onnx_inspect('sd-turbo/2026-05-29/model.onnx')` call got
-the active version injected a second time (producing the broken
-`sd-turbo/2026-05-29/2026-05-29/...` path) goes away by construction.
-
-For absolute paths or side-loaded weights outside the catalog,
-`file://` and rooted absolute paths short-circuit relative resolution
-entirely:
-
-```sql
--- Absolute:
-USING 'file://C:/onnx/external.onnx'
--- or:
-USING 'D:/data/models/local.onnx'
-```
-
 The runtime currently uses ONNX Runtime 1.25.1, which supports up to
 opset 22 (for the `ai.onnx` domain). Newer ONNX exports may need to be
 re-saved with an older `ir_version` / `opset_import` to load. A small
@@ -187,6 +135,115 @@ onnx.save(m, "model.onnx")
 
 GGUF files load via LlamaSharp / llama.cpp — no opset constraints; the
 backend handles its own version detection from the file's metadata.
+
+## Setup
+
+### Models directory
+
+DatumV reads model files from a single models directory. The resolution order is:
+
+1. The path set in the **Settings** tab.
+2. The `DATUMV_MODELS` environment variable.
+3. Per-user default — `%LOCALAPPDATA%\Heliosoph.DatumV\models` on Windows, `~/.local/share/Heliosoph.DatumV/models` on Linux/macOS.
+
+Pick a directory on NVMe or SSD storage with sufficient free space for the catalog you intend to install — model files run into the multi-GB range, and the first call to each model pays the session-load read cost.
+
+### Directory layout
+
+Each catalog-installed model lives in a per-id subfolder under the
+models directory — single-file and multi-file models follow the same
+pattern. Folder contents vary by model: most ship as a single
+`.onnx` or `.gguf`, while multi-input bundles (Florence-2, ViT-GPT2,
+encoder-decoder pairs) ship the encoder, decoder, and tokenizer
+alongside the main weights. For multi-file entries the catalog's
+`RelativePath` points at one anchor file inside the folder; the model
+loader derives the rest from the parent directory.
+
+```
+<models-dir>\
+  yolox_s\
+    yolox_s.onnx
+  Meta-Llama-3.1-8B-Instruct-Q4_K_M\
+    Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+  vit-gpt2-image-captioning\
+    encoder_model.onnx
+    decoder_model.onnx
+    tokenizer.json
+    ...
+  florence-2-base-ft-fp16\
+    vision_encoder_fp16.onnx
+    embed_tokens_fp16.onnx
+    encoder_model_fp16.onnx
+    decoder_model_fp16.onnx
+    tokenizer.json
+    ...
+```
+
+Catalog-driven Python models follow the same per-id convention
+(`bark-small/`, `bark/`, ...); the engine downloads the HuggingFace
+repo's files directly into that folder and points the worker at it
+via the `DATUMV_MODELS` env var, so there's no `~/.cache/huggingface/`
+indirection.
+
+### Catalog versioning
+
+Catalog-installed models add one more layer: each model lives under a
+per-`<catalog-id>` folder, with a per-version subfolder inside.
+
+```
+<models-dir>\
+  all-minilm-l6-v2\
+    2026-05-29\
+      model.onnx
+      vocab.txt
+```
+
+The catalog's installSql files write the explicit version segment in
+their USING paths:
+
+```sql
+USING 'all-minilm-l6-v2/2026-05-29/model.onnx'
+```
+
+When the catalog ships a new version, the new installSql writes the
+new segment. Each catalog row records its `(catalog_id, version)`
+pair, so a registered model always names exactly one on-disk weight
+file.
+
+### Python toolchain (auto-managed)
+
+Python-backed models (`bark_small`, `bark`, and anything else with
+`kind: "python"` in the catalog) don't require any manual Python
+install. The first time you Install one through the **Model Catalog**
+tab, the engine does the following, in order, surfacing each step
+inline on the model card:
+
+1. **Download `uv`** from `github.com/astral-sh/uv/releases` into
+   `%LOCALAPPDATA%\Heliosoph.DatumV\uv\`. One-time, ~15 MB.
+2. **Install the requested CPython** (e.g. 3.11) via
+   `uv python install` into `%LOCALAPPDATA%\Heliosoph.DatumV\python\`.
+   One-time per major.minor version, ~30-60 MB.
+3. **Create a per-model venv** at
+   `%LOCALAPPDATA%\Heliosoph.DatumV\venvs\<catalog-id>\` and `uv pip install`
+   the model's declared requirements (`torch`, `transformers`, etc.).
+   uv hardlinks wheels from its global cache across venvs, so the
+   second Python model installs in seconds.
+4. **Download weights** through the same `HuggingFaceSource` pipeline
+   ONNX models use, into `<models-dir>\<catalog-id>\`. The worker
+   reads `os.environ["DATUMV_MODELS"]` at startup and loads via
+   `from_pretrained(MODEL_DIR)` — no `~/.cache/huggingface/`
+   indirection.
+
+The engine never modifies your `PATH`, never touches your system
+Python, and writes only to `%LOCALAPPDATA%\DatumV\` and the models
+directory. Uninstall is a directory delete.
+
+To see current state from SQL:
+
+```sql
+SELECT * FROM system.python_paths;          -- uv binary, python install root, venvs root
+SELECT * FROM system.python_environments;   -- one row per provisioned venv
+```
 
 ## Schema lockdown
 
@@ -244,6 +301,8 @@ AS BEGIN
 END;
 ```
 
+See [Structs](struct.md) for field-access syntax (dot, bracket, `LET`-destructuring) and the catalog of named shapes (`BoundingBox`, `ScoredClass`, `Keypoint`, …) that can replace inline `Struct<...>` declarations.
+
 ### Annotation syntax
 
 The body inside the angle brackets is a comma-separated list of
@@ -288,6 +347,43 @@ return literal should agree, but the engine doesn't strictly enforce
 it (a field declared in `RETURNS` but missing from the return literal
 won't be reachable at runtime). Treat the annotation as the user-
 facing contract; treat the return literal as the implementation.
+
+## Body-scoped dispatch surface
+
+The scalars in the table below are the model body's interface to the
+loaded ONNX / GGUF sessions. Every one of them is **body-scoped** —
+the planner's plan-time gate refuses any call site outside a
+`CREATE [OR REPLACE] MODEL ... AS BEGIN ... END` body and surfaces the
+constraint through `system.functions.body_scope = 'modelbody'`. See
+the dedicated sections (and the linked function pages) for full
+argument shapes and worked examples.
+
+| Scalar | Backend | Surface | Documented in |
+|---|---|---|---|
+| `infer(arg [, shape])` <br/> `infer(alias, arg [, shape])` <br/> `infer(struct [, shapes])` | ONNX | Single-output tensor dispatch — single-input, multi-input (struct), and multi-session (aliased) forms. | [`§ infer()`](#infer) below |
+| `infer_outputs(struct [, shapes])` <br/> `infer_outputs(alias, struct [, shapes])` | ONNX | Multi-output ONNX dispatch; returns a struct keyed by ONNX output names. | [`§ infer()`](#infer) below |
+| `llama_generate(alias, prompt [, template] [, max_tokens] [, temperature])` | GGUF | Single-prompt text generation; implements `TextGenerator`. | [`§ LLM dispatch scalars`](#llm-dispatch-scalars) below |
+| `llama_chat(alias, messages [, template] [, max_tokens] [, temperature])` | GGUF | Multi-turn chat; `messages: Array<ChatMessage>`; implements `ChatCompleter`. | [`§ LLM dispatch scalars`](#llm-dispatch-scalars) below |
+| `decode_seq2seq(decoder, encoder_features, mask, prefix, eos, max_tokens, use_kv_cache [, embed_alias] [, suppress_above])` | ONNX | Encoder-decoder greedy decode (Whisper, T5, BART, TrOCR). | [`docs/functions/inference.md → decode_seq2seq`](../functions/inference.md#decode_seq2seq) |
+| `decode_decoder_only(decoder, embed_tokens, prefix_embeds, eos, max_tokens)` | ONNX | KV-cached greedy decode for decoder-only LLMs spliced behind a vision/audio prefix (Moondream2-style VQA). | [`docs/functions/inference.md → decode_decoder_only`](../functions/inference.md#decode_decoder_only) |
+| `mesh_from_triplane(nerf_alias, triplane, shape, resolution, isolevel, radius, chunk_size)` | ONNX | Chunked NeRF query loop + Marching Cubes; TripoSR-style triplane → `Mesh`. | [`docs/functions/inference.md → mesh_from_triplane`](../functions/inference.md#mesh_from_triplane) |
+
+Helpers that are *not* body-scoped — tokenizers
+([`tokenizer.encode_bert`](../functions/tokenization.md#tokenizerencode_bert),
+[`tokenizer.encode_bpe`](../functions/tokenization.md#tokenizerencode_bpe), ...), image
+preprocessors
+([`image_to_tensor_chw`](../functions/image.md#image_to_tensor_chw),
+[`imagenet_mean`](../functions/image.md#imagenet_mean), ...), audio
+feature extraction
+([`audio_to_log_mel`](../functions/audio.md#audio_to_log_mel)), and
+postprocessors
+([`yolox_postprocess`](../functions/inference.md#yolox_postprocess),
+[`dbnet_postprocess`](../functions/inference.md#dbnet_postprocess),
+[`mask_nms_planes`](../functions/inference.md#mask_nms_planes),
+[`depth_map_to_image`](../functions/inference.md#depth_map_to_image),
+...) — are callable from any `SELECT`, but appear almost exclusively
+inside model bodies. Browse them in
+[`docs/functions/`](../functions/string.md).
 
 ## `infer()`
 
@@ -366,17 +462,15 @@ DECLARE result Float32[] = infer(
      token_type_ids: [CAST(1 AS Int32), n]});
 ```
 
-The shipped [`all-minilm-l6-v2`](../../models/sql/all-minilm-l6-v2.sql)
+The shipped `models.all_minilm_l6_v2`
 model body is the canonical worked example — tokenize → multi-input
 `infer` → mean-pool → L2-normalize.
 
 ### Return shape
 
 The return value matches the session's output tensor's element kind.
-Output tensors with a single element surface as a scalar `ValueRef`;
-multi-element outputs surface as a primitive array. The body's `RETURN`
-coerces the value to the model's declared `RETURNS TYPE` if the kinds
-differ.
+The body's `RETURN` coerces the value to the model's declared
+`RETURNS TYPE` if the kinds differ.
 
 Sessions with **more than one output** are accepted; `infer()` returns
 the **first** output. The convention HuggingFace optimum and most

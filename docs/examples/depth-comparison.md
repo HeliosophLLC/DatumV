@@ -57,4 +57,4 @@ The four models above produce **relative** depth — values that order pixels fr
 
 Pick relative depth for visualisation and within-frame analysis. Pick metric depth when the numbers need to mean something outside the image — 3D reconstruction, robotics, AR, anything that combines depth across frames or cameras consistently.
 
-See the [Models reference](../models.md) for the full catalog of depth estimators and their characteristics.
+Open the **Model Catalog** tab for the depth-estimator variants installed in your catalog and their licenses.

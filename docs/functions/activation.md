@@ -1,7 +1,5 @@
 # ML Activation Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 All activations are element-wise and accept either a `Float32` scalar
 (returning `Float32`) or a `Float32[]` vector (returning `Float32[]`).
 Examples below use vector inputs; substitute a scalar column where

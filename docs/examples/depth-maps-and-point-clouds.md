@@ -340,6 +340,6 @@ coordinate-frame rules — see [Spatial Types](../sql/spatial.md).
   layout, organized vs unorganized, the full accessor table.
 - [Image Functions](../functions/image.md) — `apply_colormap`,
   `depth_map_to_image`, and the broader image-manipulation surface.
-- [Models](../models.md) — depth estimators, including the
-  metric-vs-relative distinction across `models.midas_small`,
-  `models.dpt_large`, and `models.zoedepth_nyu_kitti`.
+- [Models](../models.md) — `models.X(...)` dispatch, output shapes,
+  and the lifecycle of a catalog model. Open the **Model Catalog**
+  tab for the depth estimators installed in your catalog.

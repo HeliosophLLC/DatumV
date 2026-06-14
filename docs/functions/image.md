@@ -5,8 +5,6 @@ category: image
 
 # Image Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ## Metadata
 
 ### image_channels
@@ -132,25 +130,185 @@ CROSS APPLY video_unnest_frames(v.video, 0, 5, 50) AS f
 
 Sequential access (frame N → N+1 → N+2) is fast (~3–5 ms/frame at 384px, ~11 ms at 1080p on a reference H.264 source); backward access seeks to the file head and decodes forward. Stay in `frame_index` order whenever possible.
 
-### image_to_tensor_hwc
+## ONNX Tensor Conversion
 
-`image_to_tensor_hwc(img)` → Tensor
-
-Decode to [H, W, 3] RGB float tensor (values 0–255). TensorFlow/NumPy layout.
-
-```sql
-SELECT image_to_tensor_hwc(resize(file_bytes, 224, 224)) AS pixels FROM images
-```
+The functions in this section are the bridge between typed `Image`
+values and the flat `Float32[]` tensors that ONNX model bodies
+consume. They appear almost exclusively inside
+[`CREATE MODEL`](../sql/create-model.md) bodies as the first or last
+step of an inference pipeline.
 
 ### image_to_tensor_chw
 
-`image_to_tensor_chw(img)` → Tensor
+`image_to_tensor_chw(img, target_size)` → `Float32[]`
+`image_to_tensor_chw(img, target_size, mean, std)` → `Float32[]`
 
-Decode to [3, H, W] RGB float tensor (values 0–255). PyTorch layout.
+Stretch-resize an `Image` to `target_size = [height, width]` and
+flatten its RGB pixel data into a normalised NCHW Float32 tensor —
+the canonical preprocessing shape for most ONNX vision models
+(ResNet, MobileNet, ViT, YOLO backbones, CLIP image encoders).
+
+Output length is `3 × height × width`, channel-major:
+`dest[c*H*W + y*W + x]`. Per-element formula:
+`(pixel_byte / 255.0 - mean[c]) / std[c]`. The 2-arg shortcut omits
+mean/std and produces raw `pixel/255`.
+
+`target_size` is `[height, width]`, matching the NCHW tensor
+convention `[batch, channels, height, width]`. Resize filter is
+bilinear (matches the OpenCV / torchvision / TensorFlow defaults).
 
 ```sql
-SELECT image_to_tensor_chw(resize(file_bytes, 224, 224)) AS pixels FROM images
+-- ImageNet-normalised (most CV backbones):
+DECLARE tensor Float32[] = image_to_tensor_chw(
+    img, [224::Int32, 224::Int32], imagenet_mean(), imagenet_std());
+
+-- SigLIP / ViT-half-normalisation (Moondream2 vision encoder):
+DECLARE tensor Float32[] = image_to_tensor_chw(
+    img, [378::Int32, 378::Int32],
+    [0.5::Float32, 0.5::Float32, 0.5::Float32],
+    [0.5::Float32, 0.5::Float32, 0.5::Float32]);
+
+-- Raw pixel/255 (model applies its own normalisation in-graph):
+DECLARE tensor Float32[] = image_to_tensor_chw(img, [512::Int32, 512::Int32]);
 ```
+
+This is a **stretch** resize — the input is squashed to fit the
+target dimensions, no aspect preservation. For detectors and other
+aspect-sensitive models, see
+[`image_letterbox_tensor_chw`](#image_letterbox_tensor_chw) or
+[`yolox_preprocess`](inference.md#yolox_preprocess).
+
+### image_to_tensor_hwc
+
+`image_to_tensor_hwc(img, target_size)` → `Float32[]`
+`image_to_tensor_hwc(img, target_size, mean, std)` → `Float32[]`
+
+NHWC sibling of `image_to_tensor_chw`. Same stretch resize and
+per-channel normalisation; the only difference is the output index
+layout — pixels are interleaved as `[R, G, B]` triples
+(`dest[(y*W + x)*3 + c]`) instead of channel-major planes. Pair with
+ONNX models whose input shape is `[B, H, W, C]` (typically
+TF-exported graphs).
+
+### image_to_tensor_chw_bgr
+
+`image_to_tensor_chw_bgr(img, target_size)` → `Float32[]`
+`image_to_tensor_chw_bgr(img, target_size, mean, std)` → `Float32[]`
+
+BGR sibling of `image_to_tensor_chw`. Same stretch resize and
+normalisation, but emits the tensor in BGR channel order. Used by
+legacy detectors and depth estimators trained against cv2-loaded BGR
+images (MiDaS-small v2.1, some YOLO variants).
+
+The `mean` and `std` arrays are indexed in *output* channel order —
+i.e. BGR. Pass `[meanB, meanG, meanR]` if the upstream Python
+reference cites the values in BGR order.
+
+### image_letterbox_tensor_chw
+
+`image_letterbox_tensor_chw(img, target_size, mean, std, pad_fill)` → `Float32[]`
+
+Aspect-preserving letterbox resize plus per-channel normalisation
+into a square NCHW Float32 tensor — the canonical preprocessing for
+object detectors (YOLOX, SCRFD, RetinaFace) and any model whose
+accuracy depends on not stretching the input.
+
+- `target_size` — single `Int32`. The output canvas is
+  `target_size × target_size`; the image is aspect-scaled to fit
+  inside it and padded along the shorter side.
+- `mean`, `std` — `Float32[3]`. Per-channel normalisation; same role
+  as in `image_to_tensor_chw`.
+- `pad_fill` — `Float32`. The post-normalisation value written into
+  the padded region. YOLOX uses `114` (the raw byte 114, paired with
+  raw normalisation `mean=[0,0,0]`, `std=[1/255, 1/255, 1/255]`); for
+  ImageNet-normalised letterbox padding the canonical choice is `0`.
+
+Output length = `3 × target_size × target_size`. For a YOLOX-tuned
+all-in-one preset (BGR + 0–255 + 114-gray padding bundled together),
+see [`yolox_preprocess`](inference.md#yolox_preprocess).
+
+### tensor_to_image_chw
+
+`tensor_to_image_chw(tensor, height, width)` → `Image`
+`tensor_to_image_chw(tensor, height, width, mean, std)` → `Image`
+
+Inverse of `image_to_tensor_chw`: takes a flat NCHW Float32 tensor
+(`3 × height × width`), optionally denormalises with `mean` / `std`,
+and packs the bytes back into a PNG-encoded RGB image.
+
+The 3-arg shortcut assumes the tensor is already in `[0, 1]` (i.e.
+produced with `mean=[0,0,0]`, `std=[1,1,1]`); multiplies by 255 and
+clamps to byte range. The 5-arg form applies the inverse normalize
+`(value * std + mean) * 255` before clamping — pass the same
+mean/std the producer used. Values outside `[0, 1]` post-denormalize
+clamp rather than wrap (diffusion outputs frequently land slightly
+outside the range).
+
+```sql
+-- SD VAE-decoder output in [-1, 1] → image:
+RETURN tensor_to_image_chw(rgb, size, size,
+    [0.5::Float32, 0.5::Float32, 0.5::Float32],
+    [0.5::Float32, 0.5::Float32, 0.5::Float32])
+```
+
+Canonical use: `models.sd_turbo`
+
+### tensor_to_image_hwc
+
+`tensor_to_image_hwc(tensor, height, width)` → `Image`
+`tensor_to_image_hwc(tensor, height, width, mean, std)` → `Image`
+
+NHWC sibling of `tensor_to_image_chw`. Same call shape and
+semantics; the input tensor is interleaved `[R, G, B]` triples
+instead of channel-major planes.
+
+## Normalization Presets
+
+Per-channel mean / std constants for the most common training-data
+normalisations. Each returns `Float32[3]`; pass directly into
+`image_to_tensor_chw`'s `mean` / `std` arguments.
+
+These exist as named scalars because inline array literals like
+`[0.485, 0.456, 0.406]` parse as `Array<Int8>` and don't auto-cast
+to `Array<Float32>` — the named helpers sidestep that and are
+cheaper to type than `CAST(... AS Float32)` triples.
+
+### imagenet_mean
+
+`imagenet_mean()` → `Float32[3]`
+
+ImageNet RGB channel mean: `[0.485, 0.456, 0.406]`. The standard
+normalisation used across PyTorch / torchvision vision models trained
+on ImageNet — ResNet, MobileNet, EfficientNet, ViT, and most
+detection / segmentation backbones derived from them.
+
+### imagenet_std
+
+`imagenet_std()` → `Float32[3]`
+
+ImageNet RGB channel std: `[0.229, 0.224, 0.225]`. Pair with
+`imagenet_mean()`.
+
+```sql
+DECLARE tensor Float32[] = image_to_tensor_chw(
+    resized, [rh, rw], imagenet_mean(), imagenet_std());
+```
+
+### clip_mean
+
+`clip_mean()` → `Float32[3]`
+
+OpenAI CLIP RGB channel mean:
+`[0.48145466, 0.4578275, 0.40821073]`. The normalisation used by
+CLIP image encoders and the models that re-use them (BLIP,
+Florence-2's vision tower, MetaCLIP, OpenCLIP variants).
+
+### clip_std
+
+`clip_std()` → `Float32[3]`
+
+OpenAI CLIP RGB channel std:
+`[0.26862954, 0.26130258, 0.27577711]`. Pair with `clip_mean()`.
 
 ## Transforms
 
@@ -247,6 +405,76 @@ Decrease brightness by subtracting intensity (0–255 byte units) from each RGB 
 
 Sobel edge detection producing a grayscale edge-magnitude image. The 1-pixel border is opaque black.
 
+### image_resize_to_stride
+
+`image_resize_to_stride(img, max_side, stride)` → `Image`
+
+Aspect-preserving resize so the longest side is at most `max_side`,
+with both output dimensions rounded down to the nearest multiple of
+`stride`. The combination matches the PaddleOCR `DetResizeForTest`
+recipe and any other model whose ONNX export pins the input height /
+width to a stride multiple (typically 32 for FPN-style backbones).
+
+```sql
+-- PaddleOCR detector: longest side ≤ 960, both dims aligned to 32.
+DECLARE resized Image = image_resize_to_stride(img, 960, 32);
+```
+
+Canonical use: `models.paddleocr_v4_det`.
+
+### image_resize_foreground
+
+`image_resize_foreground(img, ratio)` → `Image`
+
+Crop the input to its alpha bounding box, then centre it in a square
+canvas with `ratio` of each side occupied by the subject (the rest is
+transparent margin). The standard preprocessor for single-object
+generative-3D pipelines (TripoSR's `resize_foreground(_, 0.85)`
+reference): a photo where the subject covers a third of the frame
+gets framed so the model has consistent context regardless of source
+crop.
+
+`ratio` is typically in `[0.7, 0.9]`. Smaller leaves more breathing
+room (helpful when the subject has extremities like legs or antennas
+that would otherwise hit the edge); larger zooms in more aggressively.
+
+Canonical use: `models.triposr`.
+
+### image_composite_over
+
+`image_composite_over(img, background_rgb)` → `Image`
+
+Flatten an alpha-bearing image against a solid background colour:
+`out = rgb · alpha + background · (1 - alpha)`. `background_rgb` is a
+`Float32[3]` with values in `[0, 1]`. No-op for inputs that are
+already fully opaque RGB.
+
+Used when the downstream model was trained on imagery composited
+over a specific background colour — feeding it a raw cutout
+(alpha = 0 outside subject) or a flatten-to-black render produces
+silhouette ghosts or fringing artifacts.
+
+```sql
+-- TripoSR's training data is rembg-cleaned then composited over 0.5 gray.
+DECLARE flat Image = image_composite_over(
+    framed, [0.5::Float32, 0.5::Float32, 0.5::Float32]);
+```
+
+### image_cutout
+
+`image_cutout(image, mask)` → `Image`
+
+Apply a grayscale mask as the alpha channel of an image. The output
+has the original image's RGB and a new alpha channel sampled from
+the mask's red channel — opaque where the mask is white, transparent
+where it is black. Pair with `models.u2netp(img)` or
+`models.mobilesam(img)` to turn segmentation output into a typed
+RGBA cutout in a single SQL expression.
+
+```sql
+SELECT image_cutout(img, models.u2netp(img)) AS subject FROM photos
+```
+
 ### resize_and_crop
 
 `image_resize_and_crop(img, w, h, gravity)` → Image
@@ -306,5 +534,8 @@ This is implemented via `ImageHandle`, a smart wrapper that carries either encod
 
 ## See Also
 
-- [Vector & Tensor Functions](vector.md) -- operations on tensors produced by image_to_tensor_hwc/chw
-- [Functions Reference](string.md) -- complete function listing across all categories
+- [Inference Helpers](inference.md) — vision-model preprocess / postprocess (`yolox_preprocess`, `sam_preprocess`, `dbnet_postprocess`, `mask_nms_planes`, `depth_map_to_image`, ...) paired with the tensor-conversion surface here.
+- [CREATE MODEL](../sql/create-model.md) — the DDL surface that wires `image_to_tensor_chw` and friends into ONNX inference bodies.
+- [Tokenization Functions](tokenization.md) — text → tensor preprocessing for vision-language models.
+- [Vector & Tensor Functions](vector.md) — operations on tensors produced by `image_to_tensor_hwc` / `image_to_tensor_chw`.
+- [Functions Reference](string.md) — complete function listing across all categories.

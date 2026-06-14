@@ -5,8 +5,6 @@ category: numeric
 
 # Numeric Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ## Normalization
 
 ### min_max_normalize

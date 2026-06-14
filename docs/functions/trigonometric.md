@@ -5,8 +5,6 @@ category: trigonometry
 
 # Trigonometric Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 All functions accept any numeric kind and return `Float64`. Angles are in radians.
 
 ### sin

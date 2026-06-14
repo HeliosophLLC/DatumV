@@ -5,8 +5,6 @@ category: random
 
 # Random & Sampling Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ### hash_split
 
 `hash_split(key, seed)` → Float32 | QU: 1

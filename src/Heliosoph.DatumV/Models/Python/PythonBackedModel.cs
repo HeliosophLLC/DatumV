@@ -87,8 +87,8 @@ public sealed class PythonBackedModel : IModel, IDisposable
     /// Absolute path to the per-model directory under
     /// <c>DATUMV_MODELS</c> that <see cref="Heliosoph.DatumV.ModelLibrary.ModelDownloadService"/>
     /// populated with weight files. Forwarded to the worker as the
-    /// <c>DATUMV_MODEL_DIR</c> environment variable so it can load
-    /// weights via <c>from_pretrained(os.environ['DATUMV_MODEL_DIR'])</c>
+    /// <c>DATUMV_MODELS</c> environment variable so it can load
+    /// weights via <c>from_pretrained(os.environ['DATUMV_MODELS'])</c>
     /// — keeping the model's on-disk footprint under the user-
     /// configured models directory rather than HuggingFace's default
     /// <c>~/.cache/huggingface/</c>. Optional: pass

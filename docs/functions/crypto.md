@@ -5,8 +5,6 @@ category: crypto
 
 # Cryptographic Hash Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 Cryptographic hash functions backed by the .NET runtime. All hashes accept a `String` (hashed as UTF-8) or a `UInt8[]` byte array. Null input propagates to null output.
 
 `md5` returns a 32-character lowercase hex `String` for PostgreSQL compatibility; every other hash returns the raw digest as `UInt8[]`. Pair them with [`encode`](encoding.md#encode) to get a hex or base64 string.

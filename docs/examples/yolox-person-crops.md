@@ -24,4 +24,4 @@ The pieces:
 - `WHERE c.value.label = 'person'` filters to person detections.
 - `image_crop(file, c.value.bbox)` returns the cropped region as an `Image`.
 
-YOLOX-Small is the smallest model in the family and runs comfortably on CPU. Larger variants (`yolox_m`, `yolox_l`, `yolox_x`) trade speed for accuracy. See the [Models reference](../models.md) for the full set.
+YOLOX-Small is the smallest model in the family and runs comfortably on CPU. Larger variants (`yolox_m`, `yolox_l`, `yolox_x`) trade speed for accuracy. Open the **Model Catalog** tab for the full set of variants and their licenses; see [Models](../models.md) for the conceptual surface around `models.X(...)` dispatch and `Array<Struct>` outputs.

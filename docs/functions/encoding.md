@@ -5,8 +5,6 @@ category: encoding
 
 # Encoding & Decoding Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 Convert between byte arrays (`UInt8[]`) and text using one of three formats. PostgreSQL-compatible: `encode`/`decode` are the same surface and the same format set (`'base64'`, `'hex'`, `'escape'`) as Postgres' bytea encoders. The format string is case-insensitive. Null input propagates to null output.
 
 ## encode

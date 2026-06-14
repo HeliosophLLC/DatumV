@@ -123,16 +123,16 @@ internal sealed class PythonProcessHost : IDisposable
             psi.Environment["PYTHONPATH"] = string.Join(Path.PathSeparator, parts);
         }
 
-        // DATUMV_MODEL_DIR points the worker at the per-model directory
+        // DATUMV_MODELS points the worker at the per-model directory
         // that ModelDownloadService populated. Workers use this to load
-        // weights via `from_pretrained(os.environ['DATUMV_MODEL_DIR'])`
+        // weights via `from_pretrained(os.environ['DATUMV_MODELS'])`
         // — so the model files live where the user expects (under their
         // configured DATUMV_MODELS), not in HuggingFace's default cache
         // under ~/.cache/huggingface/. Mirrors how ONNX workers resolve
         // their .onnx paths relative to the model directory.
         if (!string.IsNullOrEmpty(modelDirectory))
         {
-            psi.Environment["DATUMV_MODEL_DIR"] = modelDirectory;
+            psi.Environment["DATUMV_MODELS"] = modelDirectory;
         }
 
         Process process;

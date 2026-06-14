@@ -5,8 +5,6 @@ category: uuid
 
 # UUID Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 UUID generation, formatting, and inspection. Versions 4 and 7 cover the common cases — v4 for random identifiers, v7 for time-ordered identifiers that sort by creation time. The extraction functions follow RFC 9562 / PostgreSQL 18 semantics.
 
 ## uuidv4

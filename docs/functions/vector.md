@@ -5,8 +5,6 @@ category: vector
 
 # Vector & Tensor Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ## Reductions
 
 ### vec_sum

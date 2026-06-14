@@ -5,8 +5,6 @@ category: audio
 
 # Audio Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ## Metadata
 
 ### audio_sample_rate
@@ -81,6 +79,38 @@ Reach for this before `audio_samples` whenever the source is or might be stereo 
 -- Canonical stereo-tolerant chain for any audio model:
 SELECT audio_samples(16000, audio_to_mono(clip)) AS pcm FROM clips
 ```
+
+## ONNX Feature Extraction
+
+### audio_to_log_mel
+
+`audio_to_log_mel(samples, n_mels)` → `Float32[]`
+
+Whisper-canonical log-mel spectrogram feature extractor — STFT
+(`n_fft = 400`, `hop = 160`, Hann window, center-padded), Slaney mel
+filterbank with `n_mels` channels, log10, max-8 dB clip + shift to
+roughly `[-1, 1]`. The input `samples` is the raw PCM `Float32[]`
+that [`audio_samples`](#audio_samples) emits at 16 kHz.
+
+Output is a flat mel-major `Float32[]` of length `n_mels × 3000`
+(the trailing 3000 is Whisper's 30-second encoder context — clips
+longer than that truncate, shorter zero-pad to the limit). Pass
+straight to the encoder ONNX with shape
+`[1, n_mels, 3000]`:
+
+```sql
+DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));
+DECLARE mel Float32[] = audio_to_log_mel(samples, 80::Int32);
+DECLARE encoder_features Float32[] = infer(
+    'encoder', mel, [1::Int32, 80::Int32, 3000::Int32]);
+```
+
+`n_mels` is 80 for Whisper base / small / medium / large-v1/v2;
+**128** for Whisper large-v3 (and the v3 turbo distillation). Always
+match the value to the encoder's expected input depth — passing 80
+to a large-v3 export silently produces garbage transcriptions.
+
+Canonical use: `models.whisper_base`.
 
 ## Visualization
 
@@ -212,6 +242,9 @@ Width and height must be positive. Null audio, null `width`, null `height`, or n
 
 ## See Also
 
+- [CREATE MODEL](../sql/create-model.md) — the DDL surface that wires `audio_samples` / `audio_to_log_mel` into ONNX speech / audio pipelines.
+- [Inference Helpers](inference.md) — sequence-to-sequence dispatch (`decode_seq2seq`) used by Whisper-style decoders that consume `audio_to_log_mel` features.
+- [Tokenization Functions](tokenization.md) — `tokenizer.decode_bpe` and `tokenizer.byte_level_decode` for the text-side of speech-to-text bodies.
 - [Drawing Functions](drawing.md) — `render`, drawing primitives, and the broader procedural-visual toolkit that `audio_waveform_drawing` / `audio_waveform_path` slot into.
 - [Vector & Tensor Functions](vector.md) — operations on tensors produced by `audio_samples`.
 - [Functions Reference](string.md) — complete function listing across all categories.

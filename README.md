@@ -57,7 +57,7 @@ See [Examples — Depth model comparison](docs/examples/depth-comparison.md) for
 
 DatumV ships with a built-in catalog spanning object detection, segmentation, classification, depth estimation, OCR, captioning, embeddings, text-to-speech, image generation, and LLMs — including MobileSAM, the YOLOX family, Stable Diffusion variants, all-MiniLM-L6-v2, Florence-2, PaddleOCR, MiDaS, DPT, U²-Net, and Bark.
 
-You can add your own ONNX models with `CREATE MODEL`. See [docs/models.md](docs/models.md) for the current catalog and [docs/sql/create-model.md](docs/sql/create-model.md) for adding new ones.
+You can add your own ONNX models with `CREATE MODEL`. See [docs/models.md](docs/models.md) for the conceptual surface (dispatch, output shapes, lifecycle) and [docs/sql/create-model.md](docs/sql/create-model.md) for adding new ones.
 
 ## Documentation
 
@@ -67,7 +67,7 @@ You can add your own ONNX models with `CREATE MODEL`. See [docs/models.md](docs/
 | [Examples](docs/examples/index.md) | Things you can do |
 | [SQL Reference](docs/sql/select.md) | SELECT, JOIN, WHERE, GROUP BY, window functions, type system, DDL/DML |
 | [Functions](docs/functions/string.md) | 200+ built-in functions across math, string, image, vector, temporal, JSON |
-| [Models](docs/models.md) | Built-in catalog and how to add your own |
+| [Models](docs/models.md) | How `models.X(...)` works — dispatch, output shapes, lifecycle, adding your own |
 | [Engine internals](docs/technical/architecture.md) | Architecture, file format, indexes, execution plans, C# API |
 
 ## Building from source
