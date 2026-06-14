@@ -5,8 +5,6 @@ category: aggregate
 
 # Aggregate Functions
 
-[< Back to Functions Reference](string.md) | [SQL Reference](../sql/select.md)
-
 Aggregate functions reduce multiple rows into a single result per group. Used with `GROUP BY` or as global aggregations (see [SQL Reference -- GROUP BY](../sql/group-by.md)).
 
 All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`), which deduplicates argument values before accumulation. `COUNT(DISTINCT *)` is not supported -- use `COUNT(DISTINCT column)` instead.
