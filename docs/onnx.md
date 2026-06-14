@@ -37,20 +37,14 @@ walks you through the steps with diagnostic SQL between each.
 
 ## Prerequisites
 
-- DatumV is installed and `datum-shell` is on your PATH.
-- A *models directory* is configured. By default DatumV looks at:
-  1. The `--models <path>` flag on `datum-shell`.
-  2. The `DATUMV_MODELS` environment variable.
-  3. `%LOCALAPPDATA%\DatumV\models` (Windows) or
-     `~/.local/share/DatumV/models` (Linux/macOS).
-
-  Pick a location with a few GB free and (recommended) set the env var:
-
-  ```powershell
-  [Environment]::SetEnvironmentVariable('DATUMV_MODELS', 'E:\models', 'User')
-  ```
-
-  Restart your shell after setting it.
+- DatumV is installed.
+- The models directory is configured. By default DatumV uses
+  `%LOCALAPPDATA%\Heliosoph.DatumV\models` on Windows or
+  `~/.local/share/Heliosoph.DatumV/models` on Linux/macOS. Change the location
+  from the **Settings** tab if you want a directory with more free
+  space; the `DATUMV_MODELS` environment variable is honoured as a
+  fallback. See [CREATE MODEL — Setup](sql/create-model.md#setup) for
+  the full resolution order.
 
 ## Step 1 — Get a model file
 
@@ -62,11 +56,13 @@ Most users get ONNX files from one of three places:
 | **ONNX Model Zoo** | Classic vision/audio models | Download `.onnx` directly from [github.com/onnx/models](https://github.com/onnx/models) |
 | **Your own training** | Custom model | `torch.onnx.export(...)`, `tf2onnx`, etc. |
 
-Place the `.onnx` file under your models directory. For this guide we'll
-assume:
+Place the `.onnx` file under your models directory in a per-id
+subfolder — the same convention catalog models follow (see
+[CREATE MODEL — Directory layout](sql/create-model.md#directory-layout)).
+For this guide we'll assume:
 
 ```
-$DATUMV_MODELS/
+<models-dir>/
 └── my-model/
     └── model.onnx
 ```
@@ -228,9 +224,11 @@ revise:
 
 ## Step 4 — Customise the body
 
-Five common patterns cover most of the model zoo. Each composes the
-preprocessing / `infer()` / postprocessing helpers documented in
-[`docs/sql/functions.md`](sql/functions.md).
+Several common patterns cover most of the catalog. Each composes three families of helper functions inside the `CREATE MODEL` body:
+
+- The **body-scoped dispatch surface** — `infer`, `infer_outputs`, `llama_chat`, `llama_generate`, and the `decode_*` family — calls into the loaded session. See [CREATE MODEL — body-scoped dispatch surface](sql/create-model.md#body-scoped-dispatch-surface).
+- The **inference helpers** — preprocess (`yolox_preprocess`, `sam_preprocess`), pooling (`mean_pool_masked`), postprocess (`nms`, `mask_to_polygon`, `rtdetr_postprocess`) — turn raw ONNX tensors into typed outputs. See [Inference Functions](functions/inference.md). Image-tensor conversion (`image_to_tensor_chw`, `imagenet_mean`, ...) lives one page over in [Image Functions](functions/image.md).
+- The **tokenization helpers** — `tokenizer.encode_bert`, `tokenizer.encode_bpe`, and the rest of the `tokenizer.*` family — turn `String` into the integer-id sequences transformer ONNX exports consume. See [Tokenization Functions](functions/tokenization.md).
 
 ### Vision classification (single class label)
 
@@ -298,8 +296,7 @@ AS BEGIN
 END
 ```
 
-The shipped [`all-minilm-l6-v2`](../models/sql/all-minilm-l6-v2.sql) SQL
-body is this exact shape. Key pieces:
+The shipped `models.all_minilm_l6_v2` SQL body is this exact shape. Key pieces:
 
 - `tokenizer.encode_bert` returns the canonical BERT input bundle as one
   struct so multi-input `infer()` can match by field name. Relative
