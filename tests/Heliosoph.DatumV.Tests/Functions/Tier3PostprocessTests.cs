@@ -199,6 +199,449 @@ public sealed class Tier3PostprocessTests : ServiceTestBase
             InvokeAsync(new DotProductFunction(), F32(1f, 2f), F32(1f, 2f, 3f)));
     }
 
+    // ─── euclidean_distance ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task EuclideanDistance_KnownInputs_MatchesPythagorean()
+    {
+        // sqrt((3-0)² + (4-0)²) = 5
+        ValueRef result = await InvokeAsync(new EuclideanDistanceFunction(),
+            F32(3f, 4f), F32(0f, 0f));
+        Assert.Equal(5f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task EuclideanDistance_Identical_Returns0()
+    {
+        ValueRef result = await InvokeAsync(new EuclideanDistanceFunction(),
+            F32(1f, 2f, 3f), F32(1f, 2f, 3f));
+        Assert.Equal(0f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task EuclideanDistance_LengthMismatch_Throws()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new EuclideanDistanceFunction(), F32(1f, 2f), F32(1f, 2f, 3f)));
+    }
+
+    // ─── manhattan_distance ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ManhattanDistance_KnownInputs_SumsAbsoluteDifferences()
+    {
+        // |1-4| + |2-6| + |3-8| = 3 + 4 + 5 = 12
+        ValueRef result = await InvokeAsync(new ManhattanDistanceFunction(),
+            F32(1f, 2f, 3f), F32(4f, 6f, 8f));
+        Assert.Equal(12f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task ManhattanDistance_NegativeDifferences_TakesAbsoluteValue()
+    {
+        // |-1-1| + |-2-2| = 2 + 4 = 6
+        ValueRef result = await InvokeAsync(new ManhattanDistanceFunction(),
+            F32(-1f, -2f), F32(1f, 2f));
+        Assert.Equal(6f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task ManhattanDistance_LengthMismatch_Throws()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new ManhattanDistanceFunction(), F32(1f, 2f), F32(1f, 2f, 3f)));
+    }
+
+    // ─── hamming_distance ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task HammingDistance_CountsDifferingPositions()
+    {
+        // "karolin" vs "kathrin": positions 2,3,4 differ → 3
+        ValueRef result = await InvokeAsync(new HammingDistanceFunction(),
+            ValueRef.FromString("karolin"), ValueRef.FromString("kathrin"));
+        Assert.Equal(3f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task HammingDistance_Identical_Returns0()
+    {
+        ValueRef result = await InvokeAsync(new HammingDistanceFunction(),
+            ValueRef.FromString("hello"), ValueRef.FromString("hello"));
+        Assert.Equal(0f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task HammingDistance_LengthMismatch_Throws()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new HammingDistanceFunction(),
+                ValueRef.FromString("abc"), ValueRef.FromString("abcd")));
+    }
+
+    // ─── vec_sum / vec_mean / vec_product ────────────────────────────────────
+
+    [Fact]
+    public async Task VecSum_AccumulatesAndEmptyReturnsZero()
+    {
+        Assert.Equal(6f, (float)(await InvokeAsync(new VecSumFunction(), F32(1f, 2f, 3f))).ToDouble(), 5);
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecSumFunction(), F32())).ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecMean_AveragesAndEmptyReturnsNull()
+    {
+        Assert.Equal(2f, (float)(await InvokeAsync(new VecMeanFunction(), F32(1f, 2f, 3f))).ToDouble(), 5);
+        Assert.True((await InvokeAsync(new VecMeanFunction(), F32())).IsNull);
+    }
+
+    [Fact]
+    public async Task VecProduct_MultipliesAndEmptyReturnsOne()
+    {
+        Assert.Equal(24f, (float)(await InvokeAsync(new VecProductFunction(), F32(1f, 2f, 3f, 4f))).ToDouble(), 5);
+        Assert.Equal(1f, (float)(await InvokeAsync(new VecProductFunction(), F32())).ToDouble(), 5);
+    }
+
+    // ─── vec_min / vec_max ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VecMinMax_KnownInputs_AndEmptyReturnsNull()
+    {
+        Assert.Equal(-3f, (float)(await InvokeAsync(new VecMinFunction(), F32(2f, -3f, 5f, 1f))).ToDouble(), 5);
+        Assert.Equal(5f, (float)(await InvokeAsync(new VecMaxFunction(), F32(2f, -3f, 5f, 1f))).ToDouble(), 5);
+        Assert.True((await InvokeAsync(new VecMinFunction(), F32())).IsNull);
+        Assert.True((await InvokeAsync(new VecMaxFunction(), F32())).IsNull);
+    }
+
+    // ─── vec_var / vec_std ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VecVarStd_PopulationFormula()
+    {
+        // [2,4,4,4,5,5,7,9] population variance = 4, std = 2 (classic worked example)
+        ValueRef sample = F32(2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f);
+        Assert.Equal(4f, (float)(await InvokeAsync(new VecVarFunction(), sample)).ToDouble(), 4);
+        Assert.Equal(2f, (float)(await InvokeAsync(new VecStdFunction(), sample)).ToDouble(), 4);
+    }
+
+    [Fact]
+    public async Task VecVarStd_EmptyReturnsNull()
+    {
+        Assert.True((await InvokeAsync(new VecVarFunction(), F32())).IsNull);
+        Assert.True((await InvokeAsync(new VecStdFunction(), F32())).IsNull);
+    }
+
+    // ─── vec_median ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VecMedian_OddLength_PicksCentreElement()
+    {
+        // sorted: [1,2,3,4,5] → 3
+        ValueRef result = await InvokeAsync(new VecMedianFunction(), F32(3f, 1f, 4f, 1f, 5f));
+        // sorted = [1,1,3,4,5] → 3
+        Assert.Equal(3f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecMedian_EvenLength_AveragesCentrePair()
+    {
+        // sorted: [1,2,3,4] → (2+3)/2 = 2.5
+        ValueRef result = await InvokeAsync(new VecMedianFunction(), F32(4f, 2f, 1f, 3f));
+        Assert.Equal(2.5f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecMedian_EmptyReturnsNull()
+    {
+        Assert.True((await InvokeAsync(new VecMedianFunction(), F32())).IsNull);
+    }
+
+    // ─── vec_norm ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VecNorm_DefaultIsL2()
+    {
+        // ||[3,4]||₂ = 5
+        Assert.Equal(5f, (float)(await InvokeAsync(new VecNormFunction(), F32(3f, 4f))).ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecNorm_L1_SumsAbsoluteValues()
+    {
+        // ||[-1,2,-3]||₁ = 6
+        ValueRef result = await InvokeAsync(new VecNormFunction(), F32(-1f, 2f, -3f), ValueRef.FromFloat32(1f));
+        Assert.Equal(6f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecNorm_PInfinity_ReturnsMaxAbs()
+    {
+        // ||[-1,2,-3]||∞ = 3
+        ValueRef result = await InvokeAsync(new VecNormFunction(),
+            F32(-1f, 2f, -3f), ValueRef.FromFloat32(float.PositiveInfinity));
+        Assert.Equal(3f, (float)result.ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecNorm_GeneralP_MatchesFormula()
+    {
+        // ||[1,2,3]||₃ = (1+8+27)^(1/3) = 36^(1/3) ≈ 3.30193
+        ValueRef result = await InvokeAsync(new VecNormFunction(), F32(1f, 2f, 3f), ValueRef.FromFloat32(3f));
+        Assert.Equal((float)System.Math.Pow(36.0, 1.0 / 3.0), (float)result.ToDouble(), 4);
+    }
+
+    [Fact]
+    public async Task VecNorm_NonPositiveP_Throws()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new VecNormFunction(), F32(1f, 2f), ValueRef.FromFloat32(0f)));
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new VecNormFunction(), F32(1f, 2f), ValueRef.FromFloat32(-1f)));
+    }
+
+    [Fact]
+    public async Task VecNorm_EmptyReturnsZero()
+    {
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecNormFunction(), F32())).ToDouble(), 5);
+    }
+
+    // ─── vec_count_nonzero / vec_any / vec_all ───────────────────────────────
+
+    [Fact]
+    public async Task VecCountNonzero_CountsNonZero()
+    {
+        Assert.Equal(2f, (float)(await InvokeAsync(new VecCountNonzeroFunction(), F32(0f, 1f, 0f, -2f, 0f))).ToDouble(), 5);
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecCountNonzeroFunction(), F32())).ToDouble(), 5);
+    }
+
+    [Fact]
+    public async Task VecAny_AndVecAll_Predicates()
+    {
+        Assert.Equal(1f, (float)(await InvokeAsync(new VecAnyFunction(), F32(0f, 0f, 1f))).ToDouble(), 5);
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecAnyFunction(), F32(0f, 0f, 0f))).ToDouble(), 5);
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecAnyFunction(), F32())).ToDouble(), 5);
+
+        Assert.Equal(1f, (float)(await InvokeAsync(new VecAllFunction(), F32(1f, 2f, 3f))).ToDouble(), 5);
+        Assert.Equal(0f, (float)(await InvokeAsync(new VecAllFunction(), F32(1f, 0f, 3f))).ToDouble(), 5);
+        Assert.Equal(1f, (float)(await InvokeAsync(new VecAllFunction(), F32())).ToDouble(), 5);
+    }
+
+    // ─── argmin (and the vec_* alias coverage via argmax) ────────────────────
+
+    [Fact]
+    public async Task Argmin_PicksLowestIndexOfMinimum()
+    {
+        // [3, 1, 4, 1, 5] → first 1 is at index 2 (1-based)
+        ValueRef result = await InvokeAsync(new ArgminFunction(), F32(3f, 1f, 4f, 1f, 5f));
+        Assert.Equal(2, result.ToInt32());
+    }
+
+    [Fact]
+    public async Task Argmin_EmptyThrows()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new ArgminFunction(), F32()));
+    }
+
+    // ─── vec / vec_concat ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Vec_FlattensMixedScalarAndArrayArguments()
+    {
+        // vec(1, [2,3], 4, [5]) → [1,2,3,4,5]
+        ValueRef result = await InvokeAsync(new VecFunction(),
+            ValueRef.FromFloat32(1f), F32(2f, 3f),
+            ValueRef.FromFloat32(4f), F32(5f));
+        float[] arr = AsFloatArr(result);
+        Assert.Equal(new[] { 1f, 2f, 3f, 4f, 5f }, arr);
+    }
+
+    [Fact]
+    public async Task Vec_NullArgPropagates()
+    {
+        ValueRef result = await InvokeAsync(new VecFunction(),
+            ValueRef.FromFloat32(1f), ValueRef.Null(DataKind.Float32));
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public async Task VecConcat_JoinsVectorsInOrder()
+    {
+        ValueRef result = await InvokeAsync(new VecConcatFunction(),
+            F32(1f, 2f), F32(3f, 4f, 5f));
+        Assert.Equal(new[] { 1f, 2f, 3f, 4f, 5f }, AsFloatArr(result));
+    }
+
+    [Fact]
+    public async Task VecConcat_NullArgPropagates()
+    {
+        ValueRef result = await InvokeAsync(new VecConcatFunction(),
+            F32(1f, 2f), ValueRef.NullArray(DataKind.Float32));
+        Assert.True(result.IsNull);
+    }
+
+    // ─── vec_reverse / vec_sort / vec_unique ─────────────────────────────────
+
+    [Fact]
+    public async Task VecReverse_FlipsOrder()
+    {
+        Assert.Equal(new[] { 3f, 2f, 1f },
+            AsFloatArr(await InvokeAsync(new VecReverseFunction(), F32(1f, 2f, 3f))));
+        Assert.Empty(AsFloatArr(await InvokeAsync(new VecReverseFunction(), F32())));
+    }
+
+    [Fact]
+    public async Task VecSort_AscendingOrder()
+    {
+        Assert.Equal(new[] { -2f, 0f, 1f, 3f, 5f },
+            AsFloatArr(await InvokeAsync(new VecSortFunction(), F32(3f, 1f, -2f, 5f, 0f))));
+    }
+
+    [Fact]
+    public async Task VecUnique_PreservesFirstOccurrenceOrder()
+    {
+        // First-seen ordering: 3, 1, 4, 5, 9, 2, 6
+        Assert.Equal(new[] { 3f, 1f, 4f, 5f, 9f, 2f, 6f },
+            AsFloatArr(await InvokeAsync(new VecUniqueFunction(),
+                F32(3f, 1f, 4f, 1f, 5f, 9f, 2f, 6f, 5f, 3f))));
+    }
+
+    // ─── vec_pad / vec_repeat ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VecPad_AppendsFillToReachLength()
+    {
+        Assert.Equal(new[] { 1f, 2f, 3f, -1f, -1f },
+            AsFloatArr(await InvokeAsync(new VecPadFunction(),
+                F32(1f, 2f, 3f), ValueRef.FromInt32(5), ValueRef.FromFloat32(-1f))));
+    }
+
+    [Fact]
+    public async Task VecPad_LenAtMostSourceReturnsSourceUnchanged()
+    {
+        // No truncation: source length 3, request 2 → still [1,2,3].
+        Assert.Equal(new[] { 1f, 2f, 3f },
+            AsFloatArr(await InvokeAsync(new VecPadFunction(),
+                F32(1f, 2f, 3f), ValueRef.FromInt32(2), ValueRef.FromFloat32(0f))));
+    }
+
+    [Fact]
+    public async Task VecPad_NegativeLenThrows()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new VecPadFunction(),
+                F32(1f), ValueRef.FromInt32(-1), ValueRef.FromFloat32(0f)));
+    }
+
+    [Fact]
+    public async Task VecRepeat_TilesVector()
+    {
+        Assert.Equal(new[] { 1f, 2f, 1f, 2f, 1f, 2f },
+            AsFloatArr(await InvokeAsync(new VecRepeatFunction(),
+                F32(1f, 2f), ValueRef.FromInt32(3))));
+    }
+
+    [Fact]
+    public async Task VecRepeat_ZeroCountReturnsEmpty()
+    {
+        Assert.Empty(AsFloatArr(await InvokeAsync(new VecRepeatFunction(),
+            F32(1f, 2f), ValueRef.FromInt32(0))));
+    }
+
+    [Fact]
+    public async Task VecRepeat_NegativeCountThrows()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new VecRepeatFunction(), F32(1f), ValueRef.FromInt32(-1)));
+    }
+
+    // ─── linspace / arange ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Linspace_EvenlySpacedInclusiveEndpoints()
+    {
+        // linspace(0, 1, 5) = [0, 0.25, 0.5, 0.75, 1]
+        float[] result = AsFloatArr(await InvokeAsync(new LinspaceFunction(),
+            ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f), ValueRef.FromInt32(5)));
+        Assert.Equal(5, result.Length);
+        Assert.Equal(0f, result[0], 5);
+        Assert.Equal(0.25f, result[1], 5);
+        Assert.Equal(0.5f, result[2], 5);
+        Assert.Equal(0.75f, result[3], 5);
+        Assert.Equal(1f, result[4], 5);
+    }
+
+    [Fact]
+    public async Task Linspace_SinglePointReturnsStart()
+    {
+        float[] result = AsFloatArr(await InvokeAsync(new LinspaceFunction(),
+            ValueRef.FromFloat32(7f), ValueRef.FromFloat32(99f), ValueRef.FromInt32(1)));
+        Assert.Single(result);
+        Assert.Equal(7f, result[0]);
+    }
+
+    [Fact]
+    public async Task Linspace_ZeroPointsReturnsEmpty()
+    {
+        Assert.Empty(AsFloatArr(await InvokeAsync(new LinspaceFunction(),
+            ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f), ValueRef.FromInt32(0))));
+    }
+
+    [Fact]
+    public async Task Linspace_NegativeNThrows()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new LinspaceFunction(),
+                ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f), ValueRef.FromInt32(-1)));
+    }
+
+    [Fact]
+    public async Task Arange_PositiveStepExcludesStop()
+    {
+        // arange(0, 5, 1) = [0,1,2,3,4]  (stop excluded)
+        Assert.Equal(new[] { 0f, 1f, 2f, 3f, 4f },
+            AsFloatArr(await InvokeAsync(new ArangeFunction(),
+                ValueRef.FromFloat32(0f), ValueRef.FromFloat32(5f), ValueRef.FromFloat32(1f))));
+    }
+
+    [Fact]
+    public async Task Arange_FractionalStep()
+    {
+        // arange(0, 1, 0.25) = [0, 0.25, 0.5, 0.75]
+        float[] result = AsFloatArr(await InvokeAsync(new ArangeFunction(),
+            ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f), ValueRef.FromFloat32(0.25f)));
+        Assert.Equal(4, result.Length);
+        Assert.Equal(0f, result[0], 5);
+        Assert.Equal(0.25f, result[1], 5);
+        Assert.Equal(0.5f, result[2], 5);
+        Assert.Equal(0.75f, result[3], 5);
+    }
+
+    [Fact]
+    public async Task Arange_NegativeStepDescends()
+    {
+        // arange(5, 0, -1) = [5,4,3,2,1]
+        Assert.Equal(new[] { 5f, 4f, 3f, 2f, 1f },
+            AsFloatArr(await InvokeAsync(new ArangeFunction(),
+                ValueRef.FromFloat32(5f), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(-1f))));
+    }
+
+    [Fact]
+    public async Task Arange_StartPastStopReturnsEmpty()
+    {
+        // start >= stop with positive step → empty
+        Assert.Empty(AsFloatArr(await InvokeAsync(new ArangeFunction(),
+            ValueRef.FromFloat32(5f), ValueRef.FromFloat32(0f), ValueRef.FromFloat32(1f))));
+    }
+
+    [Fact]
+    public async Task Arange_ZeroStepThrows()
+    {
+        await Assert.ThrowsAsync<FunctionArgumentException>(() =>
+            InvokeAsync(new ArangeFunction(),
+                ValueRef.FromFloat32(0f), ValueRef.FromFloat32(5f), ValueRef.FromFloat32(0f)));
+    }
+
     // ─── nms ─────────────────────────────────────────────────────────────────
 
     [Fact]

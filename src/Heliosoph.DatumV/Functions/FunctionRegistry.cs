@@ -1098,11 +1098,41 @@ public sealed class FunctionRegistry
 
         // Vector reductions + normalization + detection postprocess.
         registry.RegisterScalar<Scalar.Vector.ArgmaxFunction>();
+        registry.RegisterScalar<Scalar.Vector.ArgminFunction>();
+        registry.RegisterScalarAlias<Scalar.Vector.ArgmaxFunction>("vec_argmax");
+        registry.RegisterScalarAlias<Scalar.Vector.ArgminFunction>("vec_argmin");
         registry.RegisterScalar<Scalar.Vector.TopkFunction>();
         registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
         registry.RegisterScalar<Scalar.Vector.MeanPoolMaskedFunction>();
         registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
         registry.RegisterScalar<Scalar.Vector.DotProductFunction>();
+        registry.RegisterScalar<Scalar.Vector.EuclideanDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.ManhattanDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.HammingDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecSumFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMeanFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMinFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMaxFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecVarFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecStdFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMedianFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecNormFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecCountNonzeroFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecAnyFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecAllFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecProductFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecConcatFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecReverseFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecSortFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecUniqueFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecPadFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecRepeatFunction>();
+        registry.RegisterScalar<Scalar.Vector.LinspaceFunction>();
+        registry.RegisterScalar<Scalar.Vector.ArangeFunction>();
+        // vec_slice is identical to array_slice (1-based, 1-D, clamp-at-edge):
+        // alias rather than duplicate the per-element-kind switch.
+        registry.RegisterScalarAlias<Scalar.Arrays.ArraySliceFunction>("vec_slice");
         registry.RegisterScalar<Scalar.Vector.NmsFunction>();
         registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
 

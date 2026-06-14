@@ -81,6 +81,73 @@ public sealed class ArgmaxFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>argmin(values FLOAT32[]) → INT32</c>. Returns the 1-based index of
+/// the smallest element. Mirror of <see cref="ArgmaxFunction"/>; same
+/// tie-breaking and NaN/empty-input rules.
+/// </summary>
+public sealed class ArgminFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "argmin";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Vector;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Returns the 1-based index of the smallest element in a Float32 vector: " +
+        "argmin(values FLOAT32[]) → INT32. " +
+        "Ties resolve to the lowest index; empty input throws.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("values", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Int32)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<ArgminFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ValueRef arg = arguments.Span[0];
+        if (arg.IsNull)
+        {
+            return new(ValueRef.Null(DataKind.Int32));
+        }
+
+        float[] values = ActivationOps.ReadFloat32Array(arg);
+        if (values.Length == 0)
+        {
+            throw new FunctionArgumentException(Name, "argmin requires at least one element; got an empty array.");
+        }
+
+        int best = 0;
+        float bestValue = values[0];
+        for (int i = 1; i < values.Length; i++)
+        {
+            if (values[i] < bestValue)
+            {
+                bestValue = values[i];
+                best = i;
+            }
+        }
+        return new(ValueRef.FromInt32(best + 1));
+    }
+}
+
+/// <summary>
 /// <c>topk(values FLOAT32[], k INT) → INT32[]</c>. Returns the 1-based
 /// indices of the top-k elements sorted by value, descending. Users index
 /// back into the original array for the values; keeping the function's
