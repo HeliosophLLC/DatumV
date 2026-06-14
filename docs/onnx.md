@@ -8,7 +8,7 @@ This guide walks you from "I have an ONNX file" to "I'm calling it from
 SQL." It assumes no prior ONNX experience.
 
 For the engine internals that power this surface, see
-[`design-docs/onnx-inference.md`](design-docs/onnx-inference.md). For
+[`technical/onnx-inference.md`](technical/onnx-inference.md). For
 the built-in models DatumV ships with, see [`models.md`](models.md).
 The full SQL reference for the `CREATE MODEL` DDL lives at
 [`sql/create-model.md`](sql/create-model.md).
@@ -547,4 +547,4 @@ declared input shape. Common causes:
 - **All preprocessing / postprocessing helpers**: `SELECT * FROM system.functions WHERE category IN ('Image', 'Vector', 'Activation', 'Encoding');`
 - **Built-in models documentation**: [`models.md`](models.md).
 - **Full `CREATE MODEL` syntax reference**: [`sql/create-model.md`](sql/create-model.md).
-- **Engine internals**: [`design-docs/onnx-inference.md`](design-docs/onnx-inference.md).
+- **Engine internals**: [`technical/onnx-inference.md`](technical/onnx-inference.md).

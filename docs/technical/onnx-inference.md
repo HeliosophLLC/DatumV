@@ -32,10 +32,6 @@ Supporting types:
 - **`TensorSpec`** — name + element kind + dynamic-aware shape (`int?[]` where `null` = dynamic dim). Returned from `IInferenceSession.Inputs/Outputs` so callers validate at SQL-MODEL load time, not per row.
 - **`BundleManifest`** — minimal "what does this bundle look like" record: session-name → file-path map, preferred backends, opset/required-ops hints, declared resident bytes. The richer applet-level bundle format lives one layer up.
 
-### Why separate from `Models/Onnx/OnnxSessionFactory`
-
-The legacy factory still exists; every existing built-in `OnnxModel` subclass (Moondream2, Florence2, MobileNetV2, etc.) loads through it. The factory and the new backend coexist intentionally — every consumer migrates one at a time. Both contain the same CUDA-probe logic; keep them in sync until the factory retires.
-
 ### ORT backend (`src/DatumV/Inference/OnnxRuntime/`)
 
 - **`OnnxRuntimeBackend`** — lazy probe of CPU / CUDA / DirectML / CoreML EPs via `CudaRuntimeProbe.EnsureOnPath()`. OS-gated probes (DML only Windows, CoreML only macOS). `ResolveResidentBytes` enforces a "≥ file size on disk" floor so an obviously-misconfigured `DeclaredResidentBytes` is rejected.
@@ -140,18 +136,6 @@ Multi-model queries are coordinated at the plan layer by a multi-invocation `Mod
 
 `InferFunction.ExecuteBatchAsync` (a columnar `IScalarFunction.ExecuteBatchAsync` override that packs N rows into one `[B, ...]` tensor for sessions with rank-≥2 inputs and a dynamic leading dim) sits behind `IModel.InferBatchAsync` for SQL-defined models that benefit from it.
 
-### Why we *removed* the column-pipeline lowering path
-
-An earlier "Step 3" added a post-pass `ModelBodyLowerer` that rewrote a SQL model's straight-line body into a chain of `ProjectOperator(__decl_n = expr) → InferOperator → ProjectOperator(__return = expr)` nodes. Real batched `Session.Run` packing fell out naturally as the structural shape. The path was removed in 2026-05-19 because:
-
-- **Repeated arena stabilization of source columns.** Each operator boundary called `DataValueRetention.Stabilize` on every passed-through column, including the `Image` parameter. For sidecar-backed Images that meant repeated bytes copies (or worse, sidecar re-decode) per row. With ~5 operators between Scan and the consumer, a 1024-row LIMIT 100 MiDaS query measured ~870s end-to-end vs ~38s for the same query when the body ran inside a single MIO via `ProceduralModelFunction`.
-- **No `RowLimit` propagation.** `ModelInvocationOperator` honours `context.RowLimit` and trims incoming batches; `InferOperator` did not, so LIMIT 100 still processed a full 1024-row source page.
-- **Two dispatch paths for one logical operation.** Bugs landed on `InferFunction` but not `InferOperator` (e.g. the 0xC0000005 lifecycle crash) because the two paths drifted.
-
-Cross-row batching for genuinely batchable shapes was preserved by moving the packing logic to `InferFunction.ExecuteBatchAsync` (one function, one place, used by both the MIO path and any future ExpressionEvaluator-batched dispatch). The `ModelBodyLowerer.LowerSqlDefinedBodies` entry point survives as the hook for future per-model plan rewrites but is currently a no-op walk.
-
----
-
 ## Layer 5: `infer()` — the runtime bridge
 
 **Location**: `src/DatumV/Functions/InferFunction.cs`
@@ -207,9 +191,7 @@ This shape replaces an earlier design where `ProceduralModelAdapter` created its
 
 ## Layer 6: body-scope mechanism
 
-`infer()` is meaningful only inside a CREATE MODEL body. Calling it from a regular query was originally a runtime error ("no CurrentModel frame") — informative but late and cryptic. The body-scope mechanism upgrades that to plan-time refusal + completion exclusion.
-
-Three pieces:
+`infer()` and the other body-scoped scalars (`infer_outputs`, `llama_chat`, `llama_generate`, the `decode_*` family) are meaningful only inside a CREATE MODEL body — that's the only context where their `CurrentModel` frame is set. The mechanism enforces this at four points: a metadata flag at registration, a plan-time gate that catches calls before any rows are scanned, a runtime guard for paths that bypass planning, and language-server exclusion so the editor never suggests body-scoped functions outside a model body.
 
 ### Metadata flag
 
@@ -261,9 +243,9 @@ The future `system.functions` (when `system.*` consolidates) inherits the column
 
 | Item | Where filed | Notes |
 |---|---|---|
-| Batched dispatch for SQL-defined models (Option B/C) | [`memory/project_batched_sql_defined_models.md`](../../memory/project_batched_sql_defined_models.md) | Two design paths sketched; pick when there's measured throughput evidence. |
-| Inference toolkit (`onnx_inspect`, `inference_devices`, preprocessing helpers) | [`plans/inference-toolkit.md`](../../plans/inference-toolkit.md) | Tier 1 is load-bearing for the model-zoo / Kaggle workflow story. |
-| Bundle signatures (SHA-256 verification) | [`plans/bundle-signatures.md`](../../plans/bundle-signatures.md) | New `WITH (sha256 = '...')` CREATE MODEL clause; three new `system.models` columns. |
+| Batched dispatch for SQL-defined models | This doc | Straight-line bodies already get columnar batched dispatch via `ProceduralModelAdapter.ExecuteModelBatchAsync`; bodies with top-level control flow still fall back to per-row execution inside `InferBatchAsync`. Two design paths sketched for lifting the control-flow case into the columnar batch path — pick when measured throughput evidence justifies the engineering. |
+| Inference toolkit (`onnx_inspect`, `inference_devices`, preprocessing helpers) | This doc | Discoverability TVFs for ONNX file inspection (graph, opset, input/output specs) and runtime device enumeration (CPU / CUDA / DirectML / CoreML availability), plus typed preprocessing helpers shared across model bodies. Load-bearing for the model-zoo workflow — without these the user can't introspect a third-party ONNX file before wrapping it in `CREATE MODEL`. |
+| Bundle signatures (SHA-256 verification) | This doc | New `WITH (sha256 = '...')` CREATE MODEL clause that checksums the on-disk weights at registration; mismatches throw before the session loads. Three new `system.models` columns expose the declared, observed, and verified-at-load hashes for introspection. |
 | ORT version bump | This doc, project memo | Currently 1.20.1 (IR ≤ 10, opset ≤ 21). Newer ONNX exports hit the cap. |
 | Body-scope Tier 2 completion (context-aware suggestions) | This doc | Show `infer()` in completion only when cursor is in a model body. Wants new `InsideModelBody` zone. |
 | Multi-output `infer()` (struct-of-tensors return) | This doc | Multi-input via struct argument **shipped 2026-05-17**; multi-output (returning a struct of tensors, e.g. BERT's `{last_hidden_state, pooler_output}`) is still deferred. v1 picks the first output. Multi-session bundles + `infer('session-name', struct)` deferred until first multi-session user. |
@@ -275,6 +257,6 @@ The future `system.functions` (when `system.*` consolidates) inherits the column
 ## See also
 
 - [`docs/models.md`](../models.md) — built-in model zoo reference (the integrations that ride on this infrastructure).
-- [`docs/architecture.md`](../technical/architecture.md) — high-level engine architecture.
+- [Architecture](architecture.md) — high-level engine architecture.
 - [`docs/sql/procedural.md`](../sql/procedural.md) — procedural body semantics shared with UDFs.
 - [`docs/sql/ddl-dml.md`](../sql/ddl-dml.md) — DDL surface (CREATE TABLE / FUNCTION / PROCEDURE / MODEL).

@@ -11,7 +11,7 @@ scalar like [`infer()`](#infer) (ONNX tensor I/O) or
 the engine's [built-in models](../models.md).
 
 The DDL is the user-facing surface for the inference layer described in
-[`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md).
+[`technical/onnx-inference.md`](../technical/onnx-inference.md).
 Use it when you have an ONNX file (image / audio / structured models) or
 a GGUF file (text-generation LLMs) you want to query without writing C#:
 download the file (or install via the in-app Model Manager), point
@@ -760,7 +760,7 @@ into a single multi-invocation `ModelInvocationOperator` so models run
 one-at-a-time with leases released between invocations — preventing the
 residency contention that otherwise lets ORT spill activations into
 shared GPU memory. See
-[`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md#batch-sizing)
+[`technical/onnx-inference.md`](../technical/onnx-inference.md#batch-sizing)
 for the full calibration + dispatch model.
 
 ## Persistence
@@ -835,4 +835,4 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
 - [Procedural Functions and Procedures](procedural.md) — the broader procedural-body family this shares syntax with.
 - [Models](../models.md) — the engine's built-in model zoo (`kind = 'builtin'` rows in `system.models`).
 - [Schema Introspection](schema-introspection.md) — how `system.models` and `system.functions` fit into the broader catalog surface.
-- [`design-docs/onnx-inference.md`](../design-docs/onnx-inference.md) — the design rationale for the inference layer, including the hoister Option A trade-off and why `infer()` is body-scoped.
+- [`technical/onnx-inference.md`](../technical/onnx-inference.md) — the design rationale for the inference layer, including the hoister Option A trade-off and why `infer()` is body-scoped.
