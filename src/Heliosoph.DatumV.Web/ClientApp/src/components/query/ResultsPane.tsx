@@ -612,6 +612,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   else if (cell.kind === 'struct') {
     return <SingleValueStruct cell={cell} />;
   }
+  else if (cell.kind === 'binary_download') {
+    return <SingleValueBinaryDownload cell={cell} />;
+  }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
   // without zooming.
@@ -1845,6 +1848,7 @@ function CellValue({
   }
   if (cell.kind === 'struct') return <StructCell cell={cell} />;
   if (cell.kind === 'json') return <JsonTextCell cell={cell} />;
+  if (cell.kind === 'binary_download') return <BinaryDownloadCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
 }
 
@@ -1854,6 +1858,74 @@ function BinaryCell({ cell }: { cell: JsonCell }) {
     <span className="text-muted-foreground" title={`${cell.mime ?? 'binary'} · ${formatBytes(bytes)}`}>
       [{cell.mime ?? 'binary'}, {formatBytes(bytes)}]
     </span>
+  );
+}
+
+// Object-URL based Save-As for arbitrary binary blobs (.glb / .stl / .obj
+// / .ply / .bin). Object URLs sidestep the ~512 KB data-URI sweet spot
+// flagged in the image-modal helper above — a 15 MB glTF would otherwise
+// freeze the browser's URL parser. We revoke immediately after click()
+// because the browser captures the data before returning.
+function triggerBinaryDownload(cell: JsonCell): void {
+  if (!cell.dataB64) return;
+  const binary = atob(cell.dataB64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: cell.mime ?? 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = cell.fileName ?? 'data.bin';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Inline grid cell for `binary_download`. Renders the server's caption
+// (format / size / importer hint) plus a small Download button. The
+// caption keeps the user's mental model intact ("oh that's a glTF
+// blob") while the button removes the SELECT-into-table dance the user
+// would otherwise need to land the bytes on disk.
+function BinaryDownloadCell({ cell }: { cell: JsonCell }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          triggerBinaryDownload(cell);
+        }}
+        aria-label="Download"
+        title={`Download ${cell.fileName ?? 'binary'}`}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-xs"
+      >
+        <Download className="h-3.5 w-3.5" />
+      </button>
+      <span className="text-muted-foreground truncate" title={cell.text ?? ''}>{cell.text ?? ''}</span>
+    </span>
+  );
+}
+
+// Single-value body variant: same content, larger affordances, monospace
+// so the size + hint read like the existing scalar fallback.
+function SingleValueBinaryDownload({ cell }: { cell: JsonCell }) {
+  const bytes = bytesFromBase64(cell.dataB64);
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <button
+        type="button"
+        onClick={() => triggerBinaryDownload(cell)}
+        className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center gap-2 rounded-xs px-4 py-2 text-sm font-medium"
+      >
+        <Download className="size-4" />
+        Download {cell.fileName ?? 'binary'} ({formatBytes(bytes)})
+      </button>
+      <pre className="text-muted-foreground max-w-full whitespace-pre-wrap break-words text-center font-mono text-sm">
+        {cell.text ?? ''}
+      </pre>
+    </div>
   );
 }
 
