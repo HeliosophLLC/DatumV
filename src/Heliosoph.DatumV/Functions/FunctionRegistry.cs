@@ -808,11 +808,30 @@ public sealed class FunctionRegistry
 
         // Math/Numerics
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
+        registry.RegisterScalar<Scalar.Math.SignFunction>();
+        registry.RegisterScalar<Scalar.Math.NegateFunction>();
         registry.RegisterScalar<Scalar.Math.RoundFunction>();
         registry.RegisterScalar<Scalar.Math.FloorFunction>();
         registry.RegisterScalar<Scalar.Math.CeilFunction>();
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
+        registry.RegisterScalar<Scalar.Math.TruncateFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.TruncateFunction>("trunc");
         registry.RegisterScalar<Scalar.Math.SqrtFunction>();
+        registry.RegisterScalar<Scalar.Math.CbrtFunction>();
+        registry.RegisterScalar<Scalar.Math.SquareFunction>();
+        registry.RegisterScalar<Scalar.Math.ExpFunction>();
+        registry.RegisterScalar<Scalar.Math.Exp2Function>();
+        registry.RegisterScalar<Scalar.Math.LnFunction>();
+        registry.RegisterScalar<Scalar.Math.Log2Function>();
+        registry.RegisterScalar<Scalar.Math.Log10Function>();
+        registry.RegisterScalar<Scalar.Math.PowFunction>();
+        registry.RegisterScalar<Scalar.Math.LogFunction>();
+        registry.RegisterScalar<Scalar.Math.ClampFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.ClampFunction>("clip");
+        registry.RegisterScalar<Scalar.Math.QuantizeFunction>();
+        registry.RegisterScalar<Scalar.Math.BucketizeFunction>();
+        registry.RegisterScalar<Scalar.Math.MinMaxNormalizeFunction>();
+        registry.RegisterScalar<Scalar.Math.DenormalizeFunction>();
         registry.RegisterScalar<Scalar.Math.LeastFunction>();
         registry.RegisterScalar<Scalar.Math.GreatestFunction>();
 
@@ -1062,6 +1081,7 @@ public sealed class FunctionRegistry
 
         // Activations. All accept Float32 scalar or Float32[] vector.
         registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
+        registry.RegisterScalar<Scalar.Activation.LogSoftmaxFunction>();
         registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
         registry.RegisterScalar<Scalar.Activation.ReluFunction>();
         registry.RegisterScalar<Scalar.Activation.LeakyReluFunction>();

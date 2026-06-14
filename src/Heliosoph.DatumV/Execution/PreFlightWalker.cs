@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
+using Heliosoph.DatumV.Catalog.Registries;
 using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.ModelLibrary;
 using Heliosoph.DatumV.Models;
@@ -79,14 +80,21 @@ internal static class PreFlightWalker
     /// table references against the manifest emit install requirements.
     /// <see langword="null"/> for hosts without a dataset surface.
     /// </param>
+    /// <param name="udfs">
+    /// Optional UDF registry. When supplied, bare function names that
+    /// match a registered UDF skip the typo-suggestion pass so a
+    /// user-defined name doesn't get "did you mean &lt;builtin&gt;?" hints
+    /// just because edit distance happens to be small.
+    /// </param>
     public static PreFlightRequirements Walk(
         QueryExpression query,
         ModelCatalog? models,
         ICatalogVocabulary? vocabulary,
         FunctionRegistry functions,
-        IPreFlightDatasetSource? datasetSource = null)
+        IPreFlightDatasetSource? datasetSource = null,
+        UdfRegistry? udfs = null)
     {
-        Builder builder = new(models, vocabulary, functions, datasetSource);
+        Builder builder = new(models, vocabulary, functions, datasetSource, udfs);
         builder.VisitQuery(query);
         return builder.Build();
     }
@@ -94,7 +102,7 @@ internal static class PreFlightWalker
     /// <summary>
     /// Statement-level entrypoint. Dispatches to the right visit method
     /// for the top-level shape: pure queries delegate to
-    /// <see cref="Walk(QueryExpression, ModelCatalog?, ICatalogVocabulary?, FunctionRegistry, IPreFlightDatasetSource?)"/>;
+    /// <see cref="Walk(QueryExpression, ModelCatalog?, ICatalogVocabulary?, FunctionRegistry, IPreFlightDatasetSource?, UdfRegistry?)"/>;
     /// <c>INSERT</c> / <c>UPDATE</c> / <c>DELETE</c> walk their own
     /// expression slots (WHERE, SET assignments, VALUES tuples,
     /// RETURNING projections). All other statement types (DDL, CALL,
@@ -113,9 +121,10 @@ internal static class PreFlightWalker
         ModelCatalog? models,
         ICatalogVocabulary? vocabulary,
         FunctionRegistry functions,
-        IPreFlightDatasetSource? datasetSource = null)
+        IPreFlightDatasetSource? datasetSource = null,
+        UdfRegistry? udfs = null)
     {
-        Builder builder = new(models, vocabulary, functions, datasetSource);
+        Builder builder = new(models, vocabulary, functions, datasetSource, udfs);
         switch (statement)
         {
             case QueryStatement qs:
@@ -145,6 +154,7 @@ internal static class PreFlightWalker
         private readonly ICatalogVocabulary? _vocabulary;
         private readonly FunctionRegistry _functions;
         private readonly IPreFlightDatasetSource? _datasetSource;
+        private readonly UdfRegistry? _udfs;
 
         private readonly List<PreFlightModelRequirement> _reqs = [];
         private readonly List<PreFlightDatasetRequirement> _datasetReqs = [];
@@ -168,12 +178,14 @@ internal static class PreFlightWalker
             ModelCatalog? models,
             ICatalogVocabulary? vocabulary,
             FunctionRegistry functions,
-            IPreFlightDatasetSource? datasetSource)
+            IPreFlightDatasetSource? datasetSource,
+            UdfRegistry? udfs)
         {
             _models = models;
             _vocabulary = vocabulary;
             _functions = functions;
             _datasetSource = datasetSource;
+            _udfs = udfs;
         }
 
         public PreFlightRequirements Build() => new(_reqs, _datasetReqs, _suggestions);
@@ -424,6 +436,7 @@ internal static class PreFlightWalker
             if (_functions.TryGetAggregate(fn.CallName) is not null) { return; }
             if (_functions.TryGetWindow(fn.CallName) is not null) { return; }
             if (_functions.TryGetTableValued(fn.CallName) is not null) { return; }
+            if (_udfs is not null && _udfs.TryGet(fn.CallName, out _)) { return; }
 
             // Unknown bare name: suggest the closest known function name.
             // Empty suggestion pool means we silently let PlanTimeFunctionGate

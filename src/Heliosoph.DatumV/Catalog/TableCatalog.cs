@@ -1015,7 +1015,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         if (statement is InsertStatement or UpdateStatement or DeleteStatement)
         {
             PreFlightRequirements preflight = PreFlightWalker.WalkStatement(
-                statement, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+                statement, Models, CatalogVocabulary, Functions, DatasetPreFlightSource, Udfs);
             if (preflight.Models.Count > 0
                 || preflight.Datasets.Count > 0
                 || preflight.Suggestions.Count > 0)
@@ -1290,7 +1290,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // until the user names the model directly). Empty result == no
         // blocker.
         PreFlightRequirements preflight = PreFlightWalker.Walk(
-            permuted, Models, CatalogVocabulary, Functions, DatasetPreFlightSource);
+            permuted, Models, CatalogVocabulary, Functions, DatasetPreFlightSource, Udfs);
         if (preflight.Models.Count > 0
             || preflight.Datasets.Count > 0
             || preflight.Suggestions.Count > 0)
