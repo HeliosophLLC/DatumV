@@ -115,7 +115,7 @@ SELECT array_contains(array(1, 2, 3), 2) -- true
 
 ### array_position
 
-`array_position(arr, value)` → Float32
+`array_position(arr, value)` → Int32
 
 1-based index of the first matching element, or null if not found.
 

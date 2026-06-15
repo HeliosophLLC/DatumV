@@ -880,6 +880,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayResize2DFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayMinFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayMaxFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArraySumFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayAvgFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayContainsFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayPositionFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayReverseFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArraySortFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayDistinctFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayFilterFunction>();
+        registry.RegisterScalarAlias<Scalar.Arrays.ArrayToStringFunction>("array_join");
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
