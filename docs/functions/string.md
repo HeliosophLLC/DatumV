@@ -11,7 +11,7 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 
 ### length
 
-`length(str)` → Int32 | QU: 1
+`length(str)` → Int32
 
 Number of Unicode code points in the string. Characters outside the Basic Multilingual Plane — emoji, ancient scripts, mathematical alphanumerics — count as 1, matching PostgreSQL semantics. This differs from .NET `string.Length`, which returns the UTF-16 code-unit count and reports 2 for any non-BMP character.
 
@@ -22,7 +22,7 @@ SELECT length('😀hi')        -- 3   (emoji is one code point)
 
 ### octet_length
 
-`octet_length(str)` → Int32 | QU: 1
+`octet_length(str)` → Int32
 
 Number of UTF-8 bytes in the string. ASCII characters take 1 byte; non-BMP characters take 4 bytes each, so for strings containing emoji or other supplementary-plane characters `octet_length` is strictly larger than `length`.
 
@@ -35,7 +35,7 @@ SELECT octet_length('😀hi')     -- 6   (emoji = 4 UTF-8 bytes + 2 ASCII)
 
 ### upper
 
-`upper(str)` → String | QU: 1
+`upper(str)` → String
 
 Convert to uppercase (invariant).
 
@@ -45,7 +45,7 @@ SELECT upper('hello') -- 'HELLO'
 
 ### lower
 
-`lower(str)` → String | QU: 1
+`lower(str)` → String
 
 Convert to lowercase (invariant).
 
@@ -55,7 +55,7 @@ SELECT lower('HELLO') -- 'hello'
 
 ### initcap
 
-`initcap(str)` → String | QU: 1
+`initcap(str)` → String
 
 Capitalize first letter of each word, lowercase the rest. Non-alphanumeric characters are word boundaries.
 
@@ -67,7 +67,7 @@ SELECT initcap('hello world') -- 'Hello World'
 
 ### substring
 
-`substring(str, start, [length])` → String | QU: 1
+`substring(str, start, [length])` → String
 
 Extract substring from 1-based start position. Optional `length` limits the result.
 
@@ -78,7 +78,7 @@ SELECT substring('hello world', 1, 5) -- 'hello'
 
 ### substr
 
-`substr(str, start, [length])` → String | QU: 1
+`substr(str, start, [length])` → String
 
 Alias for `substring()`.
 
@@ -88,7 +88,7 @@ SELECT substr('hello world', 7) -- 'world'
 
 ### mid
 
-`mid(str, start, length)` → String | QU: 1
+`mid(str, start, length)` → String
 
 Extract substring by 1-based position and length.
 
@@ -98,7 +98,7 @@ SELECT mid('hello world', 1, 5) -- 'hello'
 
 ### left
 
-`left(str, n)` → String | QU: 1
+`left(str, n)` → String
 
 First n characters. When n is negative, returns all but the last |n| characters.
 
@@ -109,7 +109,7 @@ SELECT left('hello', -2) -- 'hel'
 
 ### right
 
-`right(str, n)` → String | QU: 1
+`right(str, n)` → String
 
 Last n characters. When n is negative, returns all but the first |n| characters.
 
@@ -120,7 +120,7 @@ SELECT right('hello', -2) -- 'llo'
 
 ### overlay
 
-`overlay(str, new, start, [count])` → String | QU: 1
+`overlay(str, new, start, [count])` → String
 
 Replace `count` characters at 1-based `start` with `new`. Count defaults to `length(new)`.
 
@@ -132,7 +132,7 @@ SELECT overlay('Txxxxas', 'hom', 2, 4) -- 'Thomas'
 
 ### trim
 
-`trim(str, [chars])` → String | QU: 1
+`trim(str, [chars])` → String
 
 Remove characters from both sides. Default: whitespace.
 
@@ -143,7 +143,7 @@ SELECT trim('xyxtrimyyx', 'xyz')   -- 'trim'
 
 ### ltrim
 
-`ltrim(str, [chars])` → String | QU: 1
+`ltrim(str, [chars])` → String
 
 Remove leading characters. Default: whitespace.
 
@@ -153,7 +153,7 @@ SELECT ltrim('zzzytest', 'xyz') -- 'test'
 
 ### rtrim
 
-`rtrim(str, [chars])` → String | QU: 1
+`rtrim(str, [chars])` → String
 
 Remove trailing characters. Default: whitespace.
 
@@ -163,7 +163,7 @@ SELECT rtrim('testxxzx', 'xyz') -- 'test'
 
 ### btrim
 
-`btrim(str, [chars])` → String | QU: 1
+`btrim(str, [chars])` → String
 
 Trim characters from both sides. PostgreSQL alias for `trim()`.
 
@@ -175,7 +175,7 @@ SELECT btrim('xyxtrimyyx', 'xyz') -- 'trim'
 
 ### lpad
 
-`lpad(str, len, [fill])` → String | QU: 1
+`lpad(str, len, [fill])` → String
 
 Pad on the left to target length with fill string (default space). Truncates from the right if already longer.
 
@@ -186,7 +186,7 @@ SELECT lpad('hi', 5, 'xy')   -- 'xyxhi'
 
 ### rpad
 
-`rpad(str, len, [fill])` → String | QU: 1
+`rpad(str, len, [fill])` → String
 
 Pad on the right to target length with fill string (default space). Truncates if already longer.
 
@@ -199,7 +199,7 @@ SELECT rpad('hi', 5, 'xy')   -- 'hixyx'
 
 ### position
 
-`position(str, sub)` → Int32 | QU: 1
+`position(str, sub)` → Int32
 
 1-based index of first occurrence, or 0 if not found.
 
@@ -209,7 +209,7 @@ SELECT position('hello world', 'world') -- 7
 
 ### strpos
 
-`strpos(str, sub)` → Int32 | QU: 1
+`strpos(str, sub)` → Int32
 
 Same as `position()`.
 
@@ -219,7 +219,7 @@ SELECT strpos('hello world', 'world') -- 7
 
 ### contains
 
-`contains(str, sub)` → Boolean | QU: 1
+`contains(str, sub)` → Boolean
 
 Returns whether str contains sub (ordinal).
 
@@ -229,7 +229,7 @@ SELECT contains('hello world', 'world') -- true
 
 ### starts_with
 
-`starts_with(str, prefix)` → Boolean | QU: 1
+`starts_with(str, prefix)` → Boolean
 
 Returns whether str starts with prefix (ordinal).
 
@@ -239,7 +239,7 @@ SELECT starts_with('hello world', 'hello') -- true
 
 ### ends_with
 
-`ends_with(str, suffix)` → Boolean | QU: 1
+`ends_with(str, suffix)` → Boolean
 
 Returns whether str ends with suffix (ordinal).
 
@@ -251,7 +251,7 @@ SELECT ends_with('hello world', 'world') -- true
 
 ### replace
 
-`replace(str, old, new)` → String | QU: 1
+`replace(str, old, new)` → String
 
 Replace all occurrences of old with new (ordinal).
 
@@ -261,7 +261,7 @@ SELECT replace('hello world', 'world', 'there') -- 'hello there'
 
 ### translate
 
-`translate(str, from, to)` → String | QU: 1
+`translate(str, from, to)` → String
 
 Character-by-character substitution. Characters in `from` without a `to` counterpart are deleted.
 
@@ -271,7 +271,7 @@ SELECT translate('12345', '143', 'ax') -- 'a2x5'
 
 ### regexp_replace
 
-`regexp_replace(str, pattern, replacement, [flags])` → String | QU: 1
+`regexp_replace(str, pattern, replacement, [flags])` → String
 
 Replace regex matches. By default only the first match is replaced; pass the `'g'` flag for global replacement. Other supported flags: `'i'` case-insensitive, `'c'` case-sensitive, `'n'`/`'m'` newline-sensitive (`^`/`$` anchor at line boundaries; `.` does not match `\n`), `'s'` single-line (the default — `.` matches `\n`), `'x'` extended (ignore whitespace in pattern). Flags can be combined, e.g. `'gi'`.
 
@@ -290,7 +290,7 @@ SELECT regexp_replace('abc123def456', '\d+', '_', 1, 2)    -- 'abc123def_'
 
 ### concat
 
-`concat(a, b, ...)` → String | QU: 1
+`concat(a, b, ...)` → String
 
 Concatenate two or more strings. Null args treated as empty.
 
@@ -319,7 +319,7 @@ SELECT concat(first_name, ' ', middle_name, ' ', last_name)   -- skips a null mi
 
 ### concat_strict
 
-`concat_strict(a, b, ...)` → String | QU: 1
+`concat_strict(a, b, ...)` → String
 
 Strict, null-propagating string concatenation. Returns `NULL` when any argument is null; otherwise concatenates all arguments. This is the SQL-92 string-concat semantics, surfaced as a function for explicit invocation and as the desugar target for the `||` operator.
 
@@ -330,7 +330,7 @@ SELECT concat_strict('a', 'b')            -- 'ab'
 
 ### concat_ws
 
-`concat_ws(sep, s1, s2, ...)` → String | QU: 1
+`concat_ws(sep, s1, s2, ...)` → String
 
 Concatenate with separator, skipping nulls.
 
@@ -340,7 +340,7 @@ SELECT concat_ws(', ', 'a', 'b', 'c') -- 'a, b, c'
 
 ### repeat
 
-`repeat(str, count)` → String | QU: 1
+`repeat(str, count)` → String
 
 Repeat string count times.
 
@@ -352,7 +352,7 @@ SELECT repeat('ha', 3) -- 'hahaha'
 
 ### split_part
 
-`split_part(str, delim, n)` → String | QU: 1
+`split_part(str, delim, n)` → String
 
 Split on delimiter, return the n-th field (1-based). Empty string if out of range. Negative n counts from end.
 
@@ -365,7 +365,7 @@ SELECT split_part('a.b.c', '.', -1) -- 'c'
 
 ### ascii
 
-`ascii(str)` → Int32 | QU: 1
+`ascii(str)` → Int32
 
 Unicode code point of first character. Returns 0 for empty string.
 
@@ -375,7 +375,7 @@ SELECT ascii('A') -- 65
 
 ### chr
 
-`chr(code)` → String | QU: 1
+`chr(code)` → String
 
 Character from Unicode code point.
 
@@ -389,7 +389,7 @@ Flags: `'i'` for case-insensitive. `regexp_replace` also supports `'g'` for glob
 
 ### regexp_extract
 
-`regexp_extract(str, pattern, [group])` → String | QU: 1
+`regexp_extract(str, pattern, [group])` → String
 
 Extract first regex match. Optional 1-based group index returns a capture group. NULL if no match.
 
@@ -400,7 +400,7 @@ SELECT regexp_extract('abc123', '(\d+)', 1)   -- '123'
 
 ### regexp_count
 
-`regexp_count(str, pattern, [start], [flags])` → Int32 | QU: 1
+`regexp_count(str, pattern, [start], [flags])` → Int32
 
 Number of times pattern matches. Optional 1-based start.
 
@@ -410,7 +410,7 @@ SELECT regexp_count('abc123def456', '\d+') -- 2
 
 ### regexp_like
 
-`regexp_like(str, pattern, [flags])` → Boolean | QU: 1
+`regexp_like(str, pattern, [flags])` → Boolean
 
 Returns whether pattern matches anywhere in the string. Supports the `i` (case-insensitive), `c` (case-sensitive), `n`/`m` (newline-sensitive), `s` (single-line) and `x` (extended) flags. NULL in any argument propagates to NULL.
 
@@ -422,7 +422,7 @@ SELECT regexp_like('foo\nbar', 'foo$', 'n')      -- true
 
 ### regexp_match
 
-`regexp_match(str, pattern, [flags])` → Array | QU: 1
+`regexp_match(str, pattern, [flags])` → Array
 
 Captured substrings from the first match as an Array. NULL if no match.
 
@@ -432,7 +432,7 @@ SELECT regexp_match('2024-03-26', '(\d{4})-(\d{2})-(\d{2})') -- ['2024','03','26
 
 ### regexp_substr
 
-`regexp_substr(str, pattern, [start], [N], [flags], [subexpr])` → String | QU: 1
+`regexp_substr(str, pattern, [start], [N], [flags], [subexpr])` → String
 
 The N'th match (default 1). `subexpr` selects a capture group. NULL if no match.
 
@@ -442,7 +442,7 @@ SELECT regexp_substr('abc123def456', '\d+', 1, 2) -- '456'
 
 ### regexp_instr
 
-`regexp_instr(str, pattern, [start], [N], [endoption], [flags], [subexpr])` → Int32 | QU: 1
+`regexp_instr(str, pattern, [start], [N], [endoption], [flags], [subexpr])` → Int32
 
 1-based position of N'th match. `endoption=1` returns end+1. Returns 0 if no match.
 
@@ -454,7 +454,7 @@ SELECT regexp_instr('ABCDEF', 'c(.)(..)', 1, 1, 0, 'i') -- 3
 
 ### format
 
-`format(fmt, ...)` → String | QU: 1
+`format(fmt, ...)` → String
 
 sprintf-style formatting. `%s` string, `%I` SQL identifier, `%L` SQL literal, `%%` literal `%`. Positional: `%1$s`.
 
@@ -467,7 +467,7 @@ SELECT format('INSERT INTO %I VALUES (%L)', 'my_table', 'O''Reilly')
 
 ### string_to_array
 
-`string_to_array(str, delim, [null_str])` → Array | QU: 1
+`string_to_array(str, delim, [null_str])` → Array
 
 Split by delimiter into an Array. NULL delimiter splits into characters. Fields matching `null_str` become NULL.
 
@@ -477,7 +477,7 @@ SELECT string_to_array('xx~~yy~~zz', '~~', 'yy') -- ['xx', NULL, 'zz']
 
 ### regexp_split_to_array
 
-`regexp_split_to_array(str, pattern, [flags])` → Array | QU: 1
+`regexp_split_to_array(str, pattern, [flags])` → Array
 
 Split by regex into an Array.
 
@@ -489,7 +489,7 @@ SELECT regexp_split_to_array('hello world', '\s+') -- ['hello', 'world']
 
 ### to_hex
 
-`to_hex(n)` → String | QU: 1
+`to_hex(n)` → String
 
 Hexadecimal string representation.
 
@@ -499,7 +499,7 @@ SELECT to_hex(255) -- 'ff'
 
 ### to_bin
 
-`to_bin(n)` → String | QU: 1
+`to_bin(n)` → String
 
 Binary string representation.
 
@@ -509,7 +509,7 @@ SELECT to_bin(10) -- '1010'
 
 ### to_oct
 
-`to_oct(n)` → String | QU: 1
+`to_oct(n)` → String
 
 Octal string representation.
 
@@ -521,7 +521,7 @@ SELECT to_oct(8) -- '10'
 
 ### normalize
 
-`normalize(str, [form])` → String | QU: 1
+`normalize(str, [form])` → String
 
 Unicode normalization. Form: `NFC` (default), `NFD`, `NFKC`, `NFKD`.
 
@@ -531,7 +531,7 @@ SELECT normalize('cafe\u0301', 'NFC') -- 'caf\u00e9'
 
 ### to_ascii
 
-`to_ascii(str)` → String | QU: 1
+`to_ascii(str)` → String
 
 Transliterate to ASCII by removing diacritical marks.
 
@@ -541,7 +541,7 @@ SELECT to_ascii('caf\u00e9') -- 'cafe'
 
 ### unistr
 
-`unistr(str)` → String | QU: 1
+`unistr(str)` → String
 
 Evaluate Unicode escapes: `\XXXX`, `\+XXXXXX`, `\uXXXX`, `\UXXXXXXXX`. `\\` for literal backslash.
 
@@ -551,7 +551,7 @@ SELECT unistr('d\0061t\+000061') -- 'data'
 
 ### casefold
 
-`casefold(str)` → String | QU: 1
+`casefold(str)` → String
 
 Unicode case folding for case-insensitive comparison.
 
@@ -563,7 +563,7 @@ SELECT casefold('Stra\u00dfe') -- 'strasse'
 
 ### quote_ident
 
-`quote_ident(str)` → String | QU: 1
+`quote_ident(str)` → String
 
 Quote as a SQL identifier (double-quoted) when necessary.
 
@@ -573,7 +573,7 @@ SELECT quote_ident('my table') -- '"my table"'
 
 ### quote_literal
 
-`quote_literal(val)` → String | QU: 1
+`quote_literal(val)` → String
 
 Quote as a SQL string literal (single-quoted). NULL on NULL input.
 
@@ -583,7 +583,7 @@ SELECT quote_literal('O''Reilly') -- '''O''''Reilly'''
 
 ### quote_nullable
 
-`quote_nullable(val)` → String | QU: 1
+`quote_nullable(val)` → String
 
 Like `quote_literal`, but returns the string `'NULL'` for NULL input.
 
@@ -593,7 +593,7 @@ SELECT quote_nullable(NULL) -- 'NULL'
 
 ### parse_ident
 
-`parse_ident(str, [strict])` → Array | QU: 1
+`parse_ident(str, [strict])` → Array
 
 Split a qualified identifier into an Array. Unquoted parts are folded to lowercase (matching how PostgreSQL itself parses identifiers); double-quoted parts preserve their case and may contain any character. With `strict` (default `true`), trailing characters after the last identifier part raise an error; pass `false` to silently truncate at the first non-identifier character.
 
@@ -607,7 +607,7 @@ SELECT parse_ident('a.b junk', false)      -- ['a', 'b']
 
 ### reverse
 
-`reverse(str)` → String | QU: 1
+`reverse(str)` → String
 
 Reverse character order.
 
@@ -617,7 +617,7 @@ SELECT reverse('hello') -- 'olleh'
 
 ### word_count
 
-`word_count(str)` → Int32 | QU: 1
+`word_count(str)` → Int32
 
 Count whitespace-separated words.
 
@@ -627,7 +627,7 @@ SELECT word_count('hello world foo') -- 3
 
 ### get_filename
 
-`get_filename(path)` → String | QU: 1
+`get_filename(path)` → String
 
 Return file name with extension from path.
 
@@ -637,7 +637,7 @@ SELECT get_filename('/data/images/photo.jpg') -- 'photo.jpg'
 
 ### get_filename_ext
 
-`get_filename_ext(path)` → String | QU: 1
+`get_filename_ext(path)` → String
 
 Return extension (without dot) from path.
 
@@ -647,7 +647,7 @@ SELECT get_filename_ext('/data/images/photo.jpg') -- 'jpg'
 
 ### get_directory
 
-`get_directory(path)` → String | QU: 1
+`get_directory(path)` → String
 
 Return directory portion of path.
 

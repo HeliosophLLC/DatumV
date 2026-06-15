@@ -34,7 +34,7 @@ Missing keys, out-of-range indices, and type mismatches (descending into a non-c
 
 ### json_parse
 
-`json_parse(text: String) → Json` | QU: 5
+`json_parse(text: String)` → Json
 
 Parses a JSON text string into a `Json` value backed by canonical CBOR. Null input returns null. Throws when the input is not valid JSON, and when a number exceeds `Int64` range and is not finite as `Float64` (the engine's conservative number policy — see "Number representation" below).
 
@@ -51,7 +51,7 @@ The `String → Json` cast is equivalent to `json_parse`.
 
 ### json_try_parse
 
-`json_try_parse(text: String) → Json` | QU: 5
+`json_try_parse(text: String)` → Json
 
 Like `json_parse`, but returns SQL NULL on parse failure (invalid JSON, number out of range) instead of throwing. Use this when the source text may not be well-formed — typical for free-form LLM output where you want to filter or fall back rather than abort the query.
 
@@ -66,7 +66,7 @@ WHERE json_try_parse(response) IS NOT NULL
 
 ### json_value
 
-`json_value(doc: Json, path: String) → typed scalar` | QU: 3
+`json_value(doc: Json, path: String)` → typed scalar
 
 Extracts a scalar value at `path` from a `Json` document. Returns the typed scalar — `Int64` for an integer field, `Float64` for a float, `String` for a string, `Boolean` for a boolean, typed null for JSON's `null`. Returns SQL NULL when the path is missing or resolves to an object/array (use `json_query` for those).
 
@@ -83,7 +83,7 @@ Path traversal is O(n) on the source CBOR (no offset table). For LLM-output docu
 
 ### json_query
 
-`json_query(doc: Json, path: String) → Json` | QU: 4
+`json_query(doc: Json, path: String)` → Json
 
 Extracts an object or array subdocument at `path` as a new `Json` value. Returns SQL NULL when the path is missing or resolves to a scalar (use `json_value` for scalars).
 
@@ -98,7 +98,7 @@ SELECT
 
 ### json_to_text
 
-`json_to_text(doc: Json) → String` | QU: 5
+`json_to_text(doc: Json)` → String
 
 Re-emits a `Json` value as JSON text. Used by output writers and explicit `CAST(value AS String)`. Round-trip is structurally identical but not byte-identical to the source JSON: the canonical CBOR encoding chosen at parse time may have collapsed equivalent representations (e.g. `1.0` → `1` when the value is exactly integral, map keys re-sorted in length-then-lex order).
 

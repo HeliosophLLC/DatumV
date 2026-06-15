@@ -5,8 +5,6 @@ category: table
 
 # Table-Valued Functions
 
-[< Back to Functions Reference](string.md) | [SQL Reference](../sql/select.md)
-
 Table-valued functions produce multiple rows and are used in FROM, CROSS JOIN, and LATERAL JOIN clauses. When used with `CROSS JOIN LATERAL` or `CROSS APPLY`, the function arguments can reference columns from the left-hand table, enabling per-row expansion of array or nested data.
 
 ### unnest
