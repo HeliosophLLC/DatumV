@@ -11,7 +11,7 @@ Cryptographic hash functions backed by the .NET runtime. All hashes accept a `St
 
 ## md5
 
-`md5(input)` → String | QU: 1
+`md5(input)` → String
 
 MD5 digest as a 32-character lowercase hex string. Accepts `String` (UTF-8) or `UInt8[]`. PostgreSQL-compatible.
 
@@ -22,7 +22,7 @@ SELECT md5('hello world')
 
 ## sha1
 
-`sha1(input)` → UInt8[] | QU: 1
+`sha1(input)` → UInt8[]
 
 SHA-1 digest as a 20-byte `UInt8[]`. Accepts `String` (UTF-8) or `UInt8[]`. SHA-1 is collision-broken; use `sha256` for new code.
 
@@ -33,7 +33,7 @@ SELECT encode(sha1('hello world'), 'hex')
 
 ## sha256
 
-`sha256(input)` → UInt8[] | QU: 1
+`sha256(input)` → UInt8[]
 
 SHA-256 digest as a 32-byte `UInt8[]`. Accepts `String` (UTF-8) or `UInt8[]`.
 
@@ -43,13 +43,13 @@ SELECT encode(sha256(payload), 'hex') AS digest FROM events
 
 ## sha384
 
-`sha384(input)` → UInt8[] | QU: 1
+`sha384(input)` → UInt8[]
 
 SHA-384 digest as a 48-byte `UInt8[]`. Accepts `String` (UTF-8) or `UInt8[]`.
 
 ## sha512
 
-`sha512(input)` → UInt8[] | QU: 1
+`sha512(input)` → UInt8[]
 
 SHA-512 digest as a 64-byte `UInt8[]`. Accepts `String` (UTF-8) or `UInt8[]`.
 
@@ -59,7 +59,7 @@ SELECT encode(sha512(token), 'base64') AS digest FROM api_keys
 
 ## digest
 
-`digest(data, algorithm)` → UInt8[] | QU: 1
+`digest(data, algorithm)` → UInt8[]
 
 pgcrypto-style dispatcher: hashes `data` (`String` or `UInt8[]`) with the named algorithm and returns the raw digest as `UInt8[]`. Algorithm names are case-insensitive and ignore hyphens, underscores, and spaces — `sha256`, `SHA-256`, and `Sha 256` all select the same algorithm.
 
