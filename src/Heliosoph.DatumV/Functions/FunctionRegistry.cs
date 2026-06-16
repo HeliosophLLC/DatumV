@@ -837,6 +837,16 @@ public sealed class FunctionRegistry
 
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomTruncatedNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomLogNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomExponentialFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomBetaFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomPoissonFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomBooleanFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomCategoricalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomVectorFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomNormalVectorFunction>();
 
         // Trigonometry
         registry.RegisterScalar<Scalar.Trigonometry.SinFunction>();
@@ -885,6 +895,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayContainsFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayPositionFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayReverseFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayShuffleFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArraySortFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayDistinctFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayFilterFunction>();

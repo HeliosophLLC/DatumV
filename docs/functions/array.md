@@ -143,6 +143,22 @@ Reversed copy of the array.
 SELECT array_reverse(array(1, 2, 3)) -- [3, 2, 1]
 ```
 
+### array_shuffle
+
+`array_shuffle(arr)` → Array
+
+`array_shuffle(arr, seed)` → Array
+
+Shuffled copy of the array using the Fisher-Yates algorithm. Element kind is preserved. The two-argument form is deterministic for the given integer seed — useful when reproducible permutations are needed (test fixtures, data-augmentation pipelines). Multi-dim arrays are rejected; a meaningful shuffle would need to choose an axis.
+
+```sql
+-- Reproducible shuffle of a label vocabulary:
+SELECT array_shuffle(array('cat', 'dog', 'bird'), 42)
+
+-- Stochastic per-row shuffle of a feature ordering:
+SELECT array_shuffle(feature_ids) FROM examples
+```
+
 ### array_distinct
 
 `array_distinct(arr)` → Array
