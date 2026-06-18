@@ -721,7 +721,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.CanCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
+        registry.RegisterScalarAlias<Scalar.TypeofFunction>("pg_typeof");
         registry.RegisterScalar<Scalar.CoalesceFunction>();
+        registry.RegisterScalar<Scalar.NullifFunction>();
 
         // String
         registry.RegisterScalar<Scalar.Strings.ConcatFunction>();
@@ -834,6 +836,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Math.DenormalizeFunction>();
         registry.RegisterScalar<Scalar.Math.LeastFunction>();
         registry.RegisterScalar<Scalar.Math.GreatestFunction>();
+        registry.RegisterScalar<Scalar.Math.IsNanFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.IsNanFunction>("isnan");
+        registry.RegisterScalar<Scalar.Math.IsFiniteFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.IsFiniteFunction>("isfinite");
+        registry.RegisterScalar<Scalar.Math.IsInfiniteFunction>();
 
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();

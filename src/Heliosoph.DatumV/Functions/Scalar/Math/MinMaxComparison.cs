@@ -67,7 +67,11 @@ internal static class MinMaxComparison
         return PromoteAll(kinds);
     }
 
-    private static int Compare(ValueRef left, ValueRef right, DataKind targetKind)
+    /// <summary>
+    /// Cross-kind comparison shared with <see cref="Scalar.NullifFunction"/>.
+    /// Both inputs are guaranteed non-null by the caller.
+    /// </summary>
+    internal static int Compare(ValueRef left, ValueRef right, DataKind targetKind)
     {
         // The mixed-numeric variant accepts kinds in DataKindFamily.NumericScalar
         // (signed + unsigned ints, Float32, Float64). For those a double widening
@@ -97,7 +101,7 @@ internal static class MinMaxComparison
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
             DataKind.Boolean  => left.AsBoolean().CompareTo(right.AsBoolean()),
             _ => throw new FunctionArgumentException(
-                "least/greatest",
+                "comparison",
                 $"does not support kind {targetKind}."),
         };
     }
