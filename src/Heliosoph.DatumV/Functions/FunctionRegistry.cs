@@ -1204,6 +1204,26 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Temporal.DateTruncFunction>();
         registry.RegisterScalar<Scalar.Temporal.DateBinFunction>();
         registry.RegisterScalar<Scalar.Temporal.AgeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeDateFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeTimestampFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeTimeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateAddFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateDiffFunction>();
+        registry.RegisterScalar<Scalar.Temporal.YearFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MonthFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayFunction>();
+        registry.RegisterScalar<Scalar.Temporal.HourFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MinuteFunction>();
+        registry.RegisterScalar<Scalar.Temporal.SecondFunction>();
+        registry.RegisterScalar<Scalar.Temporal.QuarterFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayOfWeekFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayOfYearFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeDurationFunction>();
+        registry.RegisterScalar<Scalar.Temporal.TimeDiffFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationSecondsFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationMinutesFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationHoursFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationDaysFunction>();
 
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();

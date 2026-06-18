@@ -13,7 +13,7 @@ Functions for date, time, duration, and timestamp construction, extraction, form
 
 ### date_part
 
-`date_part(part, val)` -> Float64 | QU: 1
+`date_part(part, val)` -> Float64
 
 Extract a named component from a Date, Timestamp, TimestampTz, Time, Duration, or Interval. Matches Postgres' `Float64` return type so sub-second precision (`microsecond`, `epoch`) survives without truncation.
 
@@ -29,7 +29,7 @@ SELECT date_part('epoch', INTERVAL '1 hour 30 minutes')  -- 5400.0
 
 ### EXTRACT
 
-`EXTRACT(field FROM source)` -> Float64 | QU: 1
+`EXTRACT(field FROM source)` -> Float64
 
 PostgreSQL-standard syntax; desugars to `date_part('field', source)` at parse time.
 
@@ -48,7 +48,7 @@ FROM data
 
 ### cyclical_encode
 
-`cyclical_encode(val, period)` -> Vector | QU: 1
+`cyclical_encode(val, period)` -> Vector
 
 Encode a Float32 as a 2-element Vector `[sin(2*pi*val/period), cos(2*pi*val/period)]`.
 
@@ -117,49 +117,49 @@ Shorthand functions for extracting individual components from Date, Timestamp, T
 
 ### year
 
-`year(date)` -> Float32 | QU: 1
+`year(date)` -> Float32
 
 Extract year.
 
 ### month
 
-`month(date)` -> Float32 | QU: 1
+`month(date)` -> Float32
 
 Extract month (1-12).
 
 ### day
 
-`day(date)` -> Float32 | QU: 1
+`day(date)` -> Float32
 
 Extract day of month (1-31).
 
 ### hour
 
-`hour(date)` -> Float32 | QU: 1
+`hour(date)` -> Float32
 
 Extract hour (0-23). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### minute
 
-`minute(date)` -> Float32 | QU: 1
+`minute(date)` -> Float32
 
 Extract minute (0-59). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### second
 
-`second(date)` -> Float32 | QU: 1
+`second(date)` -> Float32
 
 Extract second (0-59). Accepts Date, Timestamp, TimestampTz, or Time. Returns 0 for Date inputs.
 
 ### quarter
 
-`quarter(date)` -> Float32 | QU: 1
+`quarter(date)` -> Float32
 
 Extract quarter (1-4).
 
 ### dayofweek
 
-`dayofweek(date)` -> Float32 | QU: 1
+`dayofweek(date)` -> Float32
 
 ISO 8601 day of week: 1 (Monday) through 7 (Sunday).
 
@@ -167,7 +167,7 @@ ISO 8601 day of week: 1 (Monday) through 7 (Sunday).
 
 ### dayofyear
 
-`dayofyear(date)` -> Float32 | QU: 1
+`dayofyear(date)` -> Float32
 
 Day of year (1-366).
 
@@ -185,31 +185,31 @@ PostgreSQL-compatible temporal constants that return the same value for all refe
 
 ### CURRENT_DATE
 
-`CURRENT_DATE` -> Date | QU: 1
+`CURRENT_DATE` -> Date
 
 Current UTC date.
 
 ### CURRENT_TIME
 
-`CURRENT_TIME` or `CURRENT_TIME(p)` -> Time | QU: 1
+`CURRENT_TIME` or `CURRENT_TIME(p)` -> Time
 
 Current UTC time-of-day. Optional precision `p` truncates to that many fractional-second digits (0-6).
 
 ### CURRENT_TIMESTAMP
 
-`CURRENT_TIMESTAMP` or `CURRENT_TIMESTAMP(p)` -> TimestampTz | QU: 1
+`CURRENT_TIMESTAMP` or `CURRENT_TIMESTAMP(p)` -> TimestampTz
 
 Current UTC timestamp. Optional precision `p` truncates to that many fractional-second digits.
 
 ### LOCALTIME
 
-`LOCALTIME` or `LOCALTIME(p)` -> Time | QU: 1
+`LOCALTIME` or `LOCALTIME(p)` -> Time
 
 Same as `CURRENT_TIME` (no session timezone).
 
 ### LOCALTIMESTAMP
 
-`LOCALTIMESTAMP` or `LOCALTIMESTAMP(p)` -> TimestampTz | QU: 1
+`LOCALTIMESTAMP` or `LOCALTIMESTAMP(p)` -> TimestampTz
 
 Same as `CURRENT_TIMESTAMP`.
 
@@ -230,37 +230,25 @@ SELECT CURRENT_TIMESTAMP(0) AS ts_no_fractional
 
 ### now
 
-`now()` -> TimestampTz | QU: 1
+`now()` -> TimestampTz
 
 Current UTC timestamp as TimestampTz. Transaction-stable (= `CURRENT_TIMESTAMP`).
 
 ### transaction_timestamp
 
-`transaction_timestamp()` -> TimestampTz | QU: 1
+`transaction_timestamp()` -> TimestampTz
 
 Same as `now()`. Named to clearly reflect what it returns.
 
 ### statement_timestamp
 
-`statement_timestamp()` -> TimestampTz | QU: 1
+`statement_timestamp()` -> TimestampTz
 
 Start time of the current statement. Same as `transaction_timestamp()` for the first statement in a batch; may differ for subsequent statements.
 
-### clock_timestamp
-
-`clock_timestamp()` -> TimestampTz | QU: 1
-
-Actual wall-clock time. Changes even within a single statement -- NOT batch-stable.
-
-### timeofday
-
-`timeofday()` -> String | QU: 1
-
-Actual wall-clock time as a formatted String (ISO 8601). NOT batch-stable.
-
 ### make_date
 
-`make_date(year, month, day)` -> Date | QU: 1
+`make_date(year, month, day)` -> Date
 
 Construct a Date from integer components (year, month, day).
 
@@ -270,13 +258,13 @@ SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data
 
 ### make_timestamp
 
-`make_timestamp(y, m, d, h, min, s)` -> TimestampTz | QU: 1
+`make_timestamp(y, m, d, h, min, s)` -> Timestamp
 
-Construct a TimestampTz (UTC) from components. Year, month, day, hour, minute are integers; second is numeric (supports fractional seconds).
+Construct a Timestamp (no time zone) from components. Year, month, day, hour, minute are integers; second is numeric (supports fractional seconds). Matches PostgreSQL's signature. For a zone-aware result, pair with `AT TIME ZONE`.
 
 ### date_diff
 
-`date_diff(part, start, end)` -> Float32 | QU: 1
+`date_diff(part, start, end)` -> Float32
 
 Count of part boundaries crossed between two dates. Returns Float32.
 
@@ -286,7 +274,7 @@ SELECT date_diff('day', hire_date, now()) AS tenure_days FROM employees
 
 ### date_add
 
-`date_add(part, amount, date)` -> Date/Timestamp/TimestampTz | QU: 1
+`date_add(part, amount, date)` -> Date/Timestamp/TimestampTz
 
 Add amount of the specified part to a date. Preserves input kind.
 
@@ -296,7 +284,7 @@ SELECT date_add('month', 3, start_date) AS extended FROM contracts
 
 ### date_trunc
 
-`date_trunc(part, source)` -> Timestamp/TimestampTz | QU: 1
+`date_trunc(part, source)` -> Timestamp/TimestampTz
 
 Truncate a temporal value to the start of the named field. `Timestamp` and
 `TimestampTz` preserve their kind; `Date` inputs promote to `Timestamp`.
@@ -313,20 +301,9 @@ SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY
 SELECT date_trunc('week', event_ts) AS week_start FROM events
 ```
 
-### date_bucket
-
-`date_bucket(part, width, date [, origin])` -> Date/Timestamp/TimestampTz | QU: 1
-
-Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind.
-
-```sql
--- 15-minute bucketing (DatumV style)
-SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP BY bucket
-```
-
 ### date_bin
 
-`date_bin(stride Interval, source, origin)` -> Timestamp/TimestampTz | QU: 1
+`date_bin(stride Interval, source, origin)` -> Timestamp/TimestampTz
 
 PostgreSQL-15-compatible binning: rounds `source` down to the nearest
 `stride` boundary aligned to `origin`. Preserves the source's timestamp
@@ -349,7 +326,7 @@ FROM heartbeats
 
 ### make_time
 
-`make_time(hour, minute, second)` -> Time | QU: 1
+`make_time(hour, minute, second)` -> Time
 
 Construct a Time from components (all Float32).
 
@@ -359,7 +336,7 @@ SELECT make_time(14, 30, 0) AS meeting_time FROM data
 
 ### current_time
 
-`current_time()` -> Time | QU: 1
+`current_time()` -> Time
 
 Current UTC time of day as Time. Transaction-stable.
 
@@ -367,33 +344,35 @@ Current UTC time of day as Time. Transaction-stable.
 SELECT current_time() AS now_time
 ```
 
-### date_span
+### Elapsed duration via subtraction
 
-`date_span(start, end)` -> Duration | QU: 1
-
-Elapsed Duration between two Date, Timestamp, or TimestampTz values.
+For elapsed Duration between two temporal values, use the `-` operator
+directly — it returns a `Duration` (not a calendar-aware `Interval`):
 
 ```sql
-SELECT date_span(start_date, end_date) AS elapsed FROM projects
-SELECT duration_days(date_span(hire_date, now())) AS tenure FROM employees
+SELECT end_date - start_date AS elapsed FROM projects
+SELECT duration_days(now() - hire_date) AS tenure FROM employees
 ```
 
-### date_offset
+For zone-aware or calendar-aware month/year arithmetic, use `age()` (returns
+`Interval`) instead.
 
-`date_offset(date, duration)` -> TimestampTz/Time | QU: 1
+### Adding a duration via the + operator
 
-Add a Duration to a Date, Timestamp, TimestampTz, or Time. Returns TimestampTz for Date/TimestampTz, Timestamp for Timestamp, Time for Time.
+`Timestamp + Duration`, `TimestampTz + Duration`, `Date + Duration`, and
+`Time + Duration` are all native operators — there is no dedicated
+`date_offset` function:
 
 ```sql
-SELECT date_offset(ship_date, make_duration(3, 0, 0, 0)) AS delivery_date FROM orders
+SELECT ship_date + make_duration(3, 0, 0, 0) AS delivery_date FROM orders
 
 -- Time + Duration
-SELECT date_offset(shift_start, make_duration(0, 8, 0, 0)) AS shift_end FROM schedule
+SELECT shift_start + make_duration(0, 8, 0, 0) AS shift_end FROM schedule
 ```
 
 ### time_diff
 
-`time_diff(start, end)` -> Duration | QU: 1
+`time_diff(start, end)` -> Duration
 
 Duration between two Time values (wraps forward through midnight).
 
@@ -431,7 +410,7 @@ unless otherwise noted.
 
 ### make_interval
 
-`make_interval([years [, months [, weeks [, days [, hours [, mins [, secs]]]]]]])` -> Interval | QU: 1
+`make_interval([years [, months [, weeks [, days [, hours [, mins [, secs]]]]]]])` -> Interval
 
 Construct an `Interval` from up to seven numeric components. All
 parameters are optional — omitted trailing arguments default to 0, so
@@ -446,7 +425,7 @@ SELECT make_interval()                                -- 00:00:00
 
 ### interval_qualified
 
-`interval_qualified(literal, qualifier)` -> Interval | QU: 1
+`interval_qualified(literal, qualifier)` -> Interval
 
 Parse an interval literal with an explicit PG-style qualifier. The
 parser desugars `INTERVAL '...' YEAR TO MONTH` and similar forms to this
@@ -469,9 +448,9 @@ SELECT interval_qualified('1 year 2 months 3 days', 'YEAR')  -- 1 year
 
 ### justify_hours / justify_days / justify_interval
 
-`justify_hours(interval)` -> Interval | QU: 1
-`justify_days(interval)` -> Interval | QU: 1
-`justify_interval(interval)` -> Interval | QU: 1
+`justify_hours(interval)` -> Interval
+`justify_days(interval)` -> Interval
+`justify_interval(interval)` -> Interval
 
 Normalisation helpers mirroring PG:
 
@@ -487,7 +466,7 @@ SELECT justify_interval(INTERVAL '35 days 25 hours')  -- 1 mon 6 days 01:00:00
 
 ### age
 
-`age(later, earlier)` -> Interval | QU: 1
+`age(later, earlier)` -> Interval
 
 Calendar-aware difference between two timestamps. Unlike `later - earlier`
 (which returns `Duration` with raw elapsed time), `age` walks the calendar
@@ -511,8 +490,8 @@ Accepts `(Timestamp, Timestamp)` or `(TimestampTz, TimestampTz)`. Cross-kind pai
 
 ### generate_series
 
-`generate_series(start, stop[, step])` -> table(value Int32|Int64|Float64) | QU: TVF
-`generate_series(start, stop, stride Interval)` -> table(value Timestamp|TimestampTz) | QU: TVF
+`generate_series(start, stop[, step])` -> table(value Int32|Int64|Float64)
+`generate_series(start, stop, stride Interval)` -> table(value Timestamp|TimestampTz)
 
 Emits one row per step (numeric) or stride (temporal) boundary from
 `start` through `stop`, **inclusive** of both ends. The headline
@@ -555,66 +534,50 @@ also yields zero rows.
 
 ## Duration
 
+`Duration` represents elapsed wall-clock time without calendar awareness —
+the kind returned by `Timestamp - Timestamp`. For month- or year-aware spans
+use `Interval` and `age()` instead. DatumV-specific; the PostgreSQL idiom
+collapses everything in this section into `EXTRACT(EPOCH FROM interval) / N`
+on an `Interval`.
+
 ### make_duration
 
-`make_duration(days, hours, minutes, seconds)` -> Duration | QU: 1
+`make_duration(days, hours, minutes, seconds)` -> Duration
 
-Construct a Duration from components (all Float32).
+Construct a Duration from numeric components. Fractional seconds preserved
+to tick precision (100 ns).
 
 ```sql
 -- Duration arithmetic (preserves Duration type)
-SELECT date_span(start_date, end_date) + make_duration(1, 0, 0, 0) AS extended FROM projects
+SELECT (end_date - start_date) + make_duration(1, 0, 0, 0) AS extended FROM projects
 ```
 
 ### duration_seconds
 
-`duration_seconds(dur)` -> Float32 | QU: 1
+`duration_seconds(dur)` -> Float32
 
 Total seconds in a Duration as Float32.
 
 ### duration_minutes
 
-`duration_minutes(dur)` -> Float32 | QU: 1
+`duration_minutes(dur)` -> Float32
 
 Total minutes in a Duration as Float32 (fractional).
 
 ### duration_hours
 
-`duration_hours(dur)` -> Float32 | QU: 1
+`duration_hours(dur)` -> Float32
 
 Total hours in a Duration as Float32 (fractional).
 
 ### duration_days
 
-`duration_days(dur)` -> Float32 | QU: 1
+`duration_days(dur)` -> Float32
 
 Total days in a Duration as Float32 (fractional).
 
 ```sql
-SELECT duration_days(date_span(hire_date, now())) AS tenure FROM employees
-```
-
-## Formatting & Probing
-
-### strftime
-
-`strftime(date, format)` -> String | QU: 1
-
-Format a Date, Timestamp, or TimestampTz as a String using .NET format strings (e.g., `"yyyy-MM-dd"`).
-
-```sql
-SELECT strftime(created_at, 'yyyy-MM-dd HH:mm') AS formatted FROM records
-```
-
-### is_date
-
-`is_date(expr)` -> Float32 | QU: 1
-
-Returns 1 if the value is or can be parsed as a date, 0 otherwise. Accepts String, Date, Timestamp, TimestampTz.
-
-```sql
--- Data quality checks
-SELECT * FROM raw_data WHERE is_date(date_column) = 0
+SELECT duration_days(now() - hire_date) AS tenure FROM employees
 ```
 
 ## See Also
@@ -622,4 +585,3 @@ SELECT * FROM raw_data WHERE is_date(date_column) = 0
 - [UUID Functions](uuid.md) -- UUID generation, formatting, and timestamp extraction
 - [Cryptographic Hash Functions](crypto.md) -- md5, sha1, sha2 family, and digest dispatcher
 - [Aggregate Functions](aggregate.md) -- grouping and reduction functions
-- [SQL Reference](../sql/select.md) -- full SQL dialect documentation
