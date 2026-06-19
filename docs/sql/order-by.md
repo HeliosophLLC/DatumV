@@ -2,10 +2,6 @@
 title: ORDER BY / LIMIT / OFFSET
 ---
 
-## Why Use This
-
-Query results have no guaranteed order unless you specify one. ORDER BY gives you control — sort by score to find the best, by date to see the latest, or combine with LIMIT for top-N queries and pagination.
-
 ## Common Patterns
 
 ### Top-N: best-rated products

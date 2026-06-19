@@ -2,16 +2,6 @@
 title: PIVOT / UNPIVOT
 ---
 
-## Why Use This
-
-Sometimes your data is in the wrong shape. PIVOT turns row values into columns — great for creating one column per category in a report. UNPIVOT does the reverse, melting wide tables into long format — essential for reshaping data before feeding it into ML models that expect one observation per row.
-
-## How It Works
-
-**PIVOT**: Imagine a spreadsheet where each row is a sale with columns `product`, `region`, `amount`. PIVOT takes the distinct values of `region` (North, South, East, West) and turns each into its own column, filling in the aggregate (like SUM of amount) for each product-region combination. You go from many rows to fewer rows with more columns.
-
-**UNPIVOT** does the reverse: you have a wide table with columns `q1, q2, q3, q4` and you want to stack them into two columns — one for the quarter name and one for the value. Each input row becomes multiple output rows. This is often called "melting" in data science.
-
 ## PIVOT
 
 PIVOT rotates distinct values of a column into output columns, computing one aggregate per cell.
@@ -90,7 +80,7 @@ PIVOT is a **blocking** operator — it must buffer all input rows before emitti
 
 ## UNPIVOT
 
-UNPIVOT rotates a set of columns into rows, emitting a (name, value) pair per column per input row.
+UNPIVOT rotates a set of columns into rows, emitting a (name, value) pair per column per input row. Often called "melting" in data-science tools.
 
 ### Syntax
 

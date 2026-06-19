@@ -63,7 +63,7 @@ Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL
 
 The `QueryExplainer` produces estimated row counts for each operator in the plan tree. When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate.
 
-Per-column statistics from the manifest (estimated distinct count via HyperLogLog, null ratio) drive data-aware selectivity estimation for equality, IN, IS NULL, and equi-join predicates. Without a manifest, the cost model falls back to fixed heuristics (10% equality, 33% range, etc.). See [Statistics & Manifest — Planning Integration](statistics.md#planning-integration) for the full selectivity table.
+Per-column statistics from the manifest (estimated distinct count via HyperLogLog, null ratio) drive data-aware selectivity estimation for equality, IN, IS NULL, and equi-join predicates. Without a manifest, the cost model falls back to fixed heuristics (10% equality, 33% range, etc.).
 
 ## Join implementation
 

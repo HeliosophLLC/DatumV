@@ -6,14 +6,6 @@ title: SCAN
 
 `SCAN` computes a running fold (prefix scan) over ordered partitions. Each row's output feeds back as the accumulator for the next row: `output[i] = f(output[i-1], input[i])`. This enables computations that standard window functions cannot express — patterns where a row's result depends on its own previous output.
 
-## Why Use This
-
-Window functions like SUM() OVER or AVG() OVER handle most running calculations, but they have a limitation: the result for row N can't depend on the result for row N-1. When it does — exponential moving averages, session detection, streak counting, state machines — you need SCAN. Think of it as a for-loop over your ordered data where each iteration can see what the last iteration produced.
-
-## How It Works
-
-SCAN maintains an accumulator variable that starts at an INIT value and updates with each row. On every row, the expression you write can see (a) the current accumulator value (what you computed for the previous row), (b) the current row's columns, and (c) PREV(column) for the previous row's input values. The result of the expression becomes the new accumulator value and is emitted as an output column. It's like a reduce/fold operation, but it outputs every intermediate step.
-
 ## Syntax
 
 ### Scalar accumulator

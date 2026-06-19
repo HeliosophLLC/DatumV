@@ -636,7 +636,6 @@ For procedural batches — variables, conditionals, loops, multi-variable `SELEC
 
 ## See Also
 
-- [Schema Introspection](schema-introspection.md)
 - [Type System](type-system.md)
 - [SELECT](select.md)
 - [Procedural Statements](procedural.md)

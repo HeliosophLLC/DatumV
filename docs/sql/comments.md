@@ -2,10 +2,6 @@
 title: Comments
 ---
 
-## Why Use This
-
-Complex ETL queries can span dozens of lines. Comments help you and your team understand what each section does — especially when you revisit a pipeline months later.
-
 ## Realistic Example
 
 ```sql

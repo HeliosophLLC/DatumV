@@ -2,10 +2,6 @@
 title: Subqueries
 ---
 
-## Why Use This
-
-Subqueries let you nest one query inside another — filter against a computed list, compare each row to a global average, or check for existence in a related table. They're the building blocks of complex multi-step logic.
-
 ### Derived tables (FROM subqueries)
 
 A subquery in the FROM clause produces an inline table. The subquery must be aliased.
@@ -53,7 +49,7 @@ SELECT name FROM employees
 WHERE department_id NOT IN (SELECT id FROM excluded_departments)
 ```
 
-`NOT IN` follows SQL three-valued logic: if the subquery result contains any NULL value, no rows pass the filter (because `x NOT IN (..., NULL, ...)` evaluates to UNKNOWN for every `x`).
+`NOT IN` follows SQL three-valued logic: if the subquery result contains any NULL value, no rows pass the filter (because `x NOT IN (..., NULL, ...)` evaluates to UNKNOWN for every `x`). When the subquery might return NULLs, prefer `NOT EXISTS` to avoid the trap.
 
 ### EXISTS / NOT EXISTS subqueries
 
@@ -88,12 +84,6 @@ WHERE NOT EXISTS (
 | `NOT EXISTS (SELECT ...)` | Boolean gate at plan time | Left anti-semi-join |
 
 Correlated subqueries are decorrelated by the query planner: correlation predicates in the inner WHERE are extracted and become the join's ON condition, while non-correlated predicates remain as filters on the inner plan.
-
-## When to Use IN vs EXISTS
-
-- Use `IN` when you're checking membership against a small, concrete list.
-- Use `EXISTS` when you only care whether matching rows exist (short-circuits after the first match).
-- Avoid `NOT IN` when the subquery might return NULLs — use `NOT EXISTS` instead.
 
 ## See Also
 

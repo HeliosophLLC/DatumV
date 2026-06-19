@@ -274,4 +274,3 @@ when it's wide and sparse.
 - [Array, Struct & Index Literals](literals.md) — the literal-syntax surface
 - [LET Bindings — Tuple Destructuring](let-bindings.md#tuple-destructuring)
 - [Type System](type-system.md) — full `DataKind` table and CAST rules
-- [Schema Introspection](schema-introspection.md) — `system.types`, `information_schema.columns`

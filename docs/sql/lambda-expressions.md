@@ -2,11 +2,7 @@
 title: Lambda Expressions
 ---
 
-## Why Use This
-
-A lambda lets you supply a small, inline recipe to a function that knows how to apply it — transforming each element of an array, computing each frame of an animation, or producing each layer of a procedurally-generated drawing. Without lambdas, every such case would require a dedicated function shape, an out-of-band callback, or a UDF.
-
-In this engine, lambdas are **first-class values** ([`DataKind.Lambda`](../technical/data-value-layout.md)). They can be passed to functions, returned from functions, stored in struct fields, or carried through CASE expressions — but they are **row-scoped**: a lambda cannot be persisted to a column or written across rows, because its closure captures only make sense in the row that created it.
+Lambdas are **first-class values** ([`DataKind.Lambda`](../technical/data-value-layout.md)). They can be passed to functions, returned from functions, stored in struct fields, or carried through CASE expressions — but they are **row-scoped**: a lambda cannot be persisted to a column or written across rows, because its closure captures only make sense in the row that created it.
 
 ## Common Patterns
 

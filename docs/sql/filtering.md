@@ -2,10 +2,6 @@
 title: WHERE
 ---
 
-## Why Use This
-
-WHERE filters rows before any grouping, aggregation, or window functions run. It's your first line of defense against noisy data — remove nulls, exclude outliers, focus on a date range.
-
 The WHERE clause filters rows before grouping and aggregation.
 
 ```sql

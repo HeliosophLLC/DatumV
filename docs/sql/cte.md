@@ -2,14 +2,6 @@
 title: Common Table Expressions (WITH)
 ---
 
-## Why Use This
-
-A complex query with nested subqueries quickly becomes unreadable. CTEs let you name each step and write them top-to-bottom, like a pipeline — each step feeds into the next.
-
-## When to Use CTE vs Subquery
-
-Use a CTE when you reference the same intermediate result more than once, or when the nesting gets more than two levels deep. Use a subquery for simple one-off filters. CTEs are also the only way to write recursive queries (hierarchies, sequences).
-
 CTEs define named temporary result sets scoped to a single statement. They can simplify complex queries by breaking them into readable, composable stages.
 
 ```sql

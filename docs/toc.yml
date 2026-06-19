@@ -124,14 +124,8 @@
       href: sql/subqueries.md
     - name: Set Operations
       href: sql/set-operations.md
-    - name: Parameterized Queries
-      href: sql/parameters.md
     - name: Type System
       href: sql/type-system.md
-    - name: EXPLAIN
-      href: sql/explain.md
-    - name: Schema Introspection
-      href: sql/schema-introspection.md
     - name: DDL / DML
       href: sql/ddl-dml.md
       items:

@@ -107,10 +107,7 @@ ORDER BY category, name;
 - `declared` — a SQL-defined registration. Includes both your own `CREATE MODEL` entries and catalog-installed models whose entries carry an `installSql` field.
 - `discovered` — The engine is aware that the model exists in the static catalog but it has not yet been downloaded or installed.
 
-See [Schema Introspection](sql/schema-introspection.md) for the full set of `system.*` tables.
-
 ## See also
 
 - [CREATE MODEL](sql/create-model.md) — register your own ONNX or GGUF model.
 - [Examples](examples/index.md) — worked queries using catalog models.
-- [Schema Introspection](sql/schema-introspection.md) — `system.models`, `system.functions`, and related views.

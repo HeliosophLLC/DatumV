@@ -2,10 +2,6 @@
 title: Type System
 ---
 
-## Why Use This
-
-DatumV has more types than standard SQL -- typed arrays for embeddings and tensors, durations for time spans, images as a first-class kind, structs for nested values. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
-
 ## Quick Start
 
 Three common type tasks:
@@ -690,6 +686,5 @@ Timezone names follow the [IANA tz database](https://www.iana.org/time-zones) (e
 
 ## See Also
 
-- [Parameterized Queries](parameters.md)
 - [DDL / DML](ddl-dml.md)
 - [SELECT](select.md)

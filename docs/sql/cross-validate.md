@@ -2,17 +2,9 @@
 title: CROSS VALIDATE
 ---
 
-## Why Use This
+CROSS VALIDATE hashes each row's key column into a fold number between 0 and k-1. The assignment is deterministic — same data, same seed, same folds, every time, on any machine. Because it's based on hashing rather than random sampling, the clause doesn't need to see all the data first; each row gets its fold immediately, with zero buffering.
 
-You've built a model and want to know if it actually works — not just on the data it was trained on, but on data it hasn't seen. Cross-validation is the standard answer: split your data into k groups (called "folds"), train on k-1 of them, test on the one you held out, then rotate. Do this k times and you get a reliable estimate of how your model will perform on new data.
-
-The problem is that setting this up in SQL is tedious. You end up writing `hash_split` + `FLOOR` + `CAST` boilerplate, duplicating the fold count in every query, and managing k separate train/test materializations by hand. CROSS VALIDATE replaces all of that with one line.
-
-## How It Works
-
-CROSS VALIDATE hashes each row's key column into a fold number between 0 and k-1. The assignment is deterministic — same data, same seed, same folds, every time, on any machine. Because it's based on hashing (not random sampling), it doesn't need to see all the data first. It's a streaming operation: each row gets its fold immediately, with zero buffering.
-
-Under the hood, the clause desugars to a LET binding that calls `hash_split` — the same function you'd use manually, but without the boilerplate.
+The clause desugars to a `LET` binding that calls `hash_split` — the same function you'd use manually, without the boilerplate.
 
 ## Common Patterns
 

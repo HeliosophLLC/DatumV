@@ -2,10 +2,6 @@
 title: CASE Expressions
 ---
 
-## Why Use This
-
-CASE lets you create new columns based on conditions — bin continuous scores into grades, map numeric codes to human-readable labels, or handle special values differently. It's the SQL equivalent of if/else.
-
 CASE expressions provide inline conditional logic, similar to if/else chains.
 
 ### Searched CASE

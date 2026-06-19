@@ -3,7 +3,7 @@ title: User-Defined Functions
 ---
 
 User-defined functions (UDFs) allow you to name a reusable computation and
-call it like any other function. UDFs live in [schemas](schema-introspection.md) — by
+call it like any other function. UDFs live in schemas — by
 default `public` — and are callable by either their bare name (when the
 schema is on the session `search_path`) or a schema-qualified name
 (`analytics.shout(...)`). DatumV supports two UDF body shapes with
@@ -591,7 +591,6 @@ must be discarded and recreated.
 
 ## See Also
 
-- [Schema Introspection](schema-introspection.md) — how `search_path` resolves bare function names and how to list available schemas
 - [Functions](../functions/utility.md) — built-in scalar functions usable in UDF bodies
 - [Models](../models.md) — the `models` schema, whose entries UDFs commonly wrap
 - [Lambda Expressions](lambda-expressions.md) — how scope shadowing interacts with UDF parameters
