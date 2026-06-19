@@ -61,7 +61,7 @@ Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL
 
 ## Cardinality estimation
 
-The `QueryExplainer` produces estimated row counts for each operator in the plan tree. Base estimates come from provider capabilities (Parquet, HDF5, IDX report row counts from metadata). When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate — enabling accurate row counts for CSV, JSON, JSONL, and ZIP sources.
+The `QueryExplainer` produces estimated row counts for each operator in the plan tree. When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate.
 
 Per-column statistics from the manifest (estimated distinct count via HyperLogLog, null ratio) drive data-aware selectivity estimation for equality, IN, IS NULL, and equi-join predicates. Without a manifest, the cost model falls back to fixed heuristics (10% equality, 33% range, etc.). See [Statistics & Manifest — Planning Integration](statistics.md#planning-integration) for the full selectivity table.
 
@@ -77,11 +77,6 @@ Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
 
 When `ExecutionContext.MemoryBudgetBytes` is set, equi-joins use a Grace hash join that can spill partitions to temporary files when estimated memory usage exceeds the budget. The operator partitions both build and probe sides into buckets; if a bucket's build side exceeds the memory threshold, it is written to disk and replayed during probing. This allows joining datasets larger than available memory at the cost of additional I/O.
 
-The memory budget is configurable per deployment:
-- **CLI**: 2 GB default (`--memory-budget` flag, `--memory-budget 0` disables)
-- **Compute backend (gRPC)**: 256 MB default per session
-- **Programmatic API**: set via `ExecutionContext` constructor
-
 ### Index nested-loop join
 
 For small result sets, the planner can substitute an index nested-loop join (NLJ) instead of a hash join. This strategy is chosen when all of the following conditions are met:
@@ -94,32 +89,3 @@ For small result sets, the planner can substitute an index nested-loop join (NLJ
 When eligible, the NLJ streams probe-side rows and performs O(log n) index lookups on the build side for each probe key, avoiding full materialization of the build side. This is substantially faster than a hash join when the probe side is small and most build-side rows are never touched.
 
 The `LimitOperator` propagates the `RowLimit` hint (LIMIT + OFFSET) downstream through the `ExecutionContext`, allowing the `JoinOperator` to see that only a bounded result set is needed and select the NLJ strategy accordingly.
-
-## Project structure
-
-```
-DatumV/
-  src/
-    DatumV/             # Core library
-      Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo, SourceSchema
-      Parsing/                    # SQL tokenizer and parser (Superpower)
-      Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet, .datum), DDL/DML executors, IPrimaryKeyLookup
-      Execution/                  # Query planner, operators, expression evaluator
-      Functions/                  # Scalar and table-valued functions
-      Indexing/                   # Source indexes, bloom filters, B+Tree indexes (bulk + mutable PK), bitmap indexes, binary I/O
-      Manifest/                   # Manifest model, serialization, schema matching
-      Statistics/                 # Column statistics with pluggable accumulators
-      Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest
-      Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    DatumV.Parsing/     # Extracted tokenizer/parser (shared by core and language server)
-    DatumV.Server/      # Session engine: SessionManager, CommandDispatcher, IDatasetStore
-    DatumV.Compute/     # gRPC service library wrapping the server engine (embeddable)
-    DatumV.LanguageServer/  # SQL language service: completion, diagnostics, hover
-    DatumV.Editor/      # SignalR hub for server-side language intelligence
-    DatumV.Wasm/        # Blazor WebAssembly host with JSInvokable interop
-    DatumV.Cli/         # CLI tool (query, explore, stats, schema, index commands)
-  tests/
-    DatumV.Tests/       # Unit test suite
-  benchmarks/
-    DatumV.Benchmarks/  # BenchmarkDotNet performance tests
-```
