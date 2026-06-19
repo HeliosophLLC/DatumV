@@ -63,9 +63,8 @@ implicit type coercion following SQL Server-style type precedence rules:
    runtime.
 3. **Unparseable strings become NULL.** If a String branch value cannot be
    parsed to the target type at runtime, the result is NULL rather than an
-   error. This is an ETL-friendly behavior — data flows through without
-   interruption, and downstream consumers can detect NULLs as conversion
-   failures.
+   error. Data flows through without interruption; downstream consumers can
+   detect NULLs as conversion failures.
 
 ```sql
 -- The result type is Float32, not String.

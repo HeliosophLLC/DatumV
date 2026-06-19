@@ -256,7 +256,7 @@ The future `system.functions` (when `system.*` consolidates) inherits the column
 
 ## See also
 
-- [`docs/models.md`](../models.md) — built-in model zoo reference (the integrations that ride on this infrastructure).
+- [`docs/models.md`](../models.md) — built-in catalog reference (the integrations that ride on this infrastructure).
 - [Architecture](architecture.md) — high-level engine architecture.
 - [`docs/sql/procedural.md`](../sql/procedural.md) — procedural body semantics shared with UDFs.
 - [`docs/sql/ddl-dml.md`](../sql/ddl-dml.md) — DDL surface (CREATE TABLE / FUNCTION / PROCEDURE / MODEL).

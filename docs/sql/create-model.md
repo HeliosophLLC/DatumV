@@ -833,5 +833,5 @@ rows: `name`, `backend = "sql"`, `file_name` (the raw `USING` path),
 
 - [User-Defined Functions](udf.md) — the closest sibling DDL surface; same body shape, no `infer()` and no schema lockdown.
 - [Procedural Functions and Procedures](procedural.md) — the broader procedural-body family this shares syntax with.
-- [Models](../models.md) — the engine's built-in model zoo (`kind = 'builtin'` rows in `system.models`).
+- [Models](../models.md) — the built-in catalog (`kind = 'builtin'` rows in `system.models`).
 - [`technical/onnx-inference.md`](../technical/onnx-inference.md) — the design rationale for the inference layer, including the hoister Option A trade-off and why `infer()` is body-scoped.

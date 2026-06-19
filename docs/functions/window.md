@@ -5,8 +5,6 @@ category: window
 
 # Window Functions
 
-[< Back to Functions Reference](string.md) | [SQL Reference](../sql/select.md)
-
 Window functions compute a value for each row based on a window of related rows defined by an `OVER` clause. Unlike aggregates with `GROUP BY`, window functions do not collapse rows -- every input row produces an output row. See [SQL Reference -- Window Functions](../sql/window-functions.md) for full syntax.
 
 ### ROW_NUMBER

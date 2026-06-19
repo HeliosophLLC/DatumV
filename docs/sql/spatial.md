@@ -11,7 +11,7 @@ DatumV carries four first-class spatial kinds:
 | `Point2D` | A single 2D point (X, Y) | 2D coordinates — image pixels, geographic latitude/longitude, screen positions |
 | `Point3D` | A single 3D point (X, Y, Z) | 3D coordinates — vertices, sensor readings, individual sample points |
 | `PointCloud` | Dense 3D point collection with optional per-point color | Depth-map unprojection, LiDAR / RGB-D scans, photogrammetry — anything turning 2D-per-pixel data into 3D structure |
-| `Mesh` | Triangulated 3D surface with optional per-vertex color + normals + (Phase 2) UVs + texture | Surfaces you want to export as real 3D assets — `.glb` for Blender / Unity / web viewers, `.stl` for 3D printing, `.obj` for MeshLab / Open3D |
+| `Mesh` | Triangulated 3D surface with optional per-vertex color and normals | Surfaces you want to export as real 3D assets — `.glb` for Blender / Unity / web viewers, `.stl` for 3D printing, `.obj` for MeshLab / Open3D |
 
 The pattern across the four: `Point2D` and `Point3D` are atomic scalars
 (fits inline in a `DataValue`), while `PointCloud` and `Mesh` are

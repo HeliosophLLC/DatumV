@@ -156,7 +156,7 @@ Sorted indexes are stored inline within the unified `.datum-index` file as fixed
 
 ### Multi-tenant memory profile
 
-The fixed-width mmap layout means the OS pages in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions querying the same table do not multiply memory 10×. On-disk size is larger than a Zstd-compressed encoding (~8× for typical columns) but acceptable for local ML ETL workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage can compress the file with Zstd; after download, the decompressed file is mmap'd directly.
+The fixed-width mmap layout means the OS pages in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions querying the same table do not multiply memory 10×. On-disk size is larger than a Zstd-compressed encoding (~8× for typical columns) but acceptable for local ML workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage can compress the file with Zstd; after download, the decompressed file is mmap'd directly.
 
 ## B+Tree indexes
 

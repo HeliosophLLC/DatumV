@@ -5,8 +5,6 @@ category: temporal
 
 # Temporal Functions
 
-[< Back to Functions Reference](string.md) | [SQL Reference](../sql/select.md)
-
 Functions for date, time, duration, and timestamp construction, extraction, formatting, and arithmetic.
 
 ## Feature Extraction

@@ -440,8 +440,8 @@ SELECT name, kind, backend, status FROM system.models WHERE name = 'classify_ima
 Path resolution issue. Confirm:
 
 - The file actually exists at the path you typed.
-- `$DATUMV_MODELS` is set and matches what you think.
-- Relative paths (`'my-model/model.onnx'`) resolve against `$DATUMV_MODELS`. Absolute paths need the `file://` prefix.
+- The models directory is configured the way you expect (see [Prerequisites](#prerequisites)).
+- Relative paths (`'my-model/model.onnx'`) resolve against the models directory. Absolute paths need the `file://` prefix.
 
 Cross-check with `inference.onnx_inspect` on the same path — if that
 works, `CREATE MODEL` will too.
@@ -449,8 +449,8 @@ works, `CREATE MODEL` will too.
 ### `No InferenceDispatcher is configured`
 
 The host process didn't wire an inference dispatcher onto the catalog.
-In a normal `datum-shell` session this happens automatically. If you're
-running from custom code, you need:
+In the app this happens automatically. If you're running from custom
+code, you need:
 
 ```csharp
 catalog.InferenceDispatcher = new InferenceDispatcher(
@@ -511,10 +511,10 @@ declared input shape. Common causes:
   to confirm the names. The shipped MiniLM body uses `input_ids /
   attention_mask / token_type_ids` because that's what HuggingFace
   optimum's BERT export declares.
-- *"single-output sessions only"* — Was a v1 restriction; lifted. v1
-  now picks the first output for multi-output sessions (which matches
-  HuggingFace optimum convention of listing the primary output first).
-  Struct-of-tensors return for multi-output is a follow-up.
+- *"single-output sessions only"* — Outdated; `infer()` now picks the
+  first output for multi-output sessions (which matches HuggingFace
+  optimum convention of listing the primary output first). For full
+  multi-output access, use `infer_outputs()` — see [Multi-output models](#multi-output-models-rt-detr-roberta-qa-blazeface).
 
 ### Parameter constraint errors
 
