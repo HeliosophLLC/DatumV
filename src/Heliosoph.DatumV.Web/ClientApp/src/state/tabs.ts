@@ -455,15 +455,24 @@ export const isTornOutWindow: boolean = readSeedFromHash() !== null;
 
 function createDefaultState(): PanesState {
   // First-ever boot: pinned Models / Datasets / Settings / Docs tabs +
-  // one Untitled-1 SQL tab. Pinned tabs take indices 0..N so they sit
-  // to the LEFT of user-created tabs on the strip, matching VS Code's
-  // "pinned tabs at the front" convention.
-  const firstUntitled: Tab = {
+  // two example SQL tabs that showcase the model-invocation surface.
+  // Pinned tabs take indices 0..N so they sit to the LEFT of user-created
+  // tabs on the strip, matching VS Code's "pinned tabs at the front"
+  // convention.
+  const searchPerson: Tab = {
     id: newTabId(),
-    title: 'Untitled-1',
+    title: 'search_person',
     kind: 'sql',
-    sql: '',
-    savedSql: '',
+    sql: SEARCH_PERSON_EXAMPLE_SQL,
+    savedSql: SEARCH_PERSON_EXAMPLE_SQL,
+    dirty: false,
+  };
+  const depthCompare: Tab = {
+    id: newTabId(),
+    title: 'depth_compare',
+    kind: 'sql',
+    sql: DEPTH_COMPARE_EXAMPLE_SQL,
+    savedSql: DEPTH_COMPARE_EXAMPLE_SQL,
     dirty: false,
   };
   const leaf: LeafPane = {
@@ -474,12 +483,31 @@ function createDefaultState(): PanesState {
       createPinnedTab('docs'),
       createPinnedTab('models'),
       createPinnedTab('datasets'),
-      firstUntitled,
+      searchPerson,
+      depthCompare,
     ],
-    activeTabId: firstUntitled.id,
+    activeTabId: searchPerson.id,
   };
   return { root: leaf, focusedLeafId: leaf.id };
 }
+
+const SEARCH_PERSON_EXAMPLE_SQL = `SELECT
+    LET classes = models.yolox_s(a.file),
+    image_crop(file, c.value.bbox)
+FROM datasets.coco_val2017 a
+CROSS JOIN unnest(classes) c
+WHERE c.value.label = 'person'
+LIMIT 100`;
+
+const DEPTH_COMPARE_EXAMPLE_SQL = `SELECT
+    LET depth_anything_v2 = models.depth_anything_v2_base(file) AS DAv2,
+    LET depth_anything_v3 = models.depth_anything_v3_large(file) AS DAv3,
+    LET midas = models.midas_small(file) AS midas,
+    LET dpt = models.dpt_large(file) AS dpt,
+    file AS baseline,
+    file_name
+FROM datasets.coco_val2017
+LIMIT 32`;
 
 function createInitialState(): PanesState {
   const seed = readSeedFromHash();
