@@ -1,5 +1,5 @@
 DatumV THIRD-PARTY NOTICES
-Generated: 2026-06-15T14:41:03.059Z
+Generated: 2026-06-15T15:58:01.198Z
 
 This file aggregates license and copyright notices for every
 third-party component that ships with the DatumV installer,
@@ -153,6 +153,12 @@ The DatumV engine (.NET 10) bundles the following NuGet packages.
 License text for each license family (MIT, Apache-2.0, BSD-*,
 LGPL-*) follows in Section 5 below.
 
+DatumV ships in two installer variants — `cuda` (NVIDIA stack) and
+`standard` (DirectML/Vulkan/CPU cross-vendor stack). Most packages are
+shared between both variants and are listed unannotated. The handful
+of packages that ship in only one variant carry a "Ships in: X variant
+only" line at the bottom of their entry.
+
 Apache.Arrow 23.0.0
   License: Apache-2.0
   URL: https://arrow.apache.org/
@@ -184,21 +190,30 @@ LLamaSharp.Backend.Cpu 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
 
+LLamaSharp.Backend.Cuda12.Windows 0.27.0
+  License: MIT
+  URL: https://github.com/SciSharp/LLamaSharp
+  Ships in: cuda installer variant only
+
 LLamaSharp.Backend.Vulkan 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
+  Ships in: standard installer variant only
 
 LLamaSharp.Backend.Vulkan.Linux 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
+  Ships in: standard installer variant only
 
 LLamaSharp.Backend.Vulkan.Windows 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
+  Ships in: standard installer variant only
 
 Microsoft.AI.DirectML 1.15.4
   License: Unknown
   URL: https://aka.ms/DirectML
+  Ships in: standard installer variant only
 
 Microsoft.Bcl.AsyncInterfaces 10.0.5
   License: MIT
@@ -227,10 +242,32 @@ Microsoft.IO.RecyclableMemoryStream 3.0.1
 Microsoft.ML.OnnxRuntime.DirectML 1.24.4
   License: MIT
   URL: https://github.com/Microsoft/onnxruntime
+  Ships in: standard installer variant only
+
+Microsoft.ML.OnnxRuntime.Gpu 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+  Ships in: cuda installer variant only
+
+Microsoft.ML.OnnxRuntime.Gpu.Linux 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+  Ships in: cuda installer variant only
+
+Microsoft.ML.OnnxRuntime.Gpu.Windows 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+  Ships in: cuda installer variant only
 
 Microsoft.ML.OnnxRuntime.Managed 1.24.4
   License: MIT
   URL: https://github.com/Microsoft/onnxruntime
+  Ships in: standard installer variant only
+
+Microsoft.ML.OnnxRuntime.Managed 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+  Ships in: cuda installer variant only
 
 Microsoft.ML.Tokenizers 0.22.0
   License: MIT

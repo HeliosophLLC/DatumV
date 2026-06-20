@@ -69,7 +69,48 @@ function collectDotnetLicenses() {
   log('Restoring dotnet tools...');
   execSync('dotnet tool restore', { cwd: REPO_ROOT, stdio: 'inherit' });
 
-  log('Running dotnet-project-licenses on Web project...');
+  // The Web project's dependency graph differs between GpuVariants
+  // (cuda pulls ORT.Gpu + LLamaSharp.Backend.Cuda12.Windows; standard
+  // pulls ORT.DirectML + LLamaSharp.Backend.Vulkan + Backend.Cpu).
+  // dotnet-project-licenses walks whatever the *last restore* materialised
+  // into project.assets.json, so we restore each variant in turn, collect
+  // its deps, then merge — tagging variant-exclusive entries so the
+  // notices file accurately reflects both installers.
+  const cudaEntries = collectForVariant('cuda');
+  log(`  cuda variant: ${cudaEntries.length} packages`);
+
+  const standardEntries = collectForVariant('standard');
+  log(`  standard variant: ${standardEntries.length} packages`);
+
+  const cudaKeys = new Set(cudaEntries.map((e) => `${e.name}@${e.version}`));
+  const standardKeys = new Set(standardEntries.map((e) => `${e.name}@${e.version}`));
+
+  const merged = [];
+  for (const e of cudaEntries) {
+    const key = `${e.name}@${e.version}`;
+    if (standardKeys.has(key)) {
+      merged.push(e); // shared between both variants
+    } else {
+      merged.push({ ...e, variantTag: 'cuda' });
+    }
+  }
+  for (const e of standardEntries) {
+    const key = `${e.name}@${e.version}`;
+    if (!cudaKeys.has(key)) {
+      merged.push({ ...e, variantTag: 'standard' });
+    }
+  }
+  return dedupeSorted(merged);
+}
+
+function collectForVariant(variant) {
+  log(`Restoring Web project for variant=${variant}...`);
+  execSync(
+    `dotnet restore "${WEB_CSPROJ}" -p:GpuVariant=${variant}`,
+    { cwd: REPO_ROOT, stdio: ['ignore', 'inherit', 'inherit'] },
+  );
+
+  log(`Running dotnet-project-licenses for variant=${variant}...`);
   // -t walks transitive deps; -o json emits to stdout (the alpha v3
   // CLI dropped the older -j/-f flag pair in favor of typed output).
   // The tool exits non-zero whenever any package has ValidationErrors
@@ -88,11 +129,12 @@ function collectDotnetLicenses() {
   );
   if (!result.stdout || result.stdout.trim().length === 0) {
     throw new Error(
-      `dotnet-project-licenses produced no stdout (status=${result.status}):\n${result.stderr ?? ''}`,
+      `dotnet-project-licenses produced no stdout for variant=${variant} ` +
+      `(status=${result.status}):\n${result.stderr ?? ''}`,
     );
   }
   const data = JSON.parse(result.stdout);
-  const entries = data.map((p) => ({
+  return data.map((p) => ({
     name: p.PackageId,
     version: p.PackageVersion,
     license: resolveDotnetLicense(p),
@@ -100,7 +142,6 @@ function collectDotnetLicenses() {
     authors: '',
     copyright: '',
   }));
-  return dedupeSorted(entries);
 }
 
 function resolveDotnetLicense(p) {
@@ -261,6 +302,7 @@ function formatEntry(e) {
   if (e.url) lines.push(`  URL: ${e.url}`);
   if (e.authors) lines.push(`  Authors: ${e.authors}`);
   if (e.copyright) lines.push(`  Copyright: ${e.copyright}`);
+  if (e.variantTag) lines.push(`  Ships in: ${e.variantTag} installer variant only`);
   return lines.join('\n');
 }
 
@@ -316,6 +358,11 @@ function main() {
     `The DatumV engine (.NET 10) bundles the following NuGet packages.\n` +
     `License text for each license family (MIT, Apache-2.0, BSD-*,\n` +
     `LGPL-*) follows in Section 5 below.\n\n` +
+    `DatumV ships in two installer variants — \`cuda\` (NVIDIA stack) and\n` +
+    `\`standard\` (DirectML/Vulkan/CPU cross-vendor stack). Most packages are\n` +
+    `shared between both variants and are listed unannotated. The handful\n` +
+    `of packages that ship in only one variant carry a "Ships in: X variant\n` +
+    `only" line at the bottom of their entry.\n\n` +
     formatSection(dotnetEntries) +
     formatCopyleftNote(dotnetEntries.filter((e) => isCopyleftLicense(e.license))) +
     header('SECTION 4 — NODE / NPM DEPENDENCIES') +
