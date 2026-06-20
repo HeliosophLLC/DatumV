@@ -2,10 +2,24 @@
   href: getting-started.md
 
 - name: Examples
-  href: examples.md
+  href: examples/index.md
   items:
+    - name: Person crops with YOLOX
+      href: examples/yolox-person-crops.md
+    - name: Same input, four depth models
+      href: examples/depth-comparison.md
+    - name: Depth maps and 3D point clouds
+      href: examples/depth-maps-and-point-clouds.md
+    - name: Video frames as a queryable column
+      href: examples/video-frames.md
+    - name: Transcribing audio with Whisper
+      href: examples/transcription.md
+    - name: Multi-dim arrays and bracket indexing
+      href: examples/multi-dim-arrays.md
     - name: Animated torch
-      href: examples.md#animated-torch
+      href: examples/animated-torch.md
+    - name: Audio waveforms as procedural drawings
+      href: examples/audio-waveform.md
 
 - name: SQL Reference
   items:
@@ -97,6 +111,8 @@
       href: sql/lambda-expressions.md
     - name: Array, Struct & Index Literals
       href: sql/literals.md
+    - name: Structs
+      href: sql/struct.md
     - name: Common Table Expressions
       href: sql/cte.md
       items:
@@ -108,14 +124,8 @@
       href: sql/subqueries.md
     - name: Set Operations
       href: sql/set-operations.md
-    - name: Parameterized Queries
-      href: sql/parameters.md
     - name: Type System
       href: sql/type-system.md
-    - name: EXPLAIN
-      href: sql/explain.md
-    - name: Schema Introspection
-      href: sql/schema-introspection.md
     - name: DDL / DML
       href: sql/ddl-dml.md
       items:

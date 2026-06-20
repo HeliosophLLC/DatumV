@@ -48,7 +48,7 @@ public sealed class WebCellFormatterTests
 
         JsonCell cell = WebCellFormatter.Format(value, arena, registry);
 
-        Assert.Equal("text", cell.Kind);
+        Assert.Equal("binary_download", cell.Kind);
         Assert.NotNull(cell.Text);
         Assert.Contains("glTF", cell.Text);
         Assert.Contains("mesh_from_gltf", cell.Text);
@@ -66,7 +66,7 @@ public sealed class WebCellFormatterTests
 
         JsonCell cell = WebCellFormatter.Format(value, arena, registry);
 
-        Assert.Equal("text", cell.Kind);
+        Assert.Equal("binary_download", cell.Kind);
         Assert.NotNull(cell.Text);
         Assert.Contains("PLY", cell.Text);
         Assert.Contains("pointcloud_from_ply", cell.Text);
@@ -86,7 +86,7 @@ public sealed class WebCellFormatterTests
 
         JsonCell cell = WebCellFormatter.Format(value, arena, registry);
 
-        Assert.Equal("text", cell.Kind);
+        Assert.Equal("binary_download", cell.Kind);
         Assert.NotNull(cell.Text);
         Assert.Contains("binary", cell.Text);
         Assert.Contains("8 bytes", cell.Text);

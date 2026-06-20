@@ -2,10 +2,6 @@
 title: TABLESAMPLE
 ---
 
-## Why Use This
-
-Your dataset has 10 million rows but you just need a quick look at the shape of the data, or your classes are imbalanced (95% cats, 5% dogs) and you need to balance them for model training. TABLESAMPLE gives you controlled sampling without loading everything.
-
 ## Choosing a Method
 
 - **Quick exploration**: Use BERNOULLI — fast, random, no setup.

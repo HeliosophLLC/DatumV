@@ -11,7 +11,7 @@ DatumV carries four first-class spatial kinds:
 | `Point2D` | A single 2D point (X, Y) | 2D coordinates — image pixels, geographic latitude/longitude, screen positions |
 | `Point3D` | A single 3D point (X, Y, Z) | 3D coordinates — vertices, sensor readings, individual sample points |
 | `PointCloud` | Dense 3D point collection with optional per-point color | Depth-map unprojection, LiDAR / RGB-D scans, photogrammetry — anything turning 2D-per-pixel data into 3D structure |
-| `Mesh` | Triangulated 3D surface with optional per-vertex color + normals + (Phase 2) UVs + texture | Surfaces you want to export as real 3D assets — `.glb` for Blender / Unity / web viewers, `.stl` for 3D printing, `.obj` for MeshLab / Open3D |
+| `Mesh` | Triangulated 3D surface with optional per-vertex color and normals | Surfaces you want to export as real 3D assets — `.glb` for Blender / Unity / web viewers, `.stl` for 3D printing, `.obj` for MeshLab / Open3D |
 
 The pattern across the four: `Point2D` and `Point3D` are atomic scalars
 (fits inline in a `DataValue`), while `PointCloud` and `Mesh` are
@@ -41,7 +41,7 @@ FROM photos LIMIT 1
 ```
 
 End-to-end walkthroughs of these workflows live in
-[Examples — Depth maps and 3D point clouds](examples.md#depth-maps-and-3d-point-clouds).
+[Examples — Depth maps and 3D point clouds](../examples/depth-maps-and-point-clouds.md).
 
 ## Points
 
@@ -429,7 +429,7 @@ expression context like any other DataKind.
 ## See Also
 
 - [Type System](type-system.md) — overall DataKind reference; spatial entries link back here.
-- [Examples — Depth maps and 3D point clouds](examples.md#depth-maps-and-3d-point-clouds) — step-by-step workflow walkthrough.
+- [Examples — Depth maps and 3D point clouds](../examples/depth-maps-and-point-clouds.md) — step-by-step workflow walkthrough.
 - [Models](../models.md) — depth estimators (`midas-small`, `dpt-large`, `zoedepth-nyu-kitti` + metric variants, `glpn-nyu` + metric variant).
 - [Image Functions](../functions/image.md) — `apply_colormap`, `depth_map_to_image`, and the broader image-manipulation surface.
 - [`.datum` Format](../technical/datum-format.md) — blob storage layout.

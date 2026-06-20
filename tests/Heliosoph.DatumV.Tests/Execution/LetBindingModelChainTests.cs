@@ -154,6 +154,94 @@ public sealed class LetBindingModelChainTests : ServiceTestBase
     /// CSE pass would only insert RowEnricher if a duplicate scalar appears
     /// at multiple sites, which this query avoids).
     /// </summary>
+    /// <summary>
+    /// Dot-notation struct-field access on a LET-bound struct, in a projection
+    /// that ALSO carries a model invocation. The model call forces the
+    /// projection through <c>HoistProjectWithLetStaircase</c>, which renames
+    /// the LET to a synthetic hidden column (<c>__let_s_N</c>). The expression
+    /// rewriter must remap the qualifier in <c>s.a</c> to the synthetic name,
+    /// otherwise the runtime evaluator looks for <c>s</c> in the augmented row
+    /// (where it no longer lives) and throws <c>Column 's.a' not found in row</c>.
+    /// IndexAccess (<c>s['a']</c>) goes through a different runtime path that
+    /// already worked — this test covers the dot-syntax gap.
+    /// </summary>
+    [Fact]
+    public async Task DotAccess_OnLetBoundStruct_InProjectionWithModelCall_Resolves()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "frank" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET s = {a: 'hello', b: 'world'}, "
+            + "LET v = models.echo(s.a), v AS result FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("hello", rows[0]["result"].AsString());
+    }
+
+    /// <summary>
+    /// Same scenario but the dot-access lives in the SELECT list (not a
+    /// sibling LET body). Confirms the rewriter handles every expression
+    /// site in the staircase pass.
+    /// </summary>
+    [Fact]
+    public async Task DotAccess_OnLetBoundStruct_InSelectListWithModelCall_Resolves()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "grace" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT LET s = {a: 'hello', b: 'world'}, "
+            + "LET v = models.echo(name), s.a AS first, v AS echoed FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("hello", rows[0]["first"].AsString());
+        Assert.Equal("grace", rows[0]["echoed"].AsString());
+    }
+
+    /// <summary>
+    /// Topo-order regression for the user-reported shape:
+    ///   <c>LET d = models.X(...), LET v = scalar_fn(d.field), …</c>.
+    /// The dep edge from <c>v</c> to <c>d</c> flows only through the
+    /// qualified ref <c>d.field</c> — the dep collector must follow
+    /// <see cref="ColumnReference.TableName"/> when it matches a hoist
+    /// key, otherwise <c>v</c> lands at the same staircase level as
+    /// <c>d</c> (or earlier) and the row evaluator throws
+    /// <c>Column '__let_d_N.field' not found in row</c>. Bracket access
+    /// (<c>d['field']</c>) already worked because the bare <c>d</c>
+    /// surfaces as a child of the IndexAccess.
+    /// </summary>
+    [Fact]
+    public async Task DotAccess_OnLetBoundStruct_FromScalarSiblingLet_TopoOrders()
+    {
+        TableCatalog catalog = CreateCatalog(
+            tableName: "t",
+            columns: ["name"],
+            new object?[] { "henry" });
+        catalog.Models = BuildCatalogWithEcho();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT "
+            + "  LET m = models.echo(name), "
+            + "  LET s = {a: 'hello', b: 'world'}, "
+            + "  LET v = upper(s.a), "
+            + "  v AS result, m AS echoed "
+            + "FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        Assert.Equal("HELLO", rows[0]["result"].AsString());
+        Assert.Equal("henry", rows[0]["echoed"].AsString());
+    }
+
     [Fact]
     public async Task LetWithoutModel_DoesNotLiftIntoStaircase()
     {

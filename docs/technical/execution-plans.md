@@ -9,21 +9,6 @@ This document explains how to read and interpret execution plans, what each oper
 
 ---
 
-## Obtaining a Plan
-
-### CLI
-
-```
-.explain SELECT * FROM events WHERE age > 30
-.explain --analyze SELECT * FROM events JOIN users ON events.user_id = users.id
-```
-
-### gRPC (Compute Service)
-
-Send an `ExplainRequest` with the `sql` field populated. Set `analyze = true` for runtime metrics. The response contains both `plan_text` (human-readable) and `root` (structured `ExplainPlanNodeMessage` tree).
-
----
-
 ## Reading the Plan Tree
 
 Plans render as indented trees. Each line represents one **operator** — a unit of work in the query pipeline. Data flows from leaf nodes (scans) up to the root (final projection or limit).

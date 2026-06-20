@@ -26,7 +26,7 @@ The shape-agnostic functions intentionally "drop" the multi-dim shape on output 
 
 ### array
 
-`array(a, b, c, ...)` → Array | QU: 1
+`array(a, b, c, ...)` → Array
 
 Construct a typed Array from one or more values. All arguments must share the same data kind.
 
@@ -37,7 +37,7 @@ SELECT [1, 2, 3] AS nums  -- bracket syntax equivalent
 
 ### cardinality
 
-`cardinality(arr)` → Int32 | QU: 1
+`cardinality(arr)` → Int32
 
 Total number of elements in the array (product of all dimensions for a multi-dim array). PostgreSQL-compatible.
 
@@ -48,7 +48,7 @@ SELECT cardinality(matrix_2x3)                -- 6
 
 ### array_length
 
-`array_length(arr, dim)` → Int32 | QU: 1
+`array_length(arr, dim)` → Int32
 
 Size of the requested dimension (1-based). PostgreSQL-compatible. Returns NULL for an out-of-range dimension.
 
@@ -61,7 +61,7 @@ SELECT array_length(matrix_2x3, 99)           -- NULL
 
 ### array_ndims
 
-`array_ndims(arr)` → Int32 | QU: 1
+`array_ndims(arr)` → Int32
 
 Number of dimensions of an array. PostgreSQL-compatible. Flat (1-D) arrays return `1`; multi-dim arrays return their declared ndim.
 
@@ -72,7 +72,7 @@ SELECT array_ndims(matrix_2x3)                -- 2
 
 ### array_shape
 
-`array_shape(arr)` → Array<Int32> | QU: 1
+`array_shape(arr)` → Array<Int32>
 
 Per-dimension sizes of an array.
 
@@ -83,7 +83,7 @@ SELECT array_shape(matrix_2x3)                -- [2, 3]
 
 ### array_get
 
-`array_get(arr, i0, i1, ...)` → element kind | QU: 1
+`array_get(arr, i0, i1, ...)` → element kind
 
 Read a single element by positional indices. The number of indices must equal the array's `ndim`. Indices are 1-based (PostgreSQL semantics) and row-major. Equivalent to the `arr[i]` / `arr[y, x]` bracket-syntax accessor. Returns NULL for a 1-D out-of-bounds index; throws on dimension-count or per-dim multi-dim-index range errors.
 
@@ -95,7 +95,7 @@ SELECT array_get(matrix_2x3, 1, 3)            -- element at row 1, col 3
 
 ### array_join
 
-`array_join(arr, separator)` → String | QU: 1
+`array_join(arr, separator)` → String
 
 Join elements into a String with separator. Null elements are skipped. String elements used directly; others converted via ToString.
 
@@ -105,7 +105,7 @@ SELECT array_join(array('a', 'b', 'c'), ', ') -- 'a, b, c'
 
 ### array_contains
 
-`array_contains(arr, value)` → Boolean | QU: 1
+`array_contains(arr, value)` → Boolean
 
 Returns whether the array contains the value (by equality).
 
@@ -115,7 +115,7 @@ SELECT array_contains(array(1, 2, 3), 2) -- true
 
 ### array_position
 
-`array_position(arr, value)` → Float32 | QU: 1
+`array_position(arr, value)` → Int32
 
 1-based index of the first matching element, or null if not found.
 
@@ -125,7 +125,7 @@ SELECT array_position(array('a', 'b', 'c'), 'b') -- 2
 
 ### array_sort
 
-`array_sort(arr)` → Array | QU: 1
+`array_sort(arr)` → Array
 
 Sorted copy (ascending). Uses ORDER BY comparison semantics -- nulls sort last. Supports Float32, UInt8, String, Date, DateTime elements.
 
@@ -135,7 +135,7 @@ SELECT array_sort(array(3, 1, 2)) -- [1, 2, 3]
 
 ### array_reverse
 
-`array_reverse(arr)` → Array | QU: 1
+`array_reverse(arr)` → Array
 
 Reversed copy of the array.
 
@@ -143,9 +143,25 @@ Reversed copy of the array.
 SELECT array_reverse(array(1, 2, 3)) -- [3, 2, 1]
 ```
 
+### array_shuffle
+
+`array_shuffle(arr)` → Array
+
+`array_shuffle(arr, seed)` → Array
+
+Shuffled copy of the array using the Fisher-Yates algorithm. Element kind is preserved. The two-argument form is deterministic for the given integer seed — useful when reproducible permutations are needed (test fixtures, data-augmentation pipelines). Multi-dim arrays are rejected; a meaningful shuffle would need to choose an axis.
+
+```sql
+-- Reproducible shuffle of a label vocabulary:
+SELECT array_shuffle(array('cat', 'dog', 'bird'), 42)
+
+-- Stochastic per-row shuffle of a feature ordering:
+SELECT array_shuffle(feature_ids) FROM examples
+```
+
 ### array_distinct
 
-`array_distinct(arr)` → Array | QU: 1
+`array_distinct(arr)` → Array
 
 Remove duplicates, preserving first-occurrence order. Uses DataValue equality.
 
@@ -155,7 +171,7 @@ SELECT array_distinct(array(1, 2, 2, 3, 1)) -- [1, 2, 3]
 
 ### array_slice
 
-`array_slice(arr, start, length)` → Array | QU: 1
+`array_slice(arr, start, length)` → Array
 
 Sub-array extraction. 1-based start, clamped to bounds. Returns empty array if out of range.
 
@@ -165,7 +181,7 @@ SELECT array_slice(array(10, 20, 30, 40), 2, 2) -- [20, 30]
 
 ### array_concat
 
-`array_concat(arr1, arr2)` → Array | QU: 1
+`array_concat(arr1, arr2)` → Array
 
 Concatenate two arrays. Both must share the same element kind.
 
@@ -175,7 +191,7 @@ SELECT array_concat(array(1, 2), array(3, 4)) -- [1, 2, 3, 4]
 
 ### array_min
 
-`array_min(arr)` → element type | QU: 1
+`array_min(arr)` → element type
 
 Minimum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind.
 
@@ -185,7 +201,7 @@ SELECT array_min(array(3, 1, 2)) -- 1
 
 ### array_max
 
-`array_max(arr)` → element type | QU: 1
+`array_max(arr)` → element type
 
 Maximum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind.
 
@@ -195,7 +211,7 @@ SELECT array_max(array(3, 1, 2)) -- 3
 
 ### array_sum
 
-`array_sum(arr)` → Float32 | QU: 1
+`array_sum(arr)` → Float32
 
 Sum of numeric (Float32 or UInt8) elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32.
 
@@ -205,7 +221,7 @@ SELECT array_sum(array(1, 2, 3)) -- 6
 
 ### array_avg
 
-`array_avg(arr)` → Float32 | QU: 1
+`array_avg(arr)` → Float32
 
 Average (mean) of numeric elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32.
 
@@ -215,7 +231,7 @@ SELECT array_avg(array(2, 4, 6)) -- 4
 
 ### array_transform
 
-`array_transform(arr, element -> expr)` → Array | QU: 1
+`array_transform(arr, element -> expr)` → Array
 
 Applies a lambda to each element, returning a new array of transformed values.
 
@@ -225,7 +241,7 @@ SELECT array_transform(array(1, 2, 3), x -> x * 2) -- [2, 4, 6]
 
 ### array_filter
 
-`array_filter(arr, element -> Boolean)` → Array | QU: 1
+`array_filter(arr, element -> Boolean)` → Array
 
 Filters an array, keeping only elements where the lambda predicate returns true.
 
@@ -233,8 +249,141 @@ Filters an array, keeping only elements where the lambda predicate returns true.
 SELECT array_filter(array(1, 2, 3, 4, 5), x -> x > 2) -- [3, 4, 5]
 ```
 
+## Numeric Array Primitives
+
+A small family of element-wise BLAS-flavoured primitives and shape
+transforms used heavily by SQL-defined model bodies. They aren't
+locked to ML — they're general-purpose array operations — but most
+current uses today are inside `CREATE MODEL` bodies (diffusion
+samplers, depth-map resizing, vision-language attention masks),
+where a per-element SQL loop would be orders of magnitude slower
+than the tight C# loop these functions wrap.
+
+### array_axpy
+
+`array_axpy(y, a, x)` → Float32[]
+
+Element-wise `y[i] + a * x[i]` over two equal-length `Float32[]`
+arrays with a `Float32` scalar `a`. Returns a fresh array of the
+same length; arrays of different lengths raise. Named after the
+[BLAS Level-1 `axpy`](https://www.netlib.org/blas/) routine that
+fills the same role.
+
+The diffusion Euler update is the canonical site:
+
+```sql
+SET latents = array_axpy(latents, sigma_next - sigma, noise_pred)
+```
+
+### array_scale
+
+`array_scale(a, s)` → Float32[]
+
+Multiplies every element of a `Float32[]` by a `Float32` scalar `s`;
+returns a fresh array.
+
+```sql
+-- Scale the initial diffusion latent by sigma_max:
+DECLARE latents Float32[] = array_scale(sample_normal(n), sigmas[1]);
+
+-- VAE post-decode scale-factor divide:
+SET latents = array_scale(latents, CAST(1.0 / 0.18215 AS Float32))
+```
+
+### array_clamp
+
+`array_clamp(a, min, max)` → Float32[]
+
+Element-wise clamp to `[min, max]`; returns a fresh `Float32[]` of
+the same length. `min > max` raises.
+
+The motivating use is keeping a Float32 activation inside the fp16
+representable range (±65504) before feeding it to an fp16 ONNX
+session — values that would otherwise become ±Inf on cast and
+NaN-poison the next attention softmax:
+
+```sql
+SET pooled = array_clamp(pooled, -65504.0::Float32, 65504.0::Float32)
+```
+
+### array_concat_last_dim
+
+`array_concat_last_dim(a, a_inner, b, b_inner)` → Float32[]
+
+Concatenate two flat `[outer, inner_a]` and `[outer, inner_b]`
+tensors along their inner (last) dimension, producing
+`[outer, inner_a + inner_b]` with per-row interleaving — each block
+of `inner_a + inner_b` output elements is one row of `a` followed by
+the matching row of `b`.
+
+`outer` is derived as `cardinality(a) / a_inner` and must equal
+`cardinality(b) / b_inner` or the function throws.
+
+Distinct from
+[`array_concat`](#array_concat), which flattens its inputs and
+appends end-to-end with no per-row interleaving. SDXL uses this to
+merge the two text encoders' per-token hidden states along the
+hidden dim (CLIP-L `[1, 77, 768]` + OpenCLIP-G `[1, 77, 1280]` →
+`[1, 77, 2048]`):
+
+```sql
+DECLARE combined_embeds Float32[] = array_concat_last_dim(
+    clip_l_hidden, 768::Int32, openclip_g_hidden, 1280::Int32);
+```
+
+### array_repeat
+
+`array_repeat(value, count)` → Array<T>
+
+Build an array of `count` copies of `value`. The element kind of the
+result matches the value's scalar kind. Supports `Int64`, `Int32`,
+`Float32`, and `Boolean` values. `count` must be non-negative;
+`count = 0` produces an empty array.
+
+Used to construct fixed-content tensors that model bodies need at
+runtime — all-ones attention masks of length matching a concatenated
+visual + prompt sequence, zero-filled mask-input tensors for SAM
+decoders, etc.
+
+```sql
+-- All-ones attention mask of length n:
+DECLARE mask Int64[] = array_repeat(1::Int64, n);
+
+-- Zero-filled SAM mask_input tensor (256 × 256 = 65536 floats):
+DECLARE mask_input Float32[] = array_repeat(0.0::Float32, 256 * 256)
+```
+
+### array_resize_2d
+
+`array_resize_2d(arr, dst_h, dst_w)` → Array<Float32>(dst_h, dst_w)
+
+Bilinear-resample a 2D `Float32` field onto a new pixel grid. Result
+is a shape-aware multi-dim array, so downstream consumers can read
+its dimensions via [`array_shape`](#array_shape) and index with
+[`array_get(arr, y, x)`](#array_get).
+
+Rank handling: rank-2 `(h, w)` inputs are consumed directly; rank-3
+`(1, h, w)` inputs (the typical ONNX `[batch=1, h, w]` shape for
+depth / segmentation outputs) auto-squeeze the leading dim;
+anything else raises with the observed shape.
+
+Sample positions follow the standard half-pixel convention used by
+PIL / OpenCV / SkiaSharp (`(src_y + 0.5) * src_h / dst_h - 0.5`),
+boundary samples clamp. Linear interpolation preserves the source
+value's units — metres for `models.zoedepth_nyu_kitti_meters`,
+probabilities for segmentation masks, etc.
+
+```sql
+-- Resize ZoeDepth's [1, 384, 384] metric output onto the source image grid:
+DECLARE depth_native Array<Float32> = models.zoedepth_nyu_kitti_meters(img);
+DECLARE depth_full   Array<Float32> = array_resize_2d(
+    depth_native, image_height(img), image_width(img));
+```
+
 ## See Also
 
+- [Inference Helpers](inference.md) -- ML-specific dispatch surface (`infer`, `decode_seq2seq`, ...) and the diffusion schedule / noise functions (`sd_turbo_schedule`, `sample_normal`) that pair with the numeric array primitives above
+- [CREATE MODEL](../sql/create-model.md) -- the DDL surface where most uses of `array_axpy`, `array_scale`, `array_clamp`, `array_concat_last_dim`, `array_repeat`, and `array_resize_2d` show up today
 - [String Functions](string.md) -- string_to_array, regexp_split_to_array, and array_join
 - [JSON Functions](json.md) -- json_array_length and JSON array extraction
 - [Utility & Type Conversion Functions](utility.md) -- type checks and casting

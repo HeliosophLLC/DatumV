@@ -132,4 +132,15 @@ public sealed class TypeofFunctionTests : ServiceTestBase
         DataValue typeValue = DataValue.FromType(DataKind.Float32);
         Assert.Equal("Float32", typeValue.FormatType());
     }
+
+    [Fact]
+    public void PgTypeof_AliasResolvesToSameFunction()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+        IScalarFunction? primary = registry.TryGetScalar("typeof");
+        IScalarFunction? alias = registry.TryGetScalar("pg_typeof");
+        Assert.NotNull(primary);
+        Assert.NotNull(alias);
+        Assert.IsType<TypeofFunction>(alias);
+    }
 }

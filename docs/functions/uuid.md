@@ -5,13 +5,11 @@ category: uuid
 
 # UUID Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md)
-
 UUID generation, formatting, and inspection. Versions 4 and 7 cover the common cases — v4 for random identifiers, v7 for time-ordered identifiers that sort by creation time. The extraction functions follow RFC 9562 / PostgreSQL 18 semantics.
 
 ## uuidv4
 
-`uuidv4()` → Uuid | QU: 1
+`uuidv4()` → Uuid
 
 Generate a random version 4 UUID.
 
@@ -21,7 +19,7 @@ SELECT uuidv4() AS id FROM data
 
 ## gen_random_uuid
 
-`gen_random_uuid()` → Uuid | QU: 1
+`gen_random_uuid()` → Uuid
 
 Alias for `uuidv4()`. PostgreSQL-compatible spelling.
 
@@ -31,7 +29,7 @@ SELECT gen_random_uuid() AS id FROM data
 
 ## uuidv7
 
-`uuidv7([shift Interval])` → Uuid | QU: 1
+`uuidv7([shift Interval])` → Uuid
 
 Generate a time-ordered version 7 UUID. The high bits encode the current Unix timestamp at millisecond precision, so v7 UUIDs sort by creation time and cluster well on B-tree indexes.
 
@@ -47,7 +45,7 @@ SELECT uuidv7(INTERVAL '-1 year') AS legacy_id FROM data
 
 ## uuid_str
 
-`uuid_str(uuid)` → String | QU: 1
+`uuid_str(uuid)` → String
 
 Format a UUID as its canonical lowercase hyphenated string (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
 
@@ -57,7 +55,7 @@ SELECT uuid_str(id) AS id_text FROM events
 
 ## uuid_extract_version
 
-`uuid_extract_version(uuid)` → Int16 | QU: 1
+`uuid_extract_version(uuid)` → Int16
 
 Returns the version number of an RFC 9562 UUID (1–8). Returns NULL for non-RFC 9562 variants (the nil UUID, the max UUID, or Microsoft GUIDs).
 
@@ -67,7 +65,7 @@ SELECT uuid_extract_version(uuidv7())  -- 7
 
 ## uuid_extract_timestamp
 
-`uuid_extract_timestamp(uuid)` → TimestampTz | QU: 1
+`uuid_extract_timestamp(uuid)` → TimestampTz
 
 Returns the embedded timestamp from a version 1, 6, or 7 UUID. Returns NULL for other versions (v4 has no embedded time) or non-RFC 9562 variants. v7 timestamps have millisecond precision; v1 timestamps have 100-nanosecond precision.
 

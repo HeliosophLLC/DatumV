@@ -156,6 +156,17 @@ public sealed partial class ExpressionEvaluator
             return EvaluateStructFieldAccess(source, index, indexAccess, frame);
         }
 
+        if (source.Kind == DataKind.Point2D)
+        {
+            throw new InvalidOperationException(
+                $"Index access is not supported on Point2D values. Use the point_x / point_y accessors instead.");    
+        }
+        else if (source.Kind == DataKind.Point3D)
+        {
+            throw new InvalidOperationException(
+                $"Index access is not supported on Point3D values. Use the point_x / point_y / point_z accessors instead.");
+        }
+
         throw new InvalidOperationException(
             $"Index access is not supported on {source.Kind} values.");
     }

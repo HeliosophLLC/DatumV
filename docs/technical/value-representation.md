@@ -1,7 +1,7 @@
 # Value Representation: `DataValue` and `ValueRef`
 
 DatumV carries values through the engine in two complementary forms.
-`DataValue` is the universal storage currency — a 20-byte struct that lives
+`DataValue` is the universal storage currency — a 32-byte struct that lives
 in rows, batches, and the on-disk format. `ValueRef` is the function-internal
 currency — a managed-memory wrapper used during expression evaluation and
 model dispatch. Both encode the same semantic types (the same `DataKind`s);
@@ -14,7 +14,7 @@ values cross between them.
 
 | | `DataValue` | `ValueRef` |
 |---|---|---|
-| Size | 32 bytes (struct, no heap) | 20-byte tag + optional managed object reference |
+| Size | 32 bytes (struct, no heap) | 32-byte tag + optional managed object reference |
 | Storage | Inline payload OR arena offset OR sidecar offset | Inline payload OR managed payload (`string`, `byte[]`, `ValueRef[]`) |
 | Where it lives | `Row`, `RowBatch`, `.datum` files, scan outputs, operator I/O | Expression evaluator, scalar function bodies, model `IModel.InferBatchAsync` |
 | Lifetime | Bound to its arena (or to a sidecar registry) | GC-managed |
@@ -27,7 +27,7 @@ with its `DataKind` and one of three storage shapes:
 
 | Storage | When | Resolution |
 |---|---|---|
-| **Inline** | The payload fits in 16 bytes (small primitives, short UTF-8 strings, type tags, dates) | Read from the struct itself; no external lookup |
+| **Inline** | The payload fits in 26 bytes (small primitives, short UTF-8 strings, type tags, dates) | Read from the struct itself; no external lookup |
 | **Arena-backed** | Payload too large to inline (long strings, vectors, struct field arrays, byte arrays produced at runtime) | `(_p0, _p1)` is `(offset, length)` into an `Arena` |
 | **Sidecar-backed** | Payload sits in a `.datum-blob` companion file (large blobs from ingest, e.g. images) | `(_p0, _p1)` plus a `_storeId` byte resolve through the per-query `SidecarRegistry` |
 

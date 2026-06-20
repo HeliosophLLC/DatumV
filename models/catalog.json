@@ -1448,6 +1448,9 @@
                 },
                 {
                   "identifier": "depth_anything_v3_large_full"
+                },
+                {
+                  "identifier": "depth_anything_v3_large_full_native"
                 }
               ]
             }

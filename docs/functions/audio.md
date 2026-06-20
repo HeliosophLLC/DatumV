@@ -5,8 +5,6 @@ category: audio
 
 # Audio Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Compute Backend](../compute.md)
-
 ## Metadata
 
 ### audio_sample_rate
@@ -28,6 +26,8 @@ SELECT audio_sample_rate(audio) FROM clips
 Wraps a raw encoded-audio byte array as a typed `Audio` value so downstream audio functions (`audio_sample_rate`, `audio_samples`, `audio_to_mono`, …) can consume it directly. The proximate use is in SQL recipes that compose `audio_decode(open_archive(:source, …).bytes)` to lift `.flac` or `.wav` entries pulled out of an archive into the engine's typed-audio surface without ever touching disk.
 
 No PCM decoding happens here — the bytes pass through verbatim with the kind tag flipped to `Audio`. The container header is parsed (WAV, FLAC, MP3 with optional ID3v2 prefix, OGG Vorbis, OGG Opus) so the resulting value carries inline metadata that the audio accessor family reads without a full decode. WAV and FLAC expose sample rate / channels / bit depth / frame count; MP3 and OGG are lossy so bit depth and frame count surface as 0 (sample rate and channels are still meaningful and stamped). M4A and other containers fall through to the no-metadata path until added to the parser; in those cases `audio_samples` still decodes via FFmpeg.
+
+`audio_decode` is intentionally **permissive** on unrecognised input: bytes that don't match any known container signature still produce a non-NULL `Audio` value, just with zero-sentinel inline metadata, so `audio_sample_rate()` and friends return `NULL` rather than throwing. For a validated conversion that throws at the call site with a hex-byte preview of the mismatch, use **`CAST(bytes AS Audio)`** instead — see [Type System](../sql/type-system.md). The validated form accepts WAV / FLAC / MP3 / OGG (Vorbis or Opus) headers; `try_cast(bytes AS Audio)` returns typed `NULL` on failure, and `can_cast(bytes, Audio)` returns a boolean usable as a `WHERE`-clause filter to drop bad rows in a folder scan.
 
 ```sql
 -- Lift FLAC entries out of a LibriSpeech tarball into typed Audio values
@@ -79,6 +79,38 @@ Reach for this before `audio_samples` whenever the source is or might be stereo 
 -- Canonical stereo-tolerant chain for any audio model:
 SELECT audio_samples(16000, audio_to_mono(clip)) AS pcm FROM clips
 ```
+
+## ONNX Feature Extraction
+
+### audio_to_log_mel
+
+`audio_to_log_mel(samples, n_mels)` → `Float32[]`
+
+Whisper-canonical log-mel spectrogram feature extractor — STFT
+(`n_fft = 400`, `hop = 160`, Hann window, center-padded), Slaney mel
+filterbank with `n_mels` channels, log10, max-8 dB clip + shift to
+roughly `[-1, 1]`. The input `samples` is the raw PCM `Float32[]`
+that [`audio_samples`](#audio_samples) emits at 16 kHz.
+
+Output is a flat mel-major `Float32[]` of length `n_mels × 3000`
+(the trailing 3000 is Whisper's 30-second encoder context — clips
+longer than that truncate, shorter zero-pad to the limit). Pass
+straight to the encoder ONNX with shape
+`[1, n_mels, 3000]`:
+
+```sql
+DECLARE samples Float32[] = audio_samples(16000, audio_to_mono(clip));
+DECLARE mel Float32[] = audio_to_log_mel(samples, 80::Int32);
+DECLARE encoder_features Float32[] = infer(
+    'encoder', mel, [1::Int32, 80::Int32, 3000::Int32]);
+```
+
+`n_mels` is 80 for Whisper base / small / medium / large-v1/v2;
+**128** for Whisper large-v3 (and the v3 turbo distillation). Always
+match the value to the encoder's expected input depth — passing 80
+to a large-v3 export silently produces garbage transcriptions.
+
+Canonical use: `models.whisper_base`.
 
 ## Visualization
 
@@ -210,6 +242,9 @@ Width and height must be positive. Null audio, null `width`, null `height`, or n
 
 ## See Also
 
+- [CREATE MODEL](../sql/create-model.md) — the DDL surface that wires `audio_samples` / `audio_to_log_mel` into ONNX speech / audio pipelines.
+- [Inference Helpers](inference.md) — sequence-to-sequence dispatch (`decode_seq2seq`) used by Whisper-style decoders that consume `audio_to_log_mel` features.
+- [Tokenization Functions](tokenization.md) — `tokenizer.decode_bpe` and `tokenizer.byte_level_decode` for the text-side of speech-to-text bodies.
 - [Drawing Functions](drawing.md) — `render`, drawing primitives, and the broader procedural-visual toolkit that `audio_waveform_drawing` / `audio_waveform_path` slot into.
 - [Vector & Tensor Functions](vector.md) — operations on tensors produced by `audio_samples`.
 - [Functions Reference](string.md) — complete function listing across all categories.

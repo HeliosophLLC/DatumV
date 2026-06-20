@@ -14,6 +14,12 @@ public static class MonarchGrammarFactory
     /// Constructs and returns the Monarch grammar as an anonymous object graph.
     /// The caller serializes this to JSON and sends it to the client.
     /// </summary>
+    /// <param name="builtinFunctions">
+    /// Names of every function the grammar should colour as
+    /// <c>predefined.function</c>. Typically sourced from the live
+    /// <c>FunctionRegistry</c> so the editor stays in sync as functions
+    /// are registered or unregistered without a grammar redeploy.
+    /// </param>
     /// <remarks>
     /// Token type names follow Monaco's standard naming conventions so they map
     /// automatically to editor theme colors without additional configuration:
@@ -34,7 +40,7 @@ public static class MonarchGrammarFactory
     /// single-character ones, literals before identifiers, identifiers last so
     /// keyword matching via the <c>@keywords</c> case table takes precedence.
     /// </remarks>
-    public static object Build() => new
+    public static object Build(IReadOnlyCollection<string> builtinFunctions) => new
     {
         // "" rather than "identifier" — unmatched characters get the
         // editor's default text colour instead of being classed as an
@@ -47,7 +53,7 @@ public static class MonarchGrammarFactory
         boolNullKeywords = SqlKeywordRegistry.BoolNullKeywords,
         typeKeywords = SqlKeywordRegistry.TypeKeywords,
         datePartKeywords = SqlKeywordRegistry.DatePartKeywords,
-        builtinFunctions = SqlKeywordRegistry.BuiltinFunctions,
+        builtinFunctions,
         tokenizer = new
         {
             root = new object[]

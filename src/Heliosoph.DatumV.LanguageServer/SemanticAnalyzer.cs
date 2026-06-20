@@ -1043,6 +1043,23 @@ internal sealed class SemanticAnalyzer
             return true;
         }
 
+        // OneOfMatcher describes itself as "one of A, B, C". Split the tail
+        // and recurse so each listed kind gets full compatibility treatment
+        // (numeric widening, family lookup, etc.), not just literal equality.
+        const string oneOfPrefix = "one of ";
+        if (expectedKind.StartsWith(oneOfPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            string tail = expectedKind[oneOfPrefix.Length..];
+            foreach (string candidate in tail.Split(','))
+            {
+                if (IsTypeCompatible(actualKind, candidate.Trim()))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Array-wrapped kinds: recurse on the element if both sides are
         // arrays; reject if exactly one side is. Without this branch a
         // legitimate `Array<Int32>` flowing into `Array<Float32>` would
@@ -1165,6 +1182,17 @@ internal sealed class SemanticAnalyzer
                     EmitWarning(diagnostics, column.Span,
                         $"Unknown column '{column.ColumnName}' produced by '{qualifier}'.");
                 }
+                return;
+            }
+
+            // LET bindings are virtual values that frequently hold
+            // structs (e.g. `LET d = models.depth(img)`); refs like
+            // `d.depth` are field accesses, not table.column lookups.
+            // Skip the qualifier-validation path for them — the
+            // analyzer doesn't track struct field shapes here, so any
+            // existence check would either over-reject or no-op.
+            if (_currentStatementLetNames.Contains(qualifier))
+            {
                 return;
             }
 

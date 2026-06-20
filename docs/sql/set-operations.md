@@ -2,10 +2,6 @@
 title: Set Operations
 ---
 
-## Why Use This
-
-When your data lives in separate tables with the same structure — training set and test set, this month and last month, version A and version B — set operations combine, intersect, or subtract them.
-
 Set operations combine the results of two or more SELECT statements. All six variants are supported:
 
 ```sql

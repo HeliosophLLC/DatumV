@@ -288,9 +288,3 @@ Uniform Bernoulli filter at a given percentage. Each row is independently includ
 3. **Correlated subqueries resolve columns via `EvaluationFrame.OuterRow`.** Set by `LateralJoinOperator` / `ScalarSubqueryOperator` before running the inner plan.
 4. **Arena lifetime follows batches.** An operator's output batch owns its arena; stabilization copies non-inline values across batch boundaries. Caches that must outlive a batch (cast-target names, IN literal sets, hoisted literals) go in the long-lived `ExecutionContext.Store`.
 5. **Return batches to the pool.** Consumers `Pool.ReturnRowBatch(batch)` after processing; arena refcount drives actual pool-or-dispose decisions.
-
----
-
-## See also
-
-- [special-functions.md](special-functions.md) — scalar/aggregate functions and DatumV-specific syntax extensions.

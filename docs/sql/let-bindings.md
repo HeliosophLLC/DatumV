@@ -2,16 +2,6 @@
 title: LET Bindings
 ---
 
-## Why Use This
-
-When your query computes the same expensive thing twice -- like resizing an image to get both its tensor and its dimensions -- LET computes it once and reuses the result. Think of it as assigning a variable inside your SELECT.
-
-## How It Works
-
-When the SQL engine encounters a LET binding, it evaluates the expression once and stores the result for the duration of that row. Every time you reference the binding name later in the same SELECT — whether in another LET, an output column, or even in QUALIFY — it uses the stored value, not the expression. This is value caching, not textual substitution. If the expression calls `uuidv4()`, you get one UUID that's reused everywhere, not a different UUID each time.
-
-LET bindings are invisible by default — they don't appear in the output. To include one, add `AS alias`. This separation means you can use LET as pure internal plumbing (compute intermediate values) without cluttering your output schema.
-
 ## Common Patterns
 
 ### 1. Image pipeline: compute a tensor once, derive multiple features

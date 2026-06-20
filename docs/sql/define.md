@@ -2,10 +2,6 @@
 title: DEFINE
 ---
 
-## Why Use This
-
-When you have several LET bindings and data quality checks (ASSERTs) in one query, they can clutter the SELECT list. DEFINE groups them in a block at the top so you can see all your setup in one place -- like a variable declaration section at the top of a function.
-
 ## Before and After
 
 The same query written both ways:

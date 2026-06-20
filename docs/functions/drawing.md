@@ -5,8 +5,6 @@ category: drawing
 
 # Drawing Functions
 
-[← Back to Functions](string.md) · [SQL Reference](../sql/select.md) · [Image Functions](image.md) · [Lambda Expressions](../sql/lambda-expressions.md)
-
 The drawing function family produces and consumes values of [`DataKind.Drawing`](../technical/data-value-layout.md) — procedural-visual recipes that describe what to draw without committing to a specific output size or encoding. A Drawing is a small tree of shape / text / image-stamp / group / transformed nodes; the universal rasterizer [`render(drawing, size)`](#render) walks the tree onto a bitmap.
 
 A Drawing is the substrate for procedural-graphics workflows:

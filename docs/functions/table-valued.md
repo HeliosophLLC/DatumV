@@ -5,8 +5,6 @@ category: table
 
 # Table-Valued Functions
 
-[< Back to Functions Reference](string.md) | [SQL Reference](../sql/select.md)
-
 Table-valued functions produce multiple rows and are used in FROM, CROSS JOIN, and LATERAL JOIN clauses. When used with `CROSS JOIN LATERAL` or `CROSS APPLY`, the function arguments can reference columns from the left-hand table, enabling per-row expansion of array or nested data.
 
 ### unnest
@@ -80,7 +78,7 @@ CROSS APPLY video_unnest_frames(v.video) AS f
 
 Sequential frame access (frame N → N+1 → N+2) hits a warm FFmpeg decoder; backward access seeks to the file head and decodes forward. Stay in `frame_index` order whenever possible.
 
-See [Examples — Video frames as a queryable column](../sql/examples.md#video-frames-as-a-queryable-column) for full pipelines.
+See [Examples — Video frames as a queryable column](../examples/video-frames.md) for full pipelines.
 
 ### open_archive
 

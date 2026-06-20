@@ -707,7 +707,11 @@ public sealed class ModelInvocationOperator : QueryOperator
     /// as Float64" deep inside the model's accessor. Treats every
     /// numeric→numeric widening as implicit (mirrors SQL's usual
     /// numeric promotion rules); non-numeric kind mismatches still
-    /// throw — those are genuine signature errors.
+    /// throw — those are genuine signature errors. Notably, byte-array
+    /// → media-blob conversions are intentionally not coerced here:
+    /// callers must <c>CAST(bytes AS Image)</c> / <c>image_decode(bytes)</c>
+    /// explicitly, matching what every other <c>Image</c> / <c>Audio</c>
+    /// consumer in the function surface requires.
     /// </summary>
     private static ValueRef CoerceToDeclaredKind(
         ValueRef value, DataKind declaredKind, string modelName, int argIdx)
@@ -727,8 +731,10 @@ public sealed class ModelInvocationOperator : QueryOperator
                 return ValueRef.FromInt32(i32);
         }
 
+        string valueKind = string.Concat(value.Kind.ToString(), value.IsArray ? "[]" : "");
+
         throw new InvalidOperationException(
-            $"Model '{modelName}' argument {argIdx} expects {declaredKind} but the call site supplies {value.Kind}; "
+            $"Model '{modelName}' argument {argIdx} expects {declaredKind} but the call site supplies {valueKind}; "
             + "no implicit conversion is defined for this kind pair. "
             + "Cast the value explicitly (e.g. CAST(x AS DOUBLE)) or fix the call to pass the right type.");
     }

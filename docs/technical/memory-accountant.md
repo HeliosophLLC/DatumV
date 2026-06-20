@@ -94,13 +94,13 @@ The chip lives in the bottom-right area of the results pane's status bar:
 Clicking the chip opens a popover with both sparklines (Row + Arena), the budget threshold dashed in red, and a current / peak / budget triplet:
 
 ```
-┌─ Memory ──────────────────────────────────┐
-│   ROW (budgeted)                          │
-│  ▁▂▂▃▅▇█████████████████████ ← budget     │
-│   ARENA (mmap, OS-paged)                  │
+┌─ Memory ──────────────────────────────────────┐
+│   ROW (budgeted)                              │
+│  ▁▂▂▃▅▇█████████████████████ ← budget       │
+│   ARENA (mmap, OS-paged)                      │
 │  ▁▁▂▃▃▄▅▅▆▇▇█████████████████             │
 │  current 184 MB   peak 192 MB   budget 200 MB │
-└───────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
 ```
 
 The Arena sparkline scales to its own data range (no shared y-axis with Row), since arena residency is informational and isn't comparable to a budget.

@@ -76,7 +76,19 @@ public sealed class CompletionProvider
         // manifest-free classifier above doesn't know about them. Result
         // is empty when there are no CTEs or when parsing failed, so the
         // existing zones keep working unchanged for CTE-less queries.
-        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+        //
+        // Mid-typing the SQL often contains a dangling dot at the cursor
+        // (`d.` followed by a keyword) that the recovering parser can't
+        // make into an EffectiveQuery — every LET binding then drops out
+        // of the resolved schema. Splice a throwaway identifier at the
+        // cursor for the resolver's parse so LET names + their kinds
+        // surface for `qualifier.` completion lookups. Classification
+        // and downstream zone-based dispatch keep using the original
+        // SQL + cursor; only the resolver sees the repaired text.
+        string resolverSql = zone.Kind == CompletionZoneKind.AfterDot && zone.TableQualifier is not null
+            ? sql[..cursorOffset] + "_dvc_complete_" + sql[cursorOffset..]
+            : sql;
+        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(resolverSql, _manifest);
         // Lambda-context-aware scalar function filtering. When the cursor
         // sits inside a lambda body whose outer call's parameter slot
         // declared a `LambdaContextName`, the function whitelist switches
@@ -1075,14 +1087,14 @@ public sealed class CompletionProvider
 
     /// <summary>
     /// Resolves a dot qualifier as a column-on-a-CTE whose kind is a
-    /// canonical <c>Struct&lt;…&gt;</c> annotation. Walks every CTE's
-    /// projected columns looking for one named <paramref name="qualifier"/>;
-    /// on match, parses the column's struct annotation and returns the
-    /// field list. Falls back through every CTE because the qualifier
-    /// might come from any of them (LET-bound names project into the
-    /// containing CTE's output).
+    /// canonical <c>Struct&lt;…&gt;</c> annotation OR a named struct
+    /// type from the manifest. Walks every CTE's projected columns
+    /// looking for one named <paramref name="qualifier"/>; on match,
+    /// resolves the column's kind to a field list. Falls back through
+    /// every CTE because the qualifier might come from any of them
+    /// (LET-bound names project into the containing CTE's output).
     /// </summary>
-    private static bool TryGetStructFieldsForColumn(
+    private bool TryGetStructFieldsForColumn(
         string qualifier,
         CteSchemaResult cteSchemas,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<StructFieldShape>? structFields)
@@ -1092,9 +1104,10 @@ public sealed class CompletionProvider
             foreach (TableColumnEntry column in cte.Value)
             {
                 if (!string.Equals(column.Name, qualifier, StringComparison.OrdinalIgnoreCase)) continue;
-                if (StructTypeAnnotation.TryParse(column.Kind, out IReadOnlyList<StructFieldShape> parsed))
+                IReadOnlyList<StructFieldShape>? resolved = TryResolveStructFields(column.Kind);
+                if (resolved is not null)
                 {
-                    structFields = parsed;
+                    structFields = resolved;
                     return true;
                 }
             }
@@ -1102,12 +1115,18 @@ public sealed class CompletionProvider
         // LET-bound struct that isn't projected into the CTE's output.
         // The LET map carries every binding's resolved kind across the
         // statement, so `curr_depth.` still suggests fields even when the
-        // LET name doesn't surface as a CTE column.
-        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind)
-            && StructTypeAnnotation.TryParse(letKind, out IReadOnlyList<StructFieldShape> letFields))
+        // LET name doesn't surface as a CTE column. Route through
+        // TryResolveStructFields so a named struct type (e.g. the
+        // declared ReturnType of `models.depth(…)`) expands to its
+        // fields, not just inline `Struct<…>` annotations.
+        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind))
         {
-            structFields = letFields;
-            return true;
+            IReadOnlyList<StructFieldShape>? letFields = TryResolveStructFields(letKind);
+            if (letFields is not null)
+            {
+                structFields = letFields;
+                return true;
+            }
         }
         structFields = null;
         return false;

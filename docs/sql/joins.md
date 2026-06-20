@@ -2,10 +2,6 @@
 title: JOIN
 ---
 
-## Why Use This
-
-Most real datasets live in multiple tables — customers in one, their orders in another, product details in a third. JOINs bring related data together into a single result.
-
 All five standard join types are supported:
 
 ```sql

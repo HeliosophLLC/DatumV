@@ -2,10 +2,6 @@
 title: CASE Expressions
 ---
 
-## Why Use This
-
-CASE lets you create new columns based on conditions — bin continuous scores into grades, map numeric codes to human-readable labels, or handle special values differently. It's the SQL equivalent of if/else.
-
 CASE expressions provide inline conditional logic, similar to if/else chains.
 
 ### Searched CASE
@@ -67,9 +63,8 @@ implicit type coercion following SQL Server-style type precedence rules:
    runtime.
 3. **Unparseable strings become NULL.** If a String branch value cannot be
    parsed to the target type at runtime, the result is NULL rather than an
-   error. This is an ETL-friendly behavior — data flows through without
-   interruption, and downstream consumers can detect NULLs as conversion
-   failures.
+   error. Data flows through without interruption; downstream consumers can
+   detect NULLs as conversion failures.
 
 ```sql
 -- The result type is Float32, not String.

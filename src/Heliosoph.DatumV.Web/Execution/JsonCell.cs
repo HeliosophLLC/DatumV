@@ -49,7 +49,12 @@ internal sealed record JsonCell(
     // to a bounded preview. `Text` holds the partial-but-still-valid JSON;
     // this carries the total/shown counts so the front-end can render a
     // "N of M shown" affordance without re-parsing.
-    JsonPreviewInfo? JsonPreview = null);
+    JsonPreviewInfo? JsonPreview = null,
+    // Populated for kind="binary_download". Suggested file name (with
+    // extension) for the browser's Save-As dialog. Derived server-side
+    // from the sniffed format so the user gets ".glb" / ".stl" / ".obj"
+    // / ".ply" / ".bin" without the client having to map mime → ext.
+    string? FileName = null);
 
 internal sealed record JsonStructField(string Name, JsonCell Cell);
 

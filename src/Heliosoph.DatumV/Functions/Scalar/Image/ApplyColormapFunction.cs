@@ -69,19 +69,6 @@ public sealed class ApplyColormapFunction : IFunction, IScalarFunction
         + "pairs naturally with depth maps (models.midas_small / models.dpt_large) "
         + "and saliency masks (models.u2net / models.u2netp).";
 
-    /// <inheritdoc />
-    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
-    [
-        new FunctionSignatureVariant(
-            Parameters:
-            [
-                new ParameterSpec("image",   DataKindMatcher.Exact(DataKind.Image)),
-                new ParameterSpec("palette", DataKindMatcher.Exact(DataKind.String)),
-            ],
-            VariadicTrailing: null,
-            ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
-    ];
-
     /// <summary>
     /// Maps each supported palette name to a function that takes a normalised
     /// scalar <c>t ∈ [0, 1]</c> and returns the corresponding RGB triple in
@@ -98,11 +85,26 @@ public sealed class ApplyColormapFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// The set of palette names <see cref="ApplyColormapFunction"/> currently
-    /// recognises. Stable, case-preserving snapshot — used by the error
-    /// message and by tests that want to round-trip every palette.
+    /// recognises. Stable, case-preserving snapshot — used to drive the
+    /// <see cref="DataKindMatcher.StringEnum"/> matcher on the <c>palette</c>
+    /// parameter (LS completion + parameter-shape display), the runtime
+    /// error message, and tests that want to round-trip every palette.
     /// </summary>
-    public static IReadOnlyCollection<string> AvailablePalettes { get; } =
+    public static IReadOnlyList<string> AvailablePalettes { get; } =
         Palettes.Keys.OrderBy(s => s, StringComparer.Ordinal).ToArray();
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("image",   DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("palette", DataKindMatcher.StringEnum(AvailablePalettes)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
+    ];
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>

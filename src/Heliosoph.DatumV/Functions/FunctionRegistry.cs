@@ -721,7 +721,9 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.TryCastFunction>();
         registry.RegisterScalar<Scalar.CanCastFunction>();
         registry.RegisterScalar<Scalar.TypeofFunction>();
+        registry.RegisterScalarAlias<Scalar.TypeofFunction>("pg_typeof");
         registry.RegisterScalar<Scalar.CoalesceFunction>();
+        registry.RegisterScalar<Scalar.NullifFunction>();
 
         // String
         registry.RegisterScalar<Scalar.Strings.ConcatFunction>();
@@ -808,16 +810,50 @@ public sealed class FunctionRegistry
 
         // Math/Numerics
         registry.RegisterScalar<Scalar.Math.AbsFunction>();
+        registry.RegisterScalar<Scalar.Math.SignFunction>();
+        registry.RegisterScalar<Scalar.Math.NegateFunction>();
         registry.RegisterScalar<Scalar.Math.RoundFunction>();
         registry.RegisterScalar<Scalar.Math.FloorFunction>();
         registry.RegisterScalar<Scalar.Math.CeilFunction>();
         registry.RegisterScalarAlias<Scalar.Math.CeilFunction>("ceiling");
+        registry.RegisterScalar<Scalar.Math.TruncateFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.TruncateFunction>("trunc");
         registry.RegisterScalar<Scalar.Math.SqrtFunction>();
+        registry.RegisterScalar<Scalar.Math.CbrtFunction>();
+        registry.RegisterScalar<Scalar.Math.SquareFunction>();
+        registry.RegisterScalar<Scalar.Math.ExpFunction>();
+        registry.RegisterScalar<Scalar.Math.Exp2Function>();
+        registry.RegisterScalar<Scalar.Math.LnFunction>();
+        registry.RegisterScalar<Scalar.Math.Log2Function>();
+        registry.RegisterScalar<Scalar.Math.Log10Function>();
+        registry.RegisterScalar<Scalar.Math.PowFunction>();
+        registry.RegisterScalar<Scalar.Math.LogFunction>();
+        registry.RegisterScalar<Scalar.Math.ClampFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.ClampFunction>("clip");
+        registry.RegisterScalar<Scalar.Math.QuantizeFunction>();
+        registry.RegisterScalar<Scalar.Math.BucketizeFunction>();
+        registry.RegisterScalar<Scalar.Math.MinMaxNormalizeFunction>();
+        registry.RegisterScalar<Scalar.Math.DenormalizeFunction>();
         registry.RegisterScalar<Scalar.Math.LeastFunction>();
         registry.RegisterScalar<Scalar.Math.GreatestFunction>();
+        registry.RegisterScalar<Scalar.Math.IsNanFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.IsNanFunction>("isnan");
+        registry.RegisterScalar<Scalar.Math.IsFiniteFunction>();
+        registry.RegisterScalarAlias<Scalar.Math.IsFiniteFunction>("isfinite");
+        registry.RegisterScalar<Scalar.Math.IsInfiniteFunction>();
 
         registry.RegisterScalar<Scalar.RandomFunction>();
         registry.RegisterScalar<Scalar.HashSplitFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomTruncatedNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomLogNormalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomExponentialFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomBetaFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomPoissonFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomBooleanFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomCategoricalFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomVectorFunction>();
+        registry.RegisterScalar<Scalar.Distributions.RandomNormalVectorFunction>();
 
         // Trigonometry
         registry.RegisterScalar<Scalar.Trigonometry.SinFunction>();
@@ -861,6 +897,16 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayResize2DFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayMinFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayMaxFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArraySumFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayAvgFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayContainsFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayPositionFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayReverseFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayShuffleFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArraySortFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayDistinctFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayFilterFunction>();
+        registry.RegisterScalarAlias<Scalar.Arrays.ArrayToStringFunction>("array_join");
 
         // UUID
         registry.RegisterScalar<Scalar.Uuid.UuidV4Function>();
@@ -1062,6 +1108,7 @@ public sealed class FunctionRegistry
 
         // Activations. All accept Float32 scalar or Float32[] vector.
         registry.RegisterScalar<Scalar.Activation.SoftmaxFunction>();
+        registry.RegisterScalar<Scalar.Activation.LogSoftmaxFunction>();
         registry.RegisterScalar<Scalar.Activation.SigmoidFunction>();
         registry.RegisterScalar<Scalar.Activation.ReluFunction>();
         registry.RegisterScalar<Scalar.Activation.LeakyReluFunction>();
@@ -1078,11 +1125,41 @@ public sealed class FunctionRegistry
 
         // Vector reductions + normalization + detection postprocess.
         registry.RegisterScalar<Scalar.Vector.ArgmaxFunction>();
+        registry.RegisterScalar<Scalar.Vector.ArgminFunction>();
+        registry.RegisterScalarAlias<Scalar.Vector.ArgmaxFunction>("vec_argmax");
+        registry.RegisterScalarAlias<Scalar.Vector.ArgminFunction>("vec_argmin");
         registry.RegisterScalar<Scalar.Vector.TopkFunction>();
         registry.RegisterScalar<Scalar.Vector.L2NormalizeFunction>();
         registry.RegisterScalar<Scalar.Vector.MeanPoolMaskedFunction>();
         registry.RegisterScalar<Scalar.Vector.CosineSimilarityFunction>();
         registry.RegisterScalar<Scalar.Vector.DotProductFunction>();
+        registry.RegisterScalar<Scalar.Vector.EuclideanDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.ManhattanDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.HammingDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecSumFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMeanFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMinFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMaxFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecVarFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecStdFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecMedianFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecNormFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecCountNonzeroFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecAnyFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecAllFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecProductFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecConcatFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecReverseFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecSortFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecUniqueFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecPadFunction>();
+        registry.RegisterScalar<Scalar.Vector.VecRepeatFunction>();
+        registry.RegisterScalar<Scalar.Vector.LinspaceFunction>();
+        registry.RegisterScalar<Scalar.Vector.ArangeFunction>();
+        // vec_slice is identical to array_slice (1-based, 1-D, clamp-at-edge):
+        // alias rather than duplicate the per-element-kind switch.
+        registry.RegisterScalarAlias<Scalar.Arrays.ArraySliceFunction>("vec_slice");
         registry.RegisterScalar<Scalar.Vector.NmsFunction>();
         registry.RegisterScalar<Scalar.Vector.MaskToPolygonFunction>();
 
@@ -1134,6 +1211,26 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Temporal.DateTruncFunction>();
         registry.RegisterScalar<Scalar.Temporal.DateBinFunction>();
         registry.RegisterScalar<Scalar.Temporal.AgeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeDateFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeTimestampFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeTimeFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateAddFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DateDiffFunction>();
+        registry.RegisterScalar<Scalar.Temporal.YearFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MonthFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayFunction>();
+        registry.RegisterScalar<Scalar.Temporal.HourFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MinuteFunction>();
+        registry.RegisterScalar<Scalar.Temporal.SecondFunction>();
+        registry.RegisterScalar<Scalar.Temporal.QuarterFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayOfWeekFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DayOfYearFunction>();
+        registry.RegisterScalar<Scalar.Temporal.MakeDurationFunction>();
+        registry.RegisterScalar<Scalar.Temporal.TimeDiffFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationSecondsFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationMinutesFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationHoursFunction>();
+        registry.RegisterScalar<Scalar.Temporal.DurationDaysFunction>();
 
         // Spatial — Point2D/Point3D construction, component access, distance.
         registry.RegisterScalar<Scalar.Spatial.Point2DFunction>();

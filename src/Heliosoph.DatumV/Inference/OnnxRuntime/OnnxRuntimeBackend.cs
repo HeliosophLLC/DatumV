@@ -18,13 +18,6 @@ namespace Heliosoph.DatumV.Inference.OnnxRuntime;
 /// that the device is fast or capable. The first failure for an EP marks
 /// it permanently unavailable for the process.
 /// </para>
-/// <para>
-/// <strong>This is the same logic as the legacy <c>OnnxSessionFactory</c></strong>
-/// (which still exists for un-migrated models). When every existing
-/// <c>OnnxModel</c> subclass is moved to the dispatcher API, the factory
-/// can be retired and this backend becomes the single source of truth for
-/// ORT session creation.
-/// </para>
 /// </remarks>
 public sealed class OnnxRuntimeBackend : IInferenceBackend
 {

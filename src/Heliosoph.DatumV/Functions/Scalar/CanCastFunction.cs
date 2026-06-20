@@ -67,7 +67,16 @@ public sealed class CanCastFunction : IFunction, IScalarFunction
         }
 
         if (input.IsArray)
-            return new ValueTask<ValueRef>(ValueRef.FromBoolean(false));
+        {
+            // Array-source casts are only allowed for the byte-array → blob
+            // pair, and even then only when the bytes actually look like the
+            // target format. Without the header sniff, can_cast would return
+            // true for garbage and lie to the caller about what cast() would
+            // accept.
+            bool blobOk = CastFunction.IsByteArrayToBlobConversion(input, targetKind)
+                && CastFunction.TryValidateBlobBytes(targetKind, input.AsByteSpan());
+            return new ValueTask<ValueRef>(ValueRef.FromBoolean(blobOk));
+        }
 
         if (input.Kind == targetKind)
             return new ValueTask<ValueRef>(ValueRef.FromBoolean(true));

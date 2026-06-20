@@ -2,10 +2,6 @@
 title: Array, Struct & Index Literals
 ---
 
-## Why Use This
-
-Sometimes your data is nested -- a column contains an array of tags, or you need to construct a struct of coordinates on the fly. Array and struct literals let you build these directly in your query without a separate table or function.
-
 ## Common Patterns
 
 ### 1. Constructing an array of values inline
@@ -38,10 +34,6 @@ SELECT record['scores'][0] AS first_score FROM data
 -- Access a named field in a struct column
 SELECT address['city'] AS city FROM customers
 ```
-
-## When to Use This vs JSON
-
-If your data is already in JSON columns, use `json_value()` and `json_query()`. Struct literals are for constructing structured values inline. Arrays are for when you need a typed, ordered collection -- unlike JSON, array elements must all be the same type.
 
 ## Array Literals
 

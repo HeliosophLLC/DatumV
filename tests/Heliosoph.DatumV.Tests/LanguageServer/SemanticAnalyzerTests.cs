@@ -506,6 +506,28 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_LetBindingUsedAsStructQualifier_DoesNotWarn()
+    {
+        // A LET binding can hold a struct (e.g.
+        // `LET d = models.depth(img)`) and downstream refs project
+        // struct fields via `d.depth`. The 2-part qualifier-validation
+        // path must consult the LET-name set alongside FROM/JOIN
+        // aliases — otherwise legitimate struct-field access on a LET
+        // emits a false "Unknown table or alias" diagnostic in the
+        // editor.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("items", "img")],
+            functions: [Function("depth", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET d = depth(a.img), d.depth FROM items a",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 'd'"));
+    }
+
+    [Fact]
     public void Analyze_LetBindingInTvfArg_DoesNotWarn()
     {
         // Regression: `unnest(classes)` where `classes` is a LET binding
@@ -1482,6 +1504,79 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             "SELECT blend(draw_rect(), s) FROM t", manifest);
 
         Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void OneOfLabelled_ListedKind_DoesNotWarn()
+    {
+        // `OneOfMatcher` (used by e.g. `point_x(point)`) renders its Kind
+        // in the manifest as `"one of Point2D, Point3D"`. Previously the
+        // string-equality check rejected a legitimate Point3D argument
+        // with `expects one of Point2D, Point3D, got Point3D`.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "p", Kind = "Point3D", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_x",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "point", Kind = "one of Point2D, Point3D" },
+                    ],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_x(p) FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void OneOfLabelled_NonListedKind_StillWarns()
+    {
+        // Negative: a kind not in the `one of` list still warns.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                TypedTable("t",
+                    new TableColumnEntry { Name = "s", Kind = "String", Nullable = false }),
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "point_x",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "point", Kind = "one of Point2D, Point3D" },
+                    ],
+                    ReturnType = "Float32",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT point_x(s) FROM t", manifest);
+
+        Assert.Contains(diagnostics, d =>
             d.Severity == DiagnosticSeverity.Warning &&
             d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
     }

@@ -89,6 +89,11 @@ export interface JsonCell {
     shown: number;
     mode: 'array' | 'object';
   };
+  // Populated for kind="binary_download". Suggested file name (with
+  // extension) for the Save-As dialog. The server picks it from the
+  // sniffed format (mesh.glb / mesh.stl / mesh.obj / data.ply / data.bin)
+  // so the client doesn't need its own mime → extension table.
+  fileName?: string;
 }
 
 export interface CellResult {

@@ -8,7 +8,7 @@ This guide walks you from "I have an ONNX file" to "I'm calling it from
 SQL." It assumes no prior ONNX experience.
 
 For the engine internals that power this surface, see
-[`design-docs/onnx-inference.md`](design-docs/onnx-inference.md). For
+[`technical/onnx-inference.md`](technical/onnx-inference.md). For
 the built-in models DatumV ships with, see [`models.md`](models.md).
 The full SQL reference for the `CREATE MODEL` DDL lives at
 [`sql/create-model.md`](sql/create-model.md).
@@ -37,20 +37,14 @@ walks you through the steps with diagnostic SQL between each.
 
 ## Prerequisites
 
-- DatumV is installed and `datum-shell` is on your PATH.
-- A *models directory* is configured. By default DatumV looks at:
-  1. The `--models <path>` flag on `datum-shell`.
-  2. The `DATUMV_MODELS` environment variable.
-  3. `%LOCALAPPDATA%\DatumV\models` (Windows) or
-     `~/.local/share/DatumV/models` (Linux/macOS).
-
-  Pick a location with a few GB free and (recommended) set the env var:
-
-  ```powershell
-  [Environment]::SetEnvironmentVariable('DATUMV_MODELS', 'E:\models', 'User')
-  ```
-
-  Restart your shell after setting it.
+- DatumV is installed.
+- The models directory is configured. By default DatumV uses
+  `%LOCALAPPDATA%\Heliosoph.DatumV\models` on Windows or
+  `~/.local/share/Heliosoph.DatumV/models` on Linux/macOS. Change the location
+  from the **Settings** tab if you want a directory with more free
+  space; the `DATUMV_MODELS` environment variable is honoured as a
+  fallback. See [CREATE MODEL — Setup](sql/create-model.md#setup) for
+  the full resolution order.
 
 ## Step 1 — Get a model file
 
@@ -62,11 +56,13 @@ Most users get ONNX files from one of three places:
 | **ONNX Model Zoo** | Classic vision/audio models | Download `.onnx` directly from [github.com/onnx/models](https://github.com/onnx/models) |
 | **Your own training** | Custom model | `torch.onnx.export(...)`, `tf2onnx`, etc. |
 
-Place the `.onnx` file under your models directory. For this guide we'll
-assume:
+Place the `.onnx` file under your models directory in a per-id
+subfolder — the same convention catalog models follow (see
+[CREATE MODEL — Directory layout](sql/create-model.md#directory-layout)).
+For this guide we'll assume:
 
 ```
-$DATUMV_MODELS/
+<models-dir>/
 └── my-model/
     └── model.onnx
 ```
@@ -228,9 +224,11 @@ revise:
 
 ## Step 4 — Customise the body
 
-Five common patterns cover most of the model zoo. Each composes the
-preprocessing / `infer()` / postprocessing helpers documented in
-[`docs/sql/functions.md`](sql/functions.md).
+Several common patterns cover most of the catalog. Each composes three families of helper functions inside the `CREATE MODEL` body:
+
+- The **body-scoped dispatch surface** — `infer`, `infer_outputs`, `llama_chat`, `llama_generate`, and the `decode_*` family — calls into the loaded session. See [CREATE MODEL — body-scoped dispatch surface](sql/create-model.md#body-scoped-dispatch-surface).
+- The **inference helpers** — preprocess (`yolox_preprocess`, `sam_preprocess`), pooling (`mean_pool_masked`), postprocess (`nms`, `mask_to_polygon`, `rtdetr_postprocess`) — turn raw ONNX tensors into typed outputs. See [Inference Functions](functions/inference.md). Image-tensor conversion (`image_to_tensor_chw`, `imagenet_mean`, ...) lives one page over in [Image Functions](functions/image.md).
+- The **tokenization helpers** — `tokenizer.encode_bert`, `tokenizer.encode_bpe`, and the rest of the `tokenizer.*` family — turn `String` into the integer-id sequences transformer ONNX exports consume. See [Tokenization Functions](functions/tokenization.md).
 
 ### Vision classification (single class label)
 
@@ -298,8 +296,7 @@ AS BEGIN
 END
 ```
 
-The shipped [`all-minilm-l6-v2`](../models/sql/all-minilm-l6-v2.sql) SQL
-body is this exact shape. Key pieces:
+The shipped `models.all_minilm_l6_v2` SQL body is this exact shape. Key pieces:
 
 - `tokenizer.encode_bert` returns the canonical BERT input bundle as one
   struct so multi-input `infer()` can match by field name. Relative
@@ -443,8 +440,8 @@ SELECT name, kind, backend, status FROM system.models WHERE name = 'classify_ima
 Path resolution issue. Confirm:
 
 - The file actually exists at the path you typed.
-- `$DATUMV_MODELS` is set and matches what you think.
-- Relative paths (`'my-model/model.onnx'`) resolve against `$DATUMV_MODELS`. Absolute paths need the `file://` prefix.
+- The models directory is configured the way you expect (see [Prerequisites](#prerequisites)).
+- Relative paths (`'my-model/model.onnx'`) resolve against the models directory. Absolute paths need the `file://` prefix.
 
 Cross-check with `inference.onnx_inspect` on the same path — if that
 works, `CREATE MODEL` will too.
@@ -452,8 +449,8 @@ works, `CREATE MODEL` will too.
 ### `No InferenceDispatcher is configured`
 
 The host process didn't wire an inference dispatcher onto the catalog.
-In a normal `datum-shell` session this happens automatically. If you're
-running from custom code, you need:
+In the app this happens automatically. If you're running from custom
+code, you need:
 
 ```csharp
 catalog.InferenceDispatcher = new InferenceDispatcher(
@@ -514,10 +511,10 @@ declared input shape. Common causes:
   to confirm the names. The shipped MiniLM body uses `input_ids /
   attention_mask / token_type_ids` because that's what HuggingFace
   optimum's BERT export declares.
-- *"single-output sessions only"* — Was a v1 restriction; lifted. v1
-  now picks the first output for multi-output sessions (which matches
-  HuggingFace optimum convention of listing the primary output first).
-  Struct-of-tensors return for multi-output is a follow-up.
+- *"single-output sessions only"* — Outdated; `infer()` now picks the
+  first output for multi-output sessions (which matches HuggingFace
+  optimum convention of listing the primary output first). For full
+  multi-output access, use `infer_outputs()` — see [Multi-output models](#multi-output-models-rt-detr-roberta-qa-blazeface).
 
 ### Parameter constraint errors
 
@@ -547,4 +544,4 @@ declared input shape. Common causes:
 - **All preprocessing / postprocessing helpers**: `SELECT * FROM system.functions WHERE category IN ('Image', 'Vector', 'Activation', 'Encoding');`
 - **Built-in models documentation**: [`models.md`](models.md).
 - **Full `CREATE MODEL` syntax reference**: [`sql/create-model.md`](sql/create-model.md).
-- **Engine internals**: [`design-docs/onnx-inference.md`](design-docs/onnx-inference.md).
+- **Engine internals**: [`technical/onnx-inference.md`](technical/onnx-inference.md).

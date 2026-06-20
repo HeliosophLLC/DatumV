@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
@@ -59,11 +60,12 @@ internal static class WebCellFormatter
         // image — that misrenders the .glb / .ply / .wav payloads our own
         // typed-media export produces. Sniff for media magic first; only
         // emit a media cell when one of the recognised image / audio / video
-        // formats matches. Bytes that don't match fall through to a text
-        // summary that names the format (glTF / PLY / unknown) and points
-        // at the matching `_from_X` importer so the user can wrap the
-        // column for a proper viewer instead of staring at a broken image
-        // placeholder.
+        // formats matches. Bytes that don't match fall through to a
+        // downloadable binary cell that names the format (glTF / PLY / STL
+        // / OBJ / unknown), points at the matching `_from_X` importer
+        // when one exists, AND surfaces a Save-As button so mesh-export
+        // results like `mesh_to_gltf(...)` can land on disk in one click
+        // without bouncing through `_into_table` / external tooling.
         if (value.IsByteArrayKind)
         {
             ReadOnlySpan<byte> bytes = value.AsByteSpan(arena, registry);
@@ -74,7 +76,7 @@ internal static class WebCellFormatter
             {
                 return new JsonCell("media", Mime: mediaMime, DataB64: Convert.ToBase64String(bytes));
             }
-            return new JsonCell("text", Text: DescribeBinaryBytes(bytes));
+            return FormatBinaryDownload(bytes);
         }
 
         if (value.Kind == DataKind.Audio)
@@ -979,31 +981,115 @@ internal static class WebCellFormatter
     }
 
     /// <summary>
-    /// Builds the placeholder text for a UInt8[] cell whose bytes don't
-    /// match any known media format. When the magic matches an interchange
-    /// format we ship a matching importer for (.glb / PLY today), surface
-    /// the importer name so the user knows how to view the column properly
-    /// — typically <c>SELECT mesh_from_gltf(col) FROM open_parquet(...)</c>.
+    /// Inline-transport cap for downloadable binary cells. Mirrors the
+    /// Mesh path (200 MB would be overkill for an opaque blob the user
+    /// just wants to save). Above the cap we emit a text-only cell with
+    /// a "too large" note so the user knows to materialise the column
+    /// through a sink function instead of the result grid.
     /// </summary>
-    private static string DescribeBinaryBytes(ReadOnlySpan<byte> bytes)
+    private const int BinaryDownloadInlineCapBytes = 50 * 1024 * 1024;
+
+    /// <summary>
+    /// Formats a non-media UInt8[] as a <c>binary_download</c> cell —
+    /// inline caption (format / size / importer hint) plus mime +
+    /// filename + raw bytes so the front-end can wire a Save-As button.
+    /// Above the inline cap we fall back to a plain text cell with a
+    /// size-overflow note (no download bytes shipped).
+    /// </summary>
+    private static JsonCell FormatBinaryDownload(ReadOnlySpan<byte> bytes)
+    {
+        (string caption, string mime, string fileName) = DescribeBinaryForDownload(bytes);
+        if (bytes.Length > BinaryDownloadInlineCapBytes)
+        {
+            return new JsonCell(
+                "text",
+                Text: $"{caption} (too large to download inline; cap is "
+                    + $"{BinaryDownloadInlineCapBytes:N0} bytes)");
+        }
+        return new JsonCell(
+            Kind: "binary_download",
+            Text: caption,
+            Mime: mime,
+            DataB64: Convert.ToBase64String(bytes),
+            FileName: fileName);
+    }
+
+    /// <summary>
+    /// Sniffs the bytes for known interchange formats and returns a
+    /// (caption, mime, fileName) triple. Caption matches the legacy
+    /// text-fallback wording so existing screenshots / docs still read
+    /// the same; mime + fileName drive the browser's Save-As dialog.
+    /// When the magic matches an interchange format we ship a matching
+    /// importer for (.glb / .ply), the caption keeps the importer hint
+    /// so the user can wrap the column for in-viewer inspection too.
+    /// </summary>
+    private static (string Caption, string Mime, string FileName) DescribeBinaryForDownload(
+        ReadOnlySpan<byte> bytes)
     {
         // glTF 2.0 binary container: 4-byte ASCII "glTF" magic at offset 0.
         if (bytes.Length >= 4
             && bytes[0] == 0x67 && bytes[1] == 0x6C
             && bytes[2] == 0x54 && bytes[3] == 0x46)
         {
-            return $"<glTF 2.0 binary: {bytes.Length:N0} bytes — wrap the column with "
-                + "mesh_from_gltf(col) to view as a Mesh>";
+            return (
+                $"<glTF 2.0 binary: {bytes.Length:N0} bytes — wrap the column with "
+                + "mesh_from_gltf(col) to view as a Mesh>",
+                "model/gltf-binary",
+                "mesh.glb");
         }
         // PLY (binary or ASCII): magic line "ply" followed by LF or CRLF.
         if (bytes.Length >= 4
             && bytes[0] == 0x70 && bytes[1] == 0x6C && bytes[2] == 0x79
             && (bytes[3] == 0x0A || bytes[3] == 0x0D))
         {
-            return $"<PLY: {bytes.Length:N0} bytes — wrap the column with "
-                + "pointcloud_from_ply(col) to view as a PointCloud>";
+            return (
+                $"<PLY: {bytes.Length:N0} bytes — wrap the column with "
+                + "pointcloud_from_ply(col) to view as a PointCloud>",
+                "model/ply",
+                "data.ply");
         }
-        return $"<binary: {bytes.Length:N0} bytes>";
+        // Wavefront OBJ: UTF-8 text. Our exporter prefixes every blob with
+        // "# OBJ generated by ...", which lets us discriminate from random
+        // text payloads without enumerating every legal OBJ first token.
+        if (StartsWithAscii(bytes, "# OBJ") || StartsWithAscii(bytes, "# Wavefront"))
+        {
+            return (
+                $"<Wavefront OBJ: {bytes.Length:N0} bytes>",
+                "model/obj",
+                "mesh.obj");
+        }
+        // Binary STL: 80-byte header + uint32 triangleCount + N*50 bytes
+        // (per-triangle record). No fixed magic — the length identity is
+        // the only reliable signal. Cheap to compute and very low false-
+        // positive rate (50 doesn't divide most blob sizes cleanly).
+        if (IsLikelyBinaryStl(bytes))
+        {
+            return (
+                $"<binary STL: {bytes.Length:N0} bytes>",
+                "model/stl",
+                "mesh.stl");
+        }
+        return (
+            $"<binary: {bytes.Length:N0} bytes>",
+            "application/octet-stream",
+            "data.bin");
+    }
+
+    private static bool StartsWithAscii(ReadOnlySpan<byte> bytes, string prefix)
+    {
+        if (bytes.Length < prefix.Length) return false;
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            if (bytes[i] != (byte)prefix[i]) return false;
+        }
+        return true;
+    }
+
+    private static bool IsLikelyBinaryStl(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 84) return false;
+        uint triCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(80, 4));
+        return (long)bytes.Length == 84L + (long)triCount * 50L;
     }
 
     private static string DetectImageMime(ReadOnlySpan<byte> bytes)

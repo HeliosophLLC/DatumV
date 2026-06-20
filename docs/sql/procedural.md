@@ -2,15 +2,10 @@
 title: Procedural Statements
 ---
 
-## Why Use This
-
 DatumV treats a script as a *batch* — a sequence of statements executed
 in order against a shared procedural scope. Inside a batch you can declare
 variables, branch, loop over either a counter or a query result, and pin
-intermediate values with `SELECT var := ...`. The result is that
-analytics-style ad-hoc SQL and procedural orchestration share the same
-language: instead of dropping out to a host language to glue queries
-together, you compose them inside the engine.
+intermediate values with `SELECT var := ...`.
 
 ```sql
 DECLARE threshold FLOAT64 = 0.85;
@@ -418,7 +413,7 @@ next batch.
 ## CREATE PROCEDURE
 
 A *procedure* is a named, parameterised procedural batch — the multi-
-statement equivalent of a UDF. Procedures live in [schemas](schema-introspection.md)
+statement equivalent of a UDF. Procedures live in schemas
 (default `public`), and bodies survive process restarts when the catalog
 is opened with a path (same persistence contract as UDFs). Invocation is
 `CALL <name>(args)` (statement-only — unlike UDFs, procedures cannot be

@@ -496,7 +496,16 @@ public sealed class QueryPlanner
                 foreach ((string? tableName, string columnName) in
                     ColumnReferenceCollector.Collect(pendingPredicates[i]))
                 {
+                    // Bare `s` or qualified `s.field` (dot-notation struct-field
+                    // access on a struct-valued LET). Both flag the predicate as
+                    // dependent on the LET so the lift runs and the predicate
+                    // stays off the pushdown path.
                     if (tableName is null && letNames.Contains(columnName))
+                    {
+                        referencesLet = true;
+                        break;
+                    }
+                    if (tableName is not null && letNames.Contains(tableName))
                     {
                         referencesLet = true;
                         break;
@@ -1465,9 +1474,17 @@ public sealed class QueryPlanner
         foreach ((string? tableName, string columnName) in
             ColumnReferenceCollector.Collect(predicate))
         {
+            // Unqualified ref to a LET name (`s`) or qualified ref whose
+            // qualifier is a LET name (`s.field` — struct-field access
+            // via dot notation on a struct-valued LET). Both surface as
+            // dependencies on the LET binding.
             if (tableName is null && allLetNames.Contains(columnName))
             {
                 liftedNames.Add(columnName);
+            }
+            else if (tableName is not null && allLetNames.Contains(tableName))
+            {
+                liftedNames.Add(tableName);
             }
         }
 
@@ -1490,6 +1507,11 @@ public sealed class QueryPlanner
                 {
                     if (tableName is null && allLetNames.Contains(columnName)
                         && liftedNames.Add(columnName))
+                    {
+                        changed = true;
+                    }
+                    else if (tableName is not null && allLetNames.Contains(tableName)
+                        && liftedNames.Add(tableName))
                     {
                         changed = true;
                     }
@@ -1643,9 +1665,15 @@ public sealed class QueryPlanner
             foreach ((string? tableName, string columnName) in
                 ColumnReferenceCollector.Collect(arg))
             {
+                // Unqualified LET ref (`s`) or qualified struct-field
+                // access on a LET (`s.field`). Both depend on `s`.
                 if (tableName is null && allLetNames.Contains(columnName))
                 {
                     liftedNames.Add(columnName);
+                }
+                else if (tableName is not null && allLetNames.Contains(tableName))
+                {
+                    liftedNames.Add(tableName);
                 }
             }
         }
@@ -1668,6 +1696,11 @@ public sealed class QueryPlanner
                 {
                     if (tableName is null && allLetNames.Contains(columnName)
                         && liftedNames.Add(columnName))
+                    {
+                        changed = true;
+                    }
+                    else if (tableName is not null && allLetNames.Contains(tableName)
+                        && liftedNames.Add(tableName))
                     {
                         changed = true;
                     }

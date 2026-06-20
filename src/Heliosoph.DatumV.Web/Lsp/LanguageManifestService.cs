@@ -1,5 +1,6 @@
 using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.DatasetLibrary;
+using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.LanguageServer;
 using Heliosoph.DatumV.Manifest;
 
@@ -67,6 +68,28 @@ public sealed class LanguageManifestService
     /// can read the snapshot without going through a provider method.
     /// </summary>
     public LanguageServerManifest CurrentManifest { get; private set; } = null!;
+
+    /// <summary>
+    /// Snapshot of every function name (scalar / aggregate / window /
+    /// table-valued) registered in the live <see cref="FunctionRegistry"/>,
+    /// across every schema. Drives the Monarch grammar's
+    /// <c>@builtinFunctions</c> case table so the editor highlights every
+    /// registered function — not just a hand-curated subset — without the
+    /// list drifting out of sync as functions are added or removed.
+    /// </summary>
+    public IReadOnlyCollection<string> RegisteredFunctionNames
+    {
+        get
+        {
+            FunctionRegistry functions = _catalog.Functions;
+            HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in functions.ScalarFunctionNames) names.Add(name);
+            foreach (string name in functions.AggregateFunctionNames) names.Add(name);
+            foreach (string name in functions.WindowFunctionNames) names.Add(name);
+            foreach (string name in functions.TableValuedFunctionNames) names.Add(name);
+            return names;
+        }
+    }
 
     private void Rebuild()
     {

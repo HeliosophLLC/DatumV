@@ -335,6 +335,168 @@ public sealed class CastFunctionTests
         Assert.Equal(3, result.GetArrayLength());
     }
 
+    // ─── byte-array → encoded-media-blob (zero-copy tag flip) ────────────────
+
+    // PNG magic bytes — first 8 bytes of any conforming PNG file. The CAST
+    // validator only inspects the leading signature, so the rest of the buffer
+    // can be padding without invalidating the test.
+    private static byte[] PngMagic() => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    [Theory]
+    [InlineData(DataKind.Video)]
+    [InlineData(DataKind.PointCloud)]
+    [InlineData(DataKind.Mesh)]
+    public async Task Cast_ByteArrayToUnvalidatedBlob_RetagsBytesVerbatim(DataKind targetKind)
+    {
+        // Video / PointCloud / Mesh have no cheap header sniffer — the cast
+        // is a verbatim retag, same operation image_decode performs for
+        // images. Failure is caught downstream at decode/materialization.
+        byte[] payload = [0xDE, 0xAD, 0xBE, 0xEF];
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, payload, isArray: true);
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(targetKind) },
+            Frame, default);
+
+        Assert.Equal(targetKind, result.Kind);
+        Assert.False(result.IsArray);
+        Assert.Same(payload, result.AsBytes());
+    }
+
+    [Theory]
+    [InlineData("png",      new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })]
+    [InlineData("jpeg",     new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10 })]
+    [InlineData("gif",      new byte[] { (byte)'G', (byte)'I', (byte)'F', (byte)'8', (byte)'9', (byte)'a' })]
+    [InlineData("bmp",      new byte[] { (byte)'B', (byte)'M', 0x46, 0x00, 0x00, 0x00 })]
+    [InlineData("tiff-le",  new byte[] { 0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00 })]
+    [InlineData("tiff-be",  new byte[] { 0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08 })]
+    public async Task Cast_ByteArrayToImage_WithRecognisedMagic_RetagsBytes(string format, byte[] payload)
+    {
+        // Pins the validator's full magic-byte table. CAST and image_decode
+        // should both accept anything in this set; image_decode is broader
+        // (anything SkiaSharp recognises), CAST is restricted to formats with
+        // a stable signature.
+        _ = format; // present in the test id; used to disambiguate failures.
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, payload, isArray: true);
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(DataKind.Image) },
+            Frame, default);
+
+        Assert.Equal(DataKind.Image, result.Kind);
+        Assert.Same(payload, result.AsBytes());
+    }
+
+    [Fact]
+    public async Task Cast_ByteArrayToImage_WithGarbage_ThrowsHeaderError()
+    {
+        // Validation catches the obvious-garbage case at the CAST site rather
+        // than letting SkiaSharp throw "stream is not a known image format"
+        // ten frames deep on first image_width() / model invocation.
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, [0xDE, 0xAD, 0xBE, 0xEF], isArray: true);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new CastFunction().ExecuteAsync(
+                new[] { bytes, ValueRef.FromType(DataKind.Image) },
+                Frame, default));
+        Assert.Contains("cast() to Image:", ex.Message);
+        Assert.Contains("DE AD BE EF", ex.Message);
+        Assert.Contains("PNG / JPEG / WebP / GIF", ex.Message);
+    }
+
+    [Fact]
+    public async Task Cast_ByteArrayToAudio_WithGarbage_ThrowsHeaderError()
+    {
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, [0xDE, 0xAD, 0xBE, 0xEF], isArray: true);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new CastFunction().ExecuteAsync(
+                new[] { bytes, ValueRef.FromType(DataKind.Audio) },
+                Frame, default));
+        Assert.Contains("cast() to Audio:", ex.Message);
+        Assert.Contains("WAV / FLAC / MP3 / OGG", ex.Message);
+    }
+
+    [Fact]
+    public async Task Cast_ByteArrayToJson_StillRejected()
+    {
+        // Json bytes are CBOR-encoded internally, so a raw UInt8[] is
+        // overwhelmingly likely to be JSON *text* — caller wants
+        // CAST(string AS Json), not a raw retag. Pin the rejection.
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, [(byte)'{', (byte)'}'], isArray: true);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new CastFunction().ExecuteAsync(
+                new[] { bytes, ValueRef.FromType(DataKind.Json) },
+                Frame, default));
+        Assert.Contains("cannot convert Array<UInt8>", ex.Message);
+    }
+
+    [Fact]
+    public async Task TryCast_ByteArrayToImage_WithGarbage_ReturnsTypedNull()
+    {
+        // try_cast must honour its "typed null on failure" contract even
+        // when the pair is supported — validation failure counts as failure.
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, [0xDE, 0xAD, 0xBE, 0xEF], isArray: true);
+
+        ValueRef result = await new TryCastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(DataKind.Image) },
+            Frame, default);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Image, result.Kind);
+    }
+
+    [Fact]
+    public async Task TryCast_ByteArrayToImage_WithRecognisedMagic_Succeeds()
+    {
+        byte[] payload = PngMagic();
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, payload, isArray: true);
+
+        ValueRef result = await new TryCastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(DataKind.Image) },
+            Frame, default);
+
+        Assert.False(result.IsNull);
+        Assert.Equal(DataKind.Image, result.Kind);
+    }
+
+    [Theory]
+    [InlineData(DataKind.Image, false)]      // garbage doesn't match a known image header
+    [InlineData(DataKind.Audio, false)]      // garbage doesn't match a known audio header
+    [InlineData(DataKind.Video, true)]       // no cheap validator — passthrough
+    [InlineData(DataKind.PointCloud, true)]  // no cheap validator — passthrough
+    [InlineData(DataKind.Mesh, true)]        // no cheap validator — passthrough
+    [InlineData(DataKind.Json, false)]       // Json bytes are CBOR; UInt8[] is intentionally rejected
+    [InlineData(DataKind.String, false)]     // unsupported pair
+    [InlineData(DataKind.Int32, false)]      // unsupported pair
+    public async Task CanCast_GarbageBytesToScalar_ReportsValidatedKindsHonestly(DataKind targetKind, bool expected)
+    {
+        // can_cast must reflect what would actually succeed — that includes
+        // header validation for Image / Audio. The passthrough kinds report
+        // true because the engine has no cheap way to refute the bytes;
+        // false would be lying about kinds it doesn't actually validate.
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, [0xDE, 0xAD, 0xBE, 0xEF], isArray: true);
+
+        ValueRef result = await new CanCastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(targetKind) },
+            Frame, default);
+
+        Assert.Equal(expected, result.AsBoolean());
+    }
+
+    [Fact]
+    public async Task CanCast_PngMagicBytesToImage_ReturnsTrue()
+    {
+        ValueRef bytes = ValueRef.FromBytes(DataKind.UInt8, PngMagic(), isArray: true);
+
+        ValueRef result = await new CanCastFunction().ExecuteAsync(
+            new[] { bytes, ValueRef.FromType(DataKind.Image) },
+            Frame, default);
+
+        Assert.True(result.AsBoolean());
+    }
+
     // ─── try_cast ──────────────────────────────────────────────────────────
 
     [Fact]

@@ -873,12 +873,26 @@ public static class ModelInvocationHoister
                 Arguments = RewriteListWithLetRefs(fn.Arguments, modelRewrites, letRewrites),
             },
 
-            // Only rewrite unqualified column refs whose name matches a LET
-            // binding. Qualified refs (`t.x`) always resolve to a real source
-            // column and never share names with LET bindings.
+            // Unqualified ref whose name matches a LET binding — point at the
+            // synthesised hidden column.
             ColumnReference col when col.TableName is null
                 && letRewrites.TryGetValue(col.ColumnName, out string? hidden)
                 => new ColumnReference(TableName: null, ColumnName: hidden),
+
+            // Qualified ref whose qualifier matches a LET binding — the LET
+            // is struct-valued and the field is being projected via
+            // dot-notation (`s.a`). Remap the qualifier to the synthesised
+            // hidden column so the runtime evaluator finds the struct on
+            // the augmented row at evaluation time. Without this remap the
+            // qualified ref still names the old LET (which no longer lives
+            // on the row after lifting), and EvaluateColumn throws
+            // "Column 's.a' not found in row." Bracket access (`s['a']`)
+            // takes the IndexAccessExpression path and is rewritten via
+            // the Source recursion below, so this branch only matters for
+            // the dot-syntax shape.
+            ColumnReference col when col.TableName is not null
+                && letRewrites.TryGetValue(col.TableName, out string? hiddenQualifier)
+                => col with { TableName = hiddenQualifier },
 
             BinaryExpression b => b with
             {

@@ -5,13 +5,13 @@ category: utility
 
 # Utility & Type Conversion Functions
 
-Type conversion, type introspection, and general-purpose conditional and null-handling functions.
+Type conversion, type introspection, conditional and null-handling, and floating-point predicate functions.
 
 ## Type Conversion
 
 ### cast
 
-`cast(val, TargetType)` → TargetType | QU: 1
+`cast(val, TargetType)` → TargetType
 
 Explicit type conversion. Accepts a type literal (`cast(x, Int32)`) or the `CAST(x AS Int32)` SQL syntax. Date to Float32 yields epoch days; DateTime to Float32 yields epoch seconds.
 
@@ -22,9 +22,9 @@ SELECT CAST(score AS UInt8) AS byte_score FROM data  -- equivalent
 
 ### typeof
 
-`typeof(val)` → Type | QU: 1
+`typeof(val)` → Type
 
-Returns the runtime DataKind of a value as a Type tag. Use with type literals for type-oriented comparisons: `typeof(x) = Int32`.
+Returns the runtime DataKind of a value as a Type tag. Use with type literals for type-oriented comparisons: `typeof(x) = Int32`. The PostgreSQL alias `pg_typeof(val)` resolves to the same function.
 
 ```sql
 -- Project the runtime type of each value
@@ -64,7 +64,7 @@ SELECT * FROM raw_data WHERE value IS NOT Float64
 
 ### can_cast
 
-`can_cast(val, TargetType)` → Boolean | QU: 1
+`can_cast(val, TargetType)` → Boolean
 
 Returns whether CAST would succeed for this value. Allows truncation (matches CAST semantics); returns false only on overflow, parse failure, or unsupported conversion pair.
 
@@ -75,7 +75,7 @@ SELECT * FROM t WHERE can_cast(x, UInt8)   -- false for 5000, true for 3.14
 
 ### try_cast
 
-`try_cast(val, TargetType)` → TargetType / null | QU: 1
+`try_cast(val, TargetType)` → TargetType / null
 
 Attempts to cast a value to the target type. Returns NULL on failure instead of throwing. Follows CAST semantics (including truncation) on success.
 
@@ -97,20 +97,37 @@ Type literals (`Int32`, `Float64`, `String`, etc.) are reserved keywords in expr
 
 ### coalesce
 
-`coalesce(a, b, ...)` → first non-null type | QU: 1
+`coalesce(a, b, ...)` → first non-null type
 
-Returns first non-null argument.
+Returns the first non-null argument. Numeric arguments may be of mixed kinds; the result is the widest numeric kind among them. For non-numeric kinds every argument must share the same kind.
 
 ```sql
 SELECT coalesce(primary_score, fallback_score) AS score FROM results
 SELECT coalesce(name, 'unknown') AS safe_name FROM users
 ```
 
+### nullif
+
+`nullif(a, b)` → same type as `a` (or promoted numeric kind)
+
+Returns NULL when `a` equals `b`, otherwise returns `a`. The inverse of `coalesce`: useful for turning a sentinel value into a true NULL so it composes with COALESCE / aggregates that skip nulls. Numeric arguments may be of mixed kinds; the result is the widest numeric kind. For non-numeric kinds both arguments must share the same kind.
+
+```sql
+-- Turn empty strings into NULL
+SELECT nullif(trim(comment), '') AS comment FROM feedback
+
+-- Avoid divide-by-zero: the row produces NULL instead of an error
+SELECT total / nullif(count, 0) AS average FROM stats
+
+-- Erase a sentinel before aggregation
+SELECT avg(nullif(score, -1)) FROM measurements
+```
+
 ### greatest
 
-`greatest(a, b, ...)` → scalar / String | QU: 1
+`greatest(a, b, ...)` → scalar / String
 
-Returns maximum of scalar or string arguments.
+Returns the largest non-null argument. Null arguments are skipped; the result is null only when every argument is null. Mixed numeric kinds promote to the widest.
 
 ```sql
 SELECT greatest(a, b, c) AS max_val FROM data
@@ -118,98 +135,54 @@ SELECT greatest(a, b, c) AS max_val FROM data
 
 ### least
 
-`least(a, b, ...)` → scalar / String | QU: 1
+`least(a, b, ...)` → scalar / String
 
-Returns minimum of scalar or string arguments.
+Returns the smallest non-null argument. Null arguments are skipped; the result is null only when every argument is null. Mixed numeric kinds promote to the widest.
 
 ```sql
 SELECT least(a, b, c) AS min_val FROM data
 ```
 
-### choose
+## Floating-Point Predicates
 
-`choose(index, v1, v2, ...)` → value type | QU: 1
-
-Returns the value at 1-based index. NULL if out of range.
-
-```sql
-SELECT choose(2, 'a', 'b', 'c') -- 'b'
-```
+PostgreSQL-conformant predicates that classify floating-point values. All three accept `Float16`, `Float32`, or `Float64`, return `Boolean`, and propagate NULL inputs to NULL outputs. The undash aliases (`isnan`, `isfinite`) match the PG built-in spellings.
 
 ### is_nan
 
-`is_nan(x)` → Float32 | QU: 1
+`is_nan(x)` → Boolean (alias: `isnan`)
 
-Returns 1 if NaN, 0 otherwise.
+Returns true when `x` is NaN, false for any finite or infinite value.
 
 ```sql
-SELECT * FROM data WHERE is_nan(score) = 0
+SELECT * FROM data WHERE NOT is_nan(score)
 ```
 
 ### is_finite
 
-`is_finite(x)` → Float32 | QU: 1
+`is_finite(x)` → Boolean (alias: `isfinite`)
 
-Returns 1 if finite, 0 if NaN or infinite.
+Returns true when `x` is a finite number (not NaN, not ±infinity).
 
 ```sql
-SELECT * FROM data WHERE is_finite(value) = 1
+SELECT * FROM data WHERE is_finite(value)
+SELECT count(*) FILTER (WHERE NOT is_finite(weight)) AS bad_rows FROM model_outputs
 ```
 
-### is_even
+### is_infinite
 
-`is_even(x)` → Float32 | QU: 1
+`is_infinite(x)` → Boolean
 
-Returns 1 if x is an even integer, 0 otherwise.
-
-```sql
-SELECT * FROM data WHERE is_even(id) = 1
-```
-
-### is_odd
-
-`is_odd(x)` → Float32 | QU: 1
-
-Returns 1 if x is an odd integer, 0 otherwise.
+Returns true when `x` is positive or negative infinity. Note that `is_finite` and `is_infinite` are not strict complements: `is_infinite(NaN)` and `is_finite(NaN)` both return false.
 
 ```sql
-SELECT * FROM data WHERE is_odd(id) = 1
-```
-
-### if_null
-
-`if_null(x, default)` → value type | QU: 1
-
-Returns x if not null, otherwise default.
-
-```sql
-SELECT if_null(score, 0) AS safe_score FROM data
-```
-
-### iif
-
-`iif(cond, then, else)` → value type | QU: 1
-
-Returns then when cond is truthy (non-null, non-zero), else otherwise. For multi-branch conditionals, see CASE expressions.
-
-```sql
-SELECT iif(age > 18, 'adult', 'minor') AS age_group FROM users
-SELECT iif(score > 0.5, 'positive', 'negative') AS label FROM predictions
-```
-
-### random
-
-`random()` → Float32 | QU: 1
-
-Random float in [0, 1).
-
-```sql
-SELECT random() AS rand_val FROM data
-SELECT * FROM data WHERE random() < 0.1  -- ~10% sample
+SELECT count(*) FILTER (WHERE is_infinite(rate)) AS overflow_rows FROM metrics
 ```
 
 ## See Also
 
+- [Numeric Functions](numeric.md) -- arithmetic, rounding, `sign`, normalization
+- [Random & Sampling](random.md) -- `random`, `hash_split`, distribution samplers
+- [UUID Functions](uuid.md) -- UUID generation and inspection
 - [String Functions](string.md) -- text manipulation and formatting
 - [Array Functions](array.md) -- array construction and manipulation
 - [JSON Functions](json.md) -- JSON path access and type extraction

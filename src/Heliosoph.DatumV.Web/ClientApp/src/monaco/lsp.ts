@@ -28,21 +28,36 @@ export async function initLsp(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  // Grammar bootstrap. The endpoint returns a Monarch language definition
-  // shaped exactly like what `setMonarchTokensProvider` accepts. The
-  // generated client types it as a FileResponse (NSwag can't statically
-  // see the JSON shape from an IActionResult return); plain fetch is
-  // simpler than re-typing it. Best-effort: on failure, the SQL language
-  // stays registered (see setup.ts) but with no tokenizer, so editor
-  // text renders without syntax highlighting until the next reload.
+  // Grammar bootstrap. The endpoint returns a bundle of
+  //   { grammar, themes: { light, dark } }
+  // shaped so the grammar feeds straight into `setMonarchTokensProvider`
+  // and each theme body into `defineTheme`. The generated client types
+  // it as a FileResponse (NSwag can't statically see the JSON shape
+  // from an IActionResult return); plain fetch is simpler than
+  // re-typing it. Best-effort: on failure, the SQL language stays
+  // registered (see setup.ts) with no tokenizer and the placeholder
+  // themes pre-registered there keep the editor's theme name valid, so
+  // text renders in the stock vs/vs-dark palette until the next reload.
   try {
     const res = await fetch(GRAMMAR_URL, {
       headers: { Accept: 'application/json' },
       credentials: 'include',
     });
     if (res.ok) {
-      const grammar = (await res.json()) as monaco.languages.IMonarchLanguage;
-      monaco.languages.setMonarchTokensProvider('sql', grammar);
+      const bundle = (await res.json()) as {
+        grammar: monaco.languages.IMonarchLanguage;
+        themes: {
+          light: monaco.editor.IStandaloneThemeData;
+          dark: monaco.editor.IStandaloneThemeData;
+        };
+      };
+      // Overwrite the placeholder themes registered in setup.ts with
+      // the server-provided palette. `defineTheme` updates existing
+      // theme names in place; Monaco re-applies the new rules to every
+      // editor whose `theme` option is set to this name.
+      monaco.editor.defineTheme('datumv-light', bundle.themes.light);
+      monaco.editor.defineTheme('datumv-dark', bundle.themes.dark);
+      monaco.languages.setMonarchTokensProvider('sql', bundle.grammar);
       // Retokenise every existing SQL model so the new grammar takes
       // effect on already-loaded content. `resetTokenization` is a
       // private API but stable across Monaco versions; we fall back to

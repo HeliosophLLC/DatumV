@@ -35,11 +35,16 @@ public sealed class LanguageController(LanguageManifestService manifest) : Contr
     [HttpGet("grammar")]
     public IActionResult Grammar()
     {
-        // Monarch grammar JSON the client feeds into
-        // `monaco.languages.setMonarchTokensProvider('sql', …)`. Static
-        // — the grammar shape doesn't depend on the catalog — so no
-        // dependence on the manifest service. Served as raw JSON so
-        // the client can pass it straight to Monaco without reshaping.
-        return new JsonResult(MonarchGrammarFactory.Build());
+        // Bundles the Monarch grammar with the editor themes that pair
+        // with it. The client passes `grammar` to
+        // `monaco.languages.setMonarchTokensProvider('sql', …)` and the
+        // light/dark theme bodies to `monaco.editor.defineTheme(…)`.
+        // Both shapes are static (independent of the catalog), so no
+        // dependence on the manifest service.
+        return new JsonResult(new
+        {
+            grammar = MonarchGrammarFactory.Build(manifest.RegisteredFunctionNames),
+            themes = MonarchEditorThemeFactory.BuildThemes(),
+        });
     }
 }

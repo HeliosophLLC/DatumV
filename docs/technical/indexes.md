@@ -93,14 +93,6 @@ Each bloom filter uses Kirsch-Mitzenmacher double hashing: two independent FNV-1
 
 Filters are built per column per chunk. At query time, bloom filters enable **join key pruning**: if all build-side key values are definitely absent from a chunk's bloom filter, that chunk is skipped entirely — no source data is read.
 
-### Request bloom filters
-
-Specify columns at index build time:
-
-```bash
-datumv index --source "csv:data=./data.csv" --bloom-columns "id,category"
-```
-
 ## Sorted value indexes (legacy)
 
 Sorted value indexes are a legacy `.datum-index` section. New index builds emit B+Tree indexes instead — sorted indexes can't be incrementally maintained, and B+Tree covers the same point and range query surface. Existing `.datum-index` files containing sorted-index sections still load and serve queries; the on-disk format is preserved for backward compatibility but no current writer emits new sorted-index sections.
@@ -115,14 +107,6 @@ Sorted value indexes store every distinct value in a column alongside its chunk 
 - **Chunk-level range** — `FindChunksInRange(low, high)`, `FindChunksLessThan(key)`, `FindChunksGreaterThan(key)`, and their inclusive variants return chunk sets for range predicates
 
 At query time, sorted indexes enable **equality and range predicate pruning**: the engine extracts literal values from WHERE predicates and uses the sorted index to identify which chunks contain matching values, skipping all others.
-
-### Request sorted indexes
-
-Specify columns at index build time:
-
-```bash
-datumv index --source "csv:data=./data.csv" --index-columns "user_id,timestamp"
-```
 
 ### Automatic column selection
 
@@ -172,7 +156,7 @@ Sorted indexes are stored inline within the unified `.datum-index` file as fixed
 
 ### Multi-tenant memory profile
 
-The fixed-width mmap layout means the OS pages in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions querying the same table do not multiply memory 10×. On-disk size is larger than a Zstd-compressed encoding (~8× for typical columns) but acceptable for local ML ETL workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage can compress the file with Zstd; after download, the decompressed file is mmap'd directly.
+The fixed-width mmap layout means the OS pages in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions querying the same table do not multiply memory 10×. On-disk size is larger than a Zstd-compressed encoding (~8× for typical columns) but acceptable for local ML workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage can compress the file with Zstd; after download, the decompressed file is mmap'd directly.
 
 ## B+Tree indexes
 
@@ -306,14 +290,6 @@ Before reading any rows, `ScanOperator` checks `BitmapColumnIndex.ChunkContainsV
 
 Within surviving chunks, the engine builds a combined bitmap mask by evaluating the filter expression tree against the chunk's per-value bitsets. Rows where the corresponding bit is 0 are skipped without being materialized. This is precise (no false negatives or false positives) unlike statistics-based pruning which is conservative.
 
-### Request bitmap indexes
-
-Bitmap columns are auto-detected during index building for all auto-indexable kinds. To force specific columns:
-
-```
-datumv index --source data.csv --auto-index --bitmap-columns color,status
-```
-
 ### Storage format
 
 Each bitmap is Zstd-compressed and stored under `UnifiedIndexSectionType.BitmapIndexes` (section type 7). At a chunk size of 10,000 rows, each uncompressed bitmap is 1.25 KB; Zstd typically achieves 5–20× compression for sparse bitmaps.
@@ -409,64 +385,6 @@ Sorted value indexes can eliminate the `OrderByOperator` entirely. When all of t
 The `IndexScanOperator` walks the sorted index entries in order (ascending or descending) and fetches each row via `ReadRowRangeAsync`. Consecutive entries in the same chunk are batched into a single seek call. Because rows emerge already sorted, no materialization or in-memory sort is needed.
 
 This optimization composes with LIMIT — an `ORDER BY col LIMIT N` query reads only the first *N* index entries, avoiding a full table scan entirely.
-
-## CLI usage
-
-### Build a standalone index
-
-```bash
-datumv index --source "csv:data=./large_dataset.csv" \
-  --chunk-size 50000 \
-  --bloom-columns "id,category" \
-  --index-columns "id"
-```
-
-This creates `large_dataset.csv.datum-index` alongside the source file.
-
-### Co-generate an index and manifest
-
-```bash
-datumv index-manifest --source "csv:data=./data.csv" \
-  --chunk-size 50000 \
-  --bloom-columns "id,category" \
-  --with-interactions
-```
-
-This creates both `data.csv.datum-index` and `data.csv.datum-manifest` in a single pass. Use `--with-interactions` to include pairwise column interaction statistics in the manifest (opt-in due to O(C²) scaling). See [Statistics & Manifest](statistics.md) for details.
-
-### Co-generate an index during query output
-
-```bash
-datumv query "
-  COPY (
-    SELECT id, normalize(value) AS norm_value
-    FROM data
-  ) TO 'output/result.parquet'
-" --source "csv:data=./data.csv" --with-index
-```
-
-The `--with-index` flag builds an index for each source as rows flow through the pipeline, at no additional I/O cost.
-
-### Load a pre-built index at query time
-
-```bash
-datumv query "SELECT * FROM data WHERE category = 'train'" \
-  --source "csv:data=./data.csv" \
-  --index "./data.csv.datum-index"
-```
-
-The engine validates the index fingerprint against the source, applies chunk-level pruning, and streams only matching rows.
-
-### CLI flags reference
-
-| Flag | Description |
-|------|-------------|
-| `--index <path>` | Load a pre-built `.datum-index` file. Repeatable for multiple sources. |
-| `--with-index` | Co-generate a `.datum-index` for each source during query execution. |
-| `--with-interactions` | Include pairwise column interactions in the manifest (`index-manifest` only). |
-| `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
-| `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
-| `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
 
 ## Programmatic API
 

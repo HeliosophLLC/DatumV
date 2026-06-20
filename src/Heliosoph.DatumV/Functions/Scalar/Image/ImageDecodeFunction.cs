@@ -17,12 +17,23 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 /// for one-off lookups against a file on the local filesystem.
 /// </summary>
 /// <remarks>
-/// Mirror of <c>audio_decode</c>: no PNG/JPEG pixel decoding happens — bytes
-/// pass through verbatim with the kind tag flipped to
-/// <see cref="DataKind.Image"/>. Width/height parsing happens lazily at the
-/// materialization boundary the same way it does for ingest-time
+/// <para>
+/// No pixel decoding happens — bytes pass through verbatim with the kind tag
+/// flipped to <see cref="DataKind.Image"/>. Width/height parsing happens
+/// lazily at the materialization boundary the same way it does for ingest-time
 /// <see cref="DataValue.FromImage(byte[], IValueStore)"/> calls, so
 /// <c>image_width()</c> and friends keep their fast inline-metadata path.
+/// </para>
+/// <para>
+/// Permissive on unrecognised input: unknown / corrupt bytes still produce a
+/// non-NULL <see cref="DataKind.Image"/> value, just with zero-sentinel inline
+/// metadata, mirroring <c>audio_decode</c>'s zero-sample-rate contract.
+/// Downstream <c>image_width()</c> / <c>image_height()</c> then return NULL
+/// via the zero-sentinel path. Callers that want a hard error at the call
+/// site — with a hex-byte preview of what didn't match — should use
+/// <c>CAST(bytes AS Image)</c> instead, which validates against the
+/// PNG/JPEG/WebP/GIF/BMP/TIFF magic table and throws on mismatch.
+/// </para>
 /// </remarks>
 public sealed class ImageDecodeFunction : IFunction, IScalarFunction
 {

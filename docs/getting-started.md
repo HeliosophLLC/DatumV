@@ -2,279 +2,73 @@
 title: Getting Started
 ---
 
-## What Is DatumV?
+Welcome to DatumV — a SQL engine that runs ML models on your data, locally. This is the welcome tab; it's pinned, so you can come back to it any time.
 
-DatumV is a SQL-based tool for preparing data for machine learning. If you've ever needed to load a CSV, join it with another dataset, clean up bad rows, normalize some columns, and export the result as Parquet — all without writing Python — DatumV does that in a single SQL query.
+Two example queries are already open in tabs alongside this one. Click Run on either to see DatumV in motion.
 
-It supports standard SQL (SELECT, JOIN, GROUP BY, window functions) plus ML-specific extensions: vector operations, image transforms, type-safe tensors, sampling, cross-validation, and 200+ built-in functions.
+## The two starter tabs
 
-## Installing
+**[Person crops with YOLOX](examples/yolox-person-crops.md)** runs `models.yolox_s` over the COCO val2017 dataset, takes every detection labeled `person`, and crops the original image to the bounding box. It shows model invocation inside `SELECT`, the `Array<Struct>` output shape that detection models return, and filtering / cropping based on what a model produced.
 
-```bash
-dotnet tool install --global DatumV.Cli
-```
+**[Same input, four depth models](examples/depth-comparison.md)** runs one image through Depth Anything v2, Depth Anything v3, MiDaS Small, and DPT Large in a single query. It shows that swapping models is a column-level concern, not a pipeline concern.
 
-Verify it works:
+The first time you click Run, DatumV prompts you to download the models and dataset that the query needs:
 
-```bash
-datumv --version
-```
+- Most models ship under MIT or Apache 2.0. A few — notably SDXL and Llama — require accepting their license first.
+- Downloads stream into your catalog and surface as a progress chip in the bottom-left corner.
+- An OS notification fires when each download completes.
+- If a download fails, restart it manually from the chip, then re-run the query.
 
-## Your First Query
+![Export from the toolbar](figures/download_prompt.jpg)
 
-Say you have a CSV file called `iris.csv`:
+## Bringing your own data in
 
-```csv
-sepal_length,sepal_width,petal_length,petal_width,species
-5.1,3.5,1.4,0.2,setosa
-7.0,3.2,4.7,1.4,versicolor
-...
-```
+Every external file is read by a table-valued function — `FROM open_X(...)` lands typed columns in your query.
 
-To peek at the data:
+| I have... | Use |
+|---|---|
+| A CSV file | `open_csv_typed('path.csv')` |
+| A Parquet file (HuggingFace, Spark, pandas) | `open_parquet('path.parquet')` |
+| An Arrow / Feather file | `open_arrow('path.arrow')` |
+| A JSON or JSONL document | `open_json('path.json')` / `open_jsonl('path.jsonl')` |
+| An HDF5 file | `open_h5_dataset('path.h5', '/dataset')` |
+| A FITS file (astronomy) | `open_fits_images('path.fits')` |
+| A ZIP / TAR archive | `open_archive('path.zip')` |
+| A folder of files | `open_folder('path/')` |
 
-```bash
-datumv explore "SELECT * FROM iris LIMIT 5" --source "iris=./iris.csv"
-```
+Each function reads the file's schema at plan time, so projections type-check before the query runs. See [Table-Valued Functions](functions/table-valued.md) for the full surface — additional arguments, supported types, and round-trip rules.
 
-The `--source` flag tells DatumV where the data lives. The format is `name=path` — the name becomes the table name you use in SQL.
+## Saving results
 
-## The Three-Step Pipeline
-
-Almost every DatumV workflow follows the same pattern: **load → transform → export**.
-
-### Step 1: Load (FROM + --source)
-
-```bash
-# CSV (auto-detected from extension)
---source "orders=./orders.csv"
-
-# Parquet
---source "features=./embeddings.parquet"
-
-# ZIP of images (columns: file_name, file_bytes)
---source "images=./train2017.zip"
-
-# JSON
---source "labels=./annotations.json"
-
-# Multiple sources in one query
---source "orders=./orders.csv" --source "customers=./customers.csv"
-```
-
-The format is auto-detected from the file extension. For explicit control, prefix with the provider name: `csv:data=./file.txt`.
-
-### Step 2: Transform (SELECT, WHERE, JOIN, functions)
-
-This is where you do the work — filter bad rows, join tables, compute features, normalize values:
+Save query results to disk with the `COPY (...) TO` statement:
 
 ```sql
-SELECT
-  customer_id,
-  total_spent / order_count AS avg_order_value,
-  CASE WHEN churn_score > 0.7 THEN 'high_risk' ELSE 'normal' END AS risk_tier
-FROM customers
-WHERE total_spent > 0
-ORDER BY avg_order_value DESC
-```
-
-### Step 3: Export (COPY)
-
-Wrap the query in `COPY (...) TO '<path>'` to write results to a file. The format is inferred from the extension (Parquet today; CSV / JSONL / `.datum` / HDF5 staged as follow-ups):
-
-```bash
-datumv query "COPY (SELECT * FROM customers) TO 'output.parquet'" --source "customers=./customers.csv"
-```
-
-Pass options through an optional trailing block:
-
-```sql
-COPY (SELECT * FROM data) TO 'output.parquet'
-  (FORMAT parquet, ROW_GROUP_SIZE 10000, COMPRESSION 'zstd')
-```
-
-See [COPY and Export](technical/copy-and-export.md) for the full option set and typed-media encoding rules.
-
-## Interactive Mode (Shell)
-
-For exploration, use the interactive shell:
-
-```bash
-datumv shell --source "orders=./orders.csv" --source "products=./products.csv"
-```
-
-Inside the shell you can run queries, inspect tables, and iterate without restarting:
-
-```
-datum> .tables
-orders    (5 columns, csv)
-products  (4 columns, csv)
-
-datum> SELECT * FROM orders LIMIT 3
-order_id  customer_id  product_id  quantity  price
-1         42           101         2         29.99
-2         42           203         1         9.99
-3         17           101         5         29.99
-
-datum> .schema orders
-Column        Type      Nullable
-order_id      Float32   YES
-customer_id   Float32   YES
-product_id    Float32   YES
-quantity      Float32   YES
-price         Float32   YES
-```
-
-## A Real Example: Preparing Customer Features
-
-Let's walk through a realistic scenario. You have two CSV files — `orders.csv` and `customers.csv` — and you want to build a feature table for a churn prediction model.
-
-### 1. Explore the data
-
-```bash
-datumv shell --source "orders=./orders.csv" --source "customers=./customers.csv"
-```
-
-```sql
--- What does the orders table look like?
-SELECT * FROM orders LIMIT 5
-
--- How many orders per customer?
-SELECT customer_id, COUNT(*) AS order_count
-FROM orders
-GROUP BY customer_id
-ORDER BY order_count DESC
-LIMIT 10
-```
-
-### 2. Build features with a JOIN
-
-```sql
-SELECT
-  c.customer_id,
-  c.signup_date,
-  c.region,
-  COUNT(o.order_id) AS order_count,
-  SUM(o.price * o.quantity) AS total_spent,
-  AVG(o.price) AS avg_price,
-  MAX(o.order_date) AS last_order_date,
-  date_diff('day', MAX(o.order_date), CURRENT_DATE) AS days_since_last_order
-FROM customers AS c
-LEFT JOIN orders AS o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.signup_date, c.region
-```
-
-### 3. Add derived features and quality checks
-
-```sql
-SELECT DEFINE {
-  LET tenure = date_diff('day', signup_date, CURRENT_DATE);
-  LET avg_order = total_spent / NULLIF(order_count, 0);
-  ASSERT order_count >= 0 MESSAGE 'negative order count' ON FAIL SKIP;
-}
-  customer_id,
-  tenure AS tenure_days,
-  order_count,
-  total_spent,
-  avg_order AS avg_order_value,
-  days_since_last_order,
-  CASE
-    WHEN days_since_last_order > 90 THEN 'churned'
-    WHEN days_since_last_order > 30 THEN 'at_risk'
-    ELSE 'active'
-  END AS status
-FROM (
-  SELECT
-    c.customer_id,
-    c.signup_date,
-    COUNT(o.order_id) AS order_count,
-    COALESCE(SUM(o.price * o.quantity), 0) AS total_spent,
-    date_diff('day', MAX(o.order_date), CURRENT_DATE) AS days_since_last_order
-  FROM customers AS c
-  LEFT JOIN orders AS o ON c.customer_id = o.customer_id
-  GROUP BY c.customer_id, c.signup_date
-) AS base
-```
-
-### 4. Export
-
-```bash
-datumv query "
-  COPY (
-    SELECT ...  -- (the query above)
-  ) TO 'customer_features.parquet'
-" --source "orders=./orders.csv" --source "customers=./customers.csv"
-```
-
-Your Parquet file is ready for pandas, scikit-learn, or any ML framework.
-
-## A Real Example: Preparing an Image Dataset
-
-You have a ZIP of images and a JSON annotations file. You want to resize all images to 224x224, pair them with their labels, and export as HDF5 for PyTorch.
-
-```bash
-datumv query "
-  COPY (
-    SELECT
-      resize(img.file_bytes, 224, 224) AS image,
-      cap.label
-    FROM images AS img
-    INNER JOIN annotations AS cap ON get_filename(img.file_name) = cap.filename
-    WHERE cap.label IS NOT NULL
-  ) TO 'training_data.parquet'
-" \
-  --source "images=./train2017.zip" \
-  --source "json:annotations=./labels.json"
-```
-
-That's it — no Python script, no intermediate files, no memory issues. DatumV streams through the ZIP, joins with annotations, resizes each image, and writes the result directly to Parquet.
-
-## Sampling and Cross-Validation
-
-### Quick sample for exploration
-
-```sql
--- Random 1% sample
-SELECT * FROM training_data TABLESAMPLE BERNOULLI(1)
-```
-
-### Balance an imbalanced dataset
-
-```sql
--- Exactly 1000 rows per class
 COPY (
-  SELECT * FROM training_data
-  TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
-) TO 'balanced_train.parquet'
+  SELECT file_name, models.yolox_s(file) AS detections
+  FROM datasets.coco_val2017
+  LIMIT 1000
+) TO 'detections.parquet'
 ```
 
-### Set up k-fold cross-validation
+Or click the export icon in the per-tab toolbar to open a save dialog. The app builds the `COPY` statement for you, picks the format from the file extension, and runs it as a normal query — the summary cell shows how many rows and bytes landed on disk.
 
-```sql
--- Tag each row with a fold number (0-4), then export
-COPY (
-  SELECT *, fold
-  FROM training_data
-  CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
-) TO 'training_with_folds.parquet'
-```
+![Export from the toolbar](figures/export_dialog.jpg)
 
-## What's Next?
+Supported formats: Parquet, CSV, JSON, JSONL, Arrow. Parquet round-trips typed media (images, audio, video, meshes, point clouds) losslessly; CSV and JSON are one-way for those columns. See [COPY and Export](technical/copy-and-export.md) for the full option surface and per-format details.
 
-Now that you have the basics, explore these topics based on what you need:
+## What's next
+
+The three other pinned tabs hold most of what you'll come back to:
+
+- **Model Catalog** — every model that ships with DatumV, what it returns, and how to add your own.
+- **Dataset Catalog** — datasets you've downloaded, datasets curated for download, and license details.
+- **Settings** — catalog paths, GPU selection, model storage location.
+
+When you need deeper reference material, follow the docs sidebar:
 
 | I want to... | Read |
-|--------------|------|
-| Filter and clean data | [WHERE](sql/filtering.md) |
-| Join multiple tables | [JOIN](sql/joins.md) |
-| Aggregate and group | [GROUP BY](sql/group-by.md) |
-| Rank and window | [Window Functions](sql/window-functions.md), [QUALIFY](sql/qualify.md) |
-| Compute reusable values | [LET Bindings](sql/let-bindings.md) |
-| Validate data quality | [ASSERT](sql/assert.md) |
-| Reshape wide/long | [PIVOT / UNPIVOT](sql/pivot-unpivot.md) |
-| Sample and balance | [TABLESAMPLE](sql/tablesample.md) |
-| Cross-validate | [CROSS VALIDATE](sql/cross-validate.md) |
-| Export results | [INTO](sql/into.md) |
-| Browse all functions | [Functions Reference](functions/string.md) |
-| Understand the type system | [Type System](sql/type-system.md) |
-| Inspect query performance | [EXPLAIN](sql/explain.md) |
+|---|---|
+| Write more advanced SQL | [SQL Reference](sql/select.md) |
+| Look up a function | [Functions Reference](functions/string.md) |
+| Browse example queries | [Examples](examples/index.md) |
+| Add my own model | [CREATE MODEL](sql/create-model.md) |
