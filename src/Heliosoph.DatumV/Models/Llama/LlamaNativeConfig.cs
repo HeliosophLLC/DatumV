@@ -89,6 +89,18 @@ public static class LlamaNativeConfig
             // (used to print the tensor-loading "..........." dots one at a
             // time). It slips through the >= Warning filter because its
             // numeric value happens to be high; exclude it explicitly.
+            // Route only Warning+ from LlamaSharp to the console — the lower
+            // levels are extremely chatty (per-tensor / per-token traces during
+            // load and inference) and drown out actual problems. Drop the
+            // threshold to LLamaLogLevel.Debug temporarily when diagnosing
+            // a native-load failure (see git history for the prior verbose
+            // shape).
+            //
+            // Continue is a special llama.cpp marker meaning "no newline
+            // before me; this is a continuation of the previous log line"
+            // (used to print the tensor-loading "..........." dots one at a
+            // time). It slips through the >= Warning filter because its
+            // numeric value happens to be high; exclude it explicitly.
             NativeLogConfig.LLamaLogCallback logCallback = (level, message) =>
             {
                 if (level >= LLamaLogLevel.Warning && level != LLamaLogLevel.Continue)

@@ -15,7 +15,20 @@
     <AssemblyName>Heliosoph.DatumV.Web</AssemblyName>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!--
+      `false` is load-bearing: LLamaSharp's native loader walks the
+      `<AppContext.BaseDirectory>/runtimes/<rid>/native/<sub>/` path
+      to find llama.dll + ggml*.dll. For self-extracting single-file
+      apps, BaseDirectory points at the .exe location (not the temp
+      extraction dir), so packing the LLamaSharp natives into the exe
+      strands them at runtime — the loader can't find them at the
+      location it searches. ONNX Runtime checks both locations and
+      doesn't care, but LLamaSharp 0.27 does. Keeping native libs
+      next to the exe in their standard `runtimes/` layout works for
+      every loader at the cost of a slightly less "single" file
+      (managed code still packs in; only natives ride alongside).
+    -->
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>embedded</DebugType>
     <!--
@@ -84,6 +97,87 @@
     <None Include="$(MSBuildThisFileDirectory)..\..\datasets\**\*"
           Link="datasets\%(RecursiveDir)%(Filename)%(Extension)"
           CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    App-local VC++ runtime for the LLamaSharp / llama.cpp native binaries.
+    The ggml-*.dll and llama.dll built by upstream link dynamically against
+    the VC++ runtime (`/MD`), so they need vcruntime140.dll + msvcp140.dll
+    + friends present at load time. Microsoft.ML.OnnxRuntime's native side
+    is statically linked (`/MT`) — that's why ONNX models work on machines
+    without the Redist installed but LLamaSharp doesn't.
+
+    Microsoft permits app-local redistribution of this exact set of files;
+    see https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+    Sourced from the build host's System32 (CI runners + dev machines have
+    the Redist preinstalled). Per-file Exists() conditions keep this robust
+    against future Redist versions that may drop or add specific DLLs —
+    we ship what's available, skip what isn't.
+
+    Only fires for Windows publishes; Linux gets its own libc runtime from
+    the distribution. Files land at the publish root next to the .exe so
+    Windows resolves them via the standard "loading exe's directory first"
+    DLL search rule, no SetDllDirectory needed.
+  -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' AND '$(OS)' == 'Windows_NT'">
+    <None Include="$(SystemRoot)\System32\vcruntime140.dll"
+          Link="vcruntime140.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\vcruntime140.dll')" />
+    <None Include="$(SystemRoot)\System32\vcruntime140_1.dll"
+          Link="vcruntime140_1.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\vcruntime140_1.dll')" />
+    <None Include="$(SystemRoot)\System32\msvcp140.dll"
+          Link="msvcp140.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\msvcp140.dll')" />
+    <None Include="$(SystemRoot)\System32\msvcp140_1.dll"
+          Link="msvcp140_1.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\msvcp140_1.dll')" />
+    <None Include="$(SystemRoot)\System32\msvcp140_2.dll"
+          Link="msvcp140_2.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\msvcp140_2.dll')" />
+    <None Include="$(SystemRoot)\System32\concrt140.dll"
+          Link="concrt140.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\concrt140.dll')" />
+    <!--
+      vcomp140.dll = Microsoft's OpenMP runtime. Shipped as part of the
+      VC++ Redist but a separate file; llama.cpp's CPU backend uses
+      `#pragma omp` for thread parallelism, so ggml-cpu.dll / ggml.dll
+      import vcomp140.dll directly. Without it, every CPU backend fails
+      to load even when the rest of the C runtime resolves cleanly.
+    -->
+    <None Include="$(SystemRoot)\System32\vcomp140.dll"
+          Link="vcomp140.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\vcomp140.dll')" />
+    <!--
+      C++20 stdlib bits that newer llama.cpp builds sometimes touch.
+      Belt-and-suspenders — both files are present on machines with a
+      current VC++ Redist; if they're absent on the dev/CI host the
+      Exists() guard quietly skips them.
+    -->
+    <None Include="$(SystemRoot)\System32\msvcp140_atomic_wait.dll"
+          Link="msvcp140_atomic_wait.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\msvcp140_atomic_wait.dll')" />
+    <None Include="$(SystemRoot)\System32\msvcp140_codecvt_ids.dll"
+          Link="msvcp140_codecvt_ids.dll"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"
+          Condition="Exists('$(SystemRoot)\System32\msvcp140_codecvt_ids.dll')" />
   </ItemGroup>
 
   <ItemGroup>

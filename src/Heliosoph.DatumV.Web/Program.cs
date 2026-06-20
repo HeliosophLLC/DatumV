@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+
 using Heliosoph.DatumV.Web.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -13,6 +16,8 @@ public static class Program
     // proxy to Kestrel). See src/Heliosoph.DatumV.Web/electron/main.ts.
     public static void Main(string[] args)
     {
+        EnsureAppLocalDllSearch();
+
         var url = Environment.GetEnvironmentVariable("DATUMV_WEB_URL") ?? "http://127.0.0.1:5000";
         var bootstrap = new WebHostBootstrap(
             args,
@@ -56,6 +61,40 @@ public static class Program
         {
             // No-op; NSwag only needs the DI graph for IDocumentProvider,
             // not the request pipeline.
+        }
+    }
+
+    // Pins Windows's native-library search to AppContext.BaseDirectory so
+    // app-local copies of vcruntime140.dll / msvcp140.dll / vulkan-1.dll
+    // (shipped via Heliosoph.DatumV.Web.csproj) are found when LLamaSharp's
+    // native binaries resolve their dependent imports.
+    //
+    // Why this is necessary: LLamaSharp finds llama.dll via explicit paths
+    // built from AppContext.BaseDirectory, so the library file itself loads
+    // fine. But Windows then resolves llama.dll's transitive imports using
+    // its own LoadLibrary search rules, which for a subprocess launched by
+    // Electron may not include AppContext.BaseDirectory by default. Calling
+    // SetDllDirectory once at startup makes BaseDirectory the FIRST search
+    // location for every subsequent native load — including the loader's
+    // implicit dependency resolution.
+    //
+    // No-op on Linux + macOS (the API doesn't exist; those platforms use
+    // libc / ld.so search semantics where the .so's own directory and
+    // standard system paths are searched by default — no extra pin needed).
+    [SupportedOSPlatform("windows")]
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectory(string lpPathName);
+
+    private static void EnsureAppLocalDllSearch()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        bool ok = SetDllDirectory(AppContext.BaseDirectory);
+        if (!ok)
+        {
+            int err = Marshal.GetLastWin32Error();
+            Console.Error.WriteLine(
+                $"[dll-search] SetDllDirectory({AppContext.BaseDirectory}) failed with Win32 error {err}. " +
+                "Native libraries with dependencies on app-local VC++ runtime may fail to load.");
         }
     }
 

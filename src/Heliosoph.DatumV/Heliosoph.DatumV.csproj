@@ -163,6 +163,18 @@
   </ItemGroup>
   <ItemGroup Condition="'$(GpuVariant)' == 'standard'">
     <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
+    <!--
+      Cpu is load-bearing alongside Vulkan: the dispatcher legitimately
+      picks LlamaSharpCpu for models with minVramMb=0 (the cheap, won't-
+      page-the-GPU choice), which means LlamaSharpBackend.LoadAsync
+      requests GpuLayerCount=0 and llama.cpp tries to load a CPU-shaped
+      native. The Vulkan backend package only ships the Vulkan binary,
+      so without the explicit Cpu reference there's nothing to load and
+      LLama.Native.NativeApi's cctor throws "no backend installed".
+      The CUDA variant didn't need this because LLamaSharp.Backend.Cuda12.Windows
+      bundles both CUDA and CPU binaries in one package.
+    -->
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
   </ItemGroup>
 
   <ItemGroup>

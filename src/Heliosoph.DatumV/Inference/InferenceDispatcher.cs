@@ -274,6 +274,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
     {
         InferenceDevice.OnnxRuntimeCuda,      // NVIDIA dGPU — top of the heap
         InferenceDevice.LlamaSharpCuda,       // LlamaSharp on NVIDIA dGPU
+        InferenceDevice.LlamaSharpVulkan,     // LlamaSharp on cross-vendor GPU (AMD/Intel; NVIDIA fallback in standard variant)
         InferenceDevice.OnnxRuntimeDirectMl,  // AMD/Intel dGPU on Windows
         InferenceDevice.OpenVinoGpu,          // Intel iGPU (or Arc dGPU)
         InferenceDevice.OnnxRuntimeCoreMl,    // Apple ANE/GPU via CoreML
@@ -296,6 +297,7 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
         InferenceDevice.OpenVinoCpu,
         InferenceDevice.LlamaSharpCpu,
         InferenceDevice.OnnxRuntimeDirectMl,
+        InferenceDevice.LlamaSharpVulkan,     // Cross-vendor dGPU — same power category as DirectML
         InferenceDevice.OnnxRuntimeCuda,
         InferenceDevice.LlamaSharpCuda,
     };
@@ -309,6 +311,12 @@ public sealed class InferenceDispatcher : IInferenceDispatcher
     {
         InferenceDevice.OnnxRuntimeCuda,
         InferenceDevice.LlamaSharpCuda,
+        // Vulkan sits just below CUDA. On NVIDIA in the standard variant
+        // it's ~85-95% of CUDA for LLM workloads; on AMD/Intel it's the
+        // only path that hits the GPU at all. Either way it must rank
+        // above every CPU entry so the AMD-RX-580 / Intel-Arc / older-
+        // NVIDIA paths pick GPU instead of falling through to CPU.
+        InferenceDevice.LlamaSharpVulkan,
         InferenceDevice.OpenVinoNpu,
         InferenceDevice.OnnxRuntimeDirectMl,
         InferenceDevice.OpenVinoGpu,
