@@ -639,6 +639,21 @@ public static class ParameterBinder
                 CollectFromExpression(item.Expression, names);
             }
         }
+
+        // Mirror BindStatement, which descends into CTE bodies so $parameters
+        // inside them substitute. Without this, `WITH foo AS (… $artifact …)`
+        // SELECT … FROM foo` reports $artifact as supplied-but-unreferenced.
+        if (statement.CommonTableExpressions is not null)
+        {
+            foreach (CommonTableExpression cte in statement.CommonTableExpressions)
+            {
+                CollectFromQueryExpression(cte.Body, names);
+                if (cte.RecursiveQuery is not null)
+                {
+                    CollectFromStatement(cte.RecursiveQuery, names);
+                }
+            }
+        }
     }
 
     private static void CollectFromTableSource(TableSource source, HashSet<string> names)

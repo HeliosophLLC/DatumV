@@ -179,8 +179,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "dev-clean.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "dev-clean.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -210,8 +211,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "dev-other.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "dev-other.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -241,8 +243,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "test-clean.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "test-clean.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -272,8 +275,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "test-other.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "test-other.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -303,8 +307,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "train-clean-100.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "train-clean-100.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -334,8 +339,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "train-clean-360.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "train-clean-360.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
@@ -365,8 +371,9 @@
               ],
               "ingest": [
                 {
-                  "sourcePath": "train-other-500.tar.gz",
-                  "tableName": "utterances"
+                  "tableName": "utterances",
+                  "artifact": "train-other-500.tar.gz",
+                  "sqlFile": "librispeech/utterances.sql"
                 }
               ]
             }
