@@ -45,7 +45,10 @@ public sealed record ColumnFooterV2(
     /// <summary>
     /// Serializes this column footer block. Layout:
     /// <list type="bullet">
-    /// <item>name (string), kind (1B), encoder (1B), flags (1B = isNullable | isArray | hasFixedShape),
+    /// <item>name (string), kind (1B), encoder (1B), flags (4B; widened
+    ///       from 1B in v7 — Nullable | IsArray | HasFixedShape |
+    ///       Tombstoned | HasStructTypeId | HasMaxLength | IsBlankPadded
+    ///       in the low 7 bits, 25 spare bits above),
     ///       fixedShape rank+dims (when present)</item>
     /// <item>pageCount (4B), pages[]</item>
     /// <item>chapterZoneMapCount (4B), chapterZoneMaps[]</item>
@@ -72,7 +75,10 @@ public sealed record ColumnFooterV2(
         if (StructTypeId is not null) flags |= ColumnFlagsV2.HasStructTypeId;
         if (Descriptor.MaxLength is not null) flags |= ColumnFlagsV2.HasMaxLength;
         if (Descriptor.IsBlankPadded) flags |= ColumnFlagsV2.IsBlankPadded;
-        writer.Write((byte)flags);
+        // v7: widened from byte to uint32 to give 32 bits of room for
+        // future column-level metadata (CHECK presence, collation,
+        // GENERATED expression storage, encryption hints, comments).
+        writer.Write((uint)flags);
 
         if (Descriptor.FixedShape is not null)
         {
@@ -133,7 +139,7 @@ public sealed record ColumnFooterV2(
         string name = reader.ReadString();
         DataKind kind = (DataKind)reader.ReadByte();
         EncoderKind encoder = (EncoderKind)reader.ReadByte();
-        ColumnFlagsV2 flags = (ColumnFlagsV2)reader.ReadByte();
+        ColumnFlagsV2 flags = (ColumnFlagsV2)reader.ReadUInt32();
 
         int[]? fixedShape = null;
         if ((flags & ColumnFlagsV2.HasFixedShape) != 0)
@@ -202,14 +208,21 @@ public sealed record ColumnFooterV2(
 }
 
 /// <summary>
-/// Per-column flag byte serialized into the footer. Captures the small
+/// Per-column flag word serialized into the footer. Captures the small
 /// subset of column-level state that needs round-tripping past file
 /// open (nullability, typed-array flag, fixed-shape presence,
 /// tombstone bit). Reader ignores unknown bits rather than failing —
 /// additive flag-bit allocation is a forward-compatible operation.
 /// </summary>
+/// <remarks>
+/// v4-v6 used a 1-byte storage width which left only one free bit after
+/// shipping seven flags. v7 widens the on-disk width to 4 bytes so the
+/// remaining 25 bits can absorb future column-level features (CHECK
+/// presence, collation, encryption hints, comments, semantic tags,
+/// GENERATED storage variants) without forcing a format-version bump.
+/// </remarks>
 [Flags]
-internal enum ColumnFlagsV2 : byte
+internal enum ColumnFlagsV2 : uint
 {
     None = 0,
     Nullable = 0x01,

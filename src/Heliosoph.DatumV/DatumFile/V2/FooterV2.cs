@@ -86,16 +86,25 @@ public sealed record FooterV2(
     /// byte-identical to their pre-v5 layout.
     /// </param>
     internal void Serialize(BinaryWriter writer, bool hasTypeTable) =>
-        Serialize(writer, hasTypeTable, hasColumnComputeds: false);
+        Serialize(writer, hasTypeTable, hasColumnComputeds: false, hasPrologueExtensions: false);
 
     /// <summary>
-    /// Full-fidelity serializer with explicit <paramref name="hasColumnComputeds"/>.
-    /// Existing callers that don't carry computed columns pass through the
-    /// two-arg overload.
+    /// Three-arg overload — equivalent to the four-arg overload with
+    /// <c>hasPrologueExtensions: false</c>. Kept so callers that haven't
+    /// adopted the v7 extensions block compile unchanged.
     /// </summary>
-    internal void Serialize(BinaryWriter writer, bool hasTypeTable, bool hasColumnComputeds)
+    internal void Serialize(BinaryWriter writer, bool hasTypeTable, bool hasColumnComputeds) =>
+        Serialize(writer, hasTypeTable, hasColumnComputeds, hasPrologueExtensions: false);
+
+    /// <summary>
+    /// Full-fidelity serializer with explicit <paramref name="hasColumnComputeds"/>
+    /// and <paramref name="hasPrologueExtensions"/>. Existing callers
+    /// that don't carry computed columns or prologue extensions pass
+    /// through the back-compat overloads.
+    /// </summary>
+    internal void Serialize(BinaryWriter writer, bool hasTypeTable, bool hasColumnComputeds, bool hasPrologueExtensions)
     {
-        Prologue.Serialize(writer);
+        Prologue.Serialize(writer, hasPrologueExtensions);
         foreach (ColumnFooterV2 column in Columns)
         {
             column.Serialize(writer, HasVolumeZoneMaps);
@@ -132,15 +141,26 @@ public sealed record FooterV2(
     /// pass <see langword="false"/> here.
     /// </param>
     internal static FooterV2 Deserialize(BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable) =>
-        Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds: false);
+        Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds: false, hasPrologueExtensions: false);
 
     /// <summary>
-    /// Full-fidelity deserializer with explicit <paramref name="hasColumnComputeds"/>.
+    /// Four-arg overload — equivalent to the five-arg overload with
+    /// <c>hasPrologueExtensions: false</c>. Kept so callers that
+    /// haven't adopted the v7 extensions block compile unchanged.
     /// </summary>
     internal static FooterV2 Deserialize(
-        BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable, bool hasColumnComputeds)
+        BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable, bool hasColumnComputeds) =>
+        Deserialize(reader, hasVolumeZoneMaps, hasTypeTable, hasColumnComputeds, hasPrologueExtensions: false);
+
+    /// <summary>
+    /// Full-fidelity deserializer with explicit
+    /// <paramref name="hasColumnComputeds"/> and
+    /// <paramref name="hasPrologueExtensions"/>.
+    /// </summary>
+    internal static FooterV2 Deserialize(
+        BinaryReader reader, bool hasVolumeZoneMaps, bool hasTypeTable, bool hasColumnComputeds, bool hasPrologueExtensions)
     {
-        FooterPrologueV4 prologue = FooterPrologueV4.Deserialize(reader);
+        FooterPrologueV4 prologue = FooterPrologueV4.Deserialize(reader, hasPrologueExtensions);
         ColumnFooterV2[] columns = new ColumnFooterV2[prologue.ColumnCount];
         for (int i = 0; i < prologue.ColumnCount; i++)
         {

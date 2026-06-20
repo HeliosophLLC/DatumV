@@ -37,7 +37,16 @@ namespace Heliosoph.DatumV.DatumFile.V2;
 /// historical pages stay no-bitmap and new pages carry bitmaps. The
 /// decoder reads this flag instead of the column descriptor's
 /// <c>IsNullable</c>; the encoder stamps it from the column descriptor
-/// at flush time.
+/// at flush time. Serialized as bit 0 of the v7
+/// <see cref="PageFlagsV7"/> word.
+/// </param>
+/// <param name="PageCrc">
+/// Optional CRC32C over the page's on-disk bytes, computed at flush
+/// time and verified at decode time. <see langword="null"/> when the
+/// writer did not stamp a CRC for this page (the default today —
+/// per-page CRCs are reserved hardware for a future "verified read"
+/// mode). Serialized as a trailing <c>uint32</c> gated by
+/// <see cref="PageFlagsV7.HasPageCrc"/>.
 /// </param>
 public sealed record PageDescriptorV2(
     ushort FileId,
@@ -45,7 +54,8 @@ public sealed record PageDescriptorV2(
     uint PageByteLength,
     ushort RowCount,
     DatumZoneMap? ZoneMap,
-    bool HasNullBitmap = false)
+    bool HasNullBitmap = false,
+    uint? PageCrc = null)
 {
     /// <summary>
     /// Convenience constructor for callers that always produce
@@ -54,15 +64,21 @@ public sealed record PageDescriptorV2(
     /// <c>FileId</c>.
     /// </summary>
     public PageDescriptorV2(long pageOffset, uint pageByteLength, ushort rowCount, DatumZoneMap? zoneMap, bool hasNullBitmap = false)
-        : this(DatumFormatV2.LocalFileId, pageOffset, pageByteLength, rowCount, zoneMap, hasNullBitmap)
+        : this(DatumFormatV2.LocalFileId, pageOffset, pageByteLength, rowCount, zoneMap, hasNullBitmap, PageCrc: null)
     {
     }
 
     /// <summary>
     /// Serializes this page descriptor: fileId(2) + offset(8) +
     /// length(4) + rowCount(2) + zoneMapPresent(1) + optional zone map
-    /// bytes + hasNullBitmap(1).
+    /// bytes + pageFlags(2) + optional pageCrc(4 when
+    /// <see cref="PageFlagsV7.HasPageCrc"/> is set).
     /// </summary>
+    /// <remarks>
+    /// v4-v6 wrote a single <c>bool HasNullBitmap</c> byte in place of
+    /// the v7 <c>pageFlags</c> word. The format-version raise to 7 lets
+    /// the reader assume the 2-byte layout unconditionally.
+    /// </remarks>
     internal void Serialize(BinaryWriter writer)
     {
         writer.Write(FileId);
@@ -71,7 +87,12 @@ public sealed record PageDescriptorV2(
         writer.Write(RowCount);
         writer.Write(ZoneMap is not null);
         ZoneMap?.Serialize(writer);
-        writer.Write(HasNullBitmap);
+
+        PageFlagsV7 flags = PageFlagsV7.None;
+        if (HasNullBitmap) flags |= PageFlagsV7.HasNullBitmap;
+        if (PageCrc.HasValue) flags |= PageFlagsV7.HasPageCrc;
+        writer.Write((ushort)flags);
+        if (PageCrc is { } crc) writer.Write(crc);
     }
 
     /// <summary>Deserializes a page descriptor written by <see cref="Serialize"/>.</summary>
@@ -83,7 +104,9 @@ public sealed record PageDescriptorV2(
         ushort rowCount = reader.ReadUInt16();
         bool hasZoneMap = reader.ReadBoolean();
         DatumZoneMap? zoneMap = hasZoneMap ? DatumZoneMap.Deserialize(reader) : null;
-        bool hasNullBitmap = reader.ReadBoolean();
-        return new PageDescriptorV2(fileId, offset, length, rowCount, zoneMap, hasNullBitmap);
+        PageFlagsV7 flags = (PageFlagsV7)reader.ReadUInt16();
+        bool hasNullBitmap = (flags & PageFlagsV7.HasNullBitmap) != 0;
+        uint? pageCrc = (flags & PageFlagsV7.HasPageCrc) != 0 ? reader.ReadUInt32() : null;
+        return new PageDescriptorV2(fileId, offset, length, rowCount, zoneMap, hasNullBitmap, pageCrc);
     }
 }

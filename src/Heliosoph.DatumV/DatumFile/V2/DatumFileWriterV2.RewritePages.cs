@@ -267,6 +267,7 @@ public sealed partial class DatumFileWriterV2
                 IdentityStep: oldProlog.IdentityStep,
                 IdentityNextValue: oldProlog.IdentityNextValue,
                 IdentityAcceptUserValues: oldProlog.IdentityAcceptUserValues,
+                Extensions: oldProlog.Extensions,
                 PrimaryKeyColumnIndices: oldProlog.PrimaryKeyColumnIndices);
 
             // Preserve the file's type table verbatim — RewritePages
@@ -283,7 +284,8 @@ public sealed partial class DatumFileWriterV2
             {
                 newFooter.Serialize(footerWriter,
                     hasTypeTable: (header.Flags & DatumFileFlagsV2.HasTypeTable) != 0,
-                    hasColumnComputeds: (header.Flags & DatumFileFlagsV2.HasColumnComputeds) != 0);
+                    hasColumnComputeds: (header.Flags & DatumFileFlagsV2.HasColumnComputeds) != 0,
+                    hasPrologueExtensions: (header.Flags & DatumFileFlagsV2.HasPrologueExtensions) != 0);
                 footerWriter.Flush();
                 footerScratch.Position = 0;
                 footerScratch.CopyTo(stream);

@@ -153,8 +153,9 @@ public sealed class DatumFormatV4FieldTests : ServiceTestBase, IAsyncLifetime
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
             () => DatumFileReaderV2.Open(path));
         Assert.Contains("version 3", ex.Message);
-        // v5 reader accepts a range; v3 falls below the floor.
-        Assert.Contains("reader accepts", ex.Message);
+        // v7 reader rejects anything below the defensive floor with a
+        // clear "older than this reader's floor" message.
+        Assert.Contains("older than this reader", ex.Message);
     }
 
     [Fact]
@@ -184,7 +185,8 @@ public sealed class DatumFormatV4FieldTests : ServiceTestBase, IAsyncLifetime
             IdentityStep: 0,
             IdentityNextValue: 0,
             IdentityAcceptUserValues: false,
-            PrimaryKeyColumnIndices: []);
+            PrimaryKeyColumnIndices: [],
+            Extensions: []);
 
         using MemoryStream ms = new();
         using (BinaryWriter bw = new(ms, System.Text.Encoding.UTF8, leaveOpen: true))

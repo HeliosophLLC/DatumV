@@ -2,7 +2,12 @@
 
 The `.datum` format is a binary columnar store designed for high-throughput ML inference and dataset workloads. It's **uncompressed and mmap-friendly**: data lives in fixed-stride 1024-row pages with three compact encoders, hierarchical zone maps for predicate pruning, and a companion sidecar heap for non-inline payloads. The trade vs a heavily-compressed alternative is ~2–4× larger files; the win is decompress-free reads, simpler decode logic, and bounded peak memory during both write and read.
 
-The current on-disk format version is **`4`**. v4 introduces a footer prologue (commit lineage, file table, chapter tombstone offsets), a `fileId` field on every page descriptor, and a `Tombstoned` column flag. These hooks back: crash-safe append (tail-flip-as-commit + torn-tail recovery), soft-drop column, soft-delete rows (chapter-level tombstone bitmaps with copy-on-write per commit), add column (all-null backfill), and external pages in companion `.datum-pack` files. Catalog-level `ALTER TABLE` / `INSERT` / `DELETE` route to these primitives through `TableCatalog`.
+The current on-disk format version is **`7`**. Each revision since v4 has been a passive, append-only extension to the prior layout:
+
+- **v4** introduced the footer prologue (commit lineage, file table, chapter tombstone offsets), the `fileId` field on every page descriptor, and the `Tombstoned` column flag. These hooks back crash-safe append (tail-flip-as-commit + torn-tail recovery), soft-drop column, soft-delete rows (chapter-level tombstone bitmaps with copy-on-write per commit), add column (all-null backfill), and external pages in companion `.datum-pack` files.
+- **v5** added the per-file struct type table (descriptor blobs in the sidecar + directory in the footer) and the `StructTypeId` field on Struct columns, gated by `ColumnFlagsV2.HasStructTypeId`.
+- **v6** added the per-file `GENERATED ALWAYS AS` computed-columns block, gated by `DatumFileFlagsV2.HasColumnComputeds`.
+- **v7** widened the per-column flags field from 1 byte to 4 bytes (25 spare bits), replaced the per-page `HasNullBitmap` bool with a 2-byte `PageFlagsV7` word (bit 0 = `HasNullBitmap`, bit 1 gates an optional trailing CRC32C), and reserved a prologue extensions TLV block gated by `DatumFileFlagsV2.HasPrologueExtensions` for future file-level scalars that don't warrant their own flag bit. Catalog-level `ALTER TABLE` / `INSERT` / `DELETE` route to all of the above through `TableCatalog`.
 
 Three optional companion sidecars extend the base format:
 
@@ -55,9 +60,9 @@ Three optional companion sidecars extend the base format:
 | Offset | Size | Field | Type | Description |
 |--------|------|-------|------|-------------|
 | 0 | 4 | Magic | bytes | `DTMF` (ASCII) |
-| 4 | 2 | FormatVersion | uint16 | `4` |
+| 4 | 2 | FormatVersion | uint16 | `7` (reader accepts 7..7; previous versions require an older binary) |
 | 6 | 2 | Flags | uint16 | `DatumFileFlagsV2` bitmask (see below) |
-| 8 | 4 | ColumnCount | int32 | Informational in v4 — the footer prologue's `ColumnCount` is authoritative |
+| 8 | 4 | ColumnCount | int32 | Informational since v4 — the footer prologue's `ColumnCount` is authoritative |
 | 12 | 4 | PageSize | int32 | Rows per page (default 1024) |
 | 16 | 8 | TotalRowCount | int64 | Patched at finalize |
 | 24 | 8 | FooterOffset | int64 | Absolute byte offset of the footer body, patched at finalize |
@@ -71,6 +76,9 @@ Three optional companion sidecars extend the base format:
 | `HasVolumeZoneMaps` | 0x02 | Volume-level zone maps were emitted (file row count exceeded the 1 M-row threshold) |
 | `HasExternalPages` | 0x04 | At least one page descriptor has a non-zero `FileId` — pages live in external `.datum-pack` files referenced from the footer prologue's file table. Set by compaction-style code paths that move pages out of the primary file. |
 | `HasTombstones` | 0x08 | At least one chapter has a populated tombstone bitmap (some rows soft-deleted). Set when `DELETE` has soft-deleted at least one row. |
+| `HasTypeTable` | 0x10 | File carries a per-file struct type table (v5+). When set, the footer ends with a `(typeTableEntryCount, entries[])` block mapping on-disk struct type-ids to descriptor blobs in the sidecar. Clear in files with no Struct columns. |
+| `HasColumnComputeds` | 0x20 | File carries one or more `GENERATED ALWAYS AS` computed columns (v6+). When set, the footer's trailing `(columnComputedCount, ColumnComputedV4[])` block enumerates each computed column's SQL fragment. |
+| `HasPrologueExtensions` | 0x40 | Footer prologue carries a trailing extensions TLV block (v7+). When set, the prologue ends with a length-prefixed list of `(uint16 tag, uint32 length, byte[length] payload)` entries. Readers ignore unknown tags so adding new entries is forward-compatible. Clear in v7 files that ship no extensions (the empty-block version is never emitted). |
 
 `HasSidecarReferences` is only set when the sidecar's blob sink actually received an `Append` — files whose variable-slot columns happened to all stay inline leave the flag clear so the reader doesn't try to open a non-existent companion file. Readers ignore unknown flag bits, so future bit allocations are forward-compatible.
 
@@ -139,7 +147,7 @@ Readers reject any non-zero codec byte with a clear error so a future writer's b
 
 ## Footer
 
-The footer body begins at the offset stored in the header's `FooterOffset` field and runs until the 8-byte tail. It opens with a **prologue** carrying file-level metadata, followed by one block per column written in schema order. The prologue's `ColumnCount` is authoritative for the per-column block loop — the header's `ColumnCount` field is informational only in v4.
+The footer body begins at the offset stored in the header's `FooterOffset` field and runs until the 8-byte tail. It opens with a **prologue** carrying file-level metadata, followed by one block per column written in schema order, and optionally trailed by the v5 type table, v6 computed-columns block, and v7 prologue extensions block (each gated by its file-flag bit). The prologue's `ColumnCount` is authoritative for the per-column block loop — the header's `ColumnCount` field is informational since v4.
 
 ### Footer prologue
 
@@ -177,6 +185,15 @@ byte   : identityAcceptUserValues    (0 = GENERATED ALWAYS — explicit values r
 byte   : primaryKeyColumnCount       (0 = no PK)
 uint16[primaryKeyColumnCount] : primaryKeyColumnIndices
                                      (footer column indices in PK declaration order)
+
+If file flags has HasPrologueExtensions (v7+):
+  int32  : prologueExtensionCount    (zero today — the block is reserved hardware
+                                      for future scalars that don't justify their
+                                      own flag bit)
+  For each prologue-extension entry:
+    uint16 : tag                     (opaque; no tags allocated today)
+    int32  : payloadLength
+    byte[payloadLength] : payload    (readers ignore unknown tags)
 ```
 
 When `chapterTombstoneCount` is non-zero, it equals the file's actual chapter count (`⌈totalRowCount / (PagesPerChapter × pageSize)⌉`). The prologue's chapter tombstone offsets describe the file as a whole — tombstones apply to logical rows, not per-column-page, so a single bitmap per chapter index covers every column's view of that row range.
@@ -190,8 +207,12 @@ For each column (in schema order, count = prologue.columnCount):
   string  : name                    (length-prefixed UTF-8)
   byte    : DataKind                (enum value)
   byte    : EncoderKind              (0=FixedWidth, 1=BitPackedBoolean, 2=VariableSlot)
-  byte    : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape | Tombstoned
-                                      | HasStructTypeId | HasMaxLength | IsBlankPadded)
+  uint32  : ColumnFlagsV2            (Nullable | IsArray | HasFixedShape | Tombstoned
+                                      | HasStructTypeId | HasMaxLength | IsBlankPadded
+                                      | 25 spare bits — readers ignore unknown bits.
+                                      Widened from 1 byte to 4 bytes in v7 so future
+                                      column-level features can land additively
+                                      without forcing another format bump.)
 
   If HasFixedShape:
     uint16  : shapeRank
@@ -211,10 +232,18 @@ For each column (in schema order, count = prologue.columnCount):
     uint16 : rowCount               (≤ pageSize; last page may be partial)
     bool   : hasZoneMap
     If hasZoneMap: ZoneMap          (per-page min/max/nullCount)
-    bool   : hasNullBitmap          (true = this page begins with a per-row null bitmap;
-                                     false = decoder jumps straight into payload. Per-page
-                                     because `ALTER … DROP NOT NULL` leaves historical
-                                     pages without a bitmap and writes new ones with.)
+    uint16 : pageFlags              (PageFlagsV7. Bit 0 = HasNullBitmap (page begins
+                                     with a per-row null bitmap; per-page because
+                                     `ALTER … DROP NOT NULL` leaves historical pages
+                                     without a bitmap and writes new ones with).
+                                     Bit 1 = HasPageCrc (optional trailing uint32
+                                     CRC32C over the page bytes, for bit-rot detection
+                                     at decode time). 14 spare bits — readers ignore
+                                     unknown bits. Replaced the v4-v6 `bool
+                                     hasNullBitmap` byte in v7.)
+    If pageFlags & HasPageCrc:
+      uint32 : pageCrc              (CRC32C over the page's on-disk bytes, computed
+                                     at flush time)
 
   int32: chapterCount
   ZoneMap[chapterCount]              (one per 64-page chapter; aggregated from page maps)
@@ -442,6 +471,21 @@ The common header (4 bytes) prefixes every page:
 Insert walks root→leaf recording the path, builds the merged entry list, then COW-rewrites every page on the path with fresh page ids. If a leaf would overflow it splits and the separator key bubbles up; recursive internal splits can grow a new root. After all new pages are written and fsync'd, the inactive header slot is rewritten with the new root id + CommitGen+1 + CRC and fsync'd a second time. Old pages (the path that was just rewritten) are leaked on disk pending a future free-list reuse pass.
 
 The PK index is single-writer per data path. The provider's mutation lock (the same one that gates `INSERT`/`DELETE`/`ALTER`) serialises all access; the file is opened with `FileShare.None`.
+
+## Forward-compatibility hooks
+
+The format reserves room in three places so most plausible near-term additions can ship without bumping the format version. Readers ignore unknown bits / unknown tags wherever this is called out, so a future writer can populate these slots without invalidating older readers.
+
+| Slot | Where | Spare capacity |
+|------|-------|----------------|
+| File-level flags | `DatumFileFlagsV2` in the header | `ushort`, ~9 bits unallocated (`HasSidecarReferences`, `HasVolumeZoneMaps`, `HasExternalPages`, `HasTombstones`, `HasTypeTable`, `HasColumnComputeds`, `HasPrologueExtensions` allocated) |
+| Per-column flags | `ColumnFlagsV2` in each column footer | `uint32` (widened from `byte` in v7), 25 bits unallocated |
+| Per-page flags | `PageFlagsV7` in each page descriptor | `ushort` (introduced in v7, replacing the v4-v6 `HasNullBitmap` bool), 14 bits unallocated |
+| Prologue extensions | TLV list at the end of the prologue, gated by `HasPrologueExtensions` | Arbitrary `(uint16 tag, uint32 length, byte[])` entries; no tags allocated today |
+| Sidecar blob codec | `SidecarBlobCodec` byte in every variable-slot pointer | 1 byte per blob; only `Raw` (0) emitted today, `Zstd` (1) and `ZstdShuffle` (2) reserved |
+| Tombstone granularity | `TombstoneGranularity` byte in the prologue | Only chapter-level (1) emitted; 0 reserved for a possible page-level granularity |
+
+Each footer block introduced after v4 (the type table, computed columns, prologue extensions) is gated by its own file-level flag bit and appended at the end of the existing layout. Files that don't use a feature stay byte-identical to the layout before that feature shipped — the new readers detect the absent flag and skip the read path.
 
 ## Format gotchas
 

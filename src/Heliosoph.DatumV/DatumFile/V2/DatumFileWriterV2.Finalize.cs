@@ -91,6 +91,16 @@ public sealed partial class DatumFileWriterV2
         {
             flags |= DatumFileFlagsV2.HasColumnComputeds;
         }
+        // HasPrologueExtensions: set only when the prologue carries v7
+        // extension entries. The writer doesn't emit any today, so this
+        // stays clear in all currently-produced files; the reader still
+        // honors the flag so a future writer can populate the block
+        // without invalidating today's readers.
+        bool hasPrologueExtensions = false;
+        if (hasPrologueExtensions)
+        {
+            flags |= DatumFileFlagsV2.HasPrologueExtensions;
+        }
         // HasExternalPages: clear in PR4 — cross-file pages ship in PR7.
 
         // Build the per-chapter tombstone offsets array. Three states
@@ -126,7 +136,8 @@ public sealed partial class DatumFileWriterV2
             IdentityStep: _identityStep,
             IdentityNextValue: _identityNextValue,
             IdentityAcceptUserValues: _identityAcceptUserValues,
-            PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>());
+            PrimaryKeyColumnIndices: _primaryKeyColumnIndices ?? Array.Empty<ushort>(),
+            Extensions: Array.Empty<PrologueExtensionV7>());
 
         IReadOnlyList<ColumnComputedV4> computedsForFooter = _columnComputeds is { Count: > 0 }
             ? _columnComputeds.ToArray()
@@ -140,7 +151,8 @@ public sealed partial class DatumFileWriterV2
         {
             footer.Serialize(footerWriter,
                 hasTypeTable: (flags & DatumFileFlagsV2.HasTypeTable) != 0,
-                hasColumnComputeds: hasColumnComputeds);
+                hasColumnComputeds: hasColumnComputeds,
+                hasPrologueExtensions: hasPrologueExtensions);
             footerWriter.Flush();
             footerScratch.Position = 0;
             footerScratch.CopyTo(_stream);

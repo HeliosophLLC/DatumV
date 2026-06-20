@@ -116,6 +116,16 @@ namespace Heliosoph.DatumV.DatumFile.V2;
 /// caps the total PK key size at 16 bytes (sum of column-kind sizes);
 /// the catalog enforces this at <c>CREATE TABLE</c> time.
 /// </param>
+/// <param name="Extensions">
+/// Forward-compat TLV block introduced in v7. Empty when the file
+/// carries no extension entries; the block is omitted entirely
+/// (gated by <see cref="DatumFileFlagsV2.HasPrologueExtensions"/>) when
+/// this list is empty, so files that don't use extensions stay
+/// byte-identical to their unextended layout. Each entry pairs an
+/// opaque <c>uint16</c> tag with a length-prefixed payload; readers
+/// ignore unknown tags so adding new extension entries is a
+/// forward-compatible operation.
+/// </param>
 public sealed record FooterPrologueV4(
     ulong Generation,
     ulong WriterId,
@@ -130,8 +140,10 @@ public sealed record FooterPrologueV4(
     long IdentityStep,
     long IdentityNextValue,
     bool IdentityAcceptUserValues,
-    IReadOnlyList<ushort> PrimaryKeyColumnIndices)
+    IReadOnlyList<ushort> PrimaryKeyColumnIndices,
+    IReadOnlyList<PrologueExtensionV7> Extensions)
 {
+
     /// <summary>
     /// Default prologue for a fresh single-writer commit with no
     /// tombstones and no external pages. Generation starts at <c>1</c>;
@@ -151,7 +163,8 @@ public sealed record FooterPrologueV4(
         IdentityStep: 0,
         IdentityNextValue: 0,
         IdentityAcceptUserValues: false,
-        PrimaryKeyColumnIndices: Array.Empty<ushort>());
+        PrimaryKeyColumnIndices: Array.Empty<ushort>(),
+        Extensions: Array.Empty<PrologueExtensionV7>());
 
     /// <summary>
     /// Serializes the prologue. Layout:
@@ -164,9 +177,16 @@ public sealed record FooterPrologueV4(
     ///   <item>columnDefaultCount (4) + entries[]</item>
     ///   <item>identityColumnIndex (2) + identitySeed (8) + identityStep (8) + identityNextValue (8) + identityAcceptUserValues (1)</item>
     ///   <item>primaryKeyCount (1) + uint16 indices[]</item>
+    ///   <item>(when <paramref name="hasExtensions"/>) extensionCount (4) + entries[]</item>
     /// </list>
     /// </summary>
-    internal void Serialize(BinaryWriter writer)
+    /// <param name="writer">Binary writer.</param>
+    /// <param name="hasExtensions">
+    /// Mirrors <see cref="DatumFileFlagsV2.HasPrologueExtensions"/>. When
+    /// false, the trailing extensions block is omitted so pre-v7-feature
+    /// files stay byte-identical to their unextended layout.
+    /// </param>
+    internal void Serialize(BinaryWriter writer, bool hasExtensions = false)
     {
         writer.Write(Generation);
         writer.Write(WriterId);
@@ -206,10 +226,24 @@ public sealed record FooterPrologueV4(
         {
             writer.Write(columnIndex);
         }
+
+        if (hasExtensions)
+        {
+            writer.Write(Extensions.Count);
+            foreach (PrologueExtensionV7 entry in Extensions)
+            {
+                entry.Serialize(writer);
+            }
+        }
     }
 
     /// <summary>Deserializes a prologue written by <see cref="Serialize"/>.</summary>
-    internal static FooterPrologueV4 Deserialize(BinaryReader reader)
+    /// <param name="reader">Binary reader.</param>
+    /// <param name="hasExtensions">
+    /// Mirrors <see cref="DatumFileFlagsV2.HasPrologueExtensions"/>.
+    /// Controls whether the trailing extensions block is consumed.
+    /// </param>
+    internal static FooterPrologueV4 Deserialize(BinaryReader reader, bool hasExtensions = false)
     {
         ulong generation = reader.ReadUInt64();
         ulong writerId = reader.ReadUInt64();
@@ -278,6 +312,27 @@ public sealed record FooterPrologueV4(
             primaryKeyColumnIndices[i] = reader.ReadUInt16();
         }
 
+        IReadOnlyList<PrologueExtensionV7> extensions;
+        if (hasExtensions)
+        {
+            int extensionCount = reader.ReadInt32();
+            if (extensionCount < 0)
+            {
+                throw new InvalidDataException(
+                    $"Footer prologue declares negative extension count ({extensionCount}).");
+            }
+            PrologueExtensionV7[] entries = new PrologueExtensionV7[extensionCount];
+            for (int i = 0; i < extensionCount; i++)
+            {
+                entries[i] = PrologueExtensionV7.Deserialize(reader);
+            }
+            extensions = entries;
+        }
+        else
+        {
+            extensions = Array.Empty<PrologueExtensionV7>();
+        }
+
         return new FooterPrologueV4(
             generation, writerId, baseGeneration,
             tombstoneGranularity, columnCount,
@@ -288,7 +343,57 @@ public sealed record FooterPrologueV4(
             identityStep,
             identityNextValue,
             identityAcceptUserValues,
-            primaryKeyColumnIndices);
+            primaryKeyColumnIndices,
+            extensions);
+    }
+}
+
+/// <summary>
+/// One entry of the v7 footer-prologue extensions TLV block. Reserved
+/// escape hatch for future file-level scalars that don't justify their
+/// own dedicated flag bit and field (collation ids, tenant ids,
+/// schema-evolution log offsets, etc.). Readers ignore unknown
+/// <see cref="Tag"/> values so writers can add new extension entries
+/// without invalidating older readers.
+/// </summary>
+/// <param name="Tag">
+/// Opaque 16-bit identifier of the extension entry. Allocation policy
+/// is "first writer claims an unused tag and documents it"; the format
+/// itself does not enforce any tag-to-payload contract. No tags are
+/// allocated today.
+/// </param>
+/// <param name="Payload">
+/// Length-prefixed opaque payload. Up to 4 GiB; sized for arbitrary
+/// blobs even though realistic entries are expected to be short
+/// (handful of bytes to a few KiB).
+/// </param>
+public sealed record PrologueExtensionV7(
+    ushort Tag,
+    byte[] Payload)
+{
+    internal void Serialize(BinaryWriter writer)
+    {
+        writer.Write(Tag);
+        writer.Write(Payload.Length);
+        writer.Write(Payload);
+    }
+
+    internal static PrologueExtensionV7 Deserialize(BinaryReader reader)
+    {
+        ushort tag = reader.ReadUInt16();
+        int length = reader.ReadInt32();
+        if (length < 0)
+        {
+            throw new InvalidDataException(
+                $"Prologue extension declares negative payload length ({length}).");
+        }
+        byte[] payload = reader.ReadBytes(length);
+        if (payload.Length != length)
+        {
+            throw new InvalidDataException(
+                $"Prologue extension payload truncated: expected {length} bytes, got {payload.Length}.");
+        }
+        return new PrologueExtensionV7(tag, payload);
     }
 }
 

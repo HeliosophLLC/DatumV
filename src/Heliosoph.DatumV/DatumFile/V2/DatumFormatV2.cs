@@ -32,24 +32,42 @@ public static class DatumFormatV2
     /// writerId, baseGeneration, tombstone granularity, file table,
     /// chapter tombstone offset table), the <c>fileId</c> field on
     /// <see cref="PageDescriptorV2"/>, and the
-    /// <see cref="ColumnFlagsV2.Tombstoned"/> bit. v5 adds the
+    /// <see cref="ColumnFlagsV2.Tombstoned"/> bit. v5 added the
     /// per-file struct type table (descriptor blobs in the sidecar +
     /// directory in the footer) and the per-Struct-column
     /// <c>StructTypeId</c> field gated by
-    /// <see cref="ColumnFlagsV2.HasStructTypeId"/>. Writer always emits
-    /// the latest version; reader accepts any version up to and
-    /// including <see cref="FormatVersion"/>, treating absent fields as
-    /// "no struct type info" (Struct columns deserialize as untyped,
-    /// matching pre-v5 behaviour).
+    /// <see cref="ColumnFlagsV2.HasStructTypeId"/>. v6 added the
+    /// per-file <c>GENERATED ALWAYS AS</c> computed-columns block gated
+    /// by <see cref="DatumFileFlagsV2.HasColumnComputeds"/>. v7 widened
+    /// the per-column flags field from 1 byte to 4 bytes, replaced the
+    /// per-page <c>HasNullBitmap</c> bool with a 2-byte
+    /// <see cref="PageFlagsV7"/> word (with bit 0 carrying
+    /// <c>HasNullBitmap</c> and bit 1 gating an optional per-page CRC32C),
+    /// and reserved a prologue extensions TLV block gated by
+    /// <see cref="DatumFileFlagsV2.HasPrologueExtensions"/>. Writer
+    /// always emits the latest version; reader accepts any version in
+    /// the range [<see cref="MinReadableFormatVersion"/>,
+    /// <see cref="FormatVersion"/>].
     /// </summary>
-    public const ushort FormatVersion = 6;
+    public const ushort FormatVersion = 7;
 
     /// <summary>
-    /// Oldest format version this reader accepts. v4 files contain no
-    /// type table and decode Struct columns through the untyped path —
-    /// callers see <c>f0..fN</c> field names, same as before v5.
+    /// Defensive floor: the oldest format version this reader will even
+    /// attempt to parse. Set to 7 because pre-v7 files have a different
+    /// header layout (no <see cref="HeaderV2.MinReaderVersion"/> field,
+    /// wider <c>PageSize</c> encoding) and would mis-parse if read
+    /// through the current code path.
     /// </summary>
-    public const ushort MinReadableFormatVersion = 4;
+    /// <remarks>
+    /// The cooperative accept/reject gate is
+    /// <see cref="HeaderV2.MinReaderVersion"/>, not this constant — a
+    /// future v8/v9 file can stamp a low <c>MinReaderVersion</c> and be
+    /// readable by today's binary, as long as it only used purely-additive
+    /// features (new prologue extension tags, new flag-gated
+    /// end-of-footer blocks). This floor exists purely to fail fast on
+    /// truly-incompatible historical files.
+    /// </remarks>
+    public const ushort MinReadableFormatVersion = 7;
 
     /// <summary>
     /// Pinned tombstone granularity for v4. Value <c>1</c> means
@@ -296,4 +314,46 @@ public enum DatumFileFlagsV2 : ushort
     /// with no computed columns.
     /// </summary>
     HasColumnComputeds = 0x20,
+
+    /// <summary>
+    /// Footer prologue carries a trailing extensions TLV block (v7+).
+    /// When set, the prologue ends with a length-prefixed list of
+    /// <c>(uint16 tag, uint32 length, byte[length] payload)</c> entries
+    /// — the reserved escape hatch for future file-level scalars that
+    /// don't warrant their own flag bit (collation ids, tenant ids,
+    /// schema-evolution log offsets). Readers ignore unknown tags so
+    /// adding new extension entries is a forward-compatible operation.
+    /// Clear in v7 files that ship no extensions; the empty-block
+    /// version of the layout is never emitted to save bytes.
+    /// </summary>
+    HasPrologueExtensions = 0x40,
+}
+
+/// <summary>
+/// Per-page flag word serialized into <see cref="PageDescriptorV2"/>
+/// from v7 onward, replacing the single <c>bool HasNullBitmap</c> field
+/// used by v4-v6. Sixteen bits of room for future per-page metadata
+/// (CRC presence, per-page codec, encryption marker, compaction
+/// generation, partial-page marker). Readers ignore unknown bits.
+/// </summary>
+[Flags]
+public enum PageFlagsV7 : ushort
+{
+    /// <summary>No per-page flags set.</summary>
+    None = 0,
+
+    /// <summary>
+    /// Page payload is preceded by a per-row null bitmap. Carried per-page
+    /// rather than per-column so <c>ALTER … DROP NOT NULL</c> can leave
+    /// historical pages without bitmaps while new pages flush with them.
+    /// </summary>
+    HasNullBitmap = 0x0001,
+
+    /// <summary>
+    /// Page descriptor carries a trailing <c>uint32</c> CRC32C computed
+    /// over the page bytes at flush time. Lets readers detect bit-rot at
+    /// decode time without scanning the whole file. Optional today; future
+    /// writers may emit it unconditionally.
+    /// </summary>
+    HasPageCrc = 0x0002,
 }
