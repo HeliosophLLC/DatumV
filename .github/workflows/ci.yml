@@ -26,11 +26,17 @@ jobs:
           cache: true
           cache-dependency-path: '**/packages.lock.json'
 
-      - run: dotnet restore Heliosoph.DatumV.slnx
+      # GpuVariant=standard pulls the cross-vendor stack (DirectML +
+      # Vulkan + CPU ORT) instead of the CUDA stack. CI runners have no
+      # GPU, so CUDA would never actually run — defaulting to it would
+      # just download ~500 MB of NVIDIA SASS binaries every CI run for
+      # nothing. The standard variant also exercises the OnnxRuntime
+      # CPU fallback path that's the lowest-common-denominator code.
+      - run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard
 
       # SkipClientApp=true so the engine build does not require Node or
       # the Vite frontend to be installed. The release workflow is what
       # exercises the full Electron pipeline.
-      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true
+      - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
 
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore

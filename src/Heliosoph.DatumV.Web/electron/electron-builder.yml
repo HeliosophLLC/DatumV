@@ -47,6 +47,17 @@ extraResources:
   # Regenerate via `npm run generate:notices` after any dep change.
   - from: ../../../THIRD-PARTY-NOTICES.txt
     to: THIRD-PARTY-NOTICES.txt
+  # Mirror Electron's bundled vulkan-1.dll alongside the .NET exe.
+  # Electron ships its own copy at `<app>/vulkan-1.dll` for Chromium's
+  # GPU stack, but that's not in the .NET exe's DLL search path
+  # (Windows searches the loading exe's directory first, then System32 —
+  # not parent dirs). Without this copy, LLamaSharp.Backend.Vulkan's
+  # llama.dll can't resolve its `vulkan-1.dll` import on systems where
+  # the GPU driver didn't install the loader to System32 — common on
+  # older AMD Radeon Software installs. Having Electron's known-good
+  # copy alongside the .NET exe sidesteps the driver-state lottery.
+  - from: node_modules/electron/dist/vulkan-1.dll
+    to: backend/vulkan-1.dll
 
 win:
   target:

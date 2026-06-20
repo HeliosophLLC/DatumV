@@ -176,6 +176,85 @@ function dedupeSorted(entries) {
   );
 }
 
+// Detect LGPL / GPL / AGPL family licenses. We need a distinct list
+// for the source-on-request notice — LGPL is technically a "lesser"
+// variant of GPL but both carry the same downstream source-disclosure
+// obligation, so they're flagged together.
+function isCopyleftLicense(licStr) {
+  return /\b[LA]?GPL\b/i.test(String(licStr ?? ''));
+}
+
+// Manually-curated section for binaries we ship that NuGet / npm doesn't
+// track. Today this covers two sets:
+//   1. Microsoft Visual C++ 2015-2022 Redistributable runtime DLLs that
+//      Heliosoph.DatumV.Web.csproj copies from System32 (vcruntime140.dll
+//      etc). Required by LLamaSharp's native binaries; bundling lets
+//      users skip the VC++ Redist installer step. Microsoft permits
+//      app-local redistribution under the redistributable code license
+//      terms.
+//   2. The Khronos Vulkan loader (vulkan-1.dll) that electron-builder.yml
+//      copies from `node_modules/electron/dist/`. Required by
+//      LLamaSharp.Backend.Vulkan's ggml-vulkan.dll; bundling sidesteps
+//      machines where AMD/NVIDIA driver installs didn't drop the loader
+//      DLL to System32.
+function formatBundledRuntimesSection() {
+  return (
+    `DatumV ships the following system-level runtime libraries inside\n` +
+    `the installer alongside the .NET binary. They are not tracked by\n` +
+    `NuGet or npm — they're sourced from the build host's System32 or\n` +
+    `from Electron's bundled distribution and copied into\n` +
+    `resources/backend/ at build time.\n\n` +
+    subheader('Microsoft Visual C++ 2015-2022 Redistributable runtime files') +
+    `Files shipped:\n` +
+    `  - vcruntime140.dll              - vcruntime140_1.dll\n` +
+    `  - msvcp140.dll                  - msvcp140_1.dll\n` +
+    `  - msvcp140_2.dll                - msvcp140_atomic_wait.dll\n` +
+    `  - msvcp140_codecvt_ids.dll      - concrt140.dll\n` +
+    `  - vcomp140.dll\n\n` +
+    `Copyright (c) Microsoft Corporation. All rights reserved.\n` +
+    `Licensed under the Microsoft Software License Terms for Visual C++\n` +
+    `Redistributable for Visual Studio 2015-2022.\n` +
+    `  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files\n\n` +
+    `Source: copied at build time from the build host's\n` +
+    `%SystemRoot%\\System32\\ on a machine with the Microsoft Visual\n` +
+    `C++ 2015-2022 Redistributable installed. No modifications.\n` +
+    subheader('Khronos Vulkan loader (vulkan-1.dll)') +
+    `Files shipped:\n` +
+    `  - vulkan-1.dll\n\n` +
+    `Copyright (c) The Khronos Group Inc.\n` +
+    `Licensed under the Apache License, Version 2.0.\n` +
+    `  https://www.apache.org/licenses/LICENSE-2.0\n` +
+    `  https://github.com/KhronosGroup/Vulkan-Loader\n\n` +
+    `Source: this app's bundled copy is the build from the Electron\n` +
+    `runtime distribution (node_modules/electron/dist/vulkan-1.dll),\n` +
+    `which itself sources from the upstream Khronos Vulkan-Loader\n` +
+    `project. No modifications.\n`
+  );
+}
+
+function formatCopyleftNote(entries) {
+  if (entries.length === 0) return '';
+  const list = entries
+    .map((e) => `  - ${e.name} ${e.version} (${e.license})`)
+    .join('\n');
+  return (
+    `\n\nNOTE FOR LGPL / GPL COMPONENTS\n` +
+    `${'-'.repeat(60)}\n\n` +
+    `The following packages are licensed under the GNU Lesser General\n` +
+    `Public License (LGPL) or General Public License (GPL):\n\n` +
+    list +
+    '\n\n' +
+    `DatumV uses these libraries via dynamic linking — the unmanaged\n` +
+    `native binaries are loaded by .NET P/Invoke at runtime and are\n` +
+    `not statically linked into the DatumV executable. The complete\n` +
+    `source code for each library is available from its upstream\n` +
+    `project URL listed in the per-package entries above. To exercise\n` +
+    `your right under the LGPL to use DatumV with a modified version\n` +
+    `of any of these libraries, contact support@heliosoph.net for\n` +
+    `relinking instructions.\n`
+  );
+}
+
 function formatEntry(e) {
   const lines = [`${e.name} ${e.version}`];
   if (e.license) lines.push(`  License: ${normalizeLicense(e.license)}`);
@@ -231,17 +310,20 @@ function main() {
     `below; the AUP is published at\n` +
     `  https://llama.meta.com/llama3/use-policy/\n\n` +
     llamaLicense.trim() + '\n' +
-    header('SECTION 2 — .NET / NUGET DEPENDENCIES') +
+    header('SECTION 2 — BUNDLED SYSTEM RUNTIME LIBRARIES') +
+    formatBundledRuntimesSection() +
+    header('SECTION 3 — .NET / NUGET DEPENDENCIES') +
     `The DatumV engine (.NET 10) bundles the following NuGet packages.\n` +
     `License text for each license family (MIT, Apache-2.0, BSD-*,\n` +
-    `LGPL-*) follows in Section 4 below.\n\n` +
+    `LGPL-*) follows in Section 5 below.\n\n` +
     formatSection(dotnetEntries) +
-    header('SECTION 3 — NODE / NPM DEPENDENCIES') +
+    formatCopyleftNote(dotnetEntries.filter((e) => isCopyleftLicense(e.license))) +
+    header('SECTION 4 — NODE / NPM DEPENDENCIES') +
     subheader('Electron shell (electron/)') +
     formatSection(electronEntries) +
     subheader('Renderer SPA (ClientApp/)') +
     formatSection(clientAppEntries) +
-    header('SECTION 4 — STANDARD LICENSE TEXTS') +
+    header('SECTION 5 — STANDARD LICENSE TEXTS') +
     `Per-package licenses above identify the license family. The full\n` +
     `text of each is reproduced from the canonical source:\n\n` +
     `  MIT:        https://opensource.org/licenses/MIT\n` +

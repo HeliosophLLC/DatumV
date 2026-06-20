@@ -1,5 +1,5 @@
 DatumV THIRD-PARTY NOTICES
-Generated: 2026-06-14T15:53:48.309Z
+Generated: 2026-06-15T14:41:03.059Z
 
 This file aggregates license and copyright notices for every
 third-party component that ships with the DatumV installer,
@@ -98,12 +98,60 @@ The DatumV app handles this by detecting 401/403 responses and prompting the use
 By downloading or using Llama 3.1 models, you agree to be bound by the Llama 3.1 Community License Agreement and Meta's Acceptable Use Policy. The summary above is for convenience; the legally binding text is the canonical version at the URL at the top of this file.
 
 ============================================================================
-SECTION 2 — .NET / NUGET DEPENDENCIES
+SECTION 2 — BUNDLED SYSTEM RUNTIME LIBRARIES
+============================================================================
+
+DatumV ships the following system-level runtime libraries inside
+the installer alongside the .NET binary. They are not tracked by
+NuGet or npm — they're sourced from the build host's System32 or
+from Electron's bundled distribution and copied into
+resources/backend/ at build time.
+
+
+------------------------------------------------------------
+Microsoft Visual C++ 2015-2022 Redistributable runtime files
+------------------------------------------------------------
+
+Files shipped:
+  - vcruntime140.dll              - vcruntime140_1.dll
+  - msvcp140.dll                  - msvcp140_1.dll
+  - msvcp140_2.dll                - msvcp140_atomic_wait.dll
+  - msvcp140_codecvt_ids.dll      - concrt140.dll
+  - vcomp140.dll
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+Licensed under the Microsoft Software License Terms for Visual C++
+Redistributable for Visual Studio 2015-2022.
+  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+
+Source: copied at build time from the build host's
+%SystemRoot%\System32\ on a machine with the Microsoft Visual
+C++ 2015-2022 Redistributable installed. No modifications.
+
+------------------------------------------------------------
+Khronos Vulkan loader (vulkan-1.dll)
+------------------------------------------------------------
+
+Files shipped:
+  - vulkan-1.dll
+
+Copyright (c) The Khronos Group Inc.
+Licensed under the Apache License, Version 2.0.
+  https://www.apache.org/licenses/LICENSE-2.0
+  https://github.com/KhronosGroup/Vulkan-Loader
+
+Source: this app's bundled copy is the build from the Electron
+runtime distribution (node_modules/electron/dist/vulkan-1.dll),
+which itself sources from the upstream Khronos Vulkan-Loader
+project. No modifications.
+
+============================================================================
+SECTION 3 — .NET / NUGET DEPENDENCIES
 ============================================================================
 
 The DatumV engine (.NET 10) bundles the following NuGet packages.
 License text for each license family (MIT, Apache-2.0, BSD-*,
-LGPL-*) follows in Section 4 below.
+LGPL-*) follows in Section 5 below.
 
 Apache.Arrow 23.0.0
   License: Apache-2.0
@@ -136,9 +184,21 @@ LLamaSharp.Backend.Cpu 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
 
-LLamaSharp.Backend.Cuda12.Windows 0.27.0
+LLamaSharp.Backend.Vulkan 0.27.0
   License: MIT
   URL: https://github.com/SciSharp/LLamaSharp
+
+LLamaSharp.Backend.Vulkan.Linux 0.27.0
+  License: MIT
+  URL: https://github.com/SciSharp/LLamaSharp
+
+LLamaSharp.Backend.Vulkan.Windows 0.27.0
+  License: MIT
+  URL: https://github.com/SciSharp/LLamaSharp
+
+Microsoft.AI.DirectML 1.15.4
+  License: Unknown
+  URL: https://aka.ms/DirectML
 
 Microsoft.Bcl.AsyncInterfaces 10.0.5
   License: MIT
@@ -164,19 +224,11 @@ Microsoft.IO.RecyclableMemoryStream 3.0.1
   License: MIT
   URL: https://github.com/Microsoft/Microsoft.IO.RecyclableMemoryStream
 
-Microsoft.ML.OnnxRuntime.Gpu 1.25.1
+Microsoft.ML.OnnxRuntime.DirectML 1.24.4
   License: MIT
   URL: https://github.com/Microsoft/onnxruntime
 
-Microsoft.ML.OnnxRuntime.Gpu.Linux 1.25.1
-  License: MIT
-  URL: https://github.com/Microsoft/onnxruntime
-
-Microsoft.ML.OnnxRuntime.Gpu.Windows 1.25.1
-  License: MIT
-  URL: https://github.com/Microsoft/onnxruntime
-
-Microsoft.ML.OnnxRuntime.Managed 1.25.1
+Microsoft.ML.OnnxRuntime.Managed 1.24.4
   License: MIT
   URL: https://github.com/Microsoft/onnxruntime
 
@@ -327,8 +379,27 @@ YamlDotNet 16.2.0
 ZstdSharp.Port 0.8.7
   License: MIT
   URL: https://github.com/oleg-st/ZstdSharp
+
+NOTE FOR LGPL / GPL COMPONENTS
+------------------------------------------------------------
+
+The following packages are licensed under the GNU Lesser General
+Public License (LGPL) or General Public License (GPL):
+
+  - Sdcb.FFmpeg 7.0.0 (LGPL-3.0-only)
+  - Sdcb.FFmpeg.runtime.windows-x64 7.1.0 (GPL-3.0-only)
+
+DatumV uses these libraries via dynamic linking — the unmanaged
+native binaries are loaded by .NET P/Invoke at runtime and are
+not statically linked into the DatumV executable. The complete
+source code for each library is available from its upstream
+project URL listed in the per-package entries above. To exercise
+your right under the LGPL to use DatumV with a modified version
+of any of these libraries, contact support@heliosoph.net for
+relinking instructions.
+
 ============================================================================
-SECTION 3 — NODE / NPM DEPENDENCIES
+SECTION 4 — NODE / NPM DEPENDENCIES
 ============================================================================
 
 
@@ -3154,7 +3225,7 @@ zwitch 2.0.4
   URL: https://github.com/wooorm/zwitch
   Authors: Titus Wormer
 ============================================================================
-SECTION 4 — STANDARD LICENSE TEXTS
+SECTION 5 — STANDARD LICENSE TEXTS
 ============================================================================
 
 Per-package licenses above identify the license family. The full
