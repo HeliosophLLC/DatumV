@@ -26,13 +26,13 @@ jobs:
           cache: true
           cache-dependency-path: '**/packages.lock.json'
 
-      # GpuVariant=standard pulls the cross-vendor stack (DirectML +
-      # Vulkan + CPU ORT) instead of the CUDA stack. CI runners have no
-      # GPU, so CUDA would never actually run — defaulting to it would
-      # just download ~500 MB of NVIDIA SASS binaries every CI run for
-      # nothing. The standard variant also exercises the OnnxRuntime
-      # CPU fallback path that's the lowest-common-denominator code.
-      - run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard
+      # GpuVariant=standard is the default; passing it explicitly keeps
+      # CI deterministic if the default ever changes. CI runners have no
+      # GPU, so the CUDA variant would only download ~500 MB of NVIDIA
+      # SASS binaries that never run. The standard variant also exercises
+      # the OnnxRuntime CPU fallback path that's the lowest-common-
+      # denominator code. RestoreLockedMode=true enforces packages.lock.json.
+      - run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
 
       # SkipClientApp=true so the engine build does not require Node or
       # the Vite frontend to be installed. The release workflow is what

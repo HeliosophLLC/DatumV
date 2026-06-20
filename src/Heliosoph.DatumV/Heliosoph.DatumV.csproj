@@ -20,14 +20,15 @@
   </PropertyGroup>
 
   <!--
-    GpuVariant: 'cuda' bundles NVIDIA-only stacks (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12);
-    'standard' bundles cross-vendor stacks (Microsoft.ML.OnnxRuntime[.DirectML on Windows] + LLamaSharp.Backend.Vulkan).
-    Default 'cuda' keeps CI / local dev identical to before. Set -p:GpuVariant=standard at publish to swap.
+    GpuVariant: 'standard' bundles cross-vendor stacks (Microsoft.ML.OnnxRuntime[.DirectML on Windows] + LLamaSharp.Backend.Vulkan);
+    'cuda' bundles NVIDIA-only stacks (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12).
+    Default 'standard' is the cross-vendor build that matches CI and the committed packages.lock.json files.
+    Pass -p:GpuVariant=cuda to opt into the NVIDIA stack at build/publish time.
     The matching #if constants (GPU_VARIANT_CUDA / GPU_VARIANT_STANDARD) toggle LlamaNativeConfig + LlamaSharpBackend
     between the two backend paths so the runtime config matches whichever native libs were actually packaged.
   -->
   <PropertyGroup>
-    <GpuVariant Condition="'$(GpuVariant)' == ''">cuda</GpuVariant>
+    <GpuVariant Condition="'$(GpuVariant)' == ''">standard</GpuVariant>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GpuVariant)' == 'cuda'">
     <DefineConstants>$(DefineConstants);GPU_VARIANT_CUDA</DefineConstants>

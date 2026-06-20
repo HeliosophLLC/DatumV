@@ -1,12 +1,52 @@
-# Contributing to Documentation
+# Contributing
 
-This guide governs the DatumV documentation: how to think about voice and positioning when writing user-facing content, and the mechanical conventions for file structure, templates, and TOC integration.
+This guide covers two things: building the project from source, and the conventions for writing user-facing documentation in [docs/](docs/).
 
 It is an internal contributor document — not shipped in the in-app docs viewer.
 
 ---
 
-## Part 1 — Voice & Positioning
+## Building from source
+
+```bash
+git clone https://github.com/Heliosoph/DatumV.git
+cd DatumV
+dotnet restore Heliosoph.DatumV.slnx
+dotnet build Heliosoph.DatumV.slnx -c Release
+dotnet test  tests/Heliosoph.DatumV.Tests -c Release
+```
+
+### GPU variant
+
+The engine has two mutually exclusive native-backend stacks, selected at build time by the `GpuVariant` MSBuild property:
+
+| `GpuVariant`         | ONNX Runtime                                              | LLamaSharp backend                | Notes |
+| -------------------- | --------------------------------------------------------- | --------------------------------- | ----- |
+| `standard` (default) | `Microsoft.ML.OnnxRuntime` (Linux) / `.DirectML` (Windows) | `LLamaSharp.Backend.Vulkan` + CPU | Cross-vendor. Runs on NVIDIA, AMD, Intel, Apple, or CPU-only. |
+| `cuda`               | `Microsoft.ML.OnnxRuntime.Gpu`                            | `LLamaSharp.Backend.Cuda12`       | NVIDIA-only. Adds ~500 MB of CUDA binaries. |
+
+CI and the committed lock files target `standard`. Pass `-p:GpuVariant=cuda` to any `dotnet` command if you need the NVIDIA build:
+
+```bash
+dotnet build Heliosoph.DatumV.slnx -c Release -p:GpuVariant=cuda
+```
+
+### Lock files
+
+Every project has a `packages.lock.json` checked in. CI restores with `-p:RestoreLockedMode=true` so dependency drift fails the build instead of silently producing a different package graph.
+
+Two implications:
+
+- **If you change a `PackageReference`**, restore once to regenerate the lock file, then commit the updated `packages.lock.json` alongside the csproj change.
+- **If you restore with `-p:GpuVariant=cuda`**, NuGet will rewrite the lock files to reflect the CUDA package graph. Don't commit those changes — they're a working-tree artifact of building the NVIDIA variant. `git checkout -- '**/packages.lock.json'` to discard.
+
+Dependabot keeps the `standard` lock files in sync automatically.
+
+---
+
+## Documentation: voice & positioning
+
+How to think about voice and framing when writing user-facing content in [docs/](docs/), [README.md](README.md), or in-app strings.
 
 ### Positioning one-liner
 
@@ -135,13 +175,15 @@ NVIDIA GPUs (CUDA) and CPU. Other hardware is in development.
 
 ---
 
-## Part 2 — Structure & Mechanics
+## Documentation: structure & mechanics
+
+File layout, templates, and conventions for the docs themselves.
 
 ### Directory layout
 
 ```
 DatumV/
-  CONTRIBUTING-DOCS.md    ← you are here
+  CONTRIBUTING.md         ← you are here
   README.md
   docs/
     toc.yml               ← tree navigation manifest

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "FFMediaToolkit": {
+        "type": "Direct",
+        "requested": "[4.6.0, )",
+        "resolved": "4.6.0",
+        "contentHash": "jbLcrLIEXc5jTOPu5ErsTonW/zO1auUkhWl8BksOsW58MXJRnYs1Qf7skFN8lwvFAKbd93E1+Mg3B1WtAIOHiw==",
+        "dependencies": {
+          "FFmpeg.AutoGen": "7.1.1"
+        }
+      },
+      "System.Drawing.Common": {
+        "type": "Direct",
+        "requested": "[9.0.0, )",
+        "resolved": "9.0.0",
+        "contentHash": "uoozjI3+dlgKh2onFJcz8aNLh6TRCPlLSh8Dbuljc8CdvqXrxHOVysJlrHvlsOCqceqGBR1wrMPxlnzzhynktw==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "9.0.0"
+        }
+      },
+      "FFmpeg.AutoGen": {
+        "type": "Transitive",
+        "resolved": "7.1.1",
+        "contentHash": "p4FGdG654zut4Iseg7PeYo7sxFMOTuLTEKl/vX+44UQ6NmezF3wHcR6JzjH8xzK4VDPLJe5Xz563kXamMQj7Jg=="
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "9.0.0",
+        "contentHash": "z8FfGIaoeALdD+KF44A2uP8PZIQQtDGiXsOLuN8nohbKhkyKt7zGaZb+fKiCxTuBqG22Q7myIAioSWaIcOOrOw=="
+      }
+    }
+  }
+}
