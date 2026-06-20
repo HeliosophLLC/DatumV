@@ -32,11 +32,16 @@ files:
   - "!**/*.{md,map,ts,tsbuildinfo}"
   - "!**/{tsconfig.json,electron-builder.yml,.gitignore}"
 
-# Self-contained .NET publish output. Lives at
-# `<app>/resources/backend/Heliosoph.DatumV.Web.exe` post-install, which is
-# what main.ts looks for via `path.join(process.resourcesPath, 'backend',
-# 'Heliosoph.DatumV.Web.exe')`.
+# Cross-platform extras: the .NET publish output (each platform's
+# build produces its own per-RID binaries here, so this single rule
+# is fine for both Windows and Linux), and the third-party notices.
 extraResources:
+  # `build/backend` is populated by the platform-specific dotnet
+  # publish step (publish:dotnet:win:* or publish:dotnet:linux:*),
+  # so each build's contents are already the right RID. `to: backend`
+  # places them at `<app>/resources/backend/` — what main.ts looks up
+  # via `path.join(process.resourcesPath, 'backend',
+  # 'Heliosoph.DatumV.Web.exe' or 'Heliosoph.DatumV.Web')`.
   - from: build/backend
     to: backend
     filter:
@@ -47,17 +52,6 @@ extraResources:
   # Regenerate via `npm run generate:notices` after any dep change.
   - from: ../../../THIRD-PARTY-NOTICES.txt
     to: THIRD-PARTY-NOTICES.txt
-  # Mirror Electron's bundled vulkan-1.dll alongside the .NET exe.
-  # Electron ships its own copy at `<app>/vulkan-1.dll` for Chromium's
-  # GPU stack, but that's not in the .NET exe's DLL search path
-  # (Windows searches the loading exe's directory first, then System32 —
-  # not parent dirs). Without this copy, LLamaSharp.Backend.Vulkan's
-  # llama.dll can't resolve its `vulkan-1.dll` import on systems where
-  # the GPU driver didn't install the loader to System32 — common on
-  # older AMD Radeon Software installs. Having Electron's known-good
-  # copy alongside the .NET exe sidesteps the driver-state lottery.
-  - from: node_modules/electron/dist/vulkan-1.dll
-    to: backend/vulkan-1.dll
 
 # Per-platform app icons. Source is build/source-icon.png (1024x1024,
 # transparency); the rasterised set under build/icons/ is generated via
@@ -65,6 +59,19 @@ extraResources:
 # --output=./build --flatten` whenever the source changes.
 win:
   icon: build/icons/icon.ico
+  # Windows-only: mirror Electron's bundled vulkan-1.dll alongside the
+  # .NET exe. Electron ships its own copy at `<app>/vulkan-1.dll` for
+  # Chromium's GPU stack, but that's not in the .NET exe's DLL search
+  # path (Windows searches the loading exe's directory first, then
+  # System32 — not parent dirs). Without this copy, LLamaSharp.Backend.Vulkan's
+  # llama.dll can't resolve its `vulkan-1.dll` import on systems where
+  # the GPU driver didn't install the loader to System32 — common on
+  # older AMD Radeon Software installs. Linux doesn't need this — Vulkan
+  # there is `libvulkan.so.1`, provided by the GPU driver / Mesa, and
+  # electron's Linux package doesn't ship a Vulkan loader at all.
+  extraResources:
+    - from: node_modules/electron/dist/vulkan-1.dll
+      to: backend/vulkan-1.dll
   target:
     # nsis: traditional Windows installer for users who want Start Menu
     #   integration, Add/Remove Programs, future file associations.
