@@ -34,81 +34,98 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # Dynamic matrix construction. `matrix.<value>` is only accessible
+  # inside step-level `if:` expressions in GitHub Actions — you cannot
+  # filter a matrix at the job-level `if:`. So we compute the matrix
+  # JSON in a separate setup job, then feed it to the installer job's
+  # matrix via fromJson(). Skipped variants don't allocate runners.
+  #
+  # On `release: published` the input doesn't exist and TARGET defaults
+  # to "all". On `workflow_dispatch` the input value is honoured.
+  resolve-matrix:
+    name: Resolve build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        shell: bash
+        env:
+          TARGET: ${{ github.event.inputs.build_target || 'all' }}
+        run: |
+          # Full matrix, expressed as JSON. Each entry's `attach_glob`
+          # is a newline-separated string of upload paths — keep in
+          # sync with `actions/upload-artifact@v4` + `softprops/action-gh-release@v2`
+          # both of which accept multi-line glob input. Update manifests
+          # are per-channel (`<channel>.yml` on Windows, `<channel>-linux.yml`
+          # on Linux) because the npm dist scripts pass
+          # `-c.publish.channel=<variant>` to electron-builder, which both
+          # writes a per-channel yml and bakes the channel into the
+          # installer's embedded app-update.yml. Keep `key` values in
+          # sync with the workflow_dispatch input's `options:` block.
+          ALL=$(cat <<'JSON'
+          [
+            {
+              "os": "windows-latest",
+              "label": "Windows standard",
+              "key": "windows-standard",
+              "script": "dist:win:standard",
+              "artifact": "windows-standard-installer",
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.exe\nsrc/Heliosoph.DatumV.Web/electron/out/*.zip\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/standard.yml"
+            },
+            {
+              "os": "ubuntu-latest",
+              "label": "Linux standard",
+              "key": "linux-standard",
+              "script": "dist:linux:standard",
+              "artifact": "linux-standard-appimage",
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/standard-linux.yml"
+            },
+            {
+              "os": "windows-latest",
+              "label": "Windows CUDA",
+              "key": "windows-cuda",
+              "script": "dist:win:cuda",
+              "artifact": "windows-cuda-installer",
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.exe\nsrc/Heliosoph.DatumV.Web/electron/out/*.zip\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/cuda.yml"
+            },
+            {
+              "os": "ubuntu-latest",
+              "label": "Linux CUDA",
+              "key": "linux-cuda",
+              "script": "dist:linux:cuda",
+              "artifact": "linux-cuda-appimage",
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/cuda-linux.yml"
+            }
+          ]
+          JSON
+          )
+
+          if [[ "$TARGET" == "all" ]]; then
+            MATRIX="$ALL"
+          else
+            MATRIX=$(echo "$ALL" | jq -c --arg k "$TARGET" '[.[] | select(.key == $k)]')
+            # Fail loudly if the input doesn't match any known key. Without
+            # this, fromJson() of an empty array silently produces zero
+            # matrix slots and the installer job "succeeds" while doing
+            # nothing — a confusing failure mode worth heading off.
+            if [[ "$(echo "$MATRIX" | jq 'length')" == "0" ]]; then
+              echo "::error::build_target='$TARGET' did not match any known variant. Valid options: all, windows-standard, windows-cuda, linux-standard, linux-cuda"
+              exit 1
+            fi
+          fi
+
+          echo "Computed matrix for target='$TARGET':"
+          echo "$MATRIX" | jq .
+          echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
+
   installer:
+    needs: resolve-matrix
     name: ${{ matrix.label }}
-    # Build-target filtering: on `release: published`, every matrix slot
-    # runs (build_target input doesn't exist for release events, so the
-    # `inputs.build_target` reads as empty and the third clause kicks the
-    # check over to "default to all"). On `workflow_dispatch`, only the
-    # slot matching `matrix.key` runs (or all of them if the input is
-    # 'all'). `matrix.key` is resolved per matrix instance, so this
-    # short-circuits without spinning up a runner for skipped slots.
-    if: github.event_name != 'workflow_dispatch' || inputs.build_target == 'all' || inputs.build_target == matrix.key
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # `attach_glob` is the per-job file list for both upload-artifact
-          # and the Release attach step. fail_on_unmatched_files requires
-          # every pattern to match at least one file, so each matrix slot
-          # carries only the extensions its electron-builder target emits
-          # — Windows never produces .AppImage, Linux never produces .exe.
-          #
-          # `key` is the identifier the workflow_dispatch input matches
-          # against to pick which slot(s) to run; must stay in sync with
-          # the `options:` list at the top of the file.
-          #
-          # Update manifests are per-channel: the npm dist scripts pass
-          # `-c.publish.channel=<variant>` to electron-builder, which both
-          # writes a per-channel yml (e.g. `cuda.yml` instead of `latest.yml`)
-          # and bakes the channel into the installer's embedded app-update.yml.
-          # The installed app then reads only its variant's feed, so a CUDA
-          # installer never auto-updates from the standard channel and vice
-          # versa. Windows files: `<channel>.yml`. Linux: `<channel>-linux.yml`.
-          # Standard variants ship the cross-vendor stack (DirectML on Windows,
-          # Vulkan for LLamaSharp everywhere). Smaller installers; work on
-          # NVIDIA, AMD, and Intel. ~70-95% of CUDA perf on NVIDIA.
-          - os: windows-latest
-            label: Windows standard
-            key: windows-standard
-            script: dist:win:standard
-            artifact: windows-standard-installer
-            attach_glob: |
-              src/Heliosoph.DatumV.Web/electron/out/*.exe
-              src/Heliosoph.DatumV.Web/electron/out/*.zip
-              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-              src/Heliosoph.DatumV.Web/electron/out/standard.yml
-          - os: ubuntu-latest
-            label: Linux standard
-            key: linux-standard
-            script: dist:linux:standard
-            artifact: linux-standard-appimage
-            attach_glob: |
-              src/Heliosoph.DatumV.Web/electron/out/*.AppImage
-              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-              src/Heliosoph.DatumV.Web/electron/out/standard-linux.yml
-          # CUDA variants bundle the NVIDIA-only stack
-          # (Microsoft.ML.OnnxRuntime.Gpu + LLamaSharp.Backend.Cuda12.*). Peak
-          # perf on NVIDIA; CPU fallback on non-NVIDIA hardware. ~750 MB larger.
-          - os: windows-latest
-            label: Windows CUDA
-            key: windows-cuda
-            script: dist:win:cuda
-            artifact: windows-cuda-installer
-            attach_glob: |
-              src/Heliosoph.DatumV.Web/electron/out/*.exe
-              src/Heliosoph.DatumV.Web/electron/out/*.zip
-              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-              src/Heliosoph.DatumV.Web/electron/out/cuda.yml
-          - os: ubuntu-latest
-            label: Linux CUDA
-            key: linux-cuda
-            script: dist:linux:cuda
-            artifact: linux-cuda-appimage
-            attach_glob: |
-              src/Heliosoph.DatumV.Web/electron/out/*.AppImage
-              src/Heliosoph.DatumV.Web/electron/out/*.blockmap
-              src/Heliosoph.DatumV.Web/electron/out/cuda-linux.yml
+        include: ${{ fromJson(needs.resolve-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
