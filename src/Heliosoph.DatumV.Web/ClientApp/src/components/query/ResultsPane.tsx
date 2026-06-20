@@ -478,7 +478,7 @@ function SingleValueView({
           {column.isArray ? '[]' : ''}
         </Badge>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
+      <div className="flex min-h-0 flex-1 items-safe-center justify-safe-center overflow-auto">
         <SingleValueBody cell={cell} />
       </div>
     </div>
