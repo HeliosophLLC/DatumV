@@ -182,7 +182,7 @@
 
   <ItemGroup>
     <!-- OpenAPI document + Swagger UI middleware (runtime). -->
-    <PackageReference Include="NSwag.AspNetCore" Version="14.2.0" />
+    <PackageReference Include="NSwag.AspNetCore" />
 
 
     <!--
@@ -194,7 +194,7 @@
     -->
 
     <!-- NSwag CLI surfaced as MSBuild tasks (build-time TS client gen from OpenAPI). -->
-    <PackageReference Include="NSwag.MSBuild" Version="14.2.0">
+    <PackageReference Include="NSwag.MSBuild">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
 
