@@ -1,4 +1,14 @@
 node_modules/
 dist/
-build/
 out/
+
+# `build/` is the natural spot for app-icon assets (electron-builder reads
+# from here at packaging time), but its other contents are transient
+# (build/backend/ holds the per-build dotnet publish output, etc). Use
+# `build/*` rather than `build/` so we can re-include specific paths
+# below — gitignore can't un-ignore a file whose parent directory was
+# fully excluded.
+build/*
+!build/source-icon.png
+!build/icons
+!build/icons/**

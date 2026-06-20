@@ -31,6 +31,7 @@
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
+    "electron-icon-builder": "^2.0.1",
     "license-checker-rseidelsohn": "^4.4.2",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2",

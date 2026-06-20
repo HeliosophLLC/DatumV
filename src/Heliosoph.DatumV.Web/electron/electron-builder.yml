@@ -59,7 +59,12 @@ extraResources:
   - from: node_modules/electron/dist/vulkan-1.dll
     to: backend/vulkan-1.dll
 
+# Per-platform app icons. Source is build/source-icon.png (1024x1024,
+# transparency); the rasterised set under build/icons/ is generated via
+# `npx electron-icon-builder --input=./build/source-icon.png
+# --output=./build --flatten` whenever the source changes.
 win:
+  icon: build/icons/icon.ico
   target:
     # nsis: traditional Windows installer for users who want Start Menu
     #   integration, Add/Remove Programs, future file associations.
@@ -90,6 +95,7 @@ portable:
   artifactName: ${productName}-${version}${env.DATUMV_VARIANT_SUFFIX}-portable.${ext}
 
 mac:
+  icon: build/icons/icon.icns
   target:
     - target: dmg
       arch:
@@ -99,6 +105,11 @@ mac:
   artifactName: ${productName}-${version}.${ext}
 
 linux:
+  # Pointing at the whole directory lets electron-builder pick the right
+  # PNG size for each install context (desktop file at 256x256, app
+  # launcher at 512x512, etc). The folder layout under build/icons/ uses
+  # `<size>x<size>.png` filenames which is what electron-builder expects.
+  icon: build/icons
   target:
     - target: AppImage
       arch:

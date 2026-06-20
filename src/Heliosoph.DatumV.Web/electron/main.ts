@@ -245,6 +245,11 @@ function createWindow(opts: { dialog?: boolean; parent?: BrowserWindow; modal?: 
     // (Win / Mac / Linux flavors), and CSS app-region + Chromium handle
     // drag and OS-edge resize uniformly.
     frame: false,
+    // Linux taskbar / window manager doesn't embed the icon in the binary
+    // the way Windows does, so BrowserWindow must be told explicitly.
+    // Windows + macOS pull from the bundled .exe / .app and ignore this
+    // option — leaving it set is harmless cross-platform.
+    icon: path.join(__dirname, '..', 'build', 'icons', '512x512.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
