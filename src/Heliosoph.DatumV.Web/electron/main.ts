@@ -987,6 +987,32 @@ ipcMain.handle('fs.showSaveDialog', async (event, options: Electron.SaveDialogOp
 // is the documented Electron guard against compromised-renderer link
 // injection; consumers (e.g. LicenseDialog) only ever pass URLs that
 // originated in trusted markdown bundled with the app.
+// Opens THIRD-PARTY-NOTICES.txt in the user's default text viewer.
+// Path differs between dev and prod:
+//   - prod: shipped via electron-builder's extraResources at
+//     `<resources>/THIRD-PARTY-NOTICES.txt`
+//   - dev:  generated at the repo root by the npm script; resolved
+//     two levels up from main.ts (electron/dist/main.js → electron/ →
+//     src/Heliosoph.DatumV.Web/ → src/ → repo root). The constant
+//     mirrors what `generate-third-party-notices.mjs` writes.
+ipcMain.handle('thirdPartyNotices.open', async () => {
+  const noticesPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'THIRD-PARTY-NOTICES.txt')
+    : path.resolve(__dirname, '..', '..', '..', '..', 'THIRD-PARTY-NOTICES.txt');
+  if (!fs.existsSync(noticesPath)) {
+    console.warn('[notices] file not found at', noticesPath);
+    // Fall back to opening the licenses folder on github — user still
+    // gets attribution info even if the local file is missing (e.g.
+    // dev hasn't run `npm run generate:notices` yet).
+    await shell.openExternal('https://github.com/HeliosophLLC/DatumV/blob/main/THIRD-PARTY-NOTICES.txt');
+    return;
+  }
+  const err = await shell.openPath(noticesPath);
+  if (err) {
+    console.error('[notices] shell.openPath failed:', err);
+  }
+});
+
 ipcMain.handle('shell.openExternal', async (_event, url: string) => {
   if (typeof url !== 'string') return;
   let parsed: URL;

@@ -41,6 +41,12 @@ extraResources:
     to: backend
     filter:
       - "**/*"
+  # THIRD-PARTY-NOTICES.txt ships at the root of `resources/` so the
+  # "View third-party licenses" button in the About dialog can find it
+  # at `path.join(process.resourcesPath, 'THIRD-PARTY-NOTICES.txt')`.
+  # Regenerate via `npm run generate:notices` after any dep change.
+  - from: ../../../THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
 
 win:
   target:

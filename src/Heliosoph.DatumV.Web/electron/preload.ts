@@ -60,6 +60,11 @@ contextBridge.exposeInMainWorld('electronHost', {
   // protocol and silently drops anything else — see main.ts.
   openExternal: (url: string) => ipcRenderer.invoke('shell.openExternal', url),
 
+  // Open the shipped THIRD-PARTY-NOTICES.txt in the OS default text
+  // viewer. Main resolves the path (production vs dev) and falls back
+  // to the GitHub-hosted copy if the file isn't on disk.
+  openThirdPartyNotices: () => ipcRenderer.invoke('thirdPartyNotices.open'),
+
   // Application menu: the renderer ships a localized template (plain
   // data, no i18next on the main side) and re-ships on locale change.
   // Replaces whatever menu is currently installed atomically.

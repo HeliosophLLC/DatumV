@@ -1,0 +1,3169 @@
+DatumV THIRD-PARTY NOTICES
+Generated: 2026-06-14T15:53:48.309Z
+
+This file aggregates license and copyright notices for every
+third-party component that ships with the DatumV installer,
+plus the Llama Community License for the AI model platform
+the app is built with.
+
+Models downloaded through the in-app catalog at runtime are
+NOT covered here — their licenses are presented at install
+time by the model installer dialog and stored under licenses/
+in this repo.
+
+============================================================================
+SECTION 1 — LLAMA
+============================================================================
+
+DatumV is built with Llama.
+
+Use of Llama models is subject to Meta's Llama 3.1 Community
+License and Acceptable Use Policy. The full license text follows
+below; the AUP is published at
+  https://llama.meta.com/llama3/use-policy/
+
+# Llama 3.1 Community License Agreement
+
+**Applies to:** All Llama 3.1 models (8B, 70B, 405B; base and Instruct variants) and their derivatives.
+
+**Authoritative full text:** https://www.llama.com/llama3_1/license/
+
+> ⚠️ This file is a working copy intended for in-app display. **Before redistribution, replace with the verbatim canonical text from the URL above** and verify it has not been amended.
+
+---
+
+## Summary
+
+The Llama 3.1 Community License is a **source-available** license — it permits commercial use, modification, and redistribution, but imposes specific obligations and a major-user restriction.
+
+### What you CAN do
+
+- Use Llama 3.1 commercially.
+- Modify it, fine-tune it, and distribute your derivatives.
+- Use generated outputs in your products.
+- Distribute the model weights.
+
+### Key restrictions and obligations
+
+#### 1. The 700 million MAU clause
+
+If, on the Llama 3.1 release date (2024-07-23), the products or services made available by you or your affiliates have **more than 700 million monthly active users** in the preceding calendar month, you must request a separate license from Meta. Meta may grant or deny this in its sole discretion. **Below 700M MAU, no additional license is required** for commercial use.
+
+#### 2. Attribution requirement
+
+You must:
+
+- **Display "Built with Llama"** prominently on a related website, user interface, blog post, about page, or product documentation if you distribute or otherwise make available a Llama Materials, or any derivative works, including a product or service that uses any of them.
+- **Include "Llama" at the beginning of the name** of any AI model created by training or fine-tuning Llama Materials (e.g., "Llama-MyFineTune"). This requirement is specific to *model names*, not product names.
+- **Reproduce and distribute** the following notice with copies of the Llama Materials:
+  > "Llama 3.1 is licensed under the Llama 3.1 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved."
+
+#### 3. Acceptable Use Policy
+
+Use of Llama 3.1 is subject to Meta's [Acceptable Use Policy](https://www.llama.com/llama3_1/use-policy/), which prohibits:
+
+- Violating laws or others' rights.
+- Engaging in or facilitating illegal activity.
+- CSAM, human trafficking, exploitation, sexual violence content.
+- Discrimination, harassment, defamation.
+- Unauthorized practice of professional services (legal, medical, financial advice without qualified-professional involvement).
+- Critical-infrastructure operations without authorization.
+- Generating malware, weapons of mass destruction, content promoting self-harm, deceptive content, etc.
+- Failing to disclose AI-generated content where required, or representing it as human-authored.
+
+#### 4. Disclaimer and limitation of liability
+
+The Llama Materials are provided "AS IS." Meta disclaims warranties and limits liability — see canonical text for full disclaimer.
+
+#### 5. Termination
+
+The license terminates automatically if you violate its terms.
+
+---
+
+## HF gating
+
+In addition to this license, Meta gates the Llama 3.1 repositories on HuggingFace. To download the model, users must:
+
+1. Be logged in to HuggingFace.
+2. Have accepted Meta's terms on the HF model page.
+3. Have a HuggingFace access token configured locally.
+
+The DatumV app handles this by detecting 401/403 responses and prompting the user to complete the HF acceptance flow before retrying.
+
+---
+
+## Acceptance
+
+By downloading or using Llama 3.1 models, you agree to be bound by the Llama 3.1 Community License Agreement and Meta's Acceptable Use Policy. The summary above is for convenience; the legally binding text is the canonical version at the URL at the top of this file.
+
+============================================================================
+SECTION 2 — .NET / NUGET DEPENDENCIES
+============================================================================
+
+The DatumV engine (.NET 10) bundles the following NuGet packages.
+License text for each license family (MIT, Apache-2.0, BSD-*,
+LGPL-*) follows in Section 4 below.
+
+Apache.Arrow 23.0.0
+  License: Apache-2.0
+  URL: https://arrow.apache.org/
+
+Apache.Arrow.Scalars 23.0.0
+  License: Apache-2.0
+  URL: https://arrow.apache.org/
+
+CardinalityEstimation 1.14.0
+  License: MIT
+  URL: https://github.com/saguiitay/CardinalityEstimation
+
+CommunityToolkit.HighPerformance 8.4.2
+  License: MIT
+  URL: https://github.com/CommunityToolkit/dotnet
+
+Google.Protobuf 3.27.1
+  License: BSD-3-Clause
+  URL: https://github.com/protocolbuffers/protobuf
+
+K4os.Compression.LZ4 1.3.8
+  License: MIT
+  URL: https://github.com/MiloszKrajewski/K4os.Compression.LZ4
+
+LLamaSharp 0.27.0
+  License: MIT
+
+LLamaSharp.Backend.Cpu 0.27.0
+  License: MIT
+  URL: https://github.com/SciSharp/LLamaSharp
+
+LLamaSharp.Backend.Cuda12.Windows 0.27.0
+  License: MIT
+  URL: https://github.com/SciSharp/LLamaSharp
+
+Microsoft.Bcl.AsyncInterfaces 10.0.5
+  License: MIT
+  URL: https://dot.net/
+
+Microsoft.Bcl.Memory 10.0.5
+  License: MIT
+  URL: https://dot.net/
+
+Microsoft.Extensions.AI.Abstractions 10.4.1
+  License: MIT
+  URL: https://dot.net/
+
+Microsoft.Extensions.ApiDescription.Server 6.0.3
+  License: MIT
+  URL: https://asp.net/
+
+Microsoft.Extensions.FileProviders.Embedded 9.0.0
+  License: MIT
+  URL: https://asp.net/
+
+Microsoft.IO.RecyclableMemoryStream 3.0.1
+  License: MIT
+  URL: https://github.com/Microsoft/Microsoft.IO.RecyclableMemoryStream
+
+Microsoft.ML.OnnxRuntime.Gpu 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+
+Microsoft.ML.OnnxRuntime.Gpu.Linux 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+
+Microsoft.ML.OnnxRuntime.Gpu.Windows 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+
+Microsoft.ML.OnnxRuntime.Managed 1.25.1
+  License: MIT
+  URL: https://github.com/Microsoft/onnxruntime
+
+Microsoft.ML.Tokenizers 0.22.0
+  License: MIT
+  URL: https://dot.net/ml
+
+Microsoft.NET.ILLink.Tasks 10.0.9
+  License: MIT
+  URL: https://dot.net/
+
+murmurhash 1.0.3
+  License: MS-PL
+  URL: https://github.com/darrenkopp/murmurhash-net
+
+Namotion.Reflection 3.2.0
+  License: MIT
+  URL: https://github.com/RicoSuter/Namotion.Reflection
+
+Newtonsoft.Json 13.0.3
+  License: MIT
+  URL: https://www.newtonsoft.com/json
+
+NJsonSchema 11.1.0
+  License: MIT
+  URL: http://njsonschema.org/
+
+NJsonSchema.Annotations 11.1.0
+  License: MIT
+  URL: http://njsonschema.org/
+
+NJsonSchema.NewtonsoftJson 11.1.0
+  License: MIT
+  URL: http://njsonschema.org/
+
+NJsonSchema.Yaml 11.1.0
+  License: MIT
+  URL: http://njsonschema.org/
+
+NSwag.Annotations 14.2.0
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.AspNetCore 14.2.0
+  License: MIT
+  URL: https://github.com/RicoSuter/NSwag
+
+NSwag.Core 14.2.0
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.Core.Yaml 14.2.0
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.Generation 14.2.0
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.Generation.AspNetCore 14.2.0
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.MSBuild 14.2.0
+  License: MIT
+  URL: https://github.com/RicoSuter/NSwag
+
+OpenCvSharp4 4.13.0.20260302
+  License: Apache-2.0
+  URL: https://github.com/shimat/opencvsharp
+
+OpenCvSharp4.runtime.win 4.13.0.20260302
+  License: Apache-2.0
+  URL: https://github.com/shimat/opencvsharp
+
+Parquet.Net 5.5.0
+  License: MIT
+  URL: https://github.com/aloneguid/parquet-dotnet
+
+PureHDF 2.1.1
+  License: MIT
+  URL: https://apollo3zehn.github.io/PureHDF/
+
+Sdcb.FFmpeg 7.0.0
+  License: LGPL-3.0-only
+  URL: https://github.com/sdcb/FFmpeg.AutoGen
+
+Sdcb.FFmpeg.runtime.windows-x64 7.1.0
+  License: GPL-3.0-only
+  URL: https://github.com/sdcb/FFmpeg.AutoGen
+
+SharpGLTF.Core 1.0.6
+  License: MIT
+  URL: https://github.com/vpenades/SharpGLTF
+
+SharpGLTF.Runtime 1.0.6
+  License: MIT
+  URL: https://github.com/vpenades/SharpGLTF
+
+SharpGLTF.Toolkit 1.0.6
+  License: MIT
+  URL: https://github.com/vpenades/SharpGLTF
+
+SharpZipLib 1.4.2
+  License: MIT
+  URL: https://github.com/icsharpcode/SharpZipLib
+
+SkiaSharp 3.119.0
+  License: MIT
+  URL: https://go.microsoft.com/fwlink/?linkid=868515
+
+SkiaSharp.NativeAssets.macOS 3.119.0
+  License: MIT
+  URL: https://go.microsoft.com/fwlink/?linkid=868515
+
+SkiaSharp.NativeAssets.Win32 3.119.0
+  License: MIT
+  URL: https://go.microsoft.com/fwlink/?linkid=868515
+
+Snappier 1.3.1
+  License: BSD-3-Clause
+  URL: https://brantburnett.github.io/Snappier/
+
+Superpower 3.1.0
+  License: Apache-2.0
+  URL: https://github.com/datalust/superpower
+
+System.Interactive.Async 7.0.0
+  License: MIT
+  URL: https://github.com/dotnet/reactive
+
+System.IO.Hashing 9.0.0
+  License: MIT
+  URL: https://dot.net/
+
+System.Linq.Async 7.0.0
+  License: MIT
+  URL: https://github.com/dotnet/reactive
+
+System.Numerics.Tensors 10.0.5
+  License: MIT
+  URL: https://dot.net/
+
+YamlDotNet 16.2.0
+  License: MIT
+  URL: https://github.com/aaubry/YamlDotNet/wiki
+
+ZstdSharp.Port 0.8.7
+  License: MIT
+  URL: https://github.com/oleg-st/ZstdSharp
+============================================================================
+SECTION 3 — NODE / NPM DEPENDENCIES
+============================================================================
+
+
+------------------------------------------------------------
+Electron shell (electron/)
+------------------------------------------------------------
+
+argparse 2.0.1
+  License: Python-2.0
+  URL: https://github.com/nodeca/argparse
+
+builder-util-runtime 9.7.0
+  License: MIT
+  URL: https://github.com/electron-userland/electron-builder
+  Authors: Vladimir Krivosheev
+
+debug 4.4.3
+  License: MIT
+  URL: https://github.com/debug-js/debug
+  Authors: Josh Junon
+
+electron-updater 6.8.9
+  License: MIT
+  URL: https://github.com/electron-userland/electron-builder
+  Authors: Vladimir Krivosheev
+
+fs-extra 10.1.0
+  License: MIT
+  URL: https://github.com/jprichardson/node-fs-extra
+  Authors: JP Richardson
+
+graceful-fs 4.2.11
+  License: ISC
+  URL: https://github.com/isaacs/node-graceful-fs
+
+heliosoph-datumv-electron 0.1.0
+  License: UNLICENSED
+
+js-yaml 4.1.1
+  License: MIT
+  URL: https://github.com/nodeca/js-yaml
+  Authors: Vladimir Zapparov
+
+jsonfile 6.2.1
+  License: MIT
+  URL: https://github.com/jprichardson/node-jsonfile
+  Authors: JP Richardson
+
+lazy-val 1.0.5
+  License: MIT
+  URL: https://github.com/develar/lazy-val
+  Authors: Vladimir Krivosheev
+
+lodash.escaperegexp 4.1.2
+  License: MIT
+  URL: https://github.com/lodash/lodash
+  Authors: John-David Dalton
+
+lodash.isequal 4.5.0
+  License: MIT
+  URL: https://github.com/lodash/lodash
+  Authors: John-David Dalton
+
+ms 2.1.3
+  License: MIT
+  URL: https://github.com/vercel/ms
+
+sax 1.6.0
+  License: BlueOak-1.0.0
+  URL: https://github.com/isaacs/sax-js
+  Authors: Isaac Z. Schlueter
+
+semver 7.7.4
+  License: ISC
+  URL: https://github.com/npm/node-semver
+  Authors: GitHub Inc.
+
+tiny-typed-emitter 2.1.0
+  License: MIT
+  URL: https://github.com/binier/tiny-typed-emitter
+  Authors: Zurab Benashvili
+
+universalify 2.0.1
+  License: MIT
+  URL: https://github.com/RyanZim/universalify
+  Authors: Ryan Zimmerman
+------------------------------------------------------------
+Renderer SPA (ClientApp/)
+------------------------------------------------------------
+
+@babel/code-frame 7.29.0
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/compat-data 7.29.3
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/core 7.29.0
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/generator 7.29.1
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-annotate-as-pure 7.27.3
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-compilation-targets 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-create-class-features-plugin 7.29.3
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-globals 7.28.0
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-member-expression-to-functions 7.28.5
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-module-imports 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-module-transforms 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-optimise-call-expression 7.27.1
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-plugin-utils 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-replace-supers 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-skip-transparent-expression-wrappers 7.27.1
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-string-parser 7.27.1
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-validator-identifier 7.28.5
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helper-validator-option 7.27.1
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/helpers 7.29.2
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/parser 7.29.3
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/plugin-syntax-jsx 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/plugin-syntax-typescript 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/plugin-transform-modules-commonjs 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/plugin-transform-typescript 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/preset-typescript 7.28.5
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/runtime 7.29.2
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/template 7.28.6
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/traverse 7.29.0
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@babel/types 7.29.0
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@base-ui/react 1.4.1
+  License: MIT
+  URL: https://github.com/mui/base-ui
+  Authors: MUI Team
+
+@base-ui/utils 0.2.8
+  License: MIT
+  URL: https://github.com/mui/base-ui
+  Authors: MUI Team
+
+@dimforge/rapier3d-compat 0.12.0
+  License: Apache-2.0
+  URL: https://github.com/dimforge/rapier.js
+
+@dotenvx/dotenvx 1.65.0
+  License: BSD-3-Clause
+  URL: https://github.com/dotenvx/dotenvx
+  Authors: @motdotla
+
+@ecies/ciphers 0.2.6
+  License: MIT
+  URL: https://github.com/ecies/js-ciphers
+  Authors: Weiliang Li
+
+@floating-ui/core 1.7.5
+  License: MIT
+  URL: https://github.com/floating-ui/floating-ui
+  Authors: atomiks
+
+@floating-ui/dom 1.7.6
+  License: MIT
+  URL: https://github.com/floating-ui/floating-ui
+  Authors: atomiks
+
+@floating-ui/react-dom 2.1.8
+  License: MIT
+  URL: https://github.com/floating-ui/floating-ui
+  Authors: atomiks
+
+@floating-ui/utils 0.2.11
+  License: MIT
+  URL: https://github.com/floating-ui/floating-ui
+  Authors: atomiks
+
+@fontsource-variable/geist 5.2.8
+  License: OFL-1.1
+  URL: https://github.com/fontsource/font-files
+  Authors: Google Inc.
+
+@formatjs/fast-memoize 3.1.4
+  License: MIT
+  URL: https://github.com/formatjs/formatjs
+  Authors: Long Ho
+
+@formatjs/icu-messageformat-parser 3.5.7
+  License: MIT
+  URL: https://github.com/formatjs/formatjs
+
+@formatjs/icu-skeleton-parser 2.1.7
+  License: MIT
+  URL: https://github.com/formatjs/formatjs
+
+@hono/node-server 1.19.14
+  License: MIT
+  URL: https://github.com/honojs/node-server
+  Authors: Yusuke Wada
+
+@inquirer/ansi 2.0.5
+  License: MIT
+  URL: https://github.com/SBoudrias/Inquirer.js
+  Authors: Simon Boudrias
+
+@inquirer/confirm 6.0.13
+  License: MIT
+  URL: https://github.com/SBoudrias/Inquirer.js
+  Authors: Simon Boudrias
+
+@inquirer/core 11.1.10
+  License: MIT
+  URL: https://github.com/SBoudrias/Inquirer.js
+  Authors: Simon Boudrias
+
+@inquirer/figures 2.0.5
+  License: MIT
+  URL: https://github.com/SBoudrias/Inquirer.js
+  Authors: Simon Boudrias
+
+@inquirer/type 4.0.5
+  License: MIT
+  URL: https://github.com/SBoudrias/Inquirer.js
+  Authors: Simon Boudrias
+
+@jridgewell/gen-mapping 0.3.13
+  License: MIT
+  URL: https://github.com/jridgewell/sourcemaps
+  Authors: Justin Ridgewell
+
+@jridgewell/remapping 2.3.5
+  License: MIT
+  URL: https://github.com/jridgewell/sourcemaps
+  Authors: Justin Ridgewell
+
+@jridgewell/resolve-uri 3.1.2
+  License: MIT
+  URL: https://github.com/jridgewell/resolve-uri
+  Authors: Justin Ridgewell
+
+@jridgewell/sourcemap-codec 1.5.5
+  License: MIT
+  URL: https://github.com/jridgewell/sourcemaps
+  Authors: Justin Ridgewell
+
+@jridgewell/trace-mapping 0.3.31
+  License: MIT
+  URL: https://github.com/jridgewell/sourcemaps
+  Authors: Justin Ridgewell
+
+@mediapipe/tasks-vision 0.10.17
+  License: Apache-2.0
+  Authors: mediapipe@google.com
+
+@microsoft/signalr 8.0.17
+  License: MIT
+  URL: https://github.com/dotnet/aspnetcore
+  Authors: Microsoft
+
+@modelcontextprotocol/sdk 1.29.0
+  License: MIT
+  URL: https://github.com/modelcontextprotocol/typescript-sdk
+  Authors: Anthropic, PBC
+
+@monaco-editor/loader 1.7.0
+  License: MIT
+  URL: https://github.com/suren-atoyan/monaco-loader
+  Authors: Suren Atoyan
+
+@monaco-editor/react 4.7.0
+  License: MIT
+  URL: https://github.com/suren-atoyan/monaco-react
+  Authors: Suren Atoyan
+
+@monogrid/gainmap-js 3.4.0
+  License: MIT
+  URL: https://github.com/MONOGRID/gainmap-js
+  Authors: MONOGRID
+
+@mswjs/interceptors 0.41.8
+  License: MIT
+  URL: https://github.com/mswjs/interceptors
+  Authors: Artem Zakharchenko
+
+@noble/ciphers 1.3.0
+  License: MIT
+  URL: https://github.com/paulmillr/noble-ciphers
+  Authors: Paul Miller
+
+@noble/curves 1.9.7
+  License: MIT
+  URL: https://github.com/paulmillr/noble-curves
+  Authors: Paul Miller
+
+@noble/hashes 1.8.0
+  License: MIT
+  URL: https://github.com/paulmillr/noble-hashes
+  Authors: Paul Miller
+
+@nodelib/fs.scandir 2.1.5
+  License: MIT
+  URL: https://github.com/nodelib/nodelib.git#master
+
+@nodelib/fs.stat 2.0.5
+  License: MIT
+  URL: https://github.com/nodelib/nodelib.git#master
+
+@nodelib/fs.walk 1.2.8
+  License: MIT
+  URL: https://github.com/nodelib/nodelib.git#master
+
+@open-draft/deferred-promise 2.2.0
+  License: MIT
+  URL: https://github.com/open-draft/deferred-promise
+  Authors: Artem Zakharchenko
+
+@open-draft/deferred-promise 3.0.0
+  License: MIT
+  URL: https://github.com/open-draft/deferred-promise
+  Authors: Artem Zakharchenko
+
+@open-draft/logger 0.3.0
+  License: MIT
+  URL: https://github.com/open-draft/logger
+  Authors: Artem Zakharchenko
+
+@open-draft/until 2.1.0
+  License: MIT
+  URL: https://github.com/open-draft/until
+  Authors: Artem Zakharchenko
+
+@react-three/drei 10.7.7
+  License: MIT
+  URL: https://github.com/pmndrs/drei
+
+@react-three/fiber 9.6.1
+  License: MIT
+  URL: https://github.com/pmndrs/react-three-fiber
+  Authors: Paul Henschel
+
+@sec-ant/readable-stream 0.4.1
+  License: MIT
+  URL: https://github.com/Sec-ant/readable-stream
+  Authors: Ze-Zheng Wu
+
+@sindresorhus/merge-streams 4.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/merge-streams
+  Authors: Sindre Sorhus
+
+@tanstack/react-virtual 3.13.24
+  License: MIT
+  URL: https://github.com/TanStack/virtual
+  Authors: Tanner Linsley
+
+@tanstack/virtual-core 3.14.0
+  License: MIT
+  URL: https://github.com/TanStack/virtual
+  Authors: Tanner Linsley
+
+@ts-morph/common 0.27.0
+  License: MIT
+  URL: https://github.com/dsherret/ts-morph
+  Authors: David Sherret
+
+@tweenjs/tween.js 23.1.3
+  License: MIT
+  URL: https://github.com/tweenjs/tween.js
+  Authors: tween.js contributors
+
+@types/debug 4.1.13
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/draco3d 1.4.10
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/estree 1.0.8
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/estree-jsx 1.0.5
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/hast 3.0.4
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/mdast 4.0.4
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/ms 2.1.0
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/node 22.19.18
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/offscreencanvas 2019.7.3
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/react 19.2.14
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/react-reconciler 0.28.9
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/set-cookie-parser 2.4.10
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/stats.js 0.17.4
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/statuses 2.0.6
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/three 0.184.1
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/trusted-types 2.0.7
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/unist 2.0.11
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/unist 3.0.3
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/validate-npm-package-name 4.0.2
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/webxr 0.5.24
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@uiw/react-json-view 2.0.0-alpha.43
+  License: MIT
+  URL: https://github.com/uiwjs/react-json-view
+  Authors: Kenny Wang
+
+@ungap/structured-clone 1.3.1
+  License: ISC
+  URL: https://github.com/ungap/structured-clone
+  Authors: Andrea Giammarchi
+
+@use-gesture/core 10.3.1
+  License: MIT
+  URL: https://github.com/pmndrs/use-gesture
+  Authors: Paul Henschel
+
+@use-gesture/react 10.3.1
+  License: MIT
+  URL: https://github.com/pmndrs/use-gesture
+  Authors: Paul Henschel
+
+abort-controller 3.0.0
+  License: MIT
+  URL: https://github.com/mysticatea/abort-controller
+  Authors: Toru Nagashima
+
+accepts 2.0.0
+  License: MIT
+  URL: https://github.com/jshttp/accepts
+
+agent-base 7.1.4
+  License: MIT
+  URL: https://github.com/TooTallNate/proxy-agents
+  Authors: Nathan Rajlich
+
+ajv 8.20.0
+  License: MIT
+  URL: https://github.com/ajv-validator/ajv
+  Authors: Evgeny Poberezkin
+
+ajv-formats 3.0.1
+  License: MIT
+  URL: https://github.com/ajv-validator/ajv-formats
+  Authors: Evgeny Poberezkin
+
+ansi-regex 5.0.1
+  License: MIT
+  URL: https://github.com/chalk/ansi-regex
+  Authors: Sindre Sorhus
+
+ansi-regex 6.2.2
+  License: MIT
+  URL: https://github.com/chalk/ansi-regex
+  Authors: Sindre Sorhus
+
+ansi-styles 4.3.0
+  License: MIT
+  URL: https://github.com/chalk/ansi-styles
+  Authors: Sindre Sorhus
+
+argparse 2.0.1
+  License: Python-2.0
+  URL: https://github.com/nodeca/argparse
+
+ast-types 0.16.1
+  License: MIT
+  URL: https://github.com/benjamn/ast-types
+  Authors: Ben Newman
+
+bail 2.0.2
+  License: MIT
+  URL: https://github.com/wooorm/bail
+  Authors: Titus Wormer
+
+balanced-match 4.0.4
+  License: MIT
+  URL: https://github.com/juliangruber/balanced-match
+
+base64-js 1.5.1
+  License: MIT
+  URL: https://github.com/beatgammit/base64-js
+  Authors: T. Jameson Little
+
+baseline-browser-mapping 2.10.29
+  License: Apache-2.0
+  URL: https://github.com/web-platform-dx/baseline-browser-mapping
+
+bidi-js 1.0.3
+  License: MIT
+  URL: https://github.com/lojjic/bidi-js
+  Authors: Jason Johnston
+
+body-parser 2.2.2
+  License: MIT
+  URL: https://github.com/expressjs/body-parser
+
+brace-expansion 5.0.6
+  License: MIT
+  URL: https://github.com/juliangruber/brace-expansion
+
+braces 3.0.3
+  License: MIT
+  URL: https://github.com/micromatch/braces
+  Authors: Jon Schlinkert
+
+browserslist 4.28.2
+  License: MIT
+  URL: https://github.com/browserslist/browserslist
+  Authors: Andrey Sitnik
+
+buffer 6.0.3
+  License: MIT
+  URL: https://github.com/feross/buffer
+  Authors: Feross Aboukhadijeh
+
+bundle-name 4.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/bundle-name
+  Authors: Sindre Sorhus
+
+bytes 3.1.2
+  License: MIT
+  URL: https://github.com/visionmedia/bytes.js
+  Authors: TJ Holowaychuk
+
+call-bind-apply-helpers 1.0.2
+  License: MIT
+  URL: https://github.com/ljharb/call-bind-apply-helpers
+  Authors: Jordan Harband
+
+call-bound 1.0.4
+  License: MIT
+  URL: https://github.com/ljharb/call-bound
+  Authors: Jordan Harband
+
+callsites 3.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/callsites
+  Authors: Sindre Sorhus
+
+camera-controls 3.1.2
+  License: MIT
+  URL: https://github.com/yomotsu/camera-controls
+  Authors: Yomotsu
+
+caniuse-lite 1.0.30001792
+  License: CC-BY-4.0
+  URL: https://github.com/browserslist/caniuse-lite
+  Authors: Ben Briggs
+
+ccount 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/ccount
+  Authors: Titus Wormer
+
+chalk 5.6.2
+  License: MIT
+  URL: https://github.com/chalk/chalk
+
+character-entities 2.0.2
+  License: MIT
+  URL: https://github.com/wooorm/character-entities
+  Authors: Titus Wormer
+
+character-entities-html4 2.1.0
+  License: MIT
+  URL: https://github.com/wooorm/character-entities-html4
+  Authors: Titus Wormer
+
+character-entities-legacy 3.0.0
+  License: MIT
+  URL: https://github.com/wooorm/character-entities-legacy
+  Authors: Titus Wormer
+
+character-reference-invalid 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/character-reference-invalid
+  Authors: Titus Wormer
+
+class-variance-authority 0.7.1
+  License: Apache-2.0
+  URL: https://github.com/joe-bell/cva
+  Authors: Joe Bell
+
+cli-cursor 5.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/cli-cursor
+  Authors: Sindre Sorhus
+
+cli-spinners 2.9.2
+  License: MIT
+  URL: https://github.com/sindresorhus/cli-spinners
+  Authors: Sindre Sorhus
+
+cli-width 4.1.0
+  License: ISC
+  URL: https://github.com/knownasilya/cli-width
+  Authors: Ilya Radchenko
+
+cliui 8.0.1
+  License: ISC
+  URL: https://github.com/yargs/cliui
+  Authors: Ben Coe
+
+clsx 2.1.1
+  License: MIT
+  URL: https://github.com/lukeed/clsx
+  Authors: Luke Edwards
+
+code-block-writer 13.0.3
+  License: MIT
+  URL: https://github.com/dsherret/code-block-writer
+  Authors: David Sherret
+
+color-convert 2.0.1
+  License: MIT
+  URL: https://github.com/Qix-/color-convert
+  Authors: Heather Arthur
+
+color-name 1.1.4
+  License: MIT
+  URL: https://github.com/colorjs/color-name
+  Authors: DY
+
+comma-separated-tokens 2.0.3
+  License: MIT
+  URL: https://github.com/wooorm/comma-separated-tokens
+  Authors: Titus Wormer
+
+commander 11.1.0
+  License: MIT
+  URL: https://github.com/tj/commander.js
+  Authors: TJ Holowaychuk
+
+commander 14.0.3
+  License: MIT
+  URL: https://github.com/tj/commander.js
+  Authors: TJ Holowaychuk
+
+content-disposition 1.1.0
+  License: MIT
+  URL: https://github.com/jshttp/content-disposition
+  Authors: Douglas Christopher Wilson
+
+content-type 1.0.5
+  License: MIT
+  URL: https://github.com/jshttp/content-type
+  Authors: Douglas Christopher Wilson
+
+convert-source-map 2.0.0
+  License: MIT
+  URL: https://github.com/thlorenz/convert-source-map
+  Authors: Thorsten Lorenz
+
+cookie 0.7.2
+  License: MIT
+  URL: https://github.com/jshttp/cookie
+  Authors: Roman Shtylman
+
+cookie 1.1.1
+  License: MIT
+  URL: https://github.com/jshttp/cookie
+  Authors: Roman Shtylman
+
+cookie-signature 1.2.2
+  License: MIT
+  URL: https://github.com/visionmedia/node-cookie-signature
+  Authors: TJ Holowaychuk
+
+cors 2.8.6
+  License: MIT
+  URL: https://github.com/expressjs/cors
+  Authors: Troy Goode
+
+cosmiconfig 9.0.1
+  License: MIT
+  URL: https://github.com/cosmiconfig/cosmiconfig
+  Authors: Daniel Fischer
+
+cross-env 7.0.3
+  License: MIT
+  URL: https://github.com/kentcdodds/cross-env
+  Authors: Kent C. Dodds
+
+cross-spawn 7.0.6
+  License: MIT
+  URL: https://github.com/moxystudio/node-cross-spawn
+  Authors: André Cruz
+
+cssesc 3.0.0
+  License: MIT
+  URL: https://github.com/mathiasbynens/cssesc
+  Authors: Mathias Bynens
+
+csstype 3.2.3
+  License: MIT
+  URL: https://github.com/frenic/csstype
+  Authors: Fredrik Nicol
+
+data-uri-to-buffer 4.0.1
+  License: MIT
+  URL: https://github.com/TooTallNate/node-data-uri-to-buffer
+  Authors: Nathan Rajlich
+
+debug 4.4.3
+  License: MIT
+  URL: https://github.com/debug-js/debug
+  Authors: Josh Junon
+
+decode-named-character-reference 1.3.0
+  License: MIT
+  URL: https://github.com/wooorm/decode-named-character-reference
+  Authors: Titus Wormer
+
+dedent 1.7.2
+  License: MIT
+  URL: https://github.com/dmnd/dedent
+  Authors: Desmond Brand
+
+deepmerge 4.3.1
+  License: MIT
+  URL: https://github.com/TehShrike/deepmerge
+
+default-browser 5.5.0
+  License: MIT
+  URL: https://github.com/sindresorhus/default-browser
+  Authors: Sindre Sorhus
+
+default-browser-id 5.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/default-browser-id
+  Authors: Sindre Sorhus
+
+define-lazy-prop 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/define-lazy-prop
+  Authors: Sindre Sorhus
+
+depd 2.0.0
+  License: MIT
+  URL: https://github.com/dougwilson/nodejs-depd
+  Authors: Douglas Christopher Wilson
+
+dequal 2.0.3
+  License: MIT
+  URL: https://github.com/lukeed/dequal
+  Authors: Luke Edwards
+
+detect-gpu 5.0.70
+  License: MIT
+  URL: https://github.com/pmndrs/detect-gpu
+  Authors: Tim van Scherpenzeel
+
+devlop 1.1.0
+  License: MIT
+  URL: https://github.com/wooorm/devlop
+  Authors: Titus Wormer
+
+diff 8.0.4
+  License: BSD-3-Clause
+  URL: https://github.com/kpdecker/jsdiff
+
+dompurify 3.2.7
+  License: (MPL-2.0 OR Apache-2.0)
+  URL: https://github.com/cure53/DOMPurify
+  Authors: Dr.-Ing. Mario Heiderich, Cure53
+
+dotenv 17.4.2
+  License: BSD-2-Clause
+  URL: https://github.com/motdotla/dotenv
+
+draco3d 1.5.7
+  License: Apache-2.0
+  URL: https://github.com/google/draco
+  Authors: Google Draco Team
+
+dunder-proto 1.0.1
+  License: MIT
+  URL: https://github.com/es-shims/dunder-proto
+  Authors: Jordan Harband
+
+eciesjs 0.4.18
+  License: MIT
+  URL: https://github.com/ecies/js
+  Authors: Weiliang Li
+
+ee-first 1.1.1
+  License: MIT
+  URL: https://github.com/jonathanong/ee-first
+  Authors: Jonathan Ong
+
+electron-to-chromium 1.5.353
+  License: ISC
+  URL: https://github.com/Kilian/electron-to-chromium
+  Authors: Kilian Valkhof
+
+emoji-regex 10.6.0
+  License: MIT
+  URL: https://github.com/mathiasbynens/emoji-regex
+  Authors: Mathias Bynens
+
+emoji-regex 8.0.0
+  License: MIT
+  URL: https://github.com/mathiasbynens/emoji-regex
+  Authors: Mathias Bynens
+
+encodeurl 2.0.0
+  License: MIT
+  URL: https://github.com/pillarjs/encodeurl
+
+env-paths 2.2.1
+  License: MIT
+  URL: https://github.com/sindresorhus/env-paths
+  Authors: Sindre Sorhus
+
+error-ex 1.3.4
+  License: MIT
+  URL: https://github.com/qix-/node-error-ex
+
+es-define-property 1.0.1
+  License: MIT
+  URL: https://github.com/ljharb/es-define-property
+  Authors: Jordan Harband
+
+es-errors 1.3.0
+  License: MIT
+  URL: https://github.com/ljharb/es-errors
+  Authors: Jordan Harband
+
+es-object-atoms 1.1.1
+  License: MIT
+  URL: https://github.com/ljharb/es-object-atoms
+  Authors: Jordan Harband
+
+escalade 3.2.0
+  License: MIT
+  URL: https://github.com/lukeed/escalade
+  Authors: Luke Edwards
+
+escape-html 1.0.3
+  License: MIT
+  URL: https://github.com/component/escape-html
+
+escape-string-regexp 5.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/escape-string-regexp
+  Authors: Sindre Sorhus
+
+esprima 4.0.1
+  License: BSD-2-Clause
+  URL: https://github.com/jquery/esprima
+  Authors: Ariya Hidayat
+
+estree-util-is-identifier-name 3.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/estree-util-is-identifier-name
+  Authors: Titus Wormer
+
+etag 1.8.1
+  License: MIT
+  URL: https://github.com/jshttp/etag
+
+event-target-shim 5.0.1
+  License: MIT
+  URL: https://github.com/mysticatea/event-target-shim
+  Authors: Toru Nagashima
+
+eventsource 2.0.2
+  License: MIT
+  URL: https://github.com/EventSource/eventsource
+  Authors: Aslak Hellesøy
+
+eventsource 3.0.7
+  License: MIT
+  URL: git://git@github.com/EventSource/eventsource
+  Authors: Espen Hovlandsdal
+
+eventsource-parser 3.0.8
+  License: MIT
+  URL: https://github.com/rexxars/eventsource-parser
+  Authors: Espen Hovlandsdal
+
+execa 5.1.1
+  License: MIT
+  URL: https://github.com/sindresorhus/execa
+  Authors: Sindre Sorhus
+
+execa 9.6.1
+  License: MIT
+  URL: https://github.com/sindresorhus/execa
+  Authors: Sindre Sorhus
+
+express 5.2.1
+  License: MIT
+  URL: https://github.com/expressjs/express
+  Authors: TJ Holowaychuk
+
+express-rate-limit 8.5.1
+  License: MIT
+  URL: https://github.com/express-rate-limit/express-rate-limit
+  Authors: Nathan Friedly
+
+extend 3.0.2
+  License: MIT
+  URL: https://github.com/justmoon/node-extend
+  Authors: Stefan Thomas
+
+fast-deep-equal 3.1.3
+  License: MIT
+  URL: https://github.com/epoberezkin/fast-deep-equal
+  Authors: Evgeny Poberezkin
+
+fast-glob 3.3.3
+  License: MIT
+  URL: https://github.com/mrmlnc/fast-glob
+  Authors: Denis Malinochkin
+
+fast-string-truncated-width 3.0.3
+  License: MIT
+  URL: https://github.com/fabiospampinato/fast-string-truncated-width
+
+fast-string-width 3.0.2
+  License: MIT
+  URL: https://github.com/fabiospampinato/fast-string-width
+
+fast-uri 3.1.2
+  License: BSD-3-Clause
+  URL: https://github.com/fastify/fast-uri
+  Authors: Vincent Le Goff
+
+fast-wrap-ansi 0.2.0
+  License: MIT
+  URL: https://github.com/43081j/fast-wrap-ansi
+  Authors: James Garbutt
+
+fastq 1.20.1
+  License: ISC
+  URL: https://github.com/mcollina/fastq
+  Authors: Matteo Collina
+
+fdir 6.5.0
+  License: MIT
+  URL: https://github.com/thecodrr/fdir
+  Authors: thecodrr
+
+fetch-blob 3.2.0
+  License: MIT
+  URL: https://github.com/node-fetch/fetch-blob
+  Authors: Jimmy Wärting
+
+fetch-cookie 2.2.0
+  License: Unlicense
+  URL: https://github.com/valeriangalliat/fetch-cookie
+  Authors: Val
+
+fflate 0.6.10
+  License: MIT
+  URL: https://github.com/101arrowz/fflate
+  Authors: Arjun Barrett
+
+fflate 0.8.3
+  License: MIT
+  URL: https://github.com/101arrowz/fflate
+  Authors: Arjun Barrett
+
+figures 6.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/figures
+  Authors: Sindre Sorhus
+
+fill-range 7.1.1
+  License: MIT
+  URL: https://github.com/jonschlinkert/fill-range
+  Authors: Jon Schlinkert
+
+finalhandler 2.1.1
+  License: MIT
+  URL: https://github.com/pillarjs/finalhandler
+  Authors: Douglas Christopher Wilson
+
+formdata-polyfill 4.0.10
+  License: MIT
+  URL: git+https://jimmywarting@github.com/jimmywarting/FormData
+  Authors: Jimmy Wärting
+
+forwarded 0.2.0
+  License: MIT
+  URL: https://github.com/jshttp/forwarded
+
+fresh 2.0.0
+  License: MIT
+  URL: https://github.com/jshttp/fresh
+  Authors: TJ Holowaychuk
+
+fs-extra 11.3.5
+  License: MIT
+  URL: https://github.com/jprichardson/node-fs-extra
+  Authors: JP Richardson
+
+function-bind 1.1.2
+  License: MIT
+  URL: https://github.com/Raynos/function-bind
+  Authors: Raynos
+
+fuzzysort 3.1.0
+  License: MIT
+  URL: https://github.com/farzher/fuzzysort
+  Authors: farzher
+
+gensync 1.0.0-beta.2
+  License: MIT
+  URL: https://github.com/loganfsmyth/gensync
+  Authors: Logan Smyth
+
+get-caller-file 2.0.5
+  License: ISC
+  URL: https://github.com/stefanpenner/get-caller-file
+  Authors: Stefan Penner
+
+get-east-asian-width 1.6.0
+  License: MIT
+  URL: https://github.com/sindresorhus/get-east-asian-width
+  Authors: Sindre Sorhus
+
+get-intrinsic 1.3.0
+  License: MIT
+  URL: https://github.com/ljharb/get-intrinsic
+  Authors: Jordan Harband
+
+get-own-enumerable-keys 1.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/get-own-enumerable-keys
+  Authors: Sindre Sorhus
+
+get-proto 1.0.1
+  License: MIT
+  URL: https://github.com/ljharb/get-proto
+  Authors: Jordan Harband
+
+get-stream 6.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/get-stream
+  Authors: Sindre Sorhus
+
+get-stream 9.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/get-stream
+  Authors: Sindre Sorhus
+
+github-slugger 2.0.0
+  License: ISC
+  URL: https://github.com/Flet/github-slugger
+  Authors: Dan Flettre
+
+glob-parent 5.1.2
+  License: ISC
+  URL: https://github.com/gulpjs/glob-parent
+  Authors: Gulp Team
+
+glsl-noise 0.0.0
+  License: MIT
+  URL: https://github.com/hughsk/glsl-noise
+  Authors: Ian McEwan, Ashima Arts, Stefan Gustavson
+
+gopd 1.2.0
+  License: MIT
+  URL: https://github.com/ljharb/gopd
+  Authors: Jordan Harband
+
+graceful-fs 4.2.11
+  License: ISC
+  URL: https://github.com/isaacs/node-graceful-fs
+
+graphql 16.14.0
+  License: MIT
+  URL: https://github.com/graphql/graphql-js
+
+has-symbols 1.1.0
+  License: MIT
+  URL: https://github.com/inspect-js/has-symbols
+  Authors: Jordan Harband
+
+hasown 2.0.3
+  License: MIT
+  URL: https://github.com/inspect-js/hasOwn
+  Authors: Jordan Harband
+
+hast-util-heading-rank 3.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/hast-util-heading-rank
+  Authors: Titus Wormer
+
+hast-util-is-element 3.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/hast-util-is-element
+  Authors: Titus Wormer
+
+hast-util-to-jsx-runtime 2.3.6
+  License: MIT
+  URL: https://github.com/syntax-tree/hast-util-to-jsx-runtime
+  Authors: Titus Wormer
+
+hast-util-to-string 3.0.1
+  License: MIT
+  URL: https://github.com/rehypejs/rehype-minify.git#main
+  Authors: Titus Wormer
+
+hast-util-to-text 4.0.2
+  License: MIT
+  URL: https://github.com/syntax-tree/hast-util-to-text
+  Authors: Titus Wormer
+
+hast-util-whitespace 3.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/hast-util-whitespace
+  Authors: Titus Wormer
+
+headers-polyfill 5.0.1
+  License: MIT
+  URL: https://github.com/mswjs/headers-polyfill
+  Authors: Artem Zakharchenko
+
+heliosoph-datumv-web-clientapp 0.0.0
+  License: UNLICENSED
+
+highlight.js 11.11.1
+  License: BSD-3-Clause
+  URL: https://github.com/highlightjs/highlight.js
+  Authors: Josh Goebel
+
+hls.js 1.6.16
+  License: Apache-2.0
+  URL: https://github.com/video-dev/hls.js
+
+hono 4.12.18
+  License: MIT
+  URL: https://github.com/honojs/hono
+  Authors: Yusuke Wada
+
+html-parse-stringify 3.0.1
+  License: MIT
+  URL: https://github.com/henrikjoreteg/html-parse-stringify
+  Authors: Henrik Joreteg
+
+html-url-attributes 3.0.1
+  License: MIT
+  URL: https://github.com/rehypejs/rehype-minify.git#main
+  Authors: Titus Wormer
+
+http-errors 2.0.1
+  License: MIT
+  URL: https://github.com/jshttp/http-errors
+  Authors: Jonathan Ong
+
+https-proxy-agent 7.0.6
+  License: MIT
+  URL: https://github.com/TooTallNate/proxy-agents
+  Authors: Nathan Rajlich
+
+human-signals 2.1.0
+  License: Apache-2.0
+  URL: https://github.com/ehmicky/human-signals
+  Authors: ehmicky
+
+human-signals 8.0.1
+  License: Apache-2.0
+  URL: https://github.com/ehmicky/human-signals
+  Authors: ehmicky
+
+i18next 26.1.0
+  License: MIT
+  URL: https://github.com/i18next/i18next
+  Authors: Jan Mühlemann
+
+i18next-icu 2.4.3
+  License: MIT
+  URL: https://github.com/i18next/i18next-icu
+  Authors: Jan Mühlemann
+
+iconv-lite 0.7.2
+  License: MIT
+  URL: https://github.com/pillarjs/iconv-lite
+  Authors: Alexander Shtuchkin
+
+ieee754 1.2.1
+  License: BSD-3-Clause
+  URL: https://github.com/feross/ieee754
+  Authors: Feross Aboukhadijeh
+
+ignore 5.3.2
+  License: MIT
+  URL: https://github.com/kaelzhang/node-ignore
+  Authors: kael
+
+immediate 3.0.6
+  License: MIT
+  URL: https://github.com/calvinmetcalf/immediate
+
+import-fresh 3.3.1
+  License: MIT
+  URL: https://github.com/sindresorhus/import-fresh
+  Authors: Sindre Sorhus
+
+inherits 2.0.4
+  License: ISC
+  URL: https://github.com/isaacs/inherits
+
+inline-style-parser 0.2.7
+  License: MIT
+  URL: https://github.com/remarkablemark/inline-style-parser
+
+intl-messageformat 11.2.4
+  License: BSD-3-Clause
+  URL: https://github.com/formatjs/formatjs
+  Authors: Eric Ferraiuolo
+
+ip-address 10.2.0
+  License: MIT
+  URL: https://github.com/beaugunderson/ip-address
+  Authors: Beau Gunderson
+
+ipaddr.js 1.9.1
+  License: MIT
+  URL: https://github.com/whitequark/ipaddr.js
+  Authors: whitequark
+
+is-alphabetical 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/is-alphabetical
+  Authors: Titus Wormer
+
+is-alphanumerical 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/is-alphanumerical
+  Authors: Titus Wormer
+
+is-arrayish 0.2.1
+  License: MIT
+  URL: https://github.com/qix-/node-is-arrayish
+  Authors: Qix
+
+is-decimal 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/is-decimal
+  Authors: Titus Wormer
+
+is-docker 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-docker
+  Authors: Sindre Sorhus
+
+is-extglob 2.1.1
+  License: MIT
+  URL: https://github.com/jonschlinkert/is-extglob
+  Authors: Jon Schlinkert
+
+is-fullwidth-code-point 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-fullwidth-code-point
+  Authors: Sindre Sorhus
+
+is-glob 4.0.3
+  License: MIT
+  URL: https://github.com/micromatch/is-glob
+  Authors: Jon Schlinkert
+
+is-hexadecimal 2.0.1
+  License: MIT
+  URL: https://github.com/wooorm/is-hexadecimal
+  Authors: Titus Wormer
+
+is-in-ssh 1.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-in-ssh
+  Authors: Sindre Sorhus
+
+is-inside-container 1.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-inside-container
+  Authors: Sindre Sorhus
+
+is-interactive 2.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-interactive
+  Authors: Sindre Sorhus
+
+is-node-process 1.2.0
+  License: MIT
+  URL: https://github.com/mswjs/is-node-process
+
+is-number 7.0.0
+  License: MIT
+  URL: https://github.com/jonschlinkert/is-number
+  Authors: Jon Schlinkert
+
+is-obj 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-obj
+  Authors: Sindre Sorhus
+
+is-plain-obj 4.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-plain-obj
+  Authors: Sindre Sorhus
+
+is-promise 2.2.2
+  License: MIT
+  URL: https://github.com/then/is-promise
+  Authors: ForbesLindesay
+
+is-promise 4.0.0
+  License: MIT
+  URL: https://github.com/then/is-promise
+  Authors: ForbesLindesay
+
+is-regexp 3.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-regexp
+  Authors: Sindre Sorhus
+
+is-stream 2.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/is-stream
+  Authors: Sindre Sorhus
+
+is-stream 4.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/is-stream
+  Authors: Sindre Sorhus
+
+is-unicode-supported 1.3.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-unicode-supported
+  Authors: Sindre Sorhus
+
+is-unicode-supported 2.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-unicode-supported
+  Authors: Sindre Sorhus
+
+is-wsl 3.1.1
+  License: MIT
+  URL: https://github.com/sindresorhus/is-wsl
+  Authors: Sindre Sorhus
+
+isexe 2.0.0
+  License: ISC
+  URL: https://github.com/isaacs/isexe
+  Authors: Isaac Z. Schlueter
+
+isexe 3.1.5
+  License: BlueOak-1.0.0
+  URL: https://github.com/isaacs/isexe
+  Authors: Isaac Z. Schlueter
+
+its-fine 2.0.0
+  License: MIT
+  URL: https://github.com/pmndrs/its-fine
+  Authors: Cody Bennett
+
+jose 6.2.3
+  License: MIT
+  URL: https://github.com/panva/jose
+  Authors: Filip Skokan
+
+js-tokens 4.0.0
+  License: MIT
+  URL: https://github.com/lydell/js-tokens
+  Authors: Simon Lydell
+
+js-yaml 4.1.1
+  License: MIT
+  URL: https://github.com/nodeca/js-yaml
+  Authors: Vladimir Zapparov
+
+jsesc 3.1.0
+  License: MIT
+  URL: https://github.com/mathiasbynens/jsesc
+  Authors: Mathias Bynens
+
+json-parse-even-better-errors 2.3.1
+  License: MIT
+  URL: https://github.com/npm/json-parse-even-better-errors
+  Authors: Kat Marchán
+
+json-schema-traverse 1.0.0
+  License: MIT
+  URL: https://github.com/epoberezkin/json-schema-traverse
+  Authors: Evgeny Poberezkin
+
+json-schema-typed 8.0.2
+  License: BSD-2-Clause
+  URL: https://github.com/RemyRylan/json-schema-typed
+  Authors: Remy Rylan
+
+json5 2.2.3
+  License: MIT
+  URL: https://github.com/json5/json5
+  Authors: Aseem Kishore
+
+jsonfile 6.2.1
+  License: MIT
+  URL: https://github.com/jprichardson/node-jsonfile
+  Authors: JP Richardson
+
+kleur 3.0.3
+  License: MIT
+  URL: https://github.com/lukeed/kleur
+  Authors: Luke Edwards
+
+kleur 4.1.5
+  License: MIT
+  URL: https://github.com/lukeed/kleur
+  Authors: Luke Edwards
+
+lie 3.3.0
+  License: MIT
+  URL: https://github.com/calvinmetcalf/lie
+
+lines-and-columns 1.2.4
+  License: MIT
+  URL: https://github.com/eventualbuddha/lines-and-columns
+  Authors: Brian Donovan
+
+log-symbols 6.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/log-symbols
+  Authors: Sindre Sorhus
+
+longest-streak 3.1.0
+  License: MIT
+  URL: https://github.com/wooorm/longest-streak
+  Authors: Titus Wormer
+
+lowlight 3.3.0
+  License: MIT
+  URL: https://github.com/wooorm/lowlight
+  Authors: Titus Wormer
+
+lru-cache 5.1.1
+  License: ISC
+  URL: https://github.com/isaacs/node-lru-cache
+  Authors: Isaac Z. Schlueter
+
+lucide-react 1.14.0
+  License: ISC
+  URL: https://github.com/lucide-icons/lucide
+  Authors: Eric Fennis
+
+maath 0.10.8
+  License: MIT
+
+markdown-table 3.0.4
+  License: MIT
+  URL: https://github.com/wooorm/markdown-table
+  Authors: Titus Wormer
+
+marked 14.0.0
+  License: MIT
+  URL: https://github.com/markedjs/marked
+  Authors: Christopher Jeffrey
+
+math-intrinsics 1.1.0
+  License: MIT
+  URL: https://github.com/es-shims/math-intrinsics
+  Authors: Jordan Harband
+
+mdast-util-find-and-replace 3.0.2
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-find-and-replace
+  Authors: Titus Wormer
+
+mdast-util-from-markdown 2.0.3
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-from-markdown
+  Authors: Titus Wormer
+
+mdast-util-gfm 3.1.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm
+  Authors: Titus Wormer
+
+mdast-util-gfm-autolink-literal 2.0.1
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm-autolink-literal
+  Authors: Titus Wormer
+
+mdast-util-gfm-footnote 2.1.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm-footnote
+  Authors: Titus Wormer
+
+mdast-util-gfm-strikethrough 2.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm-strikethrough
+  Authors: Titus Wormer
+
+mdast-util-gfm-table 2.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm-table
+  Authors: Titus Wormer
+
+mdast-util-gfm-task-list-item 2.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-gfm-task-list-item
+  Authors: Titus Wormer
+
+mdast-util-mdx-expression 2.0.1
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-mdx-expression
+  Authors: Titus Wormer
+
+mdast-util-mdx-jsx 3.2.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-mdx-jsx
+  Authors: Titus Wormer
+
+mdast-util-mdxjs-esm 2.0.1
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-mdxjs-esm
+  Authors: Titus Wormer
+
+mdast-util-phrasing 4.1.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-phrasing
+  Authors: Victor Felder
+
+mdast-util-to-hast 13.2.1
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-to-hast
+  Authors: Titus Wormer
+
+mdast-util-to-markdown 2.1.2
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-to-markdown
+  Authors: Titus Wormer
+
+mdast-util-to-string 4.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/mdast-util-to-string
+  Authors: Titus Wormer
+
+media-typer 1.1.0
+  License: MIT
+  URL: https://github.com/jshttp/media-typer
+  Authors: Douglas Christopher Wilson
+
+merge-descriptors 2.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/merge-descriptors
+
+merge-stream 2.0.0
+  License: MIT
+  URL: https://github.com/grncdr/merge-stream
+  Authors: Stephen Sugden
+
+merge2 1.4.1
+  License: MIT
+  URL: https://github.com/teambition/merge2
+
+meshline 3.3.1
+  License: MIT
+  Authors: Jaume Sanchez
+
+meshoptimizer 1.1.1
+  License: MIT
+  URL: https://github.com/zeux/meshoptimizer
+  Authors: Arseny Kapoulkine
+
+micromark 4.0.2
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-core-commonmark 2.0.3
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-extension-gfm 3.0.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm
+  Authors: Titus Wormer
+
+micromark-extension-gfm-autolink-literal 2.1.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-autolink-literal
+  Authors: Titus Wormer
+
+micromark-extension-gfm-footnote 2.1.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-footnote
+  Authors: Titus Wormer
+
+micromark-extension-gfm-strikethrough 2.1.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-strikethrough
+  Authors: Titus Wormer
+
+micromark-extension-gfm-table 2.1.1
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-table
+  Authors: Titus Wormer
+
+micromark-extension-gfm-tagfilter 2.0.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-tagfilter
+  Authors: Titus Wormer
+
+micromark-extension-gfm-task-list-item 2.1.0
+  License: MIT
+  URL: https://github.com/micromark/micromark-extension-gfm-task-list-item
+  Authors: Titus Wormer
+
+micromark-factory-destination 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-factory-label 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-factory-space 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-factory-title 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-factory-whitespace 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-character 2.1.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-chunked 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-classify-character 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-combine-extensions 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-decode-numeric-character-reference 2.0.2
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-decode-string 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-encode 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-html-tag-name 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-normalize-identifier 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-resolve-all 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-sanitize-uri 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-subtokenize 2.1.0
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-symbol 2.0.1
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromark-util-types 2.0.2
+  License: MIT
+  URL: https://github.com/micromark/micromark.git#main
+  Authors: Titus Wormer
+
+micromatch 4.0.8
+  License: MIT
+  URL: https://github.com/micromatch/micromatch
+  Authors: Jon Schlinkert
+
+mime-db 1.54.0
+  License: MIT
+  URL: https://github.com/jshttp/mime-db
+
+mime-types 3.0.2
+  License: MIT
+  URL: https://github.com/jshttp/mime-types
+
+mimic-fn 2.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/mimic-fn
+  Authors: Sindre Sorhus
+
+mimic-function 5.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/mimic-function
+  Authors: Sindre Sorhus
+
+minimatch 10.2.5
+  License: BlueOak-1.0.0
+  URL: https://github.com/isaacs/minimatch
+  Authors: Isaac Z. Schlueter
+
+minimist 1.2.8
+  License: MIT
+  URL: https://github.com/minimistjs/minimist
+  Authors: James Halliday
+
+minisearch 7.2.0
+  License: MIT
+  URL: https://github.com/lucaong/minisearch
+  Authors: Luca Ongaro
+
+monaco-editor 0.55.1
+  License: MIT
+  URL: https://github.com/microsoft/monaco-editor
+  Authors: Microsoft Corporation
+
+ms 2.1.3
+  License: MIT
+  URL: https://github.com/vercel/ms
+
+msw 2.14.5
+  License: MIT
+  URL: https://github.com/mswjs/msw
+  Authors: Artem Zakharchenko
+
+mute-stream 3.0.0
+  License: ISC
+  URL: https://github.com/npm/mute-stream
+  Authors: GitHub Inc.
+
+nanoid 3.3.12
+  License: MIT
+  URL: https://github.com/ai/nanoid
+  Authors: Andrey Sitnik
+
+negotiator 1.0.0
+  License: MIT
+  URL: https://github.com/jshttp/negotiator
+
+node-domexception 1.0.0
+  License: MIT
+  URL: https://github.com/jimmywarting/node-domexception
+  Authors: Jimmy Wärting
+
+node-fetch 2.7.0
+  License: MIT
+  URL: https://github.com/bitinn/node-fetch
+  Authors: David Frank
+
+node-fetch 3.3.2
+  License: MIT
+  URL: https://github.com/node-fetch/node-fetch
+  Authors: David Frank
+
+node-releases 2.0.38
+  License: MIT
+  URL: https://github.com/chicoxyzzy/node-releases
+  Authors: Sergey Rubanov
+
+npm-run-path 4.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/npm-run-path
+  Authors: Sindre Sorhus
+
+npm-run-path 6.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/npm-run-path
+  Authors: Sindre Sorhus
+
+object-assign 4.1.1
+  License: MIT
+  URL: https://github.com/sindresorhus/object-assign
+  Authors: Sindre Sorhus
+
+object-inspect 1.13.4
+  License: MIT
+  URL: https://github.com/inspect-js/object-inspect
+  Authors: James Halliday
+
+object-treeify 1.1.33
+  License: MIT
+  URL: https://github.com/blackflux/object-treeify
+  Authors: Lukas Siemon
+
+on-finished 2.4.1
+  License: MIT
+  URL: https://github.com/jshttp/on-finished
+
+once 1.4.0
+  License: ISC
+  URL: https://github.com/isaacs/once
+  Authors: Isaac Z. Schlueter
+
+onetime 5.1.2
+  License: MIT
+  URL: https://github.com/sindresorhus/onetime
+  Authors: Sindre Sorhus
+
+onetime 7.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/onetime
+  Authors: Sindre Sorhus
+
+open 11.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/open
+  Authors: Sindre Sorhus
+
+ora 8.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/ora
+  Authors: Sindre Sorhus
+
+outvariant 1.4.3
+  License: MIT
+  URL: https://github.com/open-draft/outvariant
+  Authors: Artem Zakharchenko
+
+parent-module 1.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/parent-module
+  Authors: Sindre Sorhus
+
+parse-entities 4.0.2
+  License: MIT
+  URL: https://github.com/wooorm/parse-entities
+  Authors: Titus Wormer
+
+parse-json 5.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/parse-json
+  Authors: Sindre Sorhus
+
+parse-ms 4.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/parse-ms
+  Authors: Sindre Sorhus
+
+parseurl 1.3.3
+  License: MIT
+  URL: https://github.com/pillarjs/parseurl
+
+path-browserify 1.0.1
+  License: MIT
+  URL: https://github.com/browserify/path-browserify
+  Authors: James Halliday
+
+path-key 3.1.1
+  License: MIT
+  URL: https://github.com/sindresorhus/path-key
+  Authors: Sindre Sorhus
+
+path-key 4.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/path-key
+  Authors: Sindre Sorhus
+
+path-to-regexp 6.3.0
+  License: MIT
+  URL: https://github.com/pillarjs/path-to-regexp
+
+path-to-regexp 8.4.2
+  License: MIT
+  URL: https://github.com/pillarjs/path-to-regexp
+
+picocolors 1.1.1
+  License: ISC
+  URL: https://github.com/alexeyraspopov/picocolors
+  Authors: Alexey Raspopov
+
+picomatch 2.3.2
+  License: MIT
+  URL: https://github.com/micromatch/picomatch
+  Authors: Jon Schlinkert
+
+picomatch 4.0.4
+  License: MIT
+  URL: https://github.com/micromatch/picomatch
+  Authors: Jon Schlinkert
+
+pkce-challenge 5.0.1
+  License: MIT
+  URL: https://github.com/crouchcd/pkce-challenge
+  Authors: crouchcd
+
+postcss 8.5.14
+  License: MIT
+  URL: https://github.com/postcss/postcss
+  Authors: Andrey Sitnik
+
+postcss-selector-parser 7.1.1
+  License: MIT
+  URL: https://github.com/postcss/postcss-selector-parser
+
+potpack 1.0.2
+  License: ISC
+  URL: https://github.com/mapbox/potpack
+  Authors: Vladimir Agafonkin
+
+powershell-utils 0.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/powershell-utils
+  Authors: Sindre Sorhus
+
+pretty-ms 9.3.0
+  License: MIT
+  URL: https://github.com/sindresorhus/pretty-ms
+  Authors: Sindre Sorhus
+
+promise-worker-transferable 1.0.4
+  License: Apache-2.0
+  URL: https://github.com/terikon/promise-worker-transferable
+  Authors: Roman Viskin
+
+prompts 2.4.2
+  License: MIT
+  URL: https://github.com/terkelg/prompts
+  Authors: Terkel Gjervig
+
+property-information 7.1.0
+  License: MIT
+  URL: https://github.com/wooorm/property-information
+  Authors: Titus Wormer
+
+proxy-addr 2.0.7
+  License: MIT
+  URL: https://github.com/jshttp/proxy-addr
+  Authors: Douglas Christopher Wilson
+
+proxy-compare 3.0.1
+  License: MIT
+  URL: https://github.com/dai-shi/proxy-compare
+  Authors: Daishi Kato
+
+psl 1.15.0
+  License: MIT
+  URL: https://github.com/lupomontero/psl
+  Authors: Lupo Montero
+
+punycode 2.3.1
+  License: MIT
+  URL: https://github.com/mathiasbynens/punycode.js
+  Authors: Mathias Bynens
+
+qs 6.15.1
+  License: BSD-3-Clause
+  URL: https://github.com/ljharb/qs
+
+querystringify 2.2.0
+  License: MIT
+  URL: https://github.com/unshiftio/querystringify
+  Authors: Arnout Kazemier
+
+queue-microtask 1.2.3
+  License: MIT
+  URL: https://github.com/feross/queue-microtask
+  Authors: Feross Aboukhadijeh
+
+range-parser 1.2.1
+  License: MIT
+  URL: https://github.com/jshttp/range-parser
+  Authors: TJ Holowaychuk
+
+raw-body 3.0.2
+  License: MIT
+  URL: https://github.com/stream-utils/raw-body
+  Authors: Jonathan Ong
+
+react 19.2.6
+  License: MIT
+  URL: https://github.com/facebook/react
+
+react-dom 19.2.6
+  License: MIT
+  URL: https://github.com/facebook/react
+
+react-i18next 17.0.7
+  License: MIT
+  URL: https://github.com/i18next/react-i18next
+  Authors: Jan Mühlemann
+
+react-markdown 10.1.0
+  License: MIT
+  URL: https://github.com/remarkjs/react-markdown
+  Authors: Espen Hovlandsdal
+
+react-resizable-panels 4.11.1
+  License: MIT
+  URL: https://github.com/bvaughn/react-resizable-panels
+  Authors: Brian Vaughn
+
+react-use-measure 2.1.7
+  License: MIT
+  URL: https://github.com/pmndrs/react-use-measure
+  Authors: Paul Henschel
+
+recast 0.23.11
+  License: MIT
+  URL: https://github.com/benjamn/recast
+  Authors: Ben Newman
+
+rehype-highlight 7.0.2
+  License: MIT
+  URL: https://github.com/rehypejs/rehype-highlight
+  Authors: Titus Wormer
+
+rehype-slug 6.0.0
+  License: MIT
+  URL: https://github.com/rehypejs/rehype-slug
+  Authors: Titus Wormer
+
+remark-gfm 4.0.1
+  License: MIT
+  URL: https://github.com/remarkjs/remark-gfm
+  Authors: Titus Wormer
+
+remark-parse 11.0.0
+  License: MIT
+  URL: https://github.com/remarkjs/remark.git#main
+  Authors: Titus Wormer
+
+remark-rehype 11.1.2
+  License: MIT
+  URL: https://github.com/remarkjs/remark-rehype
+  Authors: Titus Wormer
+
+remark-stringify 11.0.0
+  License: MIT
+  URL: https://github.com/remarkjs/remark.git#main
+  Authors: Titus Wormer
+
+require-directory 2.1.1
+  License: MIT
+  URL: https://github.com/troygoode/node-require-directory
+  Authors: Troy Goode
+
+require-from-string 2.0.2
+  License: MIT
+  URL: https://github.com/floatdrop/require-from-string
+  Authors: Vsevolod Strukchinsky
+
+requires-port 1.0.0
+  License: MIT
+  URL: https://github.com/unshiftio/requires-port
+  Authors: Arnout Kazemier
+
+reselect 5.1.1
+  License: MIT
+  URL: https://github.com/reduxjs/reselect
+
+resolve-from 4.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/resolve-from
+  Authors: Sindre Sorhus
+
+restore-cursor 5.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/restore-cursor
+  Authors: Sindre Sorhus
+
+rettime 0.11.11
+  License: MIT
+  URL: https://github.com/kettanaito/rettime
+  Authors: Artem Zakharchenko
+
+reusify 1.1.0
+  License: MIT
+  URL: https://github.com/mcollina/reusify
+  Authors: Matteo Collina
+
+router 2.2.0
+  License: MIT
+  URL: https://github.com/pillarjs/router
+  Authors: Douglas Christopher Wilson
+
+run-applescript 7.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/run-applescript
+  Authors: Sindre Sorhus
+
+run-parallel 1.2.0
+  License: MIT
+  URL: https://github.com/feross/run-parallel
+  Authors: Feross Aboukhadijeh
+
+safer-buffer 2.1.2
+  License: MIT
+  URL: https://github.com/ChALkeR/safer-buffer
+  Authors: Nikita Skovoroda
+
+scheduler 0.27.0
+  License: MIT
+  URL: https://github.com/facebook/react
+
+semver 6.3.1
+  License: ISC
+  URL: https://github.com/npm/node-semver
+  Authors: GitHub Inc.
+
+send 1.2.1
+  License: MIT
+  URL: https://github.com/pillarjs/send
+  Authors: TJ Holowaychuk
+
+serve-static 2.2.1
+  License: MIT
+  URL: https://github.com/expressjs/serve-static
+  Authors: Douglas Christopher Wilson
+
+set-cookie-parser 2.7.2
+  License: MIT
+  URL: https://github.com/nfriedly/set-cookie-parser
+  Authors: Nathan Friedly
+
+set-cookie-parser 3.1.0
+  License: MIT
+  URL: https://github.com/nfriedly/set-cookie-parser
+  Authors: Nathan Friedly
+
+setprototypeof 1.2.0
+  License: ISC
+  URL: https://github.com/wesleytodd/setprototypeof
+  Authors: Wes Todd
+
+shadcn 4.7.0
+  License: MIT
+  URL: https://github.com/shadcn-ui/ui
+  Authors: shadcn
+
+shebang-command 2.0.0
+  License: MIT
+  URL: https://github.com/kevva/shebang-command
+  Authors: Kevin Mårtensson
+
+shebang-regex 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/shebang-regex
+  Authors: Sindre Sorhus
+
+side-channel 1.1.0
+  License: MIT
+  URL: https://github.com/ljharb/side-channel
+  Authors: Jordan Harband
+
+side-channel-list 1.0.1
+  License: MIT
+  URL: https://github.com/ljharb/side-channel-list
+  Authors: Jordan Harband
+
+side-channel-map 1.0.1
+  License: MIT
+  URL: https://github.com/ljharb/side-channel-map
+  Authors: Jordan Harband
+
+side-channel-weakmap 1.0.2
+  License: MIT
+  URL: https://github.com/ljharb/side-channel-weakmap
+  Authors: Jordan Harband
+
+signal-exit 3.0.7
+  License: ISC
+  URL: https://github.com/tapjs/signal-exit
+  Authors: Ben Coe
+
+signal-exit 4.1.0
+  License: ISC
+  URL: https://github.com/tapjs/signal-exit
+  Authors: Ben Coe
+
+sisteransi 1.0.5
+  License: MIT
+  URL: https://github.com/terkelg/sisteransi
+  Authors: Terkel Gjervig
+
+source-map 0.6.1
+  License: BSD-3-Clause
+  URL: https://github.com/mozilla/source-map
+  Authors: Nick Fitzgerald
+
+source-map-js 1.2.1
+  License: BSD-3-Clause
+  URL: https://github.com/7rulnik/source-map-js
+  Authors: Valentin 7rulnik Semirulnik
+
+space-separated-tokens 2.0.2
+  License: MIT
+  URL: https://github.com/wooorm/space-separated-tokens
+  Authors: Titus Wormer
+
+state-local 1.0.7
+  License: MIT
+  URL: https://github.com/suren-atoyan/state-local
+  Authors: Suren Atoyan
+
+stats-gl 2.4.2
+  License: MIT
+  URL: https://github.com/RenaudRohlinger/stats-gl
+  Authors: Renaud ROHLINGER
+
+stats.js 0.17.0
+  License: MIT
+  URL: https://github.com/mrdoob/stats.js
+  Authors: mrdoob
+
+statuses 2.0.2
+  License: MIT
+  URL: https://github.com/jshttp/statuses
+
+stdin-discarder 0.2.2
+  License: MIT
+  URL: https://github.com/sindresorhus/stdin-discarder
+  Authors: Sindre Sorhus
+
+strict-event-emitter 0.5.1
+  License: MIT
+  URL: https://github.com/open-draft/strict-event-emitter
+  Authors: Artem Zakharchenko
+
+string-width 4.2.3
+  License: MIT
+  URL: https://github.com/sindresorhus/string-width
+  Authors: Sindre Sorhus
+
+string-width 7.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/string-width
+  Authors: Sindre Sorhus
+
+stringify-entities 4.0.4
+  License: MIT
+  URL: https://github.com/wooorm/stringify-entities
+  Authors: Titus Wormer
+
+stringify-object 5.0.0
+  License: BSD-2-Clause
+  URL: https://github.com/yeoman/stringify-object
+  Authors: Sindre Sorhus
+
+strip-ansi 6.0.1
+  License: MIT
+  URL: https://github.com/chalk/strip-ansi
+  Authors: Sindre Sorhus
+
+strip-ansi 7.2.0
+  License: MIT
+  URL: https://github.com/chalk/strip-ansi
+  Authors: Sindre Sorhus
+
+strip-bom 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/strip-bom
+  Authors: Sindre Sorhus
+
+strip-final-newline 2.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/strip-final-newline
+  Authors: Sindre Sorhus
+
+strip-final-newline 4.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/strip-final-newline
+  Authors: Sindre Sorhus
+
+style-to-js 1.1.21
+  License: MIT
+  URL: https://github.com/remarkablemark/style-to-js
+  Authors: Mark
+
+style-to-object 1.0.14
+  License: MIT
+  URL: https://github.com/remarkablemark/style-to-object
+  Authors: Mark
+
+suspend-react 0.1.3
+  License: MIT
+  URL: https://github.com/pmndrs/suspend-react
+  Authors: Paul Henschel
+
+tagged-tag 1.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/tagged-tag
+  Authors: Sindre Sorhus
+
+tailwind-merge 3.6.0
+  License: MIT
+  URL: https://github.com/dcastil/tailwind-merge
+  Authors: Dany Castillo
+
+three 0.170.0
+  License: MIT
+  URL: https://github.com/mrdoob/three.js
+  Authors: mrdoob
+
+three 0.184.0
+  License: MIT
+  URL: https://github.com/mrdoob/three.js
+  Authors: mrdoob
+
+three-mesh-bvh 0.8.3
+  License: MIT
+  URL: https://github.com/gkjohnson/three-mesh-bvh
+  Authors: Garrett Johnson
+
+three-stdlib 2.36.1
+  License: MIT
+  URL: https://github.com/pmndrs/three-stdlib
+  Authors: Paul Henschel
+
+tiny-invariant 1.3.3
+  License: MIT
+  URL: https://github.com/alexreardon/tiny-invariant
+  Authors: Alex Reardon
+
+tldts 7.0.30
+  License: MIT
+  URL: https://github.com/remusao/tldts
+  Authors: Rémi Berson
+
+tldts-core 7.0.30
+  License: MIT
+  URL: https://github.com/remusao/tldts
+  Authors: Rémi Berson
+
+to-regex-range 5.0.1
+  License: MIT
+  URL: https://github.com/micromatch/to-regex-range
+  Authors: Jon Schlinkert
+
+toidentifier 1.0.1
+  License: MIT
+  URL: https://github.com/component/toidentifier
+  Authors: Douglas Christopher Wilson
+
+tough-cookie 4.1.4
+  License: BSD-3-Clause
+  URL: https://github.com/salesforce/tough-cookie
+  Authors: Jeremy Stashewsky
+
+tough-cookie 6.0.1
+  License: BSD-3-Clause
+  URL: https://github.com/salesforce/tough-cookie
+  Authors: Jeremy Stashewsky
+
+tr46 0.0.3
+  License: MIT
+  URL: https://github.com/Sebmaster/tr46.js
+  Authors: Sebastian Mayr
+
+trim-lines 3.0.1
+  License: MIT
+  URL: https://github.com/wooorm/trim-lines
+  Authors: Titus Wormer
+
+troika-three-text 0.52.4
+  License: MIT
+  URL: https://github.com/protectwise/troika
+  Authors: Jason Johnston
+
+troika-three-utils 0.52.4
+  License: MIT
+  URL: https://github.com/protectwise/troika
+  Authors: Jason Johnston
+
+troika-worker-utils 0.52.0
+  License: MIT
+  URL: https://github.com/protectwise/troika
+  Authors: Jason Johnston
+
+trough 2.2.0
+  License: MIT
+  URL: https://github.com/wooorm/trough
+  Authors: Titus Wormer
+
+ts-morph 26.0.0
+  License: MIT
+  URL: https://github.com/dsherret/ts-morph
+  Authors: David Sherret
+
+tsconfig-paths 4.2.0
+  License: MIT
+  URL: https://github.com/dividab/tsconfig-paths
+  Authors: Jonas Kello
+
+tslib 2.8.1
+  License: 0BSD
+  URL: https://github.com/Microsoft/tslib
+  Authors: Microsoft Corp.
+
+tunnel-rat 0.1.2
+  License: MIT
+  URL: https://github.com/pmndrs/tunnel-rat
+  Authors: Paul Henschel
+
+tw-animate-css 1.4.0
+  License: MIT
+  URL: https://github.com/Wombosvideo/tw-animate-css
+  Authors: Luca Bosin
+
+type-fest 5.6.0
+  License: (MIT OR CC0-1.0)
+  URL: https://github.com/sindresorhus/type-fest
+  Authors: Sindre Sorhus
+
+type-is 2.0.1
+  License: MIT
+  URL: https://github.com/jshttp/type-is
+
+typescript 5.9.3
+  License: Apache-2.0
+  URL: https://github.com/microsoft/TypeScript
+  Authors: Microsoft Corp.
+
+undici-types 6.21.0
+  License: MIT
+  URL: https://github.com/nodejs/undici
+
+unicorn-magic 0.3.0
+  License: MIT
+  URL: https://github.com/sindresorhus/unicorn-magic
+  Authors: Sindre Sorhus
+
+unified 11.0.5
+  License: MIT
+  URL: https://github.com/unifiedjs/unified
+  Authors: Titus Wormer
+
+unist-util-find-after 5.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-find-after
+  Authors: Titus Wormer
+
+unist-util-is 6.0.1
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-is
+  Authors: Titus Wormer
+
+unist-util-position 5.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-position
+  Authors: Titus Wormer
+
+unist-util-stringify-position 4.0.0
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-stringify-position
+  Authors: Titus Wormer
+
+unist-util-visit 5.1.0
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-visit
+  Authors: Titus Wormer
+
+unist-util-visit-parents 6.0.2
+  License: MIT
+  URL: https://github.com/syntax-tree/unist-util-visit-parents
+  Authors: Titus Wormer
+
+universalify 0.2.0
+  License: MIT
+  URL: https://github.com/RyanZim/universalify
+  Authors: Ryan Zimmerman
+
+universalify 2.0.1
+  License: MIT
+  URL: https://github.com/RyanZim/universalify
+  Authors: Ryan Zimmerman
+
+unpipe 1.0.0
+  License: MIT
+  URL: https://github.com/stream-utils/unpipe
+  Authors: Douglas Christopher Wilson
+
+until-async 3.0.2
+  License: MIT
+  URL: https://github.com/kettanaito/until-async
+  Authors: Artem Zakharchenko
+
+update-browserslist-db 1.2.3
+  License: MIT
+  URL: https://github.com/browserslist/update-db
+  Authors: Andrey Sitnik
+
+url-parse 1.5.10
+  License: MIT
+  URL: https://github.com/unshiftio/url-parse
+  Authors: Arnout Kazemier
+
+use-sync-external-store 1.6.0
+  License: MIT
+  URL: https://github.com/facebook/react
+
+util-deprecate 1.0.2
+  License: MIT
+  URL: https://github.com/TooTallNate/util-deprecate
+  Authors: Nathan Rajlich
+
+utility-types 3.11.0
+  License: MIT
+  URL: https://github.com/piotrwitek/utility-types
+  Authors: Piotr Witek
+
+validate-npm-package-name 7.0.2
+  License: ISC
+  URL: https://github.com/npm/validate-npm-package-name
+  Authors: GitHub Inc.
+
+valtio 2.3.2
+  License: MIT
+  URL: https://github.com/pmndrs/valtio
+  Authors: Daishi Kato
+
+vary 1.1.2
+  License: MIT
+  URL: https://github.com/jshttp/vary
+  Authors: Douglas Christopher Wilson
+
+vfile 6.0.3
+  License: MIT
+  URL: https://github.com/vfile/vfile
+  Authors: Titus Wormer
+
+vfile-message 4.0.3
+  License: MIT
+  URL: https://github.com/vfile/vfile-message
+  Authors: Titus Wormer
+
+void-elements 3.1.0
+  License: MIT
+  URL: https://github.com/pugjs/void-elements
+  Authors: hemanth.hm
+
+web-streams-polyfill 3.3.3
+  License: MIT
+  URL: https://github.com/MattiasBuelens/web-streams-polyfill
+  Authors: Mattias Buelens
+
+webgl-constants 1.1.1
+  License: MIT*
+  Authors: Tim van Scherpenzeel
+
+webgl-sdf-generator 1.1.1
+  License: MIT
+  URL: https://github.com/lojjic/webgl-sdf-generator
+  Authors: Jason Johnston
+
+webidl-conversions 3.0.1
+  License: BSD-2-Clause
+  URL: https://github.com/jsdom/webidl-conversions
+  Authors: Domenic Denicola
+
+whatwg-url 5.0.0
+  License: MIT
+  URL: https://github.com/jsdom/whatwg-url
+  Authors: Sebastian Mayr
+
+which 2.0.2
+  License: ISC
+  URL: https://github.com/isaacs/node-which
+  Authors: Isaac Z. Schlueter
+
+which 4.0.0
+  License: ISC
+  URL: https://github.com/npm/node-which
+  Authors: GitHub Inc.
+
+wrap-ansi 7.0.0
+  License: MIT
+  URL: https://github.com/chalk/wrap-ansi
+  Authors: Sindre Sorhus
+
+wrappy 1.0.2
+  License: ISC
+  URL: https://github.com/npm/wrappy
+  Authors: Isaac Z. Schlueter
+
+ws 7.5.10
+  License: MIT
+  URL: https://github.com/websockets/ws
+  Authors: Einar Otto Stangvik
+
+wsl-utils 0.3.1
+  License: MIT
+  URL: https://github.com/sindresorhus/wsl-utils
+  Authors: Sindre Sorhus
+
+y18n 5.0.8
+  License: ISC
+  URL: https://github.com/yargs/y18n
+  Authors: Ben Coe
+
+yallist 3.1.1
+  License: ISC
+  URL: https://github.com/isaacs/yallist
+  Authors: Isaac Z. Schlueter
+
+yargs 17.7.2
+  License: MIT
+  URL: https://github.com/yargs/yargs
+
+yargs-parser 21.1.1
+  License: ISC
+  URL: https://github.com/yargs/yargs-parser
+  Authors: Ben Coe
+
+yocto-spinner 1.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/yocto-spinner
+  Authors: Sindre Sorhus
+
+yoctocolors 2.1.2
+  License: MIT
+  URL: https://github.com/sindresorhus/yoctocolors
+  Authors: Sindre Sorhus
+
+zod 3.25.76
+  License: MIT
+  URL: https://github.com/colinhacks/zod
+  Authors: Colin McDonnell
+
+zod-to-json-schema 3.25.2
+  License: ISC
+  URL: https://github.com/StefanTerdell/zod-to-json-schema
+  Authors: Stefan Terdell
+
+zustand 4.5.7
+  License: MIT
+  URL: https://github.com/pmndrs/zustand
+  Authors: Paul Henschel
+
+zustand 5.0.13
+  License: MIT
+  URL: https://github.com/pmndrs/zustand
+  Authors: Paul Henschel
+
+zwitch 2.0.4
+  License: MIT
+  URL: https://github.com/wooorm/zwitch
+  Authors: Titus Wormer
+============================================================================
+SECTION 4 — STANDARD LICENSE TEXTS
+============================================================================
+
+Per-package licenses above identify the license family. The full
+text of each is reproduced from the canonical source:
+
+  MIT:        https://opensource.org/licenses/MIT
+  Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0
+  BSD-2:      https://opensource.org/licenses/BSD-2-Clause
+  BSD-3:      https://opensource.org/licenses/BSD-3-Clause
+  LGPL-2.1:   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+  LGPL-3.0:   https://www.gnu.org/licenses/lgpl-3.0.html
+  ISC:        https://opensource.org/licenses/ISC

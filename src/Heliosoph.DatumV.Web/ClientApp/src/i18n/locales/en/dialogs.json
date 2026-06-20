@@ -157,6 +157,15 @@
       "chrome": "Chromium",
       "node": "Node"
     },
+    "builtWith": {
+      "heading": "Built with",
+      "llamaAttribution": "DatumV is built with Llama.",
+      "llamaTerms": "Use of Llama models is subject to Meta's {licenseLink} and {aupLink}.",
+      "licenseLinkText": "Llama Community License",
+      "aupLinkText": "Acceptable Use Policy",
+      "dependencies": "DatumV is built on Llama, LLamaSharp, ONNX Runtime, FFmpeg, Apache Arrow, Electron, and .NET 10.",
+      "viewThirdPartyLicenses": "View third-party licenses"
+    },
     "copyright": "Copyright © {year} Heliosoph LLC. DatumV™ is a trademark of Heliosoph LLC.",
     "license": {
       "heading": "License",

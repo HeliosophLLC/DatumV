@@ -1,4 +1,4 @@
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { resolveDialog } from '@/state/dialogs';
 
@@ -10,6 +10,15 @@ import { resolveDialog } from '@/state/dialogs';
 // Version info comes from the synchronously-resolved `versions`
 // block on electronHost (captured at preload time — app version
 // via sendSync to main, electron/chrome/node from process.versions).
+//
+// The "Built with" section satisfies Meta's Llama Community License
+// attribution requirement ("Built with Llama" displayed prominently)
+// and the AUP pass-through. The "View third-party licenses" link
+// opens THIRD-PARTY-NOTICES.txt — see electron/main.ts for the path
+// resolution (production: process.resourcesPath; dev: repo root).
+
+const LLAMA_LICENSE_URL = 'https://llama.meta.com/llama3_1/license/';
+const LLAMA_AUP_URL = 'https://llama.meta.com/llama3/use-policy/';
 
 export interface AboutDialogProps {
   requestId: string;
@@ -22,6 +31,10 @@ export function AboutDialog({ requestId }: AboutDialogProps) {
 
   function onClose() {
     resolveDialog(requestId, null);
+  }
+
+  function openExternalLink(url: string) {
+    void window.electronHost.openExternal(url);
   }
 
   return (
@@ -46,6 +59,60 @@ export function AboutDialog({ requestId }: AboutDialogProps) {
             <dt className="text-muted-foreground">{t('about.versions.node')}</dt>
             <dd>{versions.node}</dd>
           </dl>
+        </section>
+
+        <section>
+          <h2 className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wide">
+            {t('about.builtWith.heading')}
+          </h2>
+          <p className="text-foreground mb-2 text-xs font-medium">
+            {t('about.builtWith.llamaAttribution')}
+          </p>
+          {/*
+            Trans handles the two interpolated links in the AUP line. The
+            t-string uses `{licenseLink}` / `{aupLink}` placeholders; the
+            components map binds them to <button> elements that open in
+            the user's default browser via shell.openExternal.
+          */}
+          <p className="text-foreground/80 mb-3 text-xs leading-relaxed">
+            <Trans
+              i18nKey="about.builtWith.llamaTerms"
+              t={t}
+              values={{
+                licenseLink: t('about.builtWith.licenseLinkText'),
+                aupLink: t('about.builtWith.aupLinkText'),
+              }}
+              components={{
+                licenseLink: (
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink(LLAMA_LICENSE_URL)}
+                    className="text-primary underline-offset-2 hover:underline cursor-pointer"
+                  />
+                ),
+                aupLink: (
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink(LLAMA_AUP_URL)}
+                    className="text-primary underline-offset-2 hover:underline cursor-pointer"
+                  />
+                ),
+              }}
+            />
+          </p>
+          <p className="text-foreground/80 mb-2 text-xs leading-relaxed">
+            {t('about.builtWith.dependencies')}
+          </p>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              void window.electronHost.openThirdPartyNotices();
+            }}
+          >
+            {t('about.builtWith.viewThirdPartyLicenses')}
+          </Button>
         </section>
 
         <section>

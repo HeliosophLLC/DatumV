@@ -19,7 +19,8 @@
     "dist:linux:cuda": "npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux -c.publish.channel=cuda",
     "dist:linux:standard": "npm run build:clientapp && npm run publish:dotnet:linux:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --linux -c.publish.channel=standard",
     "dist:win": "npm run dist:win:cuda",
-    "dist:linux": "npm run dist:linux:cuda"
+    "dist:linux": "npm run dist:linux:cuda",
+    "generate:notices": "node ./scripts/generate-third-party-notices.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -30,6 +31,7 @@
     "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
+    "license-checker-rseidelsohn": "^4.4.2",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2",
     "wait-on": "^8.0.1"

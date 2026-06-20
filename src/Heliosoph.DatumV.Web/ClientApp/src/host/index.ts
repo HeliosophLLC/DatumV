@@ -130,6 +130,7 @@ declare global {
         >;
       }): Promise<{ canceled: boolean; filePath?: string }>;
       openExternal(url: string): Promise<void>;
+      openThirdPartyNotices(): Promise<void>;
       setApplicationMenu(tree: unknown): Promise<void>;
       onMenuCommand(cb: (commandId: string) => void): () => void;
 

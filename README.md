@@ -40,9 +40,30 @@ See [Examples — Depth model comparison](docs/examples/depth-comparison.md) for
 
 ## Installing
 
-<!-- Replace this block with the actual install/launch instructions for the current release artifact. -->
+Download the [latest release](https://github.com/HeliosophLLC/DatumV/releases/latest) and pick the build that matches your hardware:
 
-[Install / launch instructions for the current release artifact.]
+| Hardware | Windows | Linux (x86_64) |
+|---|---|---|
+| NVIDIA GPU | `DatumV-X.Y.Z-cuda-setup.exe` | `DatumV-X.Y.Z-cuda.AppImage` |
+| AMD / Intel GPU, or no discrete GPU | `DatumV-X.Y.Z-setup.exe` | `DatumV-X.Y.Z.AppImage` |
+
+The **CUDA** variants bundle NVIDIA's runtime (~750 MB larger) and require driver ≥ 525.60. The **standard** variants use DirectML on Windows and Vulkan on Linux for AMD + Intel GPUs, and degrade to CPU on machines without a usable accelerator.
+
+Windows users who don't want an installer can grab `DatumV-X.Y.Z-portable.exe` (self-extracting single file) or `DatumV-X.Y.Z.zip` (raw archive) from the same Release page. These don't create Start Menu entries and can be deleted to remove.
+
+### System requirements
+
+- 8 GB RAM minimum, 16 GB recommended (more for larger LLMs)
+- ~5 GB free disk for the app; significantly more for downloaded models and datasets
+- Catalog content is stored separately from the app itself, under `%LOCALAPPDATA%\Heliosoph.DatumV\` on Windows and `~/.local/share/Heliosoph.DatumV/` on Linux
+- Windows 10/11 (x64) or a recent x86_64 Linux distribution
+
+### First-launch warnings (unsigned installers)
+
+DatumV v0.1 installers are **unsigned**. We plan to add code signing in a future release; until then:
+
+- **Windows**: SmartScreen warns *"Windows protected your PC"* on first run. Click **More info** → **Run anyway**.
+- **Linux**: no warning — `chmod +x DatumV-*.AppImage` and double-click or run from the terminal.
 
 ## Why DatumV?
 
