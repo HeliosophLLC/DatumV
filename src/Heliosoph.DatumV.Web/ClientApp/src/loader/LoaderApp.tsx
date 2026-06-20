@@ -34,7 +34,7 @@ export function LoaderApp({ mode }: Props): React.JSX.Element {
           (not the wrapper) so foreground text/buttons stay full
           strength. `pointer-events-none` keeps it out of click and
           drag interactions. */}
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden px-12">
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden px-12 w-[560px]">
         <img
           src={heliosophBg}
           alt=""
