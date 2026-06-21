@@ -429,7 +429,7 @@
 			"id": "traceTool",
 			"type": "pickString",
 			"description": "Which tool to trace",
-			"options": ["IngestOnce", "IndexOnce", "ReadCsv", "ExecuteOnce"],
+			"options": ["IngestOnce", "IndexOnce", "ExecuteOnce"],
 			"default": "IndexOnce"
 		},
 		{

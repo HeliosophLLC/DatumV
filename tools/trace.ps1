@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("IngestOnce", "IndexOnce", "ReadCsv", "ExecuteOnce")]
+    [ValidateSet("IngestOnce", "IndexOnce", "ExecuteOnce")]
     [string]$Tool = "IngestOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     # gc-verbose emits GCAllocationTick every ~100 KB (with type + stack) so PerfView's
@@ -55,12 +55,6 @@ switch ($Tool) {
         $exeName = "index-once.exe"
         $needsDest = $true
         $destExt = ".datum-index"
-    }
-    "ReadCsv" {
-        $project = "tools\ReadCsv\ReadCsv.csproj"
-        $exeName = "read-csv.exe"
-        $needsDest = $false
-        $destExt = ""
     }
     "ExecuteOnce" {
         $project = "tools\ExecuteOnce\ExecuteOnce.csproj"
