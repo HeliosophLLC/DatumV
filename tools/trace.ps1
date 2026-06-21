@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("IngestOnce", "IndexOnce", "ExecuteOnce")]
-    [string]$Tool = "IngestOnce",
+    [ValidateSet("IndexOnce", "ExecuteOnce")]
+    [string]$Tool = "ExecuteOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     # gc-verbose emits GCAllocationTick every ~100 KB (with type + stack) so PerfView's
     # "GC Heap Alloc Ignore Free (Coarse Sampling) Stacks" view can attribute allocations.
@@ -44,12 +44,6 @@ $env:DOTNET_ReadyToRun = "0"
 # a default dest path.
 $needsSql = $false
 switch ($Tool) {
-    "IngestOnce" {
-        $project = "tools\IngestOnce\IngestOnce.csproj"
-        $exeName = "ingest-once.exe"
-        $needsDest = $true
-        $destExt = ".datum"
-    }
     "IndexOnce" {
         $project = "tools\IndexOnce\IndexOnce.csproj"
         $exeName = "index-once.exe"

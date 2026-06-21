@@ -114,21 +114,6 @@
 			"hide": true
 		},
 		{
-			"label": "Debug: Build IngestOnce",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"tools/IngestOnce",
-				"-c", "Debug"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"hide": true
-		},
-		{
 			"label": "Release: Build Solution",
 			"type": "shell",
 			"command": "dotnet",
@@ -429,7 +414,7 @@
 			"id": "traceTool",
 			"type": "pickString",
 			"description": "Which tool to trace",
-			"options": ["IngestOnce", "IndexOnce", "ExecuteOnce"],
+			"options": ["IndexOnce", "ExecuteOnce"],
 			"default": "IndexOnce"
 		},
 		{

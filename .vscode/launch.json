@@ -45,20 +45,6 @@
 			"preLaunchTask": "Debug: Build IndexOnce"
 		},
 		{
-			"name": "IngestOnce: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/tools/IngestOnce/bin/Debug/net10.0/ingest-once.dll",
-			"args": [
-				"${input:sourceFile}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build IngestOnce"
-		},
-		{
 			"name": "ExecuteOnce: Debug",
 			"type": "coreclr",
 			"request": "launch",
