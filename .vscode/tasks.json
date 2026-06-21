@@ -99,21 +99,6 @@
 			}
 		},
 		{
-			"label": "Debug: Build IndexOnce",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"tools/IndexOnce",
-				"-c", "Debug"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"hide": true
-		},
-		{
 			"label": "Release: Build Solution",
 			"type": "shell",
 			"command": "dotnet",
@@ -414,8 +399,8 @@
 			"id": "traceTool",
 			"type": "pickString",
 			"description": "Which tool to trace",
-			"options": ["IndexOnce", "ExecuteOnce"],
-			"default": "IndexOnce"
+			"options": ["ExecuteOnce"],
+			"default": "ExecuteOnce"
 		},
 		{
 			"id": "traceSql",

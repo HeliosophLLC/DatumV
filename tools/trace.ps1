@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("IndexOnce", "ExecuteOnce")]
+    [ValidateSet("ExecuteOnce")]
     [string]$Tool = "ExecuteOnce",
     [string]$Providers = "Microsoft-DotNETCore-SampleProfiler,Microsoft-Windows-DotNETRuntime:0x14C14FCCBD:5",
     # gc-verbose emits GCAllocationTick every ~100 KB (with type + stack) so PerfView's
@@ -44,12 +44,6 @@ $env:DOTNET_ReadyToRun = "0"
 # a default dest path.
 $needsSql = $false
 switch ($Tool) {
-    "IndexOnce" {
-        $project = "tools\IndexOnce\IndexOnce.csproj"
-        $exeName = "index-once.exe"
-        $needsDest = $true
-        $destExt = ".datum-index"
-    }
     "ExecuteOnce" {
         $project = "tools\ExecuteOnce\ExecuteOnce.csproj"
         $exeName = "execute-once.exe"

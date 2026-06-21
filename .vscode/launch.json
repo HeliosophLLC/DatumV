@@ -31,20 +31,6 @@
 			"preLaunchTask": "Release: Electron + Backend"
 		},
 		{
-			"name": "IndexOnce: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/tools/IndexOnce/bin/Debug/net10.0/index-once.dll",
-			"args": [
-				"${input:datumFile}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build IndexOnce"
-		},
-		{
 			"name": "ExecuteOnce: Debug",
 			"type": "coreclr",
 			"request": "launch",

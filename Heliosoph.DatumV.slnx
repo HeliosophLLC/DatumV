@@ -16,7 +16,6 @@
     <Project Path="tools/ExecuteOnce/ExecuteOnce.csproj" />
     <Project Path="tools/ExplainOnce/ExplainOnce.csproj" />
     <Project Path="tools/IndexInspect/IndexInspect.csproj" />
-    <Project Path="tools/IndexOnce/IndexOnce.csproj" />
     <Project Path="tools/SidecarInspect/SidecarInspect.csproj" />
     <Project Path="tools/VideoDecodeSpike/VideoDecodeSpike.csproj" />
   </Folder>
