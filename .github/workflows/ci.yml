@@ -3,8 +3,11 @@ name: CI
 on:
   pull_request:
 
+# contents: write is required for the dependabot lock-file regen step below
+# (force-evaluate + commit + push back to the PR branch). For human PRs no
+# push happens; the locked-mode restore just verifies the existing lock files.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,10 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Check out the PR head ref (not the synthetic merge ref) so the
+          # dependabot lock-file regen step below can push back to the branch.
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
 
@@ -31,8 +39,33 @@ jobs:
       # GPU, so the CUDA variant would only download ~500 MB of NVIDIA
       # SASS binaries that never run. The standard variant also exercises
       # the OnnxRuntime CPU fallback path that's the lowest-common-
-      # denominator code. RestoreLockedMode=true enforces packages.lock.json.
-      - run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
+      # denominator code.
+      #
+      # Dependabot bumps Directory.Packages.props but does not regenerate
+      # packages.lock.json, so locked-mode would fail every dependabot PR.
+      # On dependabot PRs we --force-evaluate (regenerate) and push the
+      # updated lock files back to the PR branch in the next step. On
+      # human PRs we keep locked mode so dependency drift fails the build.
+      - name: Restore
+        run: |
+          if [ "${{ github.actor }}" = "dependabot[bot]" ]; then
+            dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard --force-evaluate
+          else
+            dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
+          fi
+
+      - name: Commit regenerated lock files (dependabot only)
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          if git diff --quiet -- '**/packages.lock.json'; then
+            echo "Lock files already in sync; nothing to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add '**/packages.lock.json'
+            git commit -m "Regenerate packages.lock.json for dependabot bump"
+            git push
+          fi
 
       # SkipClientApp=true so the engine build does not require Node or
       # the Vite frontend to be installed. The release workflow is what

@@ -31,9 +31,15 @@ CI and the committed lock files target `standard`. Pass `-p:GpuVariant=cuda` to 
 dotnet build Heliosoph.DatumV.slnx -c Release -p:GpuVariant=cuda
 ```
 
+### .NET SDK
+
+The repo pins the .NET SDK version via [global.json](global.json). Use the version listed there (or a later patch in the same feature band — `rollForward` is set to `latestPatch`). Pinning matters because implicit SDK-supplied packages (e.g. `Microsoft.NET.ILLink.Tasks`) get baked into the lock files, so mismatched SDKs between contributors and CI would break locked-mode restore.
+
+If you don't have the pinned SDK installed, `dotnet --version` from the repo root will tell you exactly which version it's looking for.
+
 ### Lock files
 
-Every project has a `packages.lock.json` checked in. CI restores with `-p:RestoreLockedMode=true` so dependency drift fails the build instead of silently producing a different package graph.
+Every project has a `packages.lock.json` checked in. CI restores with `-p:RestoreLockedMode=true` on human PRs so dependency drift fails the build instead of silently producing a different package graph. On dependabot PRs CI runs with `--force-evaluate` and pushes the regenerated lock files back to the PR branch, because dependabot updates `Directory.Packages.props` but does not regenerate per-project lock files.
 
 Two implications:
 
