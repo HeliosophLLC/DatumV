@@ -224,21 +224,6 @@
 			}
 		},
 		{
-			"label": "Debug: Build ExplainOnce",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"build",
-				"tools/ExplainOnce",
-				"-c", "Debug"
-			],
-			"problemMatcher": [
-				"$msCompile"
-			],
-			"group": "build",
-			"hide": true
-		},
-		{
 			"label": "Debug: Build ExecuteOnce",
 			"type": "shell",
 			"command": "dotnet",
@@ -297,27 +282,6 @@
 			],
 			"group": "build",
 			"hide": true
-		},
-		{
-			"label": "Run: ExplainOnce",
-			"type": "shell",
-			"command": "dotnet",
-			"args": [
-				"run",
-				"--project", "tools/ExplainOnce",
-				"-c", "Debug",
-				"--no-build",
-				"--",
-				"${input:datumPath}",
-				"${input:explainSql}"
-			],
-			"dependsOn": "Debug: Build ExplainOnce",
-			"problemMatcher": [],
-			"group": "test",
-			"presentation": {
-				"reveal": "always",
-				"panel": "dedicated"
-			}
 		},
 		{
 			"label": "Debug: Build SidecarInspect",

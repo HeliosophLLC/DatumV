@@ -46,21 +46,6 @@
 			"preLaunchTask": "Debug: Build ExecuteOnce"
 		},
 		{
-			"name": "ExplainOnce: Debug",
-			"type": "coreclr",
-			"request": "launch",
-			"program": "${workspaceFolder}/tools/ExplainOnce/bin/Debug/net10.0/explain-once.dll",
-			"args": [
-				"${input:explainDatumFile}",
-				"${input:explainOnceSql}"
-			],
-			"cwd": "${workspaceFolder}",
-			"console": "integratedTerminal",
-			"justMyCode": false,
-			"stopAtEntry": false,
-			"preLaunchTask": "Debug: Build ExplainOnce"
-		},
-		{
 			"name": "ExecuteOnce: Release (Ctrl+F5 for perf)",
 			"type": "coreclr",
 			"request": "launch",
