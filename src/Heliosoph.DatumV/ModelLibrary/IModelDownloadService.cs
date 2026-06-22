@@ -6,11 +6,22 @@ namespace Heliosoph.DatumV.ModelLibrary;
 
 public interface IModelDownloadService
 {
-    // Returns whether the model's expected files are present locally with
-    // the right sizes. "Right sizes" means matching the HF tree API's
-    // reported size — a fast local-only check. Full sha256 re-verification
-    // is not done here; that would re-read every byte every time the UI
-    // refreshes the model list.
+    // Filesystem-only probe. Reads the `inventory.json` marker written at
+    // the end of a successful install and verifies each listed file exists
+    // at the recorded size. No network calls — the UI can fan this out to
+    // every catalog entry on view-open without touching the source.
+    // States:
+    //   - directory absent              → NotDownloaded
+    //   - directory exists, no marker
+    //     and empty                     → NotDownloaded
+    //   - directory exists, no marker
+    //     but contents present          → Partial (failed install or
+    //                                      pre-marker legacy install)
+    //   - marker present, sizes match,
+    //     installSql not run / no SQL   → Downloaded
+    //   - marker present, sizes match,
+    //     installer reports registered  → Installed
+    // sha256 re-verification is not done here.
     Task<ModelInstallState> ProbeAsync(string modelId, CancellationToken ct = default);
 
     // Kicks off the download. Returns once the download is queued; progress

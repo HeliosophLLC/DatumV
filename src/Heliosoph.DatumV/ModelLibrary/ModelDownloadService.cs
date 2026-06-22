@@ -4,6 +4,8 @@
 
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Heliosoph.DatumV.Models.Python;
 
@@ -64,42 +66,39 @@ internal sealed class ModelDownloadService : IModelDownloadService
 
     public async Task<ModelInstallState> ProbeAsync(string variantId, CancellationToken ct = default)
     {
-        (CatalogEntry entry, CatalogVariant variant) = ResolveVariant(variantId);
+        (CatalogEntry _, CatalogVariant variant) = ResolveVariant(variantId);
 
-        // Placeholders short-circuit before any I/O.
         if (variant.Placeholder) return ModelInstallState.NotDownloaded;
 
         string recommendedVersion = variant.Versions[0].Version;
         string variantDir = _paths.GetModelRoot(variant.Id, recommendedVersion);
         if (!Directory.Exists(variantDir)) return ModelInstallState.NotDownloaded;
 
-        CatalogSource primary = variant.Sources[0];
-        IModelSourceClient client = ResolveClient(primary);
-
-        IReadOnlyList<SourceFile> inventory;
-        try
+        InventoryDoc? inventory = TryReadInventory(variantDir);
+        if (inventory is null)
         {
-            inventory = await client.ListFilesAsync(primary, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex, "Probe of {VariantId} could not list files from primary source ({Type})",
-                variantId, client.SupportedType);
-            return ModelInstallState.Partial;
+            // No marker → either a never-completed install (only `.part`
+            // files, or an empty dir left behind by a failed source listing)
+            // or a legacy install from before markers existed. Either way,
+            // surface Partial if anything is on disk so the UI offers a
+            // Restart/Reinstall affordance; NotDownloaded if the dir is
+            // empty.
+            return Directory.EnumerateFileSystemEntries(variantDir).Any()
+                ? ModelInstallState.Partial
+                : ModelInstallState.NotDownloaded;
         }
 
         int present = 0;
-        foreach (SourceFile sf in inventory)
+        foreach (InventoryEntry e in inventory.Files)
         {
-            string localPath = Path.Combine(variantDir, sf.Path);
+            string localPath = Path.Combine(variantDir, e.Path);
             if (!File.Exists(localPath)) continue;
-            if (sf.Size == 0) { present++; continue; }
-            if (new FileInfo(localPath).Length == sf.Size) present++;
+            if (e.Size == 0) { present++; continue; }
+            if (new FileInfo(localPath).Length == e.Size) present++;
         }
 
         if (present == 0) return ModelInstallState.NotDownloaded;
-        if (present < inventory.Count) return ModelInstallState.Partial;
+        if (present < inventory.Files.Count) return ModelInstallState.Partial;
 
         bool registered = await _installer.IsInstalledAsync(variant, ct).ConfigureAwait(false);
         return registered ? ModelInstallState.Installed : ModelInstallState.Downloaded;
@@ -436,6 +435,18 @@ internal sealed class ModelDownloadService : IModelDownloadService
                 _logger.LogWarning(ex, "Could not delete partial {File}", file);
             }
         }
+
+        // Drop any completion markers too: a Restart means "treat this as
+        // not-yet-downloaded," and a stale marker would mask the wipe.
+        foreach (string marker in Directory.EnumerateFiles(
+            variantDir, InventoryFileName, SearchOption.AllDirectories))
+        {
+            try { File.Delete(marker); }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Could not delete inventory marker {File}", marker);
+            }
+        }
         return Task.CompletedTask;
     }
 
@@ -693,6 +704,43 @@ internal sealed class ModelDownloadService : IModelDownloadService
 
             bytesAcrossModel += file.Size > 0 ? file.Size : 0;
         }
+
+        await WriteInventoryAsync(variantDir, files, ct).ConfigureAwait(false);
+    }
+
+    private const string InventoryFileName = "inventory.json";
+
+    private static readonly JsonSerializerOptions _inventoryJsonOptions = new()
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private static async Task WriteInventoryAsync(
+        string variantDir, IReadOnlyList<SourceFile> files, CancellationToken ct)
+    {
+        List<InventoryEntry> entries = new(files.Count);
+        foreach (SourceFile f in files) entries.Add(new InventoryEntry(f.Path, f.Size));
+        InventoryDoc doc = new(entries);
+
+        string path = Path.Combine(variantDir, InventoryFileName);
+        await using FileStream fs = File.Create(path);
+        await JsonSerializer.SerializeAsync(fs, doc, _inventoryJsonOptions, ct).ConfigureAwait(false);
+    }
+
+    private static InventoryDoc? TryReadInventory(string variantDir)
+    {
+        string path = Path.Combine(variantDir, InventoryFileName);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using FileStream fs = File.OpenRead(path);
+            return JsonSerializer.Deserialize<InventoryDoc>(fs, _inventoryJsonOptions);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private IModelSourceClient ResolveClient(CatalogSource source)
@@ -726,6 +774,13 @@ internal sealed class ModelDownloadService : IModelDownloadService
         return hit.Value;
     }
 }
+
+internal sealed record InventoryDoc(
+    [property: JsonPropertyName("files")] List<InventoryEntry> Files);
+
+internal sealed record InventoryEntry(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("size")] long Size);
 
 // Surfaces "you must accept license X before installing" to controller code,
 // which maps it to HTTP 412 Precondition Failed.
