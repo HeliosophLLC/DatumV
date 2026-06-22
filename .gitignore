@@ -16,4 +16,5 @@ tests/Heliosoph.DatumV.Tests/TestResults/**
 
 # Heliosoph.DatumV.Web frontend build outputs (Vite owns wwwroot/)
 src/Heliosoph.DatumV.Web/ClientApp/node_modules/
+src/Heliosoph.DatumV.Web/ClientApp/node_modules.win/
 src/Heliosoph.DatumV.Web/wwwroot/

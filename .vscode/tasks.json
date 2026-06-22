@@ -99,6 +99,38 @@
 			}
 		},
 		{
+			// Builds the Linux x64 CUDA AppImage from Windows by delegating
+			// to WSL (Ubuntu-24.04, root). The script stashes Windows
+			// node_modules, runs Linux npm ci, dotnet publish, and
+			// electron-builder, then restores Windows node_modules on
+			// exit (success or failure). cwd is set to electron/ so
+			// wsl.exe inherits the mounted path and the script runs
+			// relative. Output streams into this task's terminal —
+			// closing the terminal kills the build.
+			//
+			// Prereqs (one-time): WSL distro Ubuntu-24.04 with .NET 10 SDK,
+			// Node 22, libfuse2t64, fakeroot, bzip2. See the build script.
+			"label": "Release: Build Linux AppImage (CUDA, WSL)",
+			"type": "shell",
+			"command": "wsl",
+			"args": [
+				"-d", "Ubuntu-24.04",
+				"-u", "root",
+				"--",
+				"bash", "./.wsl-linux-build.sh"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/Heliosoph.DatumV.Web/electron"
+			},
+			"problemMatcher": [],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
 			"label": "Release: Build Solution",
 			"type": "shell",
 			"command": "dotnet",

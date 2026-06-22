@@ -186,21 +186,23 @@ function collectNpmLicenses(dir, label) {
     );
   }
   const data = JSON.parse(result.stdout);
-  const entries = Object.entries(data).map(([nameVer, info]) => {
-    // license-checker keys look like "package@1.2.3"; split on the LAST
-    // '@' to handle scoped packages (`@scope/name@1.2.3`).
-    const at = nameVer.lastIndexOf('@');
-    const name = nameVer.slice(0, at);
-    const version = nameVer.slice(at + 1);
-    return {
-      name,
-      version,
-      license: info.licenses || 'Unknown',
-      url: info.repository || '',
-      authors: info.publisher || '',
-      copyright: info.copyright || '',
-    };
-  });
+  const entries = Object.entries(data)
+    .map(([nameVer, info]) => {
+      // license-checker keys look like "package@1.2.3"; split on the LAST
+      // '@' to handle scoped packages (`@scope/name@1.2.3`).
+      const at = nameVer.lastIndexOf('@');
+      const name = nameVer.slice(0, at);
+      const version = nameVer.slice(at + 1);
+      return {
+        name,
+        version,
+        license: info.licenses || 'Unknown',
+        url: info.repository || '',
+        authors: info.publisher || '',
+        copyright: info.copyright || '',
+      };
+    })
+    .filter((e) => !e.name.startsWith('heliosoph-datumv-'));
   return dedupeSorted(entries);
 }
 

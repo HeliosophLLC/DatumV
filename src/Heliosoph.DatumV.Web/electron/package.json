@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "DatumV",
+  "license": "MIT",
   "author": "Heliosoph LLC <support@heliosoph.net>",
   "main": "dist/main.js",
   "scripts": {
