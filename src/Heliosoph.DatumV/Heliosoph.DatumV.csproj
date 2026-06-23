@@ -111,6 +111,17 @@
     <PackageReference Include="Snappier" />
     <PackageReference Include="SkiaSharp" />
     <!--
+      SkiaSharp's main package ships native libSkiaSharp binaries for Windows
+      and macOS but not Linux — Linux needs an explicit NativeAssets package.
+      .NoDependencies bundles libfontconfig / libfreetype / libpng inside the
+      native blob instead of relying on the host distro's versions, which the
+      AppImage needs to run on Ubuntu / Fedora / Arch without preinstalling
+      Skia's system deps. Conditional on linux-x64 so a Windows publish
+      doesn't pull a ~10 MB Linux .so into its output.
+    -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies"
+                      Condition="'$(RuntimeIdentifier)' == 'linux-x64'" />
+    <!--
       SharpGLTF supplies the binary glTF 2.0 (.glb) writer used by
       mesh_to_gltf. Pure-managed, cross-platform, MIT — no native
       dependency. Validated against the Khronos glTF reference test

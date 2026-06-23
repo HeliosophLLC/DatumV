@@ -100,9 +100,12 @@ async function startDotnetBackend(catalogPath: string): Promise<string> {
   // default and the prior behaviour.
   const projectDir = path.resolve(__dirname, '..', '..');
   const dotnetConfig = process.env.DOTNET_CONFIGURATION ?? 'Debug';
+  const backendBinary = process.platform === 'win32'
+    ? 'Heliosoph.DatumV.Web.exe'
+    : 'Heliosoph.DatumV.Web';
   const cmd = isDev
     ? 'dotnet'
-    : path.join(process.resourcesPath, 'backend', 'Heliosoph.DatumV.Web.exe');
+    : path.join(process.resourcesPath, 'backend', backendBinary);
   const args = isDev ? ['run', '--project', projectDir, '-c', dotnetConfig] : [];
 
   // Catalog + global-data paths are the workspace contract: backend
@@ -113,6 +116,21 @@ async function startDotnetBackend(catalogPath: string): Promise<string> {
     DATUMV_CATALOG_PATH: catalogPath,
     DATUMV_GLOBAL_PATH: globalDataPath,
   };
+
+  // Packaged Linux build: prepend the backend dir to LD_LIBRARY_PATH so
+  // libonnxruntime_providers_cuda.so's dlopen() finds the bundled CUDA
+  // runtime libs (libcublasLt.so.12, libcudart.so.12, libcudnn.so.9, ...)
+  // staged there by stage-cuda-libs.sh. Without this they resolve only
+  // against the system loader path, and a machine without CUDA toolkit
+  // installed crashes with "libcublasLt.so.12: cannot open shared object".
+  // Windows resolves these via the app-dir DLL search at process load —
+  // no env tweak needed there.
+  if (!isDev && process.platform === 'linux') {
+    const backendDir = path.join(process.resourcesPath, 'backend');
+    env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
+      ? `${backendDir}:${process.env.LD_LIBRARY_PATH}`
+      : backendDir;
+  }
 
   console.log(`[dotnet] spawning: ${cmd} ${args.join(' ')}`);
   dotnetProcess = spawn(cmd, args, { env, shell: false });
