@@ -4,6 +4,8 @@
 
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Ingestion;
@@ -253,6 +255,19 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
             catch (IOException ex)
             {
                 _logger.LogWarning(ex, "Could not delete partial {File}", file);
+            }
+        }
+
+        // Drop completion markers too: Restart means "treat as not-yet-
+        // downloaded," and a stale marker would have the next attempt
+        // skip the tree call and silently believe the cache is good.
+        foreach (string marker in Directory.EnumerateFiles(
+            rawRoot, InventoryFileName, SearchOption.AllDirectories))
+        {
+            try { File.Delete(marker); }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Could not delete inventory marker {File}", marker);
             }
         }
         return Task.CompletedTask;
@@ -669,6 +684,29 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
         int sourceIndex,
         CancellationToken ct)
     {
+        // Fast path: a prior successful download wrote inventory.json into
+        // rawDir. If every listed file is still present at the recorded
+        // size, the download phase is already done and we can skip the
+        // upstream tree call entirely. This is the common case for a
+        // retry after a downstream phase (ingest) failed — there's no
+        // reason to re-ask HF for a tree we already verified, and on a
+        // flaky network it's the difference between an instant continue
+        // and another round of timeouts.
+        InventoryDoc? local = TryReadInventory(rawDir);
+        if (local is not null && InventoryMatchesDisk(rawDir, local))
+        {
+            long cachedTotalBytes = 0;
+            foreach (InventoryEntry e in local.Files) cachedTotalBytes += e.Size;
+            _logger.LogInformation(
+                "{VariantId}: resuming from cached inventory ({Count} files, {Bytes} bytes); " +
+                "skipping upstream tree call for source[{SourceIndex}].",
+                variant.Id, local.Files.Count, cachedTotalBytes, sourceIndex);
+            await _reporter.OnStartedAsync(
+                new DatasetDownloadStarted(variant.Id, local.Files.Count, cachedTotalBytes), ct)
+                .ConfigureAwait(false);
+            return;
+        }
+
         IReadOnlyList<SourceFile> files = await client.ListFilesAsync(source, ct).ConfigureAwait(false);
         if (files.Count == 0)
         {
@@ -738,6 +776,54 @@ internal sealed class DatasetDownloadService : IDatasetDownloadService
 
             bytesAcrossDataset += file.Size > 0 ? file.Size : 0;
         }
+
+        await WriteInventoryAsync(rawDir, files, ct).ConfigureAwait(false);
+    }
+
+    private const string InventoryFileName = "inventory.json";
+
+    private static readonly JsonSerializerOptions _inventoryJsonOptions = new()
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private static async Task WriteInventoryAsync(
+        string rawDir, IReadOnlyList<SourceFile> files, CancellationToken ct)
+    {
+        List<InventoryEntry> entries = new(files.Count);
+        foreach (SourceFile f in files) entries.Add(new InventoryEntry(f.Path, f.Size));
+        InventoryDoc doc = new(entries);
+
+        string path = Path.Combine(rawDir, InventoryFileName);
+        await using FileStream fs = File.Create(path);
+        await JsonSerializer.SerializeAsync(fs, doc, _inventoryJsonOptions, ct).ConfigureAwait(false);
+    }
+
+    private static InventoryDoc? TryReadInventory(string rawDir)
+    {
+        string path = Path.Combine(rawDir, InventoryFileName);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using FileStream fs = File.OpenRead(path);
+            return JsonSerializer.Deserialize<InventoryDoc>(fs, _inventoryJsonOptions);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static bool InventoryMatchesDisk(string rawDir, InventoryDoc inv)
+    {
+        foreach (InventoryEntry e in inv.Files)
+        {
+            string p = Path.Combine(rawDir, e.Path);
+            if (!File.Exists(p)) return false;
+            if (e.Size > 0 && new FileInfo(p).Length != e.Size) return false;
+        }
+        return true;
     }
 
     private IModelSourceClient ResolveClient(ModelLibrary.CatalogSource source)

@@ -70,6 +70,35 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
             _http.BaseAddress = new Uri("https://huggingface.co/");
         }
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Heliosoph.DatumV/0.1 (+https://github.com/Heliosoph.DatumV)");
+
+        // Surface proxy-related env vars on first construction. Electron-
+        // hosted runs inherit Chromium's proxy detection through env vars,
+        // and an unreachable proxy is a stall that's hard to diagnose
+        // from outside. The DI handler already sets UseProxy = false, so
+        // this is purely informational — but if you see a value here that
+        // doesn't show up in your bare PowerShell session, you've found
+        // the difference between the two environments.
+        string? httpsProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY")
+            ?? Environment.GetEnvironmentVariable("https_proxy");
+        string? httpProxy = Environment.GetEnvironmentVariable("HTTP_PROXY")
+            ?? Environment.GetEnvironmentVariable("http_proxy");
+        string? allProxy = Environment.GetEnvironmentVariable("ALL_PROXY")
+            ?? Environment.GetEnvironmentVariable("all_proxy");
+        string? noProxy = Environment.GetEnvironmentVariable("NO_PROXY")
+            ?? Environment.GetEnvironmentVariable("no_proxy");
+        if (httpsProxy is not null || httpProxy is not null || allProxy is not null)
+        {
+            _logger.LogInformation(
+                "HF client constructed with inherited proxy env vars: " +
+                "HTTPS_PROXY={HttpsProxy}, HTTP_PROXY={HttpProxy}, ALL_PROXY={AllProxy}, NO_PROXY={NoProxy}. " +
+                "Handler is configured with UseProxy=false, so these are ignored — but their presence " +
+                "indicates this process inherits proxy config from its parent (likely Electron/Chromium).",
+                httpsProxy, httpProxy, allProxy, noProxy);
+        }
+        else
+        {
+            _logger.LogInformation("HF client constructed; no proxy env vars inherited.");
+        }
     }
 
     public async ValueTask<IReadOnlyList<SourceFile>> ListFilesAsync(
@@ -78,15 +107,64 @@ internal sealed class HuggingFaceSourceClient : IModelSourceClient
         HuggingFaceSource hf = Cast(source);
 
         string url = $"api/{RepoSegment(hf)}/{hf.Repo}/tree/{hf.Revision}?recursive=true";
-        _logger.LogDebug("HF tree: {Url}", url);
 
-        using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
+        // Bound the tree call to 30s: every other operation on this client
+        // legitimately takes longer (LFS downloads), so a tight per-call
+        // budget here is the right surface to fail fast at.
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
 
-        await using Stream s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        List<HfTreeEntry>? entries = await System.Text.Json.JsonSerializer.DeserializeAsync<List<HfTreeEntry>>(
-            s, _jsonOptions, ct).ConfigureAwait(false);
-        IReadOnlyList<HfTreeEntry> tree = entries ?? new List<HfTreeEntry>();
+        // Force HTTP/1.1 explicitly. The HF tree endpoint serves both
+        // 1.1 and h2, but a SocketsHttpHandler that successfully ALPN-
+        // negotiates h2 against a middlebox that breaks h2 framing is the
+        // single most common cause of "the request just sits there." 1.1
+        // is the conservative, debuggable choice for a JSON metadata call.
+        using HttpRequestMessage req = new(HttpMethod.Get, url)
+        {
+            Version = System.Net.HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
+
+        _logger.LogInformation("HF tree GET {Url}", url);
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "HF tree GET {Url} stalled past 30s — check network reachability " +
+                "(this is the .NET HttpClient, not curl; HTTP/2, DNS, and IPv6 " +
+                "can all cause this even when curl works).", url);
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex,
+                "HF tree GET {Url} failed at the transport layer: {Message}",
+                url, ex.Message);
+            throw;
+        }
+
+        using (resp)
+        {
+            _logger.LogInformation(
+                "HF tree {Url} → {Status} (HTTP/{Version})",
+                url, (int)resp.StatusCode, resp.Version);
+            resp.EnsureSuccessStatusCode();
+
+            await using Stream s = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+            List<HfTreeEntry>? entries = await System.Text.Json.JsonSerializer.DeserializeAsync<List<HfTreeEntry>>(
+                s, _jsonOptions, cts.Token).ConfigureAwait(false);
+            IReadOnlyList<HfTreeEntry> tree = entries ?? new List<HfTreeEntry>();
+            return BuildSourceFiles(hf, tree);
+        }
+    }
+
+    private static IReadOnlyList<SourceFile> BuildSourceFiles(HuggingFaceSource hf, IReadOnlyList<HfTreeEntry> tree)
+    {
 
         // Filter against include globs (** / * / literal names handled
         // correctly by FileSystemGlobbing). Drop directory entries.

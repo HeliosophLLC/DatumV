@@ -2,6 +2,8 @@
 #pragma warning disable CS1591 // missing XML comment for publicly visible type or member
 #pragma warning disable IL2026 // reflection-based JSON serialization will not survive trimming
 
+using System.Net.Http;
+
 using Heliosoph.DatumV.ModelLibrary;
 using Heliosoph.DatumV.Models.Python;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -61,7 +63,22 @@ public static class ModelLibraryServiceExtensions
 
         // Each source client gets its own typed HttpClient so handler
         // pools, BaseAddress, and default headers stay isolated.
-        services.AddHttpClient<HuggingFaceSourceClient>();
+        //
+        // The HF client gets a hand-rolled SocketsHttpHandler so we can
+        // bound ConnectTimeout (catches unreachable hosts in <15s instead
+        // of 100s) and recycle pooled connections every 2 min (stops a
+        // dead TCP/TLS session from sticking after the machine wakes from
+        // sleep or the user's Wi-Fi flips networks). The default is
+        // PooledConnectionLifetime = Infinite, which is the most common
+        // cause of "it worked yesterday and now it just hangs."
+        services.AddHttpClient<HuggingFaceSourceClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+                ConnectTimeout = TimeSpan.FromSeconds(15),
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+            });
         services.AddHttpClient<GithubReleaseSourceClient>();
         services.AddHttpClient<HttpsSourceClient>();
         // Expose each as IModelSourceClient so the download orchestrator

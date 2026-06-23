@@ -775,13 +775,6 @@ internal sealed class ModelDownloadService : IModelDownloadService
     }
 }
 
-internal sealed record InventoryDoc(
-    [property: JsonPropertyName("files")] List<InventoryEntry> Files);
-
-internal sealed record InventoryEntry(
-    [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("size")] long Size);
-
 // Surfaces "you must accept license X before installing" to controller code,
 // which maps it to HTTP 412 Precondition Failed.
 public sealed class LicenseNotAcceptedException : Exception
