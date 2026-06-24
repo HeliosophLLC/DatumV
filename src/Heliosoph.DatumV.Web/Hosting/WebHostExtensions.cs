@@ -17,6 +17,7 @@ using Heliosoph.DatumV.Web.Lsp;
 using Heliosoph.DatumV.Web.ModelLibrary;
 using Heliosoph.DatumV.Web.Settings;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace Heliosoph.DatumV.Web.Hosting;
 
@@ -261,6 +262,29 @@ public static class WebHostExtensions
             services.AddSingleton<IKeepRawDownloadsPolicy,
                 Web.DatasetLibrary.SettingsBackedKeepRawDownloadsPolicy>();
         }
+
+        // GPU acceleration: deferred-install CUDA runtime bundle. Cache
+        // root lives under the global data path so it survives app
+        // upgrades and is shared across catalogs (one bundle per host,
+        // not per workspace). Manifest URL is hardcoded to the CDN today;
+        // bind from configuration if dev/test needs to override.
+        services.AddSingleton<Heliosoph.DatumV.GpuRuntime.ICudaBundleCacheLayout>(
+            _ => new Heliosoph.DatumV.GpuRuntime.GlobalDataCudaBundleCacheLayout(globalDataPath));
+        services.AddSingleton<Heliosoph.DatumV.GpuRuntime.CudaBundleOptions>();
+        services.AddHttpClient("cuda-cdn");
+        services.AddSingleton<Heliosoph.DatumV.GpuRuntime.GpuRuntimeProbe>();
+        services.AddSingleton<Heliosoph.DatumV.GpuRuntime.ICudaBundleInstallProgressReporter,
+            Web.GpuRuntime.SignalRGpuInstallProgressReporter>();
+        services.AddSingleton(sp => new Heliosoph.DatumV.GpuRuntime.CudaBundleManifestFetcher(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("cuda-cdn"),
+            sp.GetRequiredService<Heliosoph.DatumV.GpuRuntime.CudaBundleOptions>(),
+            sp.GetRequiredService<ILogger<Heliosoph.DatumV.GpuRuntime.CudaBundleManifestFetcher>>()));
+        services.AddSingleton(sp => new Heliosoph.DatumV.GpuRuntime.CudaBundleInstaller(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("cuda-cdn"),
+            sp.GetRequiredService<Heliosoph.DatumV.GpuRuntime.CudaBundleManifestFetcher>(),
+            sp.GetRequiredService<Heliosoph.DatumV.GpuRuntime.ICudaBundleCacheLayout>(),
+            sp.GetRequiredService<Heliosoph.DatumV.GpuRuntime.ICudaBundleInstallProgressReporter>(),
+            sp.GetRequiredService<ILogger<Heliosoph.DatumV.GpuRuntime.CudaBundleInstaller>>()));
 
         services.AddControllers()
             .AddJsonOptions(o =>

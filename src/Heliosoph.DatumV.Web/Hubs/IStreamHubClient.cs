@@ -66,4 +66,19 @@ public interface IStreamHubClient
     Task OnDatasetTableIngested(DatasetTableIngestedDto ingested);
     Task OnDatasetInstalled(DatasetInstalledDto installed);
     Task OnDatasetDownloadFailed(DatasetDownloadFailedDto failed);
+
+    // CUDA-bundle install lifecycle events. Broadcast to all clients
+    // (same single-user-desktop assumption). Populated by
+    // SignalRGpuInstallProgressReporter from the core
+    // Heliosoph.DatumV.GpuRuntime event records. Lifecycle:
+    //   OnCudaBundleInstallStarted -> N x OnCudaBundleDownloadProgress ->
+    //   OnCudaBundleExtractStarted -> N x OnCudaBundleExtractProgress ->
+    //   OnCudaBundleInstalled.
+    // OnCudaBundleInstallFailed replaces any later event on failure.
+    Task OnCudaBundleInstallStarted(CudaBundleInstallStartedDto started);
+    Task OnCudaBundleDownloadProgress(CudaBundleDownloadProgressDto progress);
+    Task OnCudaBundleExtractStarted(CudaBundleExtractStartedDto started);
+    Task OnCudaBundleExtractProgress(CudaBundleExtractProgressDto progress);
+    Task OnCudaBundleInstalled(CudaBundleInstalledDto installed);
+    Task OnCudaBundleInstallFailed(CudaBundleInstallFailedDto failed);
 }
