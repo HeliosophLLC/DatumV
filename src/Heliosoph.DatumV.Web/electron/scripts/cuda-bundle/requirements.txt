@@ -1,0 +1,23 @@
+# NVIDIA CUDA runtime libraries bundled into the cuda installer variant.
+#
+# These are NVIDIA's official PyPI redistributables, designed for app-local
+# distribution under the CUDA EULA. Each wheel ships the matching native
+# library (.so on linux, .dll on win) and corresponding subset of CUDA so
+# the AppImage / Windows installer runs on a machine without a system CUDA
+# toolkit install.
+#
+# Target compatibility: ORT.Gpu 1.25.x + LLamaSharp.Backend.Cuda12 0.27.x,
+# both of which target CUDA 12.x + cuDNN 9.x.
+#
+# Versions are intentionally unpinned to start — once the build is verified
+# on a clean machine, run `pip-compile requirements.txt -o requirements.lock`
+# (or `pip freeze`) and switch the staging scripts to read the lock file.
+nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12
+nvidia-cuda-nvrtc-cu12
+nvidia-cudnn-cu12
+nvidia-cufft-cu12
+nvidia-curand-cu12
+nvidia-cusolver-cu12
+nvidia-cusparse-cu12
+nvidia-nvjitlink-cu12
