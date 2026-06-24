@@ -4,7 +4,7 @@
 // @ts-nocheck
 import type { HubConnection, IStreamResult, Subject } from '@microsoft/signalr';
 import type { ICatalogHub, IStreamHub, ICatalogHubClient, IStreamHubClient } from './Heliosoph.DatumV.Web.Hubs';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto, CudaBundleInstallStartedDto, CudaBundleDownloadProgressDto, CudaBundleExtractStartedDto, CudaBundleExtractProgressDto, CudaBundleInstalledDto, CudaBundleInstallFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
 
 
 // components
@@ -218,6 +218,12 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         const __onDatasetTableIngested = (...args: [DatasetTableIngestedDto]) => receiver.onDatasetTableIngested(...args);
         const __onDatasetInstalled = (...args: [DatasetInstalledDto]) => receiver.onDatasetInstalled(...args);
         const __onDatasetDownloadFailed = (...args: [DatasetDownloadFailedDto]) => receiver.onDatasetDownloadFailed(...args);
+        const __onCudaBundleInstallStarted = (...args: [CudaBundleInstallStartedDto]) => receiver.onCudaBundleInstallStarted(...args);
+        const __onCudaBundleDownloadProgress = (...args: [CudaBundleDownloadProgressDto]) => receiver.onCudaBundleDownloadProgress(...args);
+        const __onCudaBundleExtractStarted = (...args: [CudaBundleExtractStartedDto]) => receiver.onCudaBundleExtractStarted(...args);
+        const __onCudaBundleExtractProgress = (...args: [CudaBundleExtractProgressDto]) => receiver.onCudaBundleExtractProgress(...args);
+        const __onCudaBundleInstalled = (...args: [CudaBundleInstalledDto]) => receiver.onCudaBundleInstalled(...args);
+        const __onCudaBundleInstallFailed = (...args: [CudaBundleInstallFailedDto]) => receiver.onCudaBundleInstallFailed(...args);
 
         connection.on("OnPong", __onPong);
         connection.on("OnToken", __onToken);
@@ -247,6 +253,12 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
         connection.on("OnDatasetTableIngested", __onDatasetTableIngested);
         connection.on("OnDatasetInstalled", __onDatasetInstalled);
         connection.on("OnDatasetDownloadFailed", __onDatasetDownloadFailed);
+        connection.on("OnCudaBundleInstallStarted", __onCudaBundleInstallStarted);
+        connection.on("OnCudaBundleDownloadProgress", __onCudaBundleDownloadProgress);
+        connection.on("OnCudaBundleExtractStarted", __onCudaBundleExtractStarted);
+        connection.on("OnCudaBundleExtractProgress", __onCudaBundleExtractProgress);
+        connection.on("OnCudaBundleInstalled", __onCudaBundleInstalled);
+        connection.on("OnCudaBundleInstallFailed", __onCudaBundleInstallFailed);
 
         const methodList: ReceiverMethod[] = [
             { methodName: "OnPong", method: __onPong },
@@ -276,7 +288,13 @@ class IStreamHubClient_Binder implements ReceiverRegister<IStreamHubClient> {
             { methodName: "OnDatasetIngestProgress", method: __onDatasetIngestProgress },
             { methodName: "OnDatasetTableIngested", method: __onDatasetTableIngested },
             { methodName: "OnDatasetInstalled", method: __onDatasetInstalled },
-            { methodName: "OnDatasetDownloadFailed", method: __onDatasetDownloadFailed }
+            { methodName: "OnDatasetDownloadFailed", method: __onDatasetDownloadFailed },
+            { methodName: "OnCudaBundleInstallStarted", method: __onCudaBundleInstallStarted },
+            { methodName: "OnCudaBundleDownloadProgress", method: __onCudaBundleDownloadProgress },
+            { methodName: "OnCudaBundleExtractStarted", method: __onCudaBundleExtractStarted },
+            { methodName: "OnCudaBundleExtractProgress", method: __onCudaBundleExtractProgress },
+            { methodName: "OnCudaBundleInstalled", method: __onCudaBundleInstalled },
+            { methodName: "OnCudaBundleInstallFailed", method: __onCudaBundleInstallFailed }
         ]
 
         return new ReceiverMethodSubscription(connection, methodList);

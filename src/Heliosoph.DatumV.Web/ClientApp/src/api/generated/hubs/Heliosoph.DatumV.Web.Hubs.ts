@@ -166,6 +166,58 @@ export type DatasetDownloadFailedDto = {
     error: string;
 }
 
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstallStartedDto */
+export type CudaBundleInstallStartedDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleDownloadProgressDto */
+export type CudaBundleDownloadProgressDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from long */
+    bytesDownloaded: number;
+    /** Transpiled from long */
+    totalBytes: number;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleExtractStartedDto */
+export type CudaBundleExtractStartedDto = {
+    /** Transpiled from string */
+    version: string;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleExtractProgressDto */
+export type CudaBundleExtractProgressDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from long */
+    filesExtracted: number;
+    /** Transpiled from long */
+    totalFiles: number;
+    /** Transpiled from long */
+    bytesExtracted: number;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstalledDto */
+export type CudaBundleInstalledDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from string */
+    installedPath: string;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstallFailedDto */
+export type CudaBundleInstallFailedDto = {
+    /** Transpiled from string */
+    version: string;
+    /** Transpiled from string */
+    error: string;
+}
+
 /** Transpiled from Heliosoph.DatumV.Web.Hubs.ModelDownloadStartedDto */
 export type ModelDownloadStartedDto = {
     /** Transpiled from string */

@@ -87,6 +87,40 @@ const globalDataPath = computeGlobalDataPath();
 let dotnetProcess: ChildProcess | null = null;
 let stoppingDotnet = false;
 
+// Catalog path that swapCatalog last successfully spawned the backend
+// against. Tracked so `backend.restart` (triggered after a CUDA bundle
+// install completes) can respawn at the same catalog without the
+// renderer having to remember which one is current.
+let lastOpenedCatalogPath: string | null = null;
+
+// Returns the absolute path of an installed CUDA runtime bundle in the
+// per-machine cache, or null when none is installed. Mirrors
+// GpuRuntimeProbe.TryReadInstalled on the .NET side: a version subdir
+// counts as "installed" iff it contains an installed.json marker (the
+// installer writes it last, atomically). Cheap to call repeatedly —
+// runs on every backend spawn.
+function findInstalledCudaBundleDir(): string | null {
+  const cacheRoot = path.join(globalDataPath, 'cuda-runtime');
+  if (!fs.existsSync(cacheRoot)) return null;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(cacheRoot);
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (name.startsWith('.')) continue;  // staging dirs
+    const dir = path.join(cacheRoot, name);
+    try {
+      if (!fs.statSync(dir).isDirectory()) continue;
+      if (fs.existsSync(path.join(dir, 'installed.json'))) return dir;
+    } catch {
+      // Race with installer GC; skip and continue.
+    }
+  }
+  return null;
+}
+
 async function startDotnetBackend(catalogPath: string): Promise<string> {
   const isDev = !app.isPackaged;
 
@@ -117,19 +151,28 @@ async function startDotnetBackend(catalogPath: string): Promise<string> {
     DATUMV_GLOBAL_PATH: globalDataPath,
   };
 
-  // Packaged Linux build: prepend the backend dir to LD_LIBRARY_PATH so
-  // libonnxruntime_providers_cuda.so's dlopen() finds the bundled CUDA
-  // runtime libs (libcublasLt.so.12, libcudart.so.12, libcudnn.so.9, ...)
-  // staged there by stage-cuda-libs.sh. Without this they resolve only
+  // CUDA runtime libraries are deferred-installed to the user's data dir
+  // by the GPU section in Settings (see state/gpu.ts + CudaBundleInstaller).
+  // When present, prepend that dir to the loader search path so
+  // libonnxruntime_providers_cuda.so's dlopen() finds libcublasLt.so.12 /
+  // libcudart.so.12 / libcudnn.so.9 / etc. Without this they resolve only
   // against the system loader path, and a machine without CUDA toolkit
-  // installed crashes with "libcublasLt.so.12: cannot open shared object".
-  // Windows resolves these via the app-dir DLL search at process load —
-  // no env tweak needed there.
-  if (!isDev && process.platform === 'linux') {
-    const backendDir = path.join(process.resourcesPath, 'backend');
-    env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
-      ? `${backendDir}:${process.env.LD_LIBRARY_PATH}`
-      : backendDir;
+  // installed silently falls back to CPU.
+  const cudaCacheDir = findInstalledCudaBundleDir();
+  if (cudaCacheDir) {
+    if (process.platform === 'linux') {
+      env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
+        ? `${cudaCacheDir}:${process.env.LD_LIBRARY_PATH}`
+        : cudaCacheDir;
+    } else if (process.platform === 'win32') {
+      // Windows resolves DLLs via PATH (and the app-dir search) — no
+      // LD_LIBRARY_PATH equivalent. Prepend so the cache wins over any
+      // system CUDA toolkit version the user might have separately.
+      env.PATH = `${cudaCacheDir};${process.env.PATH ?? ''}`;
+    }
+    console.log(`[gpu] CUDA runtime: ${cudaCacheDir}`);
+  } else {
+    console.log('[gpu] CUDA runtime: not installed; backend will use CPU/Vulkan');
   }
 
   console.log(`[dotnet] spawning: ${cmd} ${args.join(' ')}`);
@@ -515,6 +558,7 @@ async function swapCatalog(newCatalogPath: string): Promise<void> {
     const newLoadUrl = app.isPackaged ? kestrelUrl : DEV_VITE_URL;
     cachedLoadUrl = newLoadUrl;
     await mainWindow.loadURL(newLoadUrl);
+    lastOpenedCatalogPath = newCatalogPath;
   } finally {
     catalogSwapInProgress = false;
   }
@@ -586,6 +630,24 @@ ipcMain.handle('catalog.openPath', async (_event, p: string) => {
   if (typeof p !== 'string' || p.length === 0) return { canceled: true };
   void swapCatalog(p);
   return { canceled: false, path: p };
+});
+
+// Respawn the .NET backend pointed at the same catalog. Called by the
+// renderer after the user installs / uninstalls the CUDA runtime bundle
+// — the new env vars (LD_LIBRARY_PATH / PATH) only take effect on a
+// fresh process. Piggybacks on swapCatalog so the renderer's splash UX
+// and SignalR reconnect logic stays identical to a catalog change.
+//
+// Fire-and-forget: swapCatalog navigates this window to the loader page,
+// which destroys the renderer that invoked us. Awaiting swapCatalog before
+// returning would leave Electron trying to deliver our reply to a dead
+// renderer — observed as an EPIPE on the IPC socket. Resolve the IPC
+// before the navigation kicks in; the renderer is about to be torn down
+// anyway and doesn't need our "done" signal.
+ipcMain.handle('backend.restart', () => {
+  if (!lastOpenedCatalogPath) return { restarted: false };
+  void swapCatalog(lastOpenedCatalogPath);
+  return { restarted: true };
 });
 
 // ───────────────────────── Tab tear-out ─────────────────────────

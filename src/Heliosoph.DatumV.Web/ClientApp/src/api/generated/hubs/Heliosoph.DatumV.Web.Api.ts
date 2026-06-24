@@ -2,6 +2,48 @@
 /* eslint-disable */
 /* tslint:disable */
 
+/** Transpiled from Heliosoph.DatumV.Web.Api.GpuStatusDto */
+export type GpuStatusDto = {
+    /** Transpiled from string? */
+    platform?: string;
+    /** Transpiled from bool */
+    variantSupportsCuda: boolean;
+    /** Transpiled from bool */
+    hasNvidiaDriver: boolean;
+    /** Transpiled from string? */
+    nvidiaGpuName?: string;
+    /** Transpiled from string? */
+    nvidiaComputeCapability?: string;
+    /** Transpiled from bool */
+    cudaCompatible: boolean;
+    /** Transpiled from string? */
+    installedVersion?: string;
+    /** Transpiled from string? */
+    installedPath?: string;
+    /** Transpiled from string? */
+    availableVersion?: string;
+    /** Transpiled from Heliosoph.DatumV.Web.Api.CudaBundlePlatformEntryDto? */
+    availableEntry?: CudaBundlePlatformEntryDto;
+    /** Transpiled from bool */
+    updateAvailable: boolean;
+    /** Transpiled from bool */
+    isInstalling: boolean;
+    /** Transpiled from string? */
+    activeInstallVersion?: string;
+}
+
+/** Transpiled from Heliosoph.DatumV.Web.Api.CudaBundlePlatformEntryDto */
+export type CudaBundlePlatformEntryDto = {
+    /** Transpiled from string */
+    url: string;
+    /** Transpiled from string */
+    sha256: string;
+    /** Transpiled from long */
+    sizeBytes: number;
+    /** Transpiled from long */
+    extractedSizeBytes: number;
+}
+
 /** Transpiled from Heliosoph.DatumV.Web.Api.ResidentModelDto */
 export type ResidentModelDto = {
     /** Transpiled from string */

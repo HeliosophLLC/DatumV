@@ -220,6 +220,14 @@ contextBridge.exposeInMainWorld('electronHost', {
     node: process.versions.node ?? '',
   },
 
+  // Backend respawn. Called by state/gpu.ts after a CUDA bundle install
+  // completes, so the next .NET process picks up the freshly-staged
+  // LD_LIBRARY_PATH / PATH and the bundled CUDA libs become loadable.
+  // Resolves once the backend is back up + the renderer has reloaded
+  // (the same splash flow as a catalog swap).
+  restartBackend: () =>
+    ipcRenderer.invoke('backend.restart') as Promise<{ restarted: boolean }>,
+
   // Update checker — notify-only. Main owns the actual electron-updater
   // probe; renderer asks for a check, subscribes to status transitions,
   // and synchronously fetches the most-recent status on mount so a

@@ -17,6 +17,14 @@ import {
 } from '@/state/settings';
 import { setTheme } from '@/state/theme';
 import { healthState, refreshHealth } from '@/state/health';
+import {
+  gpuState,
+  refreshGpuStatus,
+  installCuda,
+  cancelInstall,
+  uninstallCuda,
+  restartBackend,
+} from '@/state/gpu';
 import { llmState } from '@/state/llm';
 import { MODELS_TAB_ID, selectTab } from '@/state/tabs';
 import {
@@ -157,6 +165,8 @@ export function SettingsView() {
             />
           ))}
         </Section>
+
+        <GpuSection />
 
         <Section title={t('about.title')}>
           <Field label={t('about.version')}>
@@ -440,4 +450,204 @@ function setLocaleSetting(locale: string): Promise<void> {
 
 function capitalize(s: string): string {
   return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
+}
+
+// GPU acceleration section. Shows driver / install state, exposes
+// Install / Update / Uninstall actions, and streams download + extract
+// progress from SignalR via state/gpu. Hidden entirely on platforms we
+// don't build a bundle for (anything other than linux-x64 / win-x64).
+function GpuSection() {
+  const { t } = useTranslation('settings');
+  const gpu = useSnapshot(gpuState);
+
+  useEffect(() => {
+    void refreshGpuStatus();
+  }, []);
+
+  const status = gpu.status;
+  if (status === null) {
+    // First-load placeholder. Avoids a flash of "no driver" before the
+    // probe responds.
+    return null;
+  }
+  // Standard-variant builds don't ship libonnxruntime_providers_cuda; the
+  // bundle would land on disk but no acceleration would light up. Hide
+  // the section entirely so we don't promise something this binary can't
+  // deliver. Users who want GPU acceleration download the cuda variant.
+  if (!status.variantSupportsCuda) {
+    return null;
+  }
+  if (status.platform === undefined || status.platform === null) {
+    return (
+      <Section title={t('gpu.title')}>
+        <p className="text-muted-foreground text-sm">{t('gpu.statusUnsupported')}</p>
+      </Section>
+    );
+  }
+  if (!status.hasNvidiaDriver) {
+    return (
+      <Section title={t('gpu.title')}>
+        <p className="text-muted-foreground text-sm">{t('gpu.statusNoDriver')}</p>
+      </Section>
+    );
+  }
+  // Driver present but the GPU itself is below the CC 5.0 floor (Kepler
+  // and older). Installing the bundle would silently fall back to CPU —
+  // surface a clear "wrong build" message + point users at the Standard
+  // installer, which uses DirectML/Vulkan and DOES work on Kepler.
+  if (!status.cudaCompatible) {
+    return (
+      <Section title={t('gpu.title')}>
+        <p className="text-sm">
+          {t('gpu.statusIncompatibleArch', {
+            gpu: status.nvidiaGpuName ?? 'NVIDIA GPU',
+            cc: status.nvidiaComputeCapability ?? '?',
+          })}
+        </p>
+        <p className="text-muted-foreground text-sm">
+          {t('gpu.statusIncompatibleArchCta')}
+        </p>
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              void window.electronHost?.openExternal(
+                'https://github.com/HeliosophLLC/DatumV/releases/latest',
+              )
+            }
+          >
+            {t('gpu.statusIncompatibleArchButton')}
+          </Button>
+        </div>
+      </Section>
+    );
+  }
+
+  const installed = status.installedVersion ?? null;
+  const available = status.availableVersion ?? null;
+  const sizeBytes = status.availableEntry?.sizeBytes ?? 0;
+  const sizeLabel = formatBytes(sizeBytes);
+
+  const phase = gpu.phase;
+  const active = phase === 'downloading' || phase === 'extracting';
+
+  return (
+    <Section title={t('gpu.title')}>
+      <p className="text-sm">
+        {installed === null
+          ? t('gpu.statusNotInstalled')
+          : status.updateAvailable && available
+            ? t('gpu.statusUpdateAvailable', { installed, available })
+            : t('gpu.statusInstalled', { version: installed })}
+      </p>
+
+      {active && (
+        <div className="flex flex-col gap-1.5">
+          {phase === 'downloading' ? (
+            <p className="text-muted-foreground text-sm">
+              {t('gpu.downloadProgress', {
+                percent: gpu.bytesTotal > 0
+                  ? Math.round((gpu.bytesDownloaded / gpu.bytesTotal) * 100)
+                  : 0,
+                downloaded: formatBytes(gpu.bytesDownloaded),
+                total: formatBytes(gpu.bytesTotal),
+                speed: formatRate(gpu.samples),
+              })}
+            </p>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              {gpu.totalFiles > 0
+                ? t('gpu.extractProgress', { files: gpu.filesExtracted })
+                : t('gpu.extracting')}
+            </p>
+          )}
+          <Button variant="outline" size="sm" onClick={() => void cancelInstall()}>
+            {t('gpu.cancelButton')}
+          </Button>
+        </div>
+      )}
+
+      {phase === 'completed' && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-sm">{t('gpu.completed')}</p>
+          <Button
+            size="sm"
+            onClick={() => void restartBackend()}
+            disabled={gpu.restarting}
+          >
+            {gpu.restarting ? t('gpu.restarting') : t('gpu.restartButton')}
+          </Button>
+        </div>
+      )}
+
+      {phase === 'failed' && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-destructive text-sm">
+            {t('gpu.errorPrefix', { message: gpu.error ?? '' })}
+          </p>
+          <Button size="sm" onClick={() => void installCuda()}>
+            {t('gpu.tryAgainButton')}
+          </Button>
+        </div>
+      )}
+
+      {phase === 'idle' && available && (
+        <div className="flex flex-wrap gap-1.5">
+          {installed === null ? (
+            <Button size="sm" onClick={() => void installCuda()}>
+              {t('gpu.installButton', { size: sizeLabel })}
+            </Button>
+          ) : status.updateAvailable ? (
+            <>
+              <Button size="sm" onClick={() => void installCuda()}>
+                {t('gpu.updateButton', { size: sizeLabel })}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void uninstallCuda(installed)}
+              >
+                {t('gpu.uninstallButton')}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void uninstallCuda(installed)}
+            >
+              {t('gpu.uninstallButton')}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {phase === 'idle' && !available && (
+        <p className="text-muted-foreground text-xs">{t('gpu.manifestUnavailable')}</p>
+      )}
+    </Section>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatRate(samples: readonly { t: number; bytes: number }[]): string {
+  if (samples.length < 2) return '—';
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const elapsedSec = (last.t - first.t) / 1000;
+  if (elapsedSec <= 0) return '—';
+  const bytesPerSec = (last.bytes - first.bytes) / elapsedSec;
+  return `${formatBytes(bytesPerSec)}/s`;
 }

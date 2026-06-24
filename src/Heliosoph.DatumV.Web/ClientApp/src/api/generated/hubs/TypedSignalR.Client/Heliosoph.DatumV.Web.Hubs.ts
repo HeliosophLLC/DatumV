@@ -3,7 +3,7 @@
 /* tslint:disable */
 // @ts-nocheck
 import type { IStreamResult, Subject } from '@microsoft/signalr';
-import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
+import type { CatalogChangedEvent, ModelLoadedEvent, ModelEvictedEvent, ModelActiveChangedEvent, CalibrationRampStartedEvent, CalibrationRampStepEvent, CalibrationRampHaltedEvent, CalibrationRampCompletedEvent, ModelDownloadStartedDto, ModelDownloadProgressDto, ModelDownloadCompleteDto, ModelInstallingDto, ModelInstalledDto, ModelDownloadFailedDto, UvDownloadStartedDto, UvDownloadProgressDto, UvDownloadCompleteDto, PythonInstallStartedDto, PythonInstallProgressDto, PythonInstallCompleteDto, VenvInstallStartedDto, VenvInstallProgressDto, VenvInstallCompleteDto, PythonEnvironmentFailedDto, DatasetDownloadStartedDto, DatasetDownloadProgressDto, DatasetDownloadCompleteDto, DatasetIngestingDto, DatasetIngestProgressDto, DatasetTableIngestedDto, DatasetInstalledDto, DatasetDownloadFailedDto, CudaBundleInstallStartedDto, CudaBundleDownloadProgressDto, CudaBundleExtractStartedDto, CudaBundleExtractProgressDto, CudaBundleInstalledDto, CudaBundleInstallFailedDto } from '../Heliosoph.DatumV.Web.Hubs';
 
 export type ICatalogHub = {
     /**
@@ -241,5 +241,35 @@ export type IStreamHubClient = {
     * @returns Transpiled from System.Threading.Tasks.Task
     */
     onDatasetDownloadFailed(failed: DatasetDownloadFailedDto): Promise<void>;
+    /**
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstallStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleInstallStarted(started: CudaBundleInstallStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleDownloadProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleDownloadProgress(progress: CudaBundleDownloadProgressDto): Promise<void>;
+    /**
+    * @param started Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleExtractStartedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleExtractStarted(started: CudaBundleExtractStartedDto): Promise<void>;
+    /**
+    * @param progress Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleExtractProgressDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleExtractProgress(progress: CudaBundleExtractProgressDto): Promise<void>;
+    /**
+    * @param installed Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstalledDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleInstalled(installed: CudaBundleInstalledDto): Promise<void>;
+    /**
+    * @param failed Transpiled from Heliosoph.DatumV.Web.Hubs.CudaBundleInstallFailedDto
+    * @returns Transpiled from System.Threading.Tasks.Task
+    */
+    onCudaBundleInstallFailed(failed: CudaBundleInstallFailedDto): Promise<void>;
 }
 

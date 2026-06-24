@@ -36,6 +36,12 @@ import type {
   DatasetTableIngestedDto as DatasetTableIngested,
   DatasetInstalledDto as DatasetInstalled,
   DatasetDownloadFailedDto as DatasetDownloadFailed,
+  CudaBundleInstallStartedDto as CudaBundleInstallStarted,
+  CudaBundleDownloadProgressDto as CudaBundleDownloadProgress,
+  CudaBundleExtractStartedDto as CudaBundleExtractStarted,
+  CudaBundleExtractProgressDto as CudaBundleExtractProgress,
+  CudaBundleInstalledDto as CudaBundleInstalled,
+  CudaBundleInstallFailedDto as CudaBundleInstallFailed,
 } from './generated/hubs/Heliosoph.DatumV.Web.Hubs';
 export type {
   ModelDownloadStarted,
@@ -62,6 +68,12 @@ export type {
   DatasetTableIngested,
   DatasetInstalled,
   DatasetDownloadFailed,
+  CudaBundleInstallStarted,
+  CudaBundleDownloadProgress,
+  CudaBundleExtractStarted,
+  CudaBundleExtractProgress,
+  CudaBundleInstalled,
+  CudaBundleInstallFailed,
 };
 
 // Singleton HubConnection + proxy + a fan-out dispatcher.
@@ -122,6 +134,13 @@ const dsIngestProgressHandlers: Set<Handler<DatasetIngestProgress>> = new Set();
 const dsTableIngestedHandlers: Set<Handler<DatasetTableIngested>> = new Set();
 const dsInstalledHandlers: Set<Handler<DatasetInstalled>> = new Set();
 const dsFailedHandlers: Set<Handler<DatasetDownloadFailed>> = new Set();
+
+const gpuStartedHandlers: Set<Handler<CudaBundleInstallStarted>> = new Set();
+const gpuDownloadProgressHandlers: Set<Handler<CudaBundleDownloadProgress>> = new Set();
+const gpuExtractStartedHandlers: Set<Handler<CudaBundleExtractStarted>> = new Set();
+const gpuExtractProgressHandlers: Set<Handler<CudaBundleExtractProgress>> = new Set();
+const gpuInstalledHandlers: Set<Handler<CudaBundleInstalled>> = new Set();
+const gpuFailedHandlers: Set<Handler<CudaBundleInstallFailed>> = new Set();
 
 type CloseHandler = (err?: Error) => void;
 const closeHandlers: Set<CloseHandler> = new Set();
@@ -197,6 +216,19 @@ export const onDatasetInstalled = (handler: Handler<DatasetInstalled>) =>
   subscribe(dsInstalledHandlers, handler);
 export const onDatasetDownloadFailed = (handler: Handler<DatasetDownloadFailed>) =>
   subscribe(dsFailedHandlers, handler);
+
+export const onCudaBundleInstallStarted = (handler: Handler<CudaBundleInstallStarted>) =>
+  subscribe(gpuStartedHandlers, handler);
+export const onCudaBundleDownloadProgress = (handler: Handler<CudaBundleDownloadProgress>) =>
+  subscribe(gpuDownloadProgressHandlers, handler);
+export const onCudaBundleExtractStarted = (handler: Handler<CudaBundleExtractStarted>) =>
+  subscribe(gpuExtractStartedHandlers, handler);
+export const onCudaBundleExtractProgress = (handler: Handler<CudaBundleExtractProgress>) =>
+  subscribe(gpuExtractProgressHandlers, handler);
+export const onCudaBundleInstalled = (handler: Handler<CudaBundleInstalled>) =>
+  subscribe(gpuInstalledHandlers, handler);
+export const onCudaBundleInstallFailed = (handler: Handler<CudaBundleInstallFailed>) =>
+  subscribe(gpuFailedHandlers, handler);
 
 export function onConnectionClosed(handler: CloseHandler): () => void {
   closeHandlers.add(handler);
@@ -289,6 +321,24 @@ const dispatcher: IStreamHubClient = {
   },
   async onDatasetDownloadFailed(event: DatasetDownloadFailed): Promise<void> {
     fanOut(dsFailedHandlers, event);
+  },
+  async onCudaBundleInstallStarted(event: CudaBundleInstallStarted): Promise<void> {
+    fanOut(gpuStartedHandlers, event);
+  },
+  async onCudaBundleDownloadProgress(event: CudaBundleDownloadProgress): Promise<void> {
+    fanOut(gpuDownloadProgressHandlers, event);
+  },
+  async onCudaBundleExtractStarted(event: CudaBundleExtractStarted): Promise<void> {
+    fanOut(gpuExtractStartedHandlers, event);
+  },
+  async onCudaBundleExtractProgress(event: CudaBundleExtractProgress): Promise<void> {
+    fanOut(gpuExtractProgressHandlers, event);
+  },
+  async onCudaBundleInstalled(event: CudaBundleInstalled): Promise<void> {
+    fanOut(gpuInstalledHandlers, event);
+  },
+  async onCudaBundleInstallFailed(event: CudaBundleInstallFailed): Promise<void> {
+    fanOut(gpuFailedHandlers, event);
   },
 };
 

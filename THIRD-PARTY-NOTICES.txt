@@ -1,5 +1,5 @@
 DatumV THIRD-PARTY NOTICES
-Generated: 2026-06-17T18:19:26.878Z
+Generated: 2026-06-24T02:11:29.973Z
 
 This file aggregates license and copyright notices for every
 third-party component that ships with the DatumV installer,
@@ -1706,9 +1706,6 @@ headers-polyfill 5.0.1
   License: MIT
   URL: https://github.com/mswjs/headers-polyfill
   Authors: Artem Zakharchenko
-
-heliosoph-datumv-web-clientapp 0.0.0
-  License: UNLICENSED
 
 highlight.js 11.11.1
   License: BSD-3-Clause

@@ -64,6 +64,12 @@ export interface HostBridge {
   // events.
   setZoomLevel(level: number): void;
   getZoomLevel(): number;
+  // Respawn the .NET backend against the current catalog. Triggered
+  // after the user installs / uninstalls the CUDA runtime bundle from
+  // Settings → GPU; the new process picks up the staged
+  // LD_LIBRARY_PATH / PATH so the deferred CUDA libs become loadable.
+  // Resolves once the new backend is ready + the renderer has reloaded.
+  restartBackend(): Promise<{ restarted: boolean }>;
   // Update checker — fire-and-forget request to re-probe GitHub
   // Releases; the result arrives via the status subscription below.
   // No await; the IPC resolves as soon as main kicks off the probe.
@@ -141,6 +147,7 @@ declare global {
       catalogOpenPicker(): Promise<{ canceled: boolean; path?: string }>;
       catalogNewPicker(): Promise<{ canceled: boolean; path?: string }>;
       catalogOpenPath(path: string): Promise<{ canceled: boolean; path?: string }>;
+      restartBackend(): Promise<{ restarted: boolean }>;
       setHostStrings(strings: unknown): Promise<void>;
       setHostTheme(theme: 'light' | 'dark'): Promise<void>;
       setZoomLevel(level: number): void;
@@ -261,6 +268,10 @@ function createHostBridge(): HostBridge {
     openCatalogPath: async (path) => {
       console.log('[host] → catalog.openPath', path);
       await eh.catalogOpenPath(path);
+    },
+    restartBackend: async () => {
+      console.log('[host] → backend.restart');
+      return await eh.restartBackend();
     },
     setHostStrings: (strings) => {
       void eh.setHostStrings(strings);
