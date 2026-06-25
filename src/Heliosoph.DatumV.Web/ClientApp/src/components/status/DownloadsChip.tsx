@@ -19,6 +19,13 @@ import {
   installVariant,
   type ActiveDatasetInstall,
 } from '@/state/datasets';
+import {
+  GPU_BUNDLE_ID,
+  dismissActiveInstall as dismissActiveGpuInstall,
+  dismissError as dismissGpuError,
+  gpuState,
+  installCuda,
+} from '@/state/gpu';
 
 // Status-bar chip showing aggregate model-download / install activity.
 // Hidden when nothing is in flight — left-section placement keeps the
@@ -68,6 +75,22 @@ function adaptDatasetActive(d: ActiveDatasetInstall): ActiveDownload {
   };
 }
 
+// Project the (single) in-flight CUDA bundle install onto ActiveDownload.
+// fileIndex/fileCount stay at 0 — there's no multi-file progression for
+// the GPU bundle, it's one tar.zst — so the chip's per-file label hides.
+function adaptGpuActive(): ActiveDownload {
+  return {
+    modelId: GPU_BUNDLE_ID,
+    bytesReadTotal: gpuState.bytesDownloaded,
+    bytesTotalAcrossModel: gpuState.bytesTotal,
+    fileIndex: 0,
+    fileCount: 0,
+    currentFile: '',
+    startedAt: gpuState.startedAt ?? Date.now(),
+    samples: gpuState.samples,
+  };
+}
+
 function rawPercentOf(bytesRead: number, bytesTotal: number): number | null {
   if (bytesTotal <= 0) return null;
   return Math.min(99, Math.floor((bytesRead / bytesTotal) * 100));
@@ -77,6 +100,7 @@ export function DownloadsChip() {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
   const datasetSnap = useSnapshot(datasetsState);
+  const gpuSnap = useSnapshot(gpuState);
 
   // Project the dataset active map into the same shape the chip already
   // aggregates over. Dataset entries split by phase: starting /
@@ -91,17 +115,30 @@ export function DownloadsChip() {
   }
   const datasetErrorIds = Object.keys(datasetSnap.errors);
 
+  // GPU bundle: there's only ever one install in flight, so the "map"
+  // shape collapses to {} or { GPU_BUNDLE_ID: ... }. Download phase
+  // → active row; extract phase → installing row; failed → error row.
+  const gpuDownloading: Record<string, ActiveDownload> =
+    gpuSnap.phase === 'downloading' ? { [GPU_BUNDLE_ID]: adaptGpuActive() } : {};
+  const gpuExtractingIds: string[] = gpuSnap.phase === 'extracting' ? [GPU_BUNDLE_ID] : [];
+  const gpuErrorIds = Object.keys(gpuSnap.errors);
+
   const modelActiveIds = Object.keys(snap.active);
-  const activeIds = [...modelActiveIds, ...Object.keys(datasetDownloading)];
+  const activeIds = [
+    ...modelActiveIds,
+    ...Object.keys(datasetDownloading),
+    ...Object.keys(gpuDownloading),
+  ];
   const installingIds = Object.keys(snap.installing);
   const venvIds = Object.keys(snap.venvSteps);
-  const errorIds = [...Object.keys(snap.errors), ...datasetErrorIds];
+  const errorIds = [...Object.keys(snap.errors), ...datasetErrorIds, ...gpuErrorIds];
 
   const hasAnything =
     activeIds.length > 0 ||
     installingIds.length > 0 ||
     venvIds.length > 0 ||
     datasetIngestingIds.length > 0 ||
+    gpuExtractingIds.length > 0 ||
     errorIds.length > 0 ||
     snap.pythonHostStep != null;
 
@@ -125,10 +162,12 @@ export function DownloadsChip() {
 
   const perfNow = performance.now();
   const wallNow = Date.now();
-  // Lookup that resolves an active id from either the model or dataset
-  // map. Both contribute to aggregate progress + stall detection.
+  // Lookup that resolves an active id from any of the three contributing
+  // maps. All three contribute to aggregate progress + stall detection.
   const lookupActive = (id: string): ActiveDownload =>
-    (snap.active[id] as ActiveDownload | undefined) ?? datasetDownloading[id]!;
+    (snap.active[id] as ActiveDownload | undefined)
+    ?? datasetDownloading[id]
+    ?? gpuDownloading[id]!;
   const stalledIds = activeIds.filter((id) =>
     isStalled(lookupActive(id), perfNow, wallNow),
   );
@@ -163,7 +202,7 @@ export function DownloadsChip() {
     rawAggPercent != null ? monotonicAggPercentRef.current : null;
 
   const installingCount =
-    new Set([...installingIds, ...venvIds, ...datasetIngestingIds]).size
+    new Set([...installingIds, ...venvIds, ...datasetIngestingIds, ...gpuExtractingIds]).size
     + (snap.pythonHostStep ? 1 : 0);
 
   let chipClasses: string;
@@ -212,6 +251,7 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
   const datasetSnap = useSnapshot(datasetsState);
+  const gpuSnap = useSnapshot(gpuState);
 
   // Mirror of the parent's per-phase dataset projection so the popover
   // can render dataset rows alongside model rows. Source tag drives
@@ -222,9 +262,12 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
     if (d.phase === 'ingesting') datasetIngestingIds.push(id);
     else datasetDownloading[id] = adaptDatasetActive(d);
   }
+  const gpuDownloading: Record<string, ActiveDownload> =
+    gpuSnap.phase === 'downloading' ? { [GPU_BUNDLE_ID]: adaptGpuActive() } : {};
+  const gpuExtractingIds: string[] = gpuSnap.phase === 'extracting' ? [GPU_BUNDLE_ID] : [];
 
   const stalledSet = new Set(stalledIds);
-  type RowSource = 'model' | 'dataset';
+  type RowSource = 'model' | 'dataset' | 'gpu';
   type Row = {
     id: string;
     source: RowSource;
@@ -236,6 +279,7 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
   const errorEntries: { id: string; source: RowSource }[] = [
     ...Object.keys(snap.errors).map((id) => ({ id, source: 'model' as RowSource })),
     ...Object.keys(datasetSnap.errors).map((id) => ({ id, source: 'dataset' as RowSource })),
+    ...Object.keys(gpuSnap.errors).map((id) => ({ id, source: 'gpu' as RowSource })),
   ].sort((a, b) => a.id.localeCompare(b.id));
   for (const { id, source } of errorEntries) {
     const key = `${source}:${id}`;
@@ -247,6 +291,7 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
   const activeEntries: { id: string; source: RowSource }[] = [
     ...Object.keys(snap.active).map((id) => ({ id, source: 'model' as RowSource })),
     ...Object.keys(datasetDownloading).map((id) => ({ id, source: 'dataset' as RowSource })),
+    ...Object.keys(gpuDownloading).map((id) => ({ id, source: 'gpu' as RowSource })),
   ].sort((a, b) => a.id.localeCompare(b.id));
   for (const { id, source } of activeEntries) {
     const key = `${source}:${id}`;
@@ -263,6 +308,7 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
     ...Object.keys(snap.installing).map((id) => ({ id, source: 'model' as RowSource })),
     ...Object.keys(snap.venvSteps).map((id) => ({ id, source: 'model' as RowSource })),
     ...datasetIngestingIds.map((id) => ({ id, source: 'dataset' as RowSource })),
+    ...gpuExtractingIds.map((id) => ({ id, source: 'gpu' as RowSource })),
   ].sort((a, b) => a.id.localeCompare(b.id));
   for (const { id, source } of installingEntries) {
     const key = `${source}:${id}`;
@@ -282,18 +328,22 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
                 modelId={row.id}
                 source={row.source}
                 error={
-                  row.source === 'dataset'
-                    ? datasetSnap.errors[row.id]!
-                    : snap.errors[row.id]!
+                  row.source === 'gpu'
+                    ? gpuSnap.errors[row.id]!
+                    : row.source === 'dataset'
+                      ? datasetSnap.errors[row.id]!
+                      : snap.errors[row.id]!
                 }
               />
             )}
             {row.kind === 'active' && (
               <ActiveRow
                 active={
-                  row.source === 'dataset'
-                    ? datasetDownloading[row.id]!
-                    : snap.active[row.id]!
+                  row.source === 'gpu'
+                    ? gpuDownloading[row.id]!
+                    : row.source === 'dataset'
+                      ? datasetDownloading[row.id]!
+                      : snap.active[row.id]!
                 }
               />
             )}
@@ -301,9 +351,11 @@ function DownloadsPopoverBody({ stalledIds }: { stalledIds: readonly string[] })
               <StalledRow
                 source={row.source}
                 active={
-                  row.source === 'dataset'
-                    ? datasetDownloading[row.id]!
-                    : snap.active[row.id]!
+                  row.source === 'gpu'
+                    ? gpuDownloading[row.id]!
+                    : row.source === 'dataset'
+                      ? datasetDownloading[row.id]!
+                      : snap.active[row.id]!
                 }
               />
             )}
@@ -393,7 +445,7 @@ function StalledRow({
   source,
 }: {
   active: ActiveDownload;
-  source: 'model' | 'dataset';
+  source: 'model' | 'dataset' | 'gpu';
 }) {
   const { t } = useTranslation('status');
   const rawPercent = rawPercentOf(
@@ -426,9 +478,11 @@ function StalledRow({
         <button
           type="button"
           onClick={() =>
-            source === 'dataset'
-              ? dismissActiveDatasetInstall(active.modelId)
-              : dismissActiveDownload(active.modelId)
+            source === 'gpu'
+              ? dismissActiveGpuInstall(active.modelId)
+              : source === 'dataset'
+                ? dismissActiveDatasetInstall(active.modelId)
+                : dismissActiveDownload(active.modelId)
           }
           className="border-border hover:bg-muted/60 cursor-pointer rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide"
         >
@@ -444,7 +498,7 @@ function InstallingRow({
   source,
 }: {
   modelId: string;
-  source: 'model' | 'dataset';
+  source: 'model' | 'dataset' | 'gpu';
 }) {
   const { t } = useTranslation('status');
   const snap = useSnapshot(downloadsState);
@@ -455,8 +509,17 @@ function InstallingRow({
   // python) is shared across whichever model triggered the install, so
   // we surface it on every installing row that doesn't have its own
   // venv step.
+  const gpuSnap = useSnapshot(gpuState);
   let detail: string | null = null;
-  if (source === 'dataset') {
+  if (source === 'gpu') {
+    // GPU extract phase. Show files extracted if the .NET side has sent
+    // a totalFiles count; otherwise just "extracting". TarZstExtractor
+    // doesn't pre-walk the archive so totalFiles == 0 in practice today.
+    detail =
+      gpuSnap.totalFiles > 0
+        ? `extracting · ${gpuSnap.filesExtracted}/${gpuSnap.totalFiles}`
+        : 'extracting';
+  } else if (source === 'dataset') {
     const d = datasetSnap.active[modelId];
     if (d && d.jobCount > 0) {
       const job = `${d.jobIndex + 1}/${d.jobCount}`;
@@ -493,18 +556,22 @@ function FailedRow({
   error,
 }: {
   modelId: string;
-  source: 'model' | 'dataset';
+  source: 'model' | 'dataset' | 'gpu';
   error: string;
 }) {
   const { t } = useTranslation('status');
   const onDismiss =
-    source === 'dataset'
-      ? () => dismissDatasetError(modelId)
-      : () => dismissDownloadError(modelId);
+    source === 'gpu'
+      ? () => dismissGpuError(modelId)
+      : source === 'dataset'
+        ? () => dismissDatasetError(modelId)
+        : () => dismissDownloadError(modelId);
   const onRetry =
-    source === 'dataset'
-      ? () => void installVariant(modelId)
-      : () => void installModel(modelId);
+    source === 'gpu'
+      ? () => void installCuda()
+      : source === 'dataset'
+        ? () => void installVariant(modelId)
+        : () => void installModel(modelId);
   return (
     <div className="flex flex-col gap-1 text-xs">
       <div className="flex items-baseline justify-between font-mono">

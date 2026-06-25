@@ -60,6 +60,14 @@ interface SettingsState {
   // results pane renders a flex-wrap gallery of thumbnails instead of
   // the table grid. When false, the table is always used.
   imageGalleryLayout: boolean;
+  // True after the user clicks "Don't ask again" on the first-launch
+  // GPU install prompt. state/gpu.ts checks this before opening the
+  // dialog. Reset by editing settings.json on disk.
+  gpuInstallPromptDismissed: boolean;
+  // True after the user clicks "Don't ask again" on the "you're running
+  // the cuda build but this machine has no usable NVIDIA GPU" prompt.
+  // Independent of gpuInstallPromptDismissed.
+  gpuWrongBuildPromptDismissed: boolean;
 }
 
 export const settingsState = proxy<SettingsState>({
@@ -77,6 +85,8 @@ export const settingsState = proxy<SettingsState>({
   columnDisplayModeDefaults: {},
   defaultLlmModel: null,
   imageGalleryLayout: true,
+  gpuInstallPromptDismissed: false,
+  gpuWrongBuildPromptDismissed: false,
 });
 
 function applyDto(dto: SettingsDto): void {
@@ -100,6 +110,18 @@ function applyDto(dto: SettingsDto): void {
   settingsState.columnDisplayModeDefaults = (dto.columnDisplayModeDefaults ?? {}) as Record<string, string>;
   settingsState.defaultLlmModel = dto.defaultLlmModel ?? null;
   settingsState.imageGalleryLayout = dto.imageGalleryLayout ?? settingsState.imageGalleryLayout;
+  // gpuInstallPromptDismissed lives on the C# DTO but isn't in the
+  // NSwag-generated TS client until a Windows build re-runs GenerateApi.
+  // Cast through `unknown` so we can read the field today; the cast can be
+  // removed once the regen ships.
+  const dtoWithGpuExt = dto as unknown as {
+    gpuInstallPromptDismissed?: boolean;
+    gpuWrongBuildPromptDismissed?: boolean;
+  };
+  settingsState.gpuInstallPromptDismissed =
+    dtoWithGpuExt.gpuInstallPromptDismissed ?? settingsState.gpuInstallPromptDismissed;
+  settingsState.gpuWrongBuildPromptDismissed =
+    dtoWithGpuExt.gpuWrongBuildPromptDismissed ?? settingsState.gpuWrongBuildPromptDismissed;
 }
 
 export async function refreshSettings(): Promise<void> {

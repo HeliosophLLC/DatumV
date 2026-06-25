@@ -10,7 +10,16 @@ import {
 } from '@/api/hub';
 import { pushSample, type ProgressSample } from '@/state/progressSamples';
 import { host } from '@/host';
+import { openDialog } from '@/state/dialogs';
+import { refreshSettings, settingsState, updateSettings } from '@/state/settings';
+import { isTornOutWindow } from '@/state/tabs';
 import type { GpuStatusDto } from '@/api/generated/hubs/Heliosoph.DatumV.Web.Api';
+
+// Stable id used in the status-bar DownloadsChip rows + error map keys.
+// Single-tenant (there's only ever one CUDA bundle install in flight on a
+// given host) so a fixed key is fine; the map shape matches the model and
+// dataset state modules for the chip's polymorphic adapter pattern.
+export const GPU_BUNDLE_ID = 'cuda-runtime';
 
 // GPU acceleration state for the Settings → GPU section. Lifecycle:
 //   - refreshStatus(): polled on Settings mount + after install/uninstall.
@@ -56,6 +65,11 @@ interface GpuStateShape {
   totalFiles: number;
   // Last error (cleared on next install attempt).
   error: string | null;
+  // Map of bundle-id → error message, mirrors downloadsState.errors so
+  // the DownloadsChip's FailedRow can render a gpu retry/dismiss row
+  // alongside model + dataset failures. Single key today (GPU_BUNDLE_ID)
+  // but the chip's polymorphic aggregation already keys by id.
+  errors: Record<string, string>;
   // True between restartBackend() being invoked and the IPC resolving.
   // The renderer reloads itself as part of the catalog-swap path, so
   // this rarely matters in practice — the UI gets reloaded mid-flight.
@@ -72,6 +86,7 @@ export const gpuState = proxy<GpuStateShape>({
   filesExtracted: 0,
   totalFiles: 0,
   error: null,
+  errors: {},
   restarting: false,
 });
 
@@ -150,6 +165,26 @@ export async function uninstallCuda(version: string): Promise<void> {
   }
 }
 
+// DownloadsChip dismiss hooks. Match the names from state/downloads +
+// state/datasets so the chip can route by source tag without per-source
+// branching at the call site.
+export function dismissError(_id: string): void {
+  gpuState.errors = {};
+  gpuState.error = null;
+  if (gpuState.phase === 'failed') gpuState.phase = 'idle';
+}
+
+export function dismissActiveInstall(_id: string): void {
+  // For an in-flight install, "dismiss" means cancel — we don't want to
+  // leave partial downloads racing in the background after the user
+  // explicitly closed the chip row.
+  cancelInstall();
+  gpuState.phase = 'idle';
+  gpuState.bytesDownloaded = 0;
+  gpuState.bytesTotal = 0;
+  gpuState.samples = [];
+}
+
 export async function restartBackend(): Promise<void> {
   gpuState.restarting = true;
   try {
@@ -190,10 +225,152 @@ onCudaBundleExtractProgress((e) => {
 
 onCudaBundleInstalled(() => {
   gpuState.phase = 'completed';
+  // Clear chip-relevant fields so the DownloadsChip drops the active /
+  // installing row immediately. The Settings → GPU section still reads
+  // the installed version via status (re-fetched below).
+  gpuState.bytesDownloaded = 0;
+  gpuState.bytesTotal = 0;
+  gpuState.filesExtracted = 0;
+  gpuState.totalFiles = 0;
+  gpuState.samples = [];
   void refreshGpuStatus();
+  // Pop the "Restart backend?" prompt — only on the main window so
+  // torn-out tab windows don't double-fire. promptRestart guards against
+  // re-firing within the same renderer.
+  if (!isTornOutWindow) {
+    void promptRestart();
+  }
 });
 
 onCudaBundleInstallFailed((e) => {
   gpuState.phase = 'failed';
   gpuState.error = e.error;
+  gpuState.errors = { [GPU_BUNDLE_ID]: e.error };
 });
+
+// ───────────────────────── Restart-after-install prompt ─────────────────────────
+
+let restartPromptShown = false;
+
+async function promptRestart(): Promise<void> {
+  if (restartPromptShown) return;
+  restartPromptShown = true;
+  const handle = openDialog<{ action: 'restart' | 'later' }>({
+    kind: 'gpuRestartPrompt',
+    payload: {},
+  });
+  const result = await handle.result;
+  if (result?.action === 'restart') {
+    void restartBackend();
+  }
+  // 'later' / null (X-close) → user can restart from Settings → GPU later.
+}
+
+// ───────────────────────── First-launch prompt ─────────────────────────
+
+// One-shot guard so a re-mount of the main app shell doesn't re-fire the
+// prompt within the same renderer process. Across launches the persistence
+// signal is settings.gpuInstallPromptDismissed.
+let promptCheckRan = false;
+let wrongBuildPromptCheckRan = false;
+
+// Called once on app mount. Surfaces a modal asking the user to install
+// GPU support iff every gate passes: this is the cuda build variant, an
+// NVIDIA driver is detected, the GPU is actually CUDA-compatible (CC 7.0+),
+// the bundle isn't already installed, and the user hasn't previously
+// chosen "Don't ask again." Otherwise no-op so the app boots straight to
+// the workspace.
+export async function maybePromptGpuInstall(): Promise<void> {
+  if (promptCheckRan) return;
+  promptCheckRan = true;
+
+  // Make sure both inputs are loaded; refreshSettings is also called by
+  // App.tsx but it's idempotent and cheap.
+  await Promise.all([refreshGpuStatus(), refreshSettings()]);
+
+  const status = gpuState.status;
+  if (status === null) return;
+  if (!status.variantSupportsCuda) return;
+  if (!status.hasNvidiaDriver) return;
+  if (!status.cudaCompatible) return;
+  if (status.installedVersion !== null && status.installedVersion !== undefined) return;
+  if (status.availableEntry === null || status.availableEntry === undefined) return;
+  if (settingsState.gpuInstallPromptDismissed) return;
+
+  const handle = openDialog<{ action: 'install' | 'later' | 'never' }>({
+    kind: 'gpuInstallPrompt',
+    payload: {
+      gpuName: status.nvidiaGpuName ?? 'NVIDIA GPU',
+      sizeBytes: status.availableEntry.sizeBytes,
+    },
+  });
+  const result = await handle.result;
+  if (result?.action === 'install') {
+    // Fire-and-forget. Progress flows through state/gpu.ts SignalR
+    // subscribers; user can watch in Settings → GPU.
+    void installCuda();
+  } else if (result?.action === 'never') {
+    // gpuInstallPromptDismissed isn't in the NSwag-generated
+    // SettingsPatchDto until a Windows build re-runs GenerateApi. Cast
+    // through `unknown` so the patch typechecks today; remove once regen
+    // ships.
+    void updateSettings({
+      gpuInstallPromptDismissed: true,
+    } as unknown as Parameters<typeof updateSettings>[0]);
+  }
+  // 'later' (and `null` from window X-close) leave the dismissed flag
+  // alone — the prompt will fire again on the next launch.
+}
+
+// Mirror of maybePromptGpuInstall for the inverse case: this is the
+// cuda build but the machine has no usable NVIDIA GPU (either no
+// driver, or the GPU is older than the cudaCompatible floor). The
+// user almost certainly downloaded the wrong installer — point them
+// at the Standard one, which would actually give them GPU acceleration
+// on this hardware via DirectML (Windows) or Vulkan (Linux + LLMs).
+//
+// Mutually exclusive with maybePromptGpuInstall by construction: that
+// one requires hasNvidiaDriver && cudaCompatible, this one requires
+// !hasNvidiaDriver || !cudaCompatible. Calling both is safe — only
+// one will ever fire.
+export async function maybePromptGpuWrongBuild(): Promise<void> {
+  if (wrongBuildPromptCheckRan) return;
+  wrongBuildPromptCheckRan = true;
+
+  await Promise.all([refreshGpuStatus(), refreshSettings()]);
+
+  const status = gpuState.status;
+  if (status === null) return;
+  // Only relevant on the cuda build — the standard build has no "wrong
+  // build" condition; it works on any GPU (or falls back to CPU silently).
+  if (!status.variantSupportsCuda) return;
+  // If the platform isn't supported at all (e.g. ARM) there's no
+  // alternative build to recommend either. Skip.
+  if (status.platform === null || status.platform === undefined) return;
+  // Happy path: NVIDIA driver + compatible GPU. maybePromptGpuInstall
+  // handles this case — we have nothing to warn about here.
+  if (status.hasNvidiaDriver && status.cudaCompatible) return;
+  if (settingsState.gpuWrongBuildPromptDismissed) return;
+
+  const reason: 'noDriver' | 'incompatibleArch' = status.hasNvidiaDriver
+    ? 'incompatibleArch'
+    : 'noDriver';
+
+  const handle = openDialog<{ action: 'open' | 'later' | 'never' }>({
+    kind: 'gpuWrongBuildPrompt',
+    payload: {
+      reason,
+      gpuName: status.nvidiaGpuName ?? null,
+      cc: status.nvidiaComputeCapability ?? null,
+    },
+  });
+  const result = await handle.result;
+  if (result?.action === 'never') {
+    void updateSettings({
+      gpuWrongBuildPromptDismissed: true,
+    } as unknown as Parameters<typeof updateSettings>[0]);
+  }
+  // 'open' (already kicked the browser open inside the dialog) and
+  // 'later' / null both leave the dismissed flag alone — the prompt
+  // fires again next launch until the user explicitly opts out.
+}

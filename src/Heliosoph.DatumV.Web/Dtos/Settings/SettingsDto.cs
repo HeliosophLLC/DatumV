@@ -50,7 +50,19 @@ public sealed record SettingsDto(
     // When true and every column in a result cell is a single Image, the
     // results pane renders a flex-wrap gallery of thumbnails instead of
     // the table grid. When false, the table is always used.
-    bool ImageGalleryLayout = true);
+    bool ImageGalleryLayout = true,
+    // Set to true when the user dismisses the "install GPU support" first-
+    // launch prompt with "Don't ask again." Keeps the prompt from re-firing
+    // on every subsequent launch. The Settings → GPU section is still
+    // available — only the proactive popup is suppressed. Reset by editing
+    // the settings.json on disk or via a future "reset prompts" affordance.
+    bool GpuInstallPromptDismissed = false,
+    // Set to true when the user dismisses the "you're running the cuda
+    // build on a machine without a usable NVIDIA GPU — download the
+    // Standard installer" prompt with "Don't ask again." Independent of
+    // GpuInstallPromptDismissed so a user who later upgrades hardware
+    // still gets the offer-to-install prompt.
+    bool GpuWrongBuildPromptDismissed = false);
 
 // Partial document for PATCH /api/settings. All fields nullable; null means
 // "don't change this field." Server merges with the current document and
@@ -81,4 +93,6 @@ public sealed record SettingsPatchDto(
     // explicitly fall back to auto-pick.
     string? DefaultLlmModel = null,
     bool ClearDefaultLlmModel = false,
-    bool? ImageGalleryLayout = null);
+    bool? ImageGalleryLayout = null,
+    bool? GpuInstallPromptDismissed = null,
+    bool? GpuWrongBuildPromptDismissed = null);

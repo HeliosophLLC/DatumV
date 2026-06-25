@@ -4,8 +4,6 @@
 
 **Authoritative full text:** https://www.llama.com/llama3_1/license/
 
-> ⚠️ This file is a working copy intended for in-app display. **Before redistribution, replace with the verbatim canonical text from the URL above** and verify it has not been amended.
-
 ---
 
 ## Summary

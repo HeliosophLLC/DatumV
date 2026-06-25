@@ -47,7 +47,9 @@ Download the [latest release](https://github.com/HeliosophLLC/DatumV/releases/la
 | NVIDIA GPU | `DatumV-X.Y.Z-cuda-setup.exe` | `DatumV-X.Y.Z-cuda.AppImage` |
 | AMD / Intel GPU, or no discrete GPU | `DatumV-X.Y.Z-setup.exe` | `DatumV-X.Y.Z.AppImage` |
 
-The **CUDA** variants bundle NVIDIA's runtime (~750 MB larger) and require driver ≥ 525.60. The **standard** variants use DirectML on Windows and Vulkan on Linux for AMD + Intel GPUs, and degrade to CPU on machines without a usable accelerator.
+The **cuda** variants enable NVIDIA CUDA acceleration. On first launch (when an NVIDIA GPU is detected), the app prompts to download ~1.5 GB of NVIDIA runtime libraries to your app-data folder; subsequent launches use the cached runtime. Requires NVIDIA driver ≥ 525.60 and a GPU with compute capability 7.0 or newer (Volta or later, see the compatibility matrix below).
+
+The **standard** variants use DirectML on Windows and Vulkan on Linux for cross-vendor hardware acceleration. They work on virtually any GPU made in the last decade, including integrated graphics.
 
 Windows users who don't want an installer can grab `DatumV-X.Y.Z-portable.exe` (self-extracting single file) or `DatumV-X.Y.Z.zip` (raw archive) from the same Release page. These don't create Start Menu entries and can be deleted to remove.
 
@@ -57,6 +59,40 @@ Windows users who don't want an installer can grab `DatumV-X.Y.Z-portable.exe` (
 - ~5 GB free disk for the app; significantly more for downloaded models and datasets
 - Catalog content is stored separately from the app itself, under `%LOCALAPPDATA%\Heliosoph.DatumV\` on Windows and `~/.local/share/Heliosoph.DatumV/` on Linux
 - Windows 10/11 (x64) or a recent x86_64 Linux distribution
+
+### GPU acceleration
+
+DatumV uses different acceleration paths depending on your hardware and OS. The picture isn't symmetric across platforms — Linux has fewer GPU options than Windows for non-NVIDIA hardware.
+
+**ONNX models** (vision, audio, embeddings, classifiers — everything dispatched via `models.X(...)`):
+
+| Hardware | Windows (standard) | Windows (cuda) | Linux (standard) | Linux (cuda) |
+|---|---|---|---|---|
+| NVIDIA Turing+ (RTX 20-series and newer, GTX 16-series) | DirectML | CUDA | CPU | CUDA |
+| NVIDIA Pascal / Maxwell (GTX 10-series, 9-series) | DirectML | not recommended* | CPU | not recommended* |
+| NVIDIA Kepler and older (GTX 7-series, 800M-series) | CPU† | not supported | CPU | not supported |
+| AMD Radeon (GCN 1.2+) | DirectML | — | CPU | — |
+| Intel Arc / iGPU (Skylake or newer) | DirectML | — | CPU | — |
+
+*The cuda variant detects Pascal/Maxwell and surfaces a "download Standard installer instead" warning. cuDNN 9's precompiled kernels for these architectures are incomplete, so Conv operations fail at runtime.
+†Some Kepler-era GPUs are rejected by DirectML's D3D12 device-interface requirements and fall back to CPU; DatumV's Settings → GPU panel will say so explicitly.
+
+**LLM models** (chat, generative text via LLamaSharp):
+
+| Hardware | Windows & Linux |
+|---|---|
+| NVIDIA Turing+ | CUDA (cuda variant) or Vulkan (standard variant) |
+| Any other Vulkan-capable GPU (most GPUs since ~2014, including iGPUs) | Vulkan |
+| No usable GPU | CPU |
+
+In short: LLM inference accelerates on a much broader range of hardware than ONNX inference, because the Vulkan path doesn't depend on platform-specific runtime libraries the way DirectML / CUDA do.
+
+**Hybrid laptops (NVIDIA Optimus / AMD Switchable Graphics)**: on laptops with both integrated and discrete GPUs, DatumV uses whichever GPU your OS exposes by default — typically the integrated one. To force the discrete GPU:
+
+- **Windows**: Settings → System → Display → Graphics → Browse → pick the DatumV executable → set to **High performance**, then relaunch.
+- **Linux**: prefix the launch with `DRI_PRIME=1` (open-source drivers) or `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` (NVIDIA proprietary driver).
+
+For small models, the integrated GPU is usually fine. For 7B+ LLMs, the discrete GPU's dedicated VRAM tends to win.
 
 ### First-launch warnings (unsigned installers)
 

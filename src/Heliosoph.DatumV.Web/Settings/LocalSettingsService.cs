@@ -128,7 +128,9 @@ internal sealed class LocalSettingsService(WebHostOptions options) : ISettingsSe
             DefaultLlmModel: patch.ClearDefaultLlmModel
                 ? null
                 : patch.DefaultLlmModel ?? current.DefaultLlmModel,
-            ImageGalleryLayout: patch.ImageGalleryLayout ?? current.ImageGalleryLayout);
+            ImageGalleryLayout: patch.ImageGalleryLayout ?? current.ImageGalleryLayout,
+            GpuInstallPromptDismissed: patch.GpuInstallPromptDismissed ?? current.GpuInstallPromptDismissed,
+            GpuWrongBuildPromptDismissed: patch.GpuWrongBuildPromptDismissed ?? current.GpuWrongBuildPromptDismissed);
 
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
 

@@ -4,6 +4,12 @@ import { AboutDialog } from './AboutDialog';
 import { DeleteFileDialog } from './DeleteFileDialog';
 import { ExportDialog } from './ExportDialog';
 import { ExternalChangeDialog } from './ExternalChangeDialog';
+import { GpuInstallPromptDialog } from './GpuInstallPromptDialog';
+import { GpuRestartPromptDialog } from './GpuRestartPromptDialog';
+import {
+  GpuWrongBuildPromptDialog,
+  type GpuWrongBuildReason,
+} from './GpuWrongBuildPromptDialog';
 import { LicenseDialog } from './LicenseDialog';
 import { PreFlightDialog } from './PreFlightDialog';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
@@ -147,6 +153,27 @@ function renderDialogBody({ kind, requestId, params }: ParsedHash): React.ReactN
           // `informational` arrives as the string 'true' from URL-encoded
           // params (main.ts JSON.stringifies non-string payload values).
           informational={params.informational === 'true'}
+        />
+      );
+    case 'gpuInstallPrompt':
+      return (
+        <GpuInstallPromptDialog
+          requestId={requestId}
+          gpuName={params.gpuName ?? 'NVIDIA GPU'}
+          // sizeBytes arrives as a string from URL-encoded params (main.ts
+          // JSON.stringifies non-string payload values then URL-encodes).
+          sizeBytes={Number(params.sizeBytes ?? '0') || 0}
+        />
+      );
+    case 'gpuRestartPrompt':
+      return <GpuRestartPromptDialog requestId={requestId} />;
+    case 'gpuWrongBuildPrompt':
+      return (
+        <GpuWrongBuildPromptDialog
+          requestId={requestId}
+          reason={(params.reason as GpuWrongBuildReason) ?? 'noDriver'}
+          gpuName={params.gpuName ?? null}
+          computeCapability={params.cc ?? null}
         />
       );
     case 'export':

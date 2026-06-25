@@ -3117,7 +3117,11 @@ export interface ModelDto {
 
 export interface GpuStatusDto {
     platform?: string | undefined;
+    variantSupportsCuda?: boolean;
     hasNvidiaDriver?: boolean;
+    nvidiaGpuName?: string | undefined;
+    nvidiaComputeCapability?: string | undefined;
+    cudaCompatible?: boolean;
     installedVersion?: string | undefined;
     installedPath?: string | undefined;
     availableVersion?: string | undefined;
@@ -3420,6 +3424,7 @@ export interface SettingsDto {
     columnDisplayModeDefaults?: { [key: string]: string; };
     defaultLlmModel?: string | undefined;
     imageGalleryLayout?: boolean;
+    gpuInstallPromptDismissed?: boolean;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -3447,6 +3452,7 @@ export interface SettingsPatchDto {
     defaultLlmModel?: string | undefined;
     clearDefaultLlmModel?: boolean;
     imageGalleryLayout?: boolean | undefined;
+    gpuInstallPromptDismissed?: boolean | undefined;
 }
 
 export interface FileResponse {

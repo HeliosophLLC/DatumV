@@ -8,6 +8,30 @@
     "close": "Close",
     "unknownLicense": "Unknown license: {id}"
   },
+  "gpuInstallPrompt": {
+    "title": "Enable GPU acceleration?",
+    "bodyDetected": "DatumV detected {gpu} on this machine and can use it to run models much faster.",
+    "bodySize": "Installing GPU support downloads about {size} of NVIDIA runtime libraries to your app-data folder. You can also do this later from Settings → GPU.",
+    "install": "Install now",
+    "later": "Later",
+    "never": "Don't ask again"
+  },
+  "gpuRestartPrompt": {
+    "title": "GPU support installed",
+    "body": "The CUDA runtime is ready to use.",
+    "detail": "Restart the backend now to enable GPU acceleration. Your current work will reload after restart.",
+    "restart": "Restart now",
+    "later": "Later"
+  },
+  "gpuWrongBuildPrompt": {
+    "title": "This build can't accelerate on your hardware",
+    "detailNoDriver": "You're running the CUDA build of DatumV, but no NVIDIA driver was detected on this machine. CUDA acceleration requires an NVIDIA GPU.",
+    "detailIncompatibleArch": "Your GPU ({gpu}, compute capability {cc}) isn't supported by this build's CUDA toolchain. CUDA 12 + cuDNN 9 require compute capability 7.0 or newer (Volta architecture and up).",
+    "recommendation": "Download the Standard installer instead. It uses DirectML on Windows and Vulkan on Linux for GPU acceleration on a much broader range of hardware — including older NVIDIA, AMD, Intel, and integrated graphics.",
+    "open": "Open downloads",
+    "later": "Later",
+    "never": "Don't ask again"
+  },
   "preflight": {
     "title": {
       "install": "Install {count, plural, one {# item} other {# items}} to run this query",

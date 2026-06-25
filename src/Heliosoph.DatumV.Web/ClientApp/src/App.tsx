@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSnapshot } from 'valtio';
 import { refreshHealth } from './state/health';
 import { refreshSettings } from './state/settings';
+import { maybePromptGpuInstall, maybePromptGpuWrongBuild } from './state/gpu';
 import { hydrateDockFromSettings, navState } from './state/nav';
 import { subscribeCatalogExplorerToHub } from './state/catalogExplorer';
 import { subscribeRoutinesToHub } from './state/functionCatalog';
@@ -46,6 +47,13 @@ export default function App() {
     void hydrateTabsFromCatalog();
     subscribeCatalogExplorerToHub();
     subscribeRoutinesToHub();
+    // First-launch GPU prompts. Both functions internally gate on every
+    // condition (variant, driver, CC, install state, dismissal) and
+    // no-op if any fails — and their conditions are mutually exclusive
+    // by construction, so at most one will ever fire on a given launch.
+    // Skipped in tear-out windows because they never reach this branch.
+    void maybePromptGpuInstall();
+    void maybePromptGpuWrongBuild();
   }, []);
 
   // Torn-out tab windows skip the main shell entirely: no docks, no
