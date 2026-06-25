@@ -317,7 +317,7 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "CardinalityEstimation": "[1.14.0, )",
+          "CardinalityEstimation": "[1.15.0, )",
           "Heliosoph.DatumV.Parsing": "[0.1.1.175, )",
           "LLamaSharp": "[0.27.0, )",
           "LLamaSharp.Backend.Cpu": "[0.27.0, )",
@@ -339,7 +339,7 @@
           "SkiaSharp": "[3.119.0, )",
           "Snappier": "[1.3.1, )",
           "System.Formats.Cbor": "[9.0.0, )",
-          "System.IO.Hashing": "[9.0.0, )",
+          "System.IO.Hashing": "[10.0.7, )",
           "ZstdSharp.Port": "[0.8.7, )"
         }
       },
@@ -366,11 +366,11 @@
       },
       "CardinalityEstimation": {
         "type": "CentralTransitive",
-        "requested": "[1.14.0, )",
-        "resolved": "1.14.0",
-        "contentHash": "SkVunyRkEm8ml/rrnAzstJL4yig0rzHzAHchkK92aSl5wZqqihX2lse8CghZGPf/coQLyFQLiWYuMCzrOnAlKw==",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "3ovZw41PtLzq8uxUCFusftW0heFEu0zg3ZozDw3hTzeiMojr3SRIK9/2b1L5ePAlJKIHUCekeyGrQ+wteCWHQw==",
         "dependencies": {
-          "System.IO.Hashing": "8.0.0",
+          "System.IO.Hashing": "10.0.7",
           "murmurhash": "1.0.3"
         }
       },
@@ -544,9 +544,9 @@
       },
       "System.IO.Hashing": {
         "type": "CentralTransitive",
-        "requested": "[9.0.0, )",
-        "resolved": "9.0.0",
-        "contentHash": "seeO8icDfED/Qwl9PDFUx2Gf/7xv7dPsMnw5PnRwNZuz4EWMpy0wIVohC4MfCcTIoJgp+KUrWG4WH3NPSusQOA=="
+        "requested": "[10.0.7, )",
+        "resolved": "10.0.7",
+        "contentHash": "6hsjdSr4VOXSOnhALkYplHpAxnTG1J33YN42IB6nH2fEg4QnJqrZ4Ft+qn7mkrKAOYC8pCSFYwVWw6rQbmwgLQ=="
       },
       "ZstdSharp.Port": {
         "type": "CentralTransitive",
