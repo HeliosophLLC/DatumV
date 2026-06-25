@@ -21,7 +21,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Check out the PR head ref (not the synthetic merge ref) so the
           # dependabot lock-file regen step below can push back to the branch.
