@@ -34,7 +34,7 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "electron-icon-builder": "^2.0.1",
-    "license-checker-rseidelsohn": "^4.4.2",
+    "license-checker-rseidelsohn": "^5.0.1",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2",
     "wait-on": "^8.0.1"
