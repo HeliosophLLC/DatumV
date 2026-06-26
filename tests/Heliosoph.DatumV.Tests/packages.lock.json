@@ -42,6 +42,12 @@
           "Microsoft.TestPlatform.TestHost": "17.14.1"
         }
       },
+      "OpenCvSharp4.official.runtime.linux-x64.slim": {
+        "type": "Direct",
+        "requested": "[4.13.0.20260302, )",
+        "resolved": "4.13.0.20260302",
+        "contentHash": "nVGlt2/I1ScgcGuiYlcLiYjgWtcl0oS5ZPM2nZfjAufKXpgtDTClP3Fmr5G7VyS2qPsX98g8HhkrCXu5O4efjA=="
+      },
       "SkiaSharp.NativeAssets.Linux.NoDependencies": {
         "type": "Direct",
         "requested": "[3.119.0, )",

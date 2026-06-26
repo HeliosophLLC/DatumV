@@ -47,6 +47,19 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 
+  <!--
+    Same RID-gap problem as SkiaSharp / ONNX. The engine references the
+    Linux OpenCvSharp native package gated on RuntimeIdentifier=linux-x64,
+    but `dotnet test` runs with no RID, so libOpenCvSharpExtern.so doesn't
+    land in the test bin output and pose_from_rgbd's first cv::Mat ctor
+    crashes with DllNotFoundException on Linux CI. Pull the slim package
+    here unconditionally — it's Linux-only payload, so it's a no-op on
+    Windows and macOS test runs.
+  -->
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64.slim" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>

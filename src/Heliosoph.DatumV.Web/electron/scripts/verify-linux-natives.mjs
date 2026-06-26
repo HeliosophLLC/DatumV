@@ -33,6 +33,8 @@ const REQUIRED = [
   'runtimes/linux-x64/native/libonnxruntime.so',
   // SkiaSharp — comes from SkiaSharp.NativeAssets.Linux.NoDependencies.
   'runtimes/linux-x64/native/libSkiaSharp.so',
+  // OpenCvSharp — comes from OpenCvSharp4.official.runtime.linux-x64.slim.
+  'runtimes/linux-x64/native/libOpenCvSharpExtern.so',
 ];
 
 if (platform() !== 'linux') {
