@@ -119,8 +119,63 @@ jobs:
           echo "$MATRIX" | jq .
           echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
 
+  # Release gate: run the test suite on both Windows and Linux before any
+  # installer is built. PR CI only runs ubuntu-latest, so this is the first
+  # time Windows tests get exercised. Failing here cancels the installer
+  # matrix entirely — better to abort a release than to ship binaries whose
+  # tests don't pass on the target OS.
+  #
+  # GpuVariant=standard mirrors the PR CI command. We don't run the cuda
+  # variant here: it pulls a ~500 MB NVIDIA payload that no CI runner can
+  # actually exercise (no GPU), and the standard variant covers the
+  # cross-platform code paths that matter for test correctness.
+  release-gate-tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore
+        run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
+
+      - name: Build
+        run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
+
+      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Ubuntu 24.04
+      # ships FFmpeg 6.x (.so.58) and Sdcb publishes no Linux NuGet, so we
+      # drop the BtbN/FFmpeg-Builds shared libs into /usr/local/lib for the
+      # test runner. Windows test runs need no equivalent step:
+      # Sdcb.FFmpeg.runtime.windows-x64 propagates through the test project's
+      # ProjectReference and lands in bin/.../runtimes/win-x64/native/.
+      - name: Install FFmpeg 7 shared libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          curl -sSL -o /tmp/ffmpeg.tar.xz \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
+          mkdir -p /tmp/ffmpeg
+          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
+          sudo cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          sudo ldconfig
+
+      - name: Test
+        run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
+
   installer:
-    needs: resolve-matrix
+    needs: [resolve-matrix, release-gate-tests]
     name: ${{ matrix.label }}
     strategy:
       fail-fast: false

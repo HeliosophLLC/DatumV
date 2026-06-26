@@ -72,4 +72,22 @@ jobs:
       # exercises the full Electron pipeline.
       - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
 
+      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Ubuntu 24.04's
+      # apt repos ship FFmpeg 6.x (libavutil.so.58), and Sdcb publishes no
+      # Linux native NuGet. Fetch a matching FFmpeg 7.1 shared build from
+      # BtbN/FFmpeg-Builds (LGPL flavour to avoid copyleft on consumers) and
+      # drop the .so files into the loader path. The Windows side ships
+      # natives via Sdcb.FFmpeg.runtime.windows-x64; this step is the Linux
+      # equivalent. Pinned to the n7.1 branch asset on the rolling `latest`
+      # tag so we track 7.1.x patches without flipping ABI versions.
+      - name: Install FFmpeg 7 shared libraries
+        run: |
+          set -euxo pipefail
+          curl -sSL -o /tmp/ffmpeg.tar.xz \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
+          mkdir -p /tmp/ffmpeg
+          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
+          sudo cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          sudo ldconfig
+
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
