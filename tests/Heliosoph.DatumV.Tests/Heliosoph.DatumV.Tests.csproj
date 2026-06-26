@@ -28,6 +28,25 @@
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
   </ItemGroup>
 
+  <!--
+    Same RID-gap problem as SkiaSharp, but for ONNX Runtime. Under
+    GpuVariant=standard the engine pulls Microsoft.ML.OnnxRuntime.DirectML
+    when RID is empty (the `dotnet test` case) — that package only ships
+    Windows native binaries. The Linux-targeted base Microsoft.ML.OnnxRuntime
+    reference is gated on RuntimeIdentifier=linux-x64, which `dotnet test`
+    never sets, so libonnxruntime.so never lands in the test output and the
+    Linux CI test host can't load it. Pull the base CPU package here under
+    standard variant only: managed assembly version matches DirectML (1.24.4),
+    so there's no version conflict, and it brings the linux-x64 + osx
+    runtime assets that the test host needs. The cuda variant already ships
+    Linux natives via Microsoft.ML.OnnxRuntime.Gpu (which has no RID gate),
+    and its managed assembly is 1.25.1 — so we deliberately do NOT add the
+    base package under cuda to avoid a managed-version mismatch.
+  -->
+  <ItemGroup Condition="'$(GpuVariant)' == 'standard' OR '$(GpuVariant)' == ''">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
