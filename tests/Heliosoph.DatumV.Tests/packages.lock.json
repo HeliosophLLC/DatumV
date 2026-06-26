@@ -33,6 +33,12 @@
           "Microsoft.TestPlatform.TestHost": "17.14.1"
         }
       },
+      "SkiaSharp.NativeAssets.Linux.NoDependencies": {
+        "type": "Direct",
+        "requested": "[3.119.0, )",
+        "resolved": "3.119.0",
+        "contentHash": "e92vdqf1VOETPjy1T67Fs1zPxfGMM1nbrpt69GM5foXSI/iIbq6L9avPz/bl/DbWtb81D0yF/NKjRmXuOZoLcg=="
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.3, )",

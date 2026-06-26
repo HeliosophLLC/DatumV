@@ -17,6 +17,15 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!--
+      The engine csproj only pulls the SkiaSharp Linux native asset when
+      publishing with RuntimeIdentifier=linux-x64. `dotnet test` runs with no
+      RID, so on a Linux CI host the test process can't load libSkiaSharp.so.
+      Reference the native package directly here so the .so is copied to the
+      test output on every restore, regardless of RID. The package contains
+      only linux-x64 runtime assets, so it's a no-op on Windows/macOS hosts.
+    -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
   </ItemGroup>
 
   <ItemGroup>
