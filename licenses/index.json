@@ -30,6 +30,14 @@
       "summary": "Permissive open-source license with an explicit patent grant. Allows commercial use, modification, and redistribution. Requires preserving copyright/notice/attribution.",
       "requiresAcceptance": false
     },
+    "cc-by-3.0": {
+      "title": "Creative Commons Attribution 3.0 Unported",
+      "spdx": "CC-BY-3.0",
+      "canonicalUrl": "https://creativecommons.org/licenses/by/3.0/legalcode",
+      "textFile": "cc-by-3.0.txt",
+      "summary": "Permissive license. Allows commercial use, modification, and redistribution. Requires attribution to the original author. Predecessor to CC BY 4.0 — similar in spirit but legally distinct; common on academic NLP corpora released circa 2008–2015 (SemEval task data, TweetEval's source subsets, and similar).",
+      "requiresAcceptance": false
+    },
     "cc-by-4.0": {
       "title": "Creative Commons Attribution 4.0 International",
       "spdx": "CC-BY-4.0",
