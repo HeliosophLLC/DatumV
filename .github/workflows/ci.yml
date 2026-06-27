@@ -90,4 +90,16 @@ jobs:
           sudo cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
           sudo ldconfig
 
+      # OpenCvSharp's manylinux build dlopens libtiff.so.5 transitively, but
+      # Ubuntu 24.04 dropped libtiff5 in favour of libtiff6. Pull the jammy
+      # security-pocket .deb (still maintained until 2027) and dpkg -i it.
+      # Bump the URL when jammy rolls a new patch — see stage-linux-natives.mjs
+      # for the same pin (keep these aligned).
+      - name: Install libtiff5 (Linux only)
+        run: |
+          set -euxo pipefail
+          curl -sSL -o /tmp/libtiff5.deb \
+            http://security.ubuntu.com/ubuntu/pool/main/t/tiff/libtiff5_4.3.0-6ubuntu0.13_amd64.deb
+          sudo dpkg -i /tmp/libtiff5.deb
+
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore

@@ -35,6 +35,9 @@ const REQUIRED = [
   'runtimes/linux-x64/native/libSkiaSharp.so',
   // OpenCvSharp — comes from OpenCvSharp4.official.runtime.linux-x64.slim.
   'runtimes/linux-x64/native/libOpenCvSharpExtern.so',
+  // libtiff5 — transitive dlopen of libOpenCvSharpExtern.so. Staged from
+  // the jammy security .deb because Ubuntu 24.04 only ships libtiff6.
+  'runtimes/linux-x64/native/libtiff.so.5',
 ];
 
 if (platform() !== 'linux') {
