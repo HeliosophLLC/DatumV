@@ -45,6 +45,7 @@
         "sentence-transformers — Reimers & Gurevych (UKP Lab, TU Darmstadt)",
         "HuggingFace optimum (ONNX export)"
       ],
+      "cardFile": "cards/minilm-l6.md",
       "variants": [
         {
           "id": "all-minilm-l6-v2",
@@ -101,6 +102,7 @@
       "attributions": [
         "BAAI — Beijing Academy of Artificial Intelligence"
       ],
+      "cardFile": "cards/bge-small-en.md",
       "variants": [
         {
           "id": "bge-small-en-v1.5",
