@@ -20,6 +20,15 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Run inside a jammy-based .NET SDK container so OpenCvSharp's manylinux
+    # transitive deps (libtiff5, libopenexr25, libpng16-16, etc.) are
+    # available via apt instead of needing per-package jammy .deb pins.
+    # Ubuntu 22.04 is the baseline OpenCvSharp's manylinux build targets, so
+    # the full image-codec stack is in jammy's default repos. The image
+    # already includes the .NET 10 SDK + git + curl + xz-utils + dpkg, so
+    # setup-dotnet isn't needed; the container's bundled SDK satisfies
+    # global.json.
+    container: mcr.microsoft.com/dotnet/sdk:10.0-jammy
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,11 +37,16 @@ jobs:
           ref: ${{ github.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-          cache: true
-          cache-dependency-path: '**/packages.lock.json'
+      # OpenCvSharp's slim runtime dlopens this set transitively. Keep
+      # --no-install-recommends to skip GUI / dev tooling weight. If a new
+      # transitive dep surfaces in test output (DllNotFoundException for
+      # something not listed), add it here, not as a separate .deb pin.
+      - name: Install OpenCV runtime deps
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7
 
       # GpuVariant=standard is the default; passing it explicitly keeps
       # CI deterministic if the default ever changes. CI runners have no
@@ -72,14 +86,14 @@ jobs:
       # exercises the full Electron pipeline.
       - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
 
-      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Ubuntu 24.04's
-      # apt repos ship FFmpeg 6.x (libavutil.so.58), and Sdcb publishes no
-      # Linux native NuGet. Fetch a matching FFmpeg 7.1 shared build from
-      # BtbN/FFmpeg-Builds (LGPL flavour to avoid copyleft on consumers) and
-      # drop the .so files into the loader path. The Windows side ships
-      # natives via Sdcb.FFmpeg.runtime.windows-x64; this step is the Linux
-      # equivalent. Pinned to the n7.1 branch asset on the rolling `latest`
-      # tag so we track 7.1.x patches without flipping ABI versions.
+      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Jammy ships
+      # FFmpeg 4.4.x (.so.56) and Sdcb publishes no Linux native NuGet, so
+      # we still need BtbN's shared build even inside the jammy container —
+      # the OpenCV transitive deps benefit from jammy, but Sdcb's required
+      # ABI is newer than anything jammy carries. The Windows side ships
+      # natives via Sdcb.FFmpeg.runtime.windows-x64. Pinned to the n7.1
+      # branch asset on the rolling `latest` tag so we track 7.1.x patches
+      # without flipping ABI versions. Container runs as root, so no sudo.
       - name: Install FFmpeg 7 shared libraries
         run: |
           set -euxo pipefail
@@ -87,19 +101,7 @@ jobs:
             https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
           mkdir -p /tmp/ffmpeg
           tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
-          sudo cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
-          sudo ldconfig
-
-      # OpenCvSharp's manylinux build dlopens libtiff.so.5 transitively, but
-      # Ubuntu 24.04 dropped libtiff5 in favour of libtiff6. Pull the jammy
-      # security-pocket .deb (still maintained until 2027) and dpkg -i it.
-      # Bump the URL when jammy rolls a new patch — see stage-linux-natives.mjs
-      # for the same pin (keep these aligned).
-      - name: Install libtiff5 (Linux only)
-        run: |
-          set -euxo pipefail
-          curl -sSL -o /tmp/libtiff5.deb \
-            http://security.ubuntu.com/ubuntu/pool/main/t/tiff/libtiff5_4.3.0-6ubuntu0.13_amd64.deb
-          sudo dpkg -i /tmp/libtiff5.deb
+          cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          ldconfig
 
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore

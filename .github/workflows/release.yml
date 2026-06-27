@@ -133,20 +133,45 @@ jobs:
     name: Tests (${{ matrix.os }})
     strategy:
       fail-fast: false
+      # Linux runs inside a jammy-based .NET SDK container so OpenCvSharp's
+      # manylinux transitive deps (libtiff5, libopenexr25, libpng16-16, ...)
+      # are satisfied via apt without per-package .deb pins. Windows runs
+      # native on the runner — no container support / no need. The matrix's
+      # `container` field is empty for Windows, which GH Actions treats as
+      # no container.
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            container: mcr.microsoft.com/dotnet/sdk:10.0-jammy
+          - os: windows-latest
+            container: ''
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
 
+      # The jammy container already bundles the .NET 10 SDK; setup-dotnet
+      # is only needed on Windows where there's no container. Skip it on
+      # Linux to avoid double-installing into the container.
       - uses: actions/setup-dotnet@v4
+        if: runner.os == 'Windows'
         with:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
+
+      # OpenCvSharp slim runtime transitive deps. Add new entries here if a
+      # DllNotFoundException surfaces for a lib not yet listed.
+      - name: Install OpenCV runtime deps (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7
 
       - name: Restore
         run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
@@ -154,12 +179,11 @@ jobs:
       - name: Build
         run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
 
-      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Ubuntu 24.04
-      # ships FFmpeg 6.x (.so.58) and Sdcb publishes no Linux NuGet, so we
-      # drop the BtbN/FFmpeg-Builds shared libs into /usr/local/lib for the
-      # test runner. Windows test runs need no equivalent step:
-      # Sdcb.FFmpeg.runtime.windows-x64 propagates through the test project's
-      # ProjectReference and lands in bin/.../runtimes/win-x64/native/.
+      # Sdcb.FFmpeg 7.0 needs libavutil.so.59 (FFmpeg 7 ABI). Jammy ships
+      # FFmpeg 4.4.x and Sdcb publishes no Linux NuGet, so we drop the BtbN
+      # shared libs into /usr/local/lib even inside the jammy container.
+      # Container runs as root, so no sudo. Windows side ships natives via
+      # Sdcb.FFmpeg.runtime.windows-x64; no equivalent step needed there.
       - name: Install FFmpeg 7 shared libraries (Linux only)
         if: runner.os == 'Linux'
         run: |
@@ -168,20 +192,8 @@ jobs:
             https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
           mkdir -p /tmp/ffmpeg
           tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
-          sudo cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
-          sudo ldconfig
-
-      # OpenCvSharp's manylinux build dlopens libtiff.so.5 transitively, but
-      # Ubuntu 24.04 dropped libtiff5 in favour of libtiff6. Pull the jammy
-      # security-pocket .deb (maintained until 2027). Keep this URL aligned
-      # with the one in stage-linux-natives.mjs and .github/workflows/ci.yml.
-      - name: Install libtiff5 (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          set -euxo pipefail
-          curl -sSL -o /tmp/libtiff5.deb \
-            http://security.ubuntu.com/ubuntu/pool/main/t/tiff/libtiff5_4.3.0-6ubuntu0.13_amd64.deb
-          sudo dpkg -i /tmp/libtiff5.deb
+          cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          ldconfig
 
       - name: Test
         run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
