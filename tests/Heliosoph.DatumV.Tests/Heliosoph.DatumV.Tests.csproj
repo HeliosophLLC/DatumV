@@ -4,7 +4,16 @@
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <DefineConstants>$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
+    <!--
+      Mirror the engine csproj's POOL_DIAGNOSTICS gate: defined in Debug,
+      undefined in Release. Tests that assert on POOL_DIAGNOSTICS-only
+      behaviour (e.g. throw-on-access-after-return guards) wrap their
+      asserts in `#if POOL_DIAGNOSTICS` so they reduce to a no-op in
+      Release. Defining POOL_DIAGNOSTICS unconditionally on the test side
+      makes the assert compile-in even when the engine's guard does not,
+      which fails the test in Release on every platform.
+    -->
+    <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
     <RunSettingsFilePath>$(MSBuildThisFileDirectory)Heliosoph.DatumV.Tests.runsettings</RunSettingsFilePath>
     <RootNamespace>Heliosoph.DatumV.Tests</RootNamespace>
     <AssemblyName>Heliosoph.DatumV.Tests</AssemblyName>
