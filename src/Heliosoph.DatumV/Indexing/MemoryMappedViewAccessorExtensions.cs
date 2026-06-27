@@ -20,4 +20,25 @@ internal static class MemoryMappedViewAccessorExtensions
         accessor.SafeMemoryMappedViewHandle.ReadSpan(
             (ulong)(accessor.PointerOffset + position), destination);
     }
+
+    /// <summary>
+    /// Verifies that a read of <paramref name="byteCount"/> bytes starting at
+    /// <paramref name="position"/> fits within <paramref name="maxOffset"/>,
+    /// throwing <see cref="InvalidDataException"/> with a torn-write message
+    /// otherwise. Use before issuing any MMF read whose offset/length comes
+    /// from on-disk metadata that has not already been validated against the
+    /// file's true extent — Windows MMF views are page-padded and silently
+    /// zero-fill an over-read; Linux views are exact-sized and throw an
+    /// opaque <see cref="ArgumentException"/>. Calling this first makes both
+    /// platforms emit the same surface-area error for corrupt indexes.
+    /// </summary>
+    public static void ValidateReadBounds(long position, long byteCount, long maxOffset)
+    {
+        if (position < 0 || byteCount < 0 || position + byteCount > maxOffset)
+        {
+            throw new InvalidDataException(
+                $"Index read of {byteCount} bytes at offset {position} extends beyond bound {maxOffset}; "
+                + "treat as torn write and run REINDEX.");
+        }
+    }
 }

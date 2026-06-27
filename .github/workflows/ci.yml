@@ -20,15 +20,52 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Run inside a jammy container so OpenCvSharp's manylinux transitive deps
+    # (libtiff5, libopenexr25, libpng16-16, ...) are available via apt
+    # instead of needing per-package jammy .deb pins on noble. Microsoft
+    # ships no .NET 10 jammy SDK image, so we start from plain ubuntu:22.04
+    # and let actions/setup-dotnet install the SDK from global.json. If/when
+    # mcr.microsoft.com/dotnet/sdk:10.0-jammy lands, swap the image and
+    # drop the .NET install prereqs (git/curl/libicu/ca-certificates) from
+    # the apt step.
+    container: ubuntu:22.04
+    # GH Actions defaults `run:` to /bin/sh inside containers (dash on
+    # ubuntu:*, no pipefail / no <<< etc). Force bash so the script bodies
+    # below behave the same way as on the host runner.
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
+      # All apt-installed deps in one batch:
+      #   - git, ca-certificates, curl, libicu70: setup-dotnet prereqs.
+      #     git is also what actions/checkout uses (otherwise REST fallback)
+      #     and what the dependabot regen step needs to push back.
+      #   - xz-utils: tar -J for the BtbN FFmpeg tarball.
+      #   - libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7:
+      #     OpenCvSharp slim's transitive dlopen set. If a new
+      #     DllNotFoundException surfaces in test output, add it here.
+      - name: Install system deps
+        env:
+          # tzdata (and a few other packages) issue debconf prompts that
+          # `apt-get -y` doesn't suppress on its own. Setting frontend to
+          # noninteractive picks defaults and proceeds without blocking.
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates curl libicu70 xz-utils tzdata \
+            libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7 libopenjp2-7 \
+            fonts-dejavu-core fontconfig
+
+      - uses: actions/checkout@v5
         with:
           # Check out the PR head ref (not the synthetic merge ref) so the
           # dependabot lock-file regen step below can push back to the branch.
           ref: ${{ github.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
           cache: true
@@ -71,5 +108,28 @@ jobs:
       # the Vite frontend to be installed. The release workflow is what
       # exercises the full Electron pipeline.
       - run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
+
+      # Sdcb.FFmpeg 7.0 dlopens libavutil.so.59 (FFmpeg 7 ABI). Jammy ships
+      # FFmpeg 4.4.x (.so.56) and Sdcb publishes no Linux native NuGet, so
+      # we still need BtbN's shared build even inside the jammy container —
+      # the OpenCV transitive deps benefit from jammy, but Sdcb's required
+      # ABI is newer than anything jammy carries. The Windows side ships
+      # natives via Sdcb.FFmpeg.runtime.windows-x64. Pinned to the n7.1
+      # branch asset on the rolling `latest` tag so we track 7.1.x patches
+      # without flipping ABI versions. Container runs as root, so no sudo.
+      - name: Install FFmpeg 7 shared libraries
+        run: |
+          set -euxo pipefail
+          # --fail makes curl exit non-zero on HTTP errors instead of
+          # saving the error page as a "tarball" (which then makes xz
+          # blow up with "File format not recognized" downstream).
+          # --retry covers transient GitHub asset hiccups.
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o /tmp/ffmpeg.tar.xz \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
+          mkdir -p /tmp/ffmpeg
+          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
+          cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          ldconfig
 
       - run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
