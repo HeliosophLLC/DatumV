@@ -16,10 +16,12 @@
     "publish:dotnet:win:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
     "publish:dotnet:linux:cuda": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
     "publish:dotnet:linux:standard": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r linux-x64 --self-contained true -p:GpuVariant=standard -o ./build/backend",
+    "stage:linux:natives": "node ./scripts/stage-linux-natives.mjs",
+    "verify:linux:natives": "node ./scripts/verify-linux-natives.mjs",
     "dist:win:cuda": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:win:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --win -c.publish.channel=cuda --publish never",
     "dist:win:standard": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:win:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --win -c.publish.channel=standard --publish never",
-    "dist:linux:cuda": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux -c.publish.channel=cuda --publish never",
-    "dist:linux:standard": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:linux:standard && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --linux -c.publish.channel=standard --publish never",
+    "dist:linux:cuda": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:linux:cuda && npm run stage:linux:natives && npm run verify:linux:natives && npm run build && cross-env DATUMV_VARIANT_SUFFIX=-cuda electron-builder --linux -c.publish.channel=cuda --publish never",
+    "dist:linux:standard": "npm run generate:notices && npm run build:clientapp && npm run publish:dotnet:linux:standard && npm run stage:linux:natives && npm run verify:linux:natives && npm run build && cross-env DATUMV_VARIANT_SUFFIX= electron-builder --linux -c.publish.channel=standard --publish never",
     "dist:win": "npm run dist:win:cuda",
     "dist:linux": "npm run dist:linux:cuda",
     "generate:notices": "node ./scripts/generate-third-party-notices.mjs"
@@ -34,9 +36,9 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "electron-icon-builder": "^2.0.1",
-    "license-checker-rseidelsohn": "^4.4.2",
+    "license-checker-rseidelsohn": "^5.0.1",
     "rimraf": "^6.0.1",
-    "typescript": "^5.7.2",
-    "wait-on": "^8.0.1"
+    "typescript": "^6.0.3",
+    "wait-on": "^9.0.10"
   }
 }
