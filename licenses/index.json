@@ -109,6 +109,14 @@
       "textFile": "falcon-llm-license-2.0.md",
       "summary": "Custom permissive license from Technology Innovation Institute (TII), UAE. Allows commercial use, modification, and redistribution with attribution. Subject to TII's acceptable-use policy (no weapons / surveillance / defamation / CSAM use).",
       "requiresAcceptance": true
+    },
+    "quora-qp-terms": {
+      "title": "Quora Question Pairs Release Terms",
+      "spdx": "LicenseRef-Quora-QP-Terms",
+      "canonicalUrl": "https://quoradata.quora.com/First-Quora-Dataset-Release-Question-Pairs",
+      "textFile": "quora-qp-terms.md",
+      "summary": "Non-standard research-use grant from Quora's January 2017 dataset release. Allows research, experimentation, and unmodified redistribution with attribution. Commercial deployment is not explicitly addressed and should be reviewed separately.",
+      "requiresAcceptance": true
     }
   }
 }

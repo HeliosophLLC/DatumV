@@ -1050,6 +1050,52 @@
       ]
     },
     {
+      "name": "Quora Question Pairs",
+      "summary": "404,290 pairs of user-submitted Quora questions, each pair flagged 0/1 for whether the two questions ask the same thing. The reference benchmark for English sentence-similarity / duplicate-detection evaluation — every text embedder reports paired-cosine accuracy on this corpus.",
+      "description": "Released by Quora in January 2017 alongside the Kaggle competition of the same name. Each row pairs two real Quora questions with a human-labelled `is_duplicate` flag, which makes it the canonical small benchmark for sentence embedders: encode both questions, take the cosine similarity of the unit vectors, threshold for a binary classifier, report accuracy / F1 against the gold labels. Drop-in for any of the text embedders in the model catalog — MiniLM-L6, BGE Small, Jina — because every modern English sentence embedder targets this exact shape of task during fine-tuning. The recipe ingests the canonical TSV release verbatim (six columns: id, qid1, qid2, question1, question2, is_duplicate); embedding-friendly variants that explode the table into one question per row, or that materialize positive / negative / hard-negative triplets, are deferred to follow-up recipes.",
+      "modalities": ["Text"],
+      "licenseIds": ["quora-qp-terms"],
+      "attributions": [
+        "Shankar Iyer, Nikhil Dandekar, Kornél Csernai (Quora — First Quora Dataset Release: Question Pairs, January 2017)",
+        "Quora users (source questions)"
+      ],
+      "suitableForTasks": [
+        "TextEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "quora_question_pairs",
+          "displayName": "pairs (404k)",
+          "summary": "404,290 question pairs in the canonical six-column TSV. ~55 MB on disk; ingests in seconds and embeds end-to-end on CPU in a few minutes with MiniLM-L6.",
+          "approxArchiveBytes": 58000000,
+          "approxIngestedBytes": 70000000,
+          "expectedRowCounts": { "pairs": 404290 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2017-01",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/Quora-Question-Pairs",
+                  "revision": "8f9ee76e982834baa77a4b1843303ec75036c58c",
+                  "include": ["quora_duplicate_questions.tsv"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "pairs",
+                  "artifact": "quora_duplicate_questions.tsv",
+                  "sqlFile": "quora_questions/pairs.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Chicago Crimes",
       "summary": "8M+ Chicago Police Department incident reports from 2001 to the present. The reach-for big-tabular benchmark for time-series, geospatial, and categorical analytics over a single municipal stream.",
       "description": "Published by the Chicago Police Department through the City of Chicago Open Data Portal (Socrata-hosted). Each row is one reported incident: timestamp, block-level address, FBI / IUCR offense codes, arrest + domestic flags, lat/lng (Socrata rounds to the city block to protect privacy), and the beat / district / ward / community-area administrative codes. The corpus refreshes daily with a roughly 7-day reporting lag, so the headline row count and on-disk size drift over time. The ingest recipe drives `open_csv_typed` at plan time so the schema lands with real per-column types (TIMESTAMPTZ for the date columns, FLOAT for lat/lng, narrowed integers for the FBI code) rather than the `Array<String>` shape `open_csv` yields — queries can write `WHERE \"Primary Type\" = 'THEFT' AND \"Year\" = 2024` against typed columns directly.",
