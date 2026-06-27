@@ -252,16 +252,46 @@ public sealed record SubquerySource(SelectStatement Query, string Alias) : Table
 
 /// <summary>
 /// A table-valued function call used as a table source in FROM or JOIN.
+/// <para>
+/// <c>ArgumentNames</c> is the parallel list of PG-style named-argument
+/// names: non-null entry at index <c>i</c> means argument <c>i</c> was
+/// supplied as <c>name := expr</c> / <c>name =&gt; expr</c>; null means
+/// positional. The whole list is <see langword="null"/> when every
+/// argument is positional (the common case). Consumed and zeroed by the
+/// <c>NamedArgPermuter</c> planner pass before TVF dispatch.
+/// </para>
 /// </summary>
 public sealed record FunctionSource(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
     string? Alias = null,
     SourceSpan? Span = null,
-    string? SchemaName = null) : TableSource
+    string? SchemaName = null,
+    IReadOnlyList<string?>? ArgumentNames = null) : TableSource
 {
     /// <summary>Flat-string call name; see <see cref="FunctionCallExpression.CallName"/>.</summary>
     public string CallName => SchemaName is null ? FunctionName : $"{SchemaName}.{FunctionName}";
+
+    /// <summary>
+    /// True when any argument was supplied as a PG-style named argument.
+    /// Mirrors <see cref="FunctionCallExpression.HasNamedArguments"/>: the
+    /// <c>NamedArgPermuter</c> planner pass consumes <see cref="ArgumentNames"/>
+    /// and rewrites the call into a fully-positional shape before TVF dispatch,
+    /// so downstream code should always see <see cref="ArgumentNames"/> as
+    /// <see langword="null"/>.
+    /// </summary>
+    public bool HasNamedArguments
+    {
+        get
+        {
+            if (ArgumentNames is null) return false;
+            for (int i = 0; i < ArgumentNames.Count; i++)
+            {
+                if (ArgumentNames[i] is not null) return true;
+            }
+            return false;
+        }
+    }
 }
 
 /// <summary>

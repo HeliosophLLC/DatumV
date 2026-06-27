@@ -321,7 +321,7 @@ public static class TemporalConstantFolder
                 arguments[i] = FoldExpression(functionSource.Arguments[i], batchClock, stmtClock);
             }
 
-            return new FunctionSource(functionSource.FunctionName, arguments, functionSource.Alias, functionSource.Span);
+            return functionSource with { Arguments = arguments };
         }
 
         if (source is SubquerySource subquerySource)
