@@ -58,7 +58,7 @@ jobs:
             libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7 libopenjp2-7 \
             fonts-dejavu-core fontconfig
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Check out the PR head ref (not the synthetic merge ref) so the
           # dependabot lock-file regen step below can push back to the branch.
