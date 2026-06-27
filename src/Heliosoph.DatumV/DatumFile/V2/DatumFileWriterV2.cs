@@ -34,6 +34,12 @@ public sealed partial class DatumFileWriterV2 : IDisposable
 {
     private readonly Stream _stream;
     private readonly bool _ownsStream;
+    // Writer coordination lock — non-null when this writer owns the
+    // path-based open path (initial create or OpenForAppend). The
+    // stream-based ctor (caller-owned Stream) leaves this null; lock
+    // management is the caller's concern in that case. Released by
+    // Dispose. See WriterLockFile for the cross-platform rationale.
+    private WriterLockFile? _writerLock;
     // Sidecar fields are not readonly because OpenForAppend attaches
     // them after construction (sequenced after rehydrate to avoid a
     // file-share conflict between the read-side mmap used during
@@ -145,20 +151,36 @@ public sealed partial class DatumFileWriterV2 : IDisposable
             Directory.CreateDirectory(directory);
         }
 
-        // FileShare.Read lets concurrent readers open the file while
-        // a writer holds it — they get a snapshot of whatever footer
-        // was last committed. Concurrent writers (in this or other
-        // processes) are excluded by the absence of FileShare.Write,
-        // so the OS-level file-share rules implement the writer-lock
-        // convention without a separate lock primitive.
-        _stream = new FileStream(
-            datumPath,
-            FileMode.Create,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            bufferSize: 65_536,
-            FileOptions.SequentialScan);
-        _ownsStream = true;
+        // Acquire the writer lock before opening the data file. Throws
+        // IOException if another writer holds the path. See WriterLockFile
+        // for why this is needed even though _stream is opened with
+        // FileShare.Read below: file-share rules are mandatory on Windows
+        // but only advisory on Linux, so the share-based exclusion alone
+        // is not portable.
+        _writerLock = WriterLockFile.AcquireFor(datumPath);
+
+        try
+        {
+            // FileShare.Read lets concurrent readers open the file while
+            // a writer holds it — they get a snapshot of whatever footer
+            // was last committed. Writer-vs-writer exclusion is enforced
+            // by _writerLock above, not by file-share semantics, so the
+            // engine behaves identically on Windows and Linux.
+            _stream = new FileStream(
+                datumPath,
+                FileMode.Create,
+                FileAccess.ReadWrite,
+                FileShare.Read,
+                bufferSize: 65_536,
+                FileOptions.SequentialScan);
+            _ownsStream = true;
+        }
+        catch
+        {
+            _writerLock.Dispose();
+            _writerLock = null;
+            throw;
+        }
 
         if (sidecarPath is not null)
         {

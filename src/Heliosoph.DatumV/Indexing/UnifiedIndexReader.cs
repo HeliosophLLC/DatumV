@@ -63,7 +63,10 @@ internal static class UnifiedIndexReader
     {
         long fileCapacity = fileLength;
 
-        // Read and validate header (24 bytes).
+        // Read and validate header (24 bytes). Validate bounds first so we
+        // get a torn-write InvalidDataException instead of the opaque
+        // ArgumentException Linux throws for an out-of-range MMF read.
+        MemoryMappedViewAccessorExtensions.ValidateReadBounds(0, UnifiedIndexWriter.HeaderSize, fileCapacity);
         Span<byte> headerBytes = stackalloc byte[UnifiedIndexWriter.HeaderSize];
         sharedAccessor.ReadArray(0, headerBytes);
 
