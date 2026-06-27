@@ -133,16 +133,16 @@ jobs:
     name: Tests (${{ matrix.os }})
     strategy:
       fail-fast: false
-      # Linux runs inside a jammy-based .NET SDK container so OpenCvSharp's
-      # manylinux transitive deps (libtiff5, libopenexr25, libpng16-16, ...)
-      # are satisfied via apt without per-package .deb pins. Windows runs
-      # native on the runner — no container support / no need. The matrix's
-      # `container` field is empty for Windows, which GH Actions treats as
-      # no container.
+      # Linux runs inside a jammy container so OpenCvSharp's manylinux
+      # transitive deps (libtiff5, libopenexr25, libpng16-16, ...) are
+      # satisfied via apt without per-package .deb pins. Microsoft ships no
+      # .NET 10 jammy SDK image, so we use plain ubuntu:22.04 and let
+      # setup-dotnet install the SDK. Windows runs native — no container
+      # support / no need. Empty `container` is treated as no container.
       matrix:
         include:
           - os: ubuntu-latest
-            container: mcr.microsoft.com/dotnet/sdk:10.0-jammy
+            container: ubuntu:22.04
           - os: windows-latest
             container: ''
     runs-on: ${{ matrix.os }}
@@ -151,27 +151,27 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-
-      # The jammy container already bundles the .NET 10 SDK; setup-dotnet
-      # is only needed on Windows where there's no container. Skip it on
-      # Linux to avoid double-installing into the container.
-      - uses: actions/setup-dotnet@v4
-        if: runner.os == 'Windows'
-        with:
-          global-json-file: global.json
-          cache: true
-          cache-dependency-path: '**/packages.lock.json'
-
-      # OpenCvSharp slim runtime transitive deps. Add new entries here if a
-      # DllNotFoundException surfaces for a lib not yet listed.
-      - name: Install OpenCV runtime deps (Linux only)
+      # Linux container is bare ubuntu:22.04: install git (checkout + push),
+      # the setup-dotnet prereqs (ca-certificates, curl, libicu70), xz-utils
+      # for the BtbN FFmpeg tarball, and the OpenCvSharp slim transitive
+      # runtime set. Add new entries here if a DllNotFoundException surfaces
+      # for a lib not yet listed. Windows runner is fully provisioned.
+      - name: Install system deps (Linux only)
         if: runner.os == 'Linux'
         run: |
           set -euxo pipefail
           apt-get update
           apt-get install -y --no-install-recommends \
+            git ca-certificates curl libicu70 xz-utils \
             libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
 
       - name: Restore
         run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
