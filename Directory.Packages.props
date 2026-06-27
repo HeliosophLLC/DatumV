@@ -25,8 +25,8 @@
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.25.1" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="0.22.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageVersion Include="NSwag.AspNetCore" Version="14.2.0" />
-    <PackageVersion Include="NSwag.MSBuild" Version="14.2.0" />
+    <PackageVersion Include="NSwag.AspNetCore" Version="14.7.1" />
+    <PackageVersion Include="NSwag.MSBuild" Version="14.7.1" />
     <PackageVersion Include="OpenCvSharp4" Version="4.13.0.20260302" />
     <PackageVersion Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
     <PackageVersion Include="OpenCvSharp4.official.runtime.linux-x64.slim" Version="4.13.0.20260302" />
