@@ -55,7 +55,7 @@ jobs:
         run: |
           # Full matrix, expressed as JSON. Each entry's `attach_glob`
           # is a newline-separated string of upload paths — keep in
-          # sync with `actions/upload-artifact@v4` + `softprops/action-gh-release@v2`
+          # sync with `actions/upload-artifact@v5` + `softprops/action-gh-release@v3`
           # both of which accept multi-line glob input. Update manifests
           # are per-channel (`<channel>.yml` on Windows, `<channel>-linux.yml`
           # on Linux) because the npm dist scripts pass
@@ -171,9 +171,9 @@ jobs:
             libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7 libopenjp2-7 \
             fonts-dejavu-core fontconfig
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
           cache: true
@@ -216,13 +216,13 @@ jobs:
       run:
         shell: bash  # uniform across windows + linux runners
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -270,7 +270,7 @@ jobs:
         working-directory: src/Heliosoph.DatumV.Web/electron
         run: npm run ${{ matrix.script }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           if-no-files-found: error
@@ -278,7 +278,7 @@ jobs:
 
       - name: Attach to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.attach_glob }}
           fail_on_unmatched_files: true
