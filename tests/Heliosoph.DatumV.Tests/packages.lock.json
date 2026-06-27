@@ -23,6 +23,15 @@
         "resolved": "10.4.0",
         "contentHash": "uJ8n9WUEzux9I2CjZh7imGBgZadfwhAKlxuBq7GsNGL8FJF81aHXAYaRMnwW+9EvRFQNytu7xo1ffeuuTncAzg=="
       },
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Direct",
+        "requested": "[1.24.4, )",
+        "resolved": "1.24.4",
+        "contentHash": "895huFBVrZkZEGjlsxBSZD3p6D32Cdz6q8DM9UcUps2YKFYdFR8TefaTggFBUTYlvcSyfNTpmOOU/ZkeL69izw==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.24.4"
+        }
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[17.14.1, )",
@@ -32,6 +41,18 @@
           "Microsoft.CodeCoverage": "17.14.1",
           "Microsoft.TestPlatform.TestHost": "17.14.1"
         }
+      },
+      "OpenCvSharp4.official.runtime.linux-x64.slim": {
+        "type": "Direct",
+        "requested": "[4.13.0.20260302, )",
+        "resolved": "4.13.0.20260302",
+        "contentHash": "nVGlt2/I1ScgcGuiYlcLiYjgWtcl0oS5ZPM2nZfjAufKXpgtDTClP3Fmr5G7VyS2qPsX98g8HhkrCXu5O4efjA=="
+      },
+      "SkiaSharp.NativeAssets.Linux.NoDependencies": {
+        "type": "Direct",
+        "requested": "[3.119.0, )",
+        "resolved": "3.119.0",
+        "contentHash": "e92vdqf1VOETPjy1T67Fs1zPxfGMM1nbrpt69GM5foXSI/iIbq6L9avPz/bl/DbWtb81D0yF/NKjRmXuOZoLcg=="
       },
       "xunit": {
         "type": "Direct",
