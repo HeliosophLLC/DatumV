@@ -4,7 +4,16 @@
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <DefineConstants>$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
+    <!--
+      Mirror the engine csproj's POOL_DIAGNOSTICS gate: defined in Debug,
+      undefined in Release. Tests that assert on POOL_DIAGNOSTICS-only
+      behaviour (e.g. throw-on-access-after-return guards) wrap their
+      asserts in `#if POOL_DIAGNOSTICS` so they reduce to a no-op in
+      Release. Defining POOL_DIAGNOSTICS unconditionally on the test side
+      makes the assert compile-in even when the engine's guard does not,
+      which fails the test in Release on every platform.
+    -->
+    <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
     <RunSettingsFilePath>$(MSBuildThisFileDirectory)Heliosoph.DatumV.Tests.runsettings</RunSettingsFilePath>
     <RootNamespace>Heliosoph.DatumV.Tests</RootNamespace>
     <AssemblyName>Heliosoph.DatumV.Tests</AssemblyName>
@@ -17,6 +26,47 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!--
+      The engine csproj only pulls the SkiaSharp Linux native asset when
+      publishing with RuntimeIdentifier=linux-x64. `dotnet test` runs with no
+      RID, so on a Linux CI host the test process can't load libSkiaSharp.so.
+      Reference the native package directly here so the .so is copied to the
+      test output on every restore, regardless of RID. The package contains
+      only linux-x64 runtime assets, so it's a no-op on Windows/macOS hosts.
+    -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+  </ItemGroup>
+
+  <!--
+    Same RID-gap problem as SkiaSharp, but for ONNX Runtime. Under
+    GpuVariant=standard the engine pulls Microsoft.ML.OnnxRuntime.DirectML
+    when RID is empty (the `dotnet test` case) — that package only ships
+    Windows native binaries. The Linux-targeted base Microsoft.ML.OnnxRuntime
+    reference is gated on RuntimeIdentifier=linux-x64, which `dotnet test`
+    never sets, so libonnxruntime.so never lands in the test output and the
+    Linux CI test host can't load it. Pull the base CPU package here under
+    standard variant only: managed assembly version matches DirectML (1.24.4),
+    so there's no version conflict, and it brings the linux-x64 + osx
+    runtime assets that the test host needs. The cuda variant already ships
+    Linux natives via Microsoft.ML.OnnxRuntime.Gpu (which has no RID gate),
+    and its managed assembly is 1.25.1 — so we deliberately do NOT add the
+    base package under cuda to avoid a managed-version mismatch.
+  -->
+  <ItemGroup Condition="'$(GpuVariant)' == 'standard' OR '$(GpuVariant)' == ''">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+  </ItemGroup>
+
+  <!--
+    Same RID-gap problem as SkiaSharp / ONNX. The engine references the
+    Linux OpenCvSharp native package gated on RuntimeIdentifier=linux-x64,
+    but `dotnet test` runs with no RID, so libOpenCvSharpExtern.so doesn't
+    land in the test bin output and pose_from_rgbd's first cv::Mat ctor
+    crashes with DllNotFoundException on Linux CI. Pull the slim package
+    here unconditionally — it's Linux-only payload, so it's a no-op on
+    Windows and macOS test runs.
+  -->
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64.slim" />
   </ItemGroup>
 
   <ItemGroup>
