@@ -1050,6 +1050,53 @@
       ]
     },
     {
+      "name": "MS MARCO Passages",
+      "summary": "8,841,823 short web passages drawn from Bing query results. The reference big-text corpus for English passage-retrieval evaluation — every modern retriever (dense, sparse, hybrid) reports MRR@10 against the standard MS MARCO dev split.",
+      "description": "Released by Microsoft in 2016 alongside the original MS MARCO machine-reading benchmark and reused as the corpus side of the MS MARCO Passage Ranking task (TREC Deep Learning track, BEIR, and most embedder leaderboards downstream). Each row is one passage extracted from a Bing search result — roughly one to a handful of sentences in length, averaging ~55 tokens but with a long tail of multi-paragraph passages that genuinely exercise long-context embedders like Jina. This variant ingests the corpus side only (`collection.tsv`): an integer `passage_id` plus the passage `text`. The queries + qrels splits required for a full nDCG / MRR run-loop ship as separate small TSVs upstream and are deferred to a follow-up variant. Use this corpus to build an embedding column once per passage and rank against ad-hoc natural-language queries, or as the substrate for any \"semantic search over a real web corpus\" demo.",
+      "modalities": ["Text"],
+      "licenseIds": ["ms-marco-terms"],
+      "attributions": [
+        "Payal Bajaj, Daniel Campos, Nick Craswell, Li Deng, Jianfeng Gao, Xiaodong Liu, Rangan Majumder, Andrew McNamara, Bhaskar Mitra, Tri Nguyen, Mir Rosenberg, Xia Song, Alina Stoica, Saurabh Tiwary, Tong Wang (MS MARCO, 2016)",
+        "Microsoft Bing (source query / passage extraction pipeline)"
+      ],
+      "suitableForTasks": [
+        "TextEmbedder",
+        "TextReranker"
+      ],
+      "variants": [
+        {
+          "id": "ms_marco_passages",
+          "displayName": "passages (8.8M)",
+          "summary": "8.8M short web passages in a two-column TSV (`passage_id`, `text`). ~3 GB on disk uncompressed — by far the heaviest text install in the catalog. Embedding every passage end-to-end with MiniLM takes a few hours on CPU, under an hour on a modest GPU.",
+          "approxArchiveBytes": 995037524,
+          "approxIngestedBytes": 3061567852,
+          "expectedRowCounts": { "passages": 8841823 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2019",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/MS-MARCO-Passages",
+                  "revision": "0faf34f406ce3956cce5e8b833280bcedd90c23f",
+                  "include": ["collection.tsv.gz"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "passages",
+                  "artifact": "collection.tsv.gz",
+                  "sqlFile": "ms_marco/passages.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Quora Question Pairs",
       "summary": "404,290 pairs of user-submitted Quora questions, each pair flagged 0/1 for whether the two questions ask the same thing. The reference benchmark for English sentence-similarity / duplicate-detection evaluation — every text embedder reports paired-cosine accuracy on this corpus.",
       "description": "Released by Quora in January 2017 alongside the Kaggle competition of the same name. Each row pairs two real Quora questions with a human-labelled `is_duplicate` flag, which makes it the canonical small benchmark for sentence embedders: encode both questions, take the cosine similarity of the unit vectors, threshold for a binary classifier, report accuracy / F1 against the gold labels. Drop-in for any of the text embedders in the model catalog — MiniLM-L6, BGE Small, Jina — because every modern English sentence embedder targets this exact shape of task during fine-tuning. The recipe ingests the canonical TSV release verbatim (six columns: id, qid1, qid2, question1, question2, is_duplicate); embedding-friendly variants that explode the table into one question per row, or that materialize positive / negative / hard-negative triplets, are deferred to follow-up recipes.",

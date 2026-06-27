@@ -117,6 +117,14 @@
       "textFile": "quora-qp-terms.md",
       "summary": "Non-standard research-use grant from Quora's January 2017 dataset release. Allows research, experimentation, and unmodified redistribution with attribution. Commercial deployment is not explicitly addressed and should be reviewed separately.",
       "requiresAcceptance": true
+    },
+    "ms-marco-terms": {
+      "title": "MS MARCO License Terms",
+      "spdx": "LicenseRef-MS-MARCO-Terms",
+      "canonicalUrl": "https://microsoft.github.io/msmarco/",
+      "textFile": "ms-marco-terms.md",
+      "summary": "Non-standard research-use grant from Microsoft's MS MARCO release. Allows research, experimentation, benchmarking, and unmodified redistribution with attribution. Commercial deployment is explicitly outside the scope of the release terms and should be reviewed separately.",
+      "requiresAcceptance": true
     }
   }
 }
