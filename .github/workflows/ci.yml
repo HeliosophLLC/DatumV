@@ -49,7 +49,7 @@ jobs:
           set -euxo pipefail
           apt-get update
           apt-get install -y --no-install-recommends \
-            git ca-certificates curl libicu70 xz-utils \
+            git ca-certificates curl libicu70 xz-utils tzdata \
             libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7 libopenjp2-7 \
             fonts-dejavu-core fontconfig
 
