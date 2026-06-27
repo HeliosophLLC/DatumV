@@ -74,7 +74,7 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
     /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
     public static string Description =>
         "Opens a CSV file with plan-time type inference and yields typed, named rows: " +
-        "open_csv_typed(path [, skip_lines [, comment [, null_token]]]). path must be a " +
+        "open_csv_typed(path [, skip_lines [, comment [, null_token [, header]]]]). path must be a " +
         "constant STRING. Runs the full ingest-grade CSV scanner at plan time so the " +
         "output schema carries real per-column types (narrowed integers, dates, etc.) " +
         "rather than the Array<String> shape returned by open_csv. " +
@@ -84,7 +84,10 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         "during the type scan and during row reading (e.g. '-' to skip the dashes " +
         "separator that follows the EDGAR header). " +
         "null_token names an extra unquoted literal treated as NULL by both passes " +
-        "(e.g. '.' for FRED-style economic series, 'NA' for R-style exports).";
+        "(e.g. '.' for FRED-style economic series, 'NA' for R-style exports). " +
+        "header overrides the header-row autodetector: pass FALSE for headerless files " +
+        "(columns are surfaced as col_0, col_1, …) or TRUE to force the first row to be " +
+        "treated as headers; omit the argument to let the detector decide.";
 
     /// <inheritdoc cref="ITableValuedFunctionMetadata"/>
     public static IReadOnlyList<TableValuedFunctionSignatureVariant> Signatures { get; } =
@@ -96,6 +99,7 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
                 new ParameterSpec("skip_lines", DataKindMatcher.Family(DataKindFamily.IntegerFamily), IsOptional: true),
                 new ParameterSpec("comment", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
                 new ParameterSpec("null_token", DataKindMatcher.Exact(DataKind.String), IsOptional: true),
+                new ParameterSpec("header", DataKindMatcher.Exact(DataKind.Boolean), IsOptional: true),
             ],
             FixedOutputSchema: null), // schema is path-dependent — computed in ValidateArguments
     ];
@@ -109,10 +113,10 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         IValueStore constantStore,
         CancellationToken cancellationToken)
     {
-        if (argumentKinds.Length is < 1 or > 4)
+        if (argumentKinds.Length is < 1 or > 5)
         {
             throw new FunctionArgumentException(Name,
-                "requires 1 to 4 arguments: open_csv_typed(path [, skip_lines [, comment [, null_token]]]).");
+                "requires 1 to 5 arguments: open_csv_typed(path [, skip_lines [, comment [, null_token [, header]]]]).");
         }
         if (argumentKinds[0] != DataKind.String)
         {
@@ -199,6 +203,22 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
             nullToken = token;
         }
 
+        bool? headerOverride = null;
+        if (argumentKinds.Length >= 5)
+        {
+            if (argumentKinds[4] != DataKind.Boolean)
+            {
+                throw new FunctionArgumentException(Name,
+                    "argument 5 (header) must be BOOLEAN.");
+            }
+            if (constantArguments[4] is not DataValue headerValue || headerValue.Kind != DataKind.Boolean)
+            {
+                throw new FunctionArgumentException(Name,
+                    "argument 5 (header) must be a constant BOOLEAN at plan time.");
+            }
+            headerOverride = headerValue.AsBoolean();
+        }
+
         if (!File.Exists(path))
         {
             throw new FunctionArgumentException(Name,
@@ -210,7 +230,7 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         // sync in sibling TVFs (open_fits_table opens streams synchronously),
         // so this matches established style — but if the scanner ever becomes
         // CPU-bound enough to want a sync overload we should add one.
-        using FileFormatDescriptor descriptor = new(path, BuildOptions(skipLines, comment, nullToken));
+        using FileFormatDescriptor descriptor = new(path, BuildOptions(skipLines, comment, nullToken, headerOverride));
         CsvScanResult scan = CsvTypeScanner
             .ScanAsync(descriptor, cancellationToken)
             .GetAwaiter()
@@ -240,16 +260,17 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         ValueRef[] arguments,
         ExecutionContext context)
     {
-        if (arguments.Length is < 1 or > 4)
+        if (arguments.Length is < 1 or > 5)
         {
             throw new ArgumentException(
-                "open_csv_typed requires 1 to 4 arguments: (path [, skip_lines [, comment [, null_token]]]).");
+                "open_csv_typed requires 1 to 5 arguments: (path [, skip_lines [, comment [, null_token [, header]]]]).");
         }
 
         string path = arguments[0].AsString();
         int skipLines = 0;
         string? comment = null;
         string? nullToken = null;
+        bool? headerOverride = null;
 
         // Options always come from the runtime arguments — instance fields
         // would race across UNION ALL arms because the registry hands the
@@ -271,6 +292,10 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
             string n = arguments[3].AsString();
             if (n.Length > 0) nullToken = n;
         }
+        if (arguments.Length >= 5 && !arguments[4].IsNull)
+        {
+            headerOverride = arguments[4].AsBoolean();
+        }
 
         // Reuse the plan-time scan stashed by ValidateArguments. Falls back
         // to scanning here when the cache misses — typically because
@@ -279,13 +304,13 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         // a future bound would land here).
         if (!ScanCache.TryGetValue(path, out CsvScanResult? scan))
         {
-            using FileFormatDescriptor scanDescriptor = new(path, BuildOptions(skipLines, comment, nullToken));
+            using FileFormatDescriptor scanDescriptor = new(path, BuildOptions(skipLines, comment, nullToken, headerOverride));
             scan = await CsvTypeScanner
                 .ScanAsync(scanDescriptor, context.CancellationToken)
                 .ConfigureAwait(false);
         }
 
-        await foreach (RowBatch batch in StreamRowsAsync(path, scan, skipLines, comment, nullToken, context).ConfigureAwait(false))
+        await foreach (RowBatch batch in StreamRowsAsync(path, scan, skipLines, comment, nullToken, headerOverride, context).ConfigureAwait(false))
         {
             yield return batch;
         }
@@ -297,10 +322,11 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         int skipLines,
         string? comment,
         string? nullToken,
+        bool? headerOverride,
         ExecutionContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using FileFormatDescriptor descriptor = new(path, BuildOptions(skipLines, comment, nullToken));
+        using FileFormatDescriptor descriptor = new(path, BuildOptions(skipLines, comment, nullToken, headerOverride));
         CsvDeserializer deserializer = new(descriptor, scan);
         SerializationContext serContext = new(context.Pool);
 
@@ -312,13 +338,14 @@ public sealed class OpenCsvTypedFunction : ITableValuedFunctionMetadata, ITableV
         }
     }
 
-    private static IReadOnlyDictionary<string, string>? BuildOptions(int skipLines, string? comment, string? nullToken)
+    private static IReadOnlyDictionary<string, string>? BuildOptions(int skipLines, string? comment, string? nullToken, bool? headerOverride)
     {
-        if (skipLines == 0 && comment is null && nullToken is null) return null;
-        Dictionary<string, string> opts = new(3);
+        if (skipLines == 0 && comment is null && nullToken is null && headerOverride is null) return null;
+        Dictionary<string, string> opts = new(4);
         if (skipLines > 0) opts["skip_lines"] = skipLines.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (comment is not null) opts["comment"] = comment;
         if (nullToken is not null) opts["null_token"] = nullToken;
+        if (headerOverride is bool h) opts["header"] = h ? "true" : "false";
         return opts;
     }
 }

@@ -393,7 +393,7 @@ public static class ParameterBinder
                 arguments[i] = BindExpression(functionSource.Arguments[i], parameters);
             }
 
-            return new FunctionSource(functionSource.FunctionName, arguments, functionSource.Alias, functionSource.Span);
+            return functionSource with { Arguments = arguments };
         }
 
         if (source is SubquerySource subquerySource)

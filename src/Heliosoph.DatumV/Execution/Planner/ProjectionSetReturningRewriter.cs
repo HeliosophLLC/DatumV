@@ -261,12 +261,10 @@ public static class ProjectionSetReturningRewriter
             SubquerySource sub => new SubquerySource(RewriteSelect(sub.Query, functions), sub.Alias),
             // FunctionSource arguments may themselves contain expression subqueries
             // (e.g. unnest((SELECT array_agg(x) FROM t))) — descend into them.
-            FunctionSource fn => new FunctionSource(
-                fn.FunctionName,
-                fn.Arguments.Select(a => RewriteExpressionSubqueries(a, functions)).ToList(),
-                fn.Alias,
-                fn.Span,
-                fn.SchemaName),
+            FunctionSource fn => fn with
+            {
+                Arguments = fn.Arguments.Select(a => RewriteExpressionSubqueries(a, functions)).ToList(),
+            },
             _ => source,
         };
 

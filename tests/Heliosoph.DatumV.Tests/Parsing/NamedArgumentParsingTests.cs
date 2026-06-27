@@ -152,4 +152,65 @@ public sealed class NamedArgumentParsingTests : ServiceTestBase
         Assert.Contains("window function", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("lag", ex.Message);
     }
+
+    // ─── TVF named arguments in FROM ──────────────────────────────────
+    //
+    // The parser must accept `name := value` / `name => value` syntax in
+    // a table-valued function call site too, capturing the names into
+    // FunctionSource.ArgumentNames for the planner-side permuter to
+    // resolve against the TVF signature.
+
+    private static FunctionSource ParseFromTvf(string sql)
+    {
+        SelectStatement stmt = ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
+        return Assert.IsType<FunctionSource>(stmt.From!.Source);
+    }
+
+    [Fact]
+    public void Parse_TvfPositionalOnly_LeavesArgumentNamesNull()
+    {
+        FunctionSource src = ParseFromTvf("SELECT * FROM range(0, 10)");
+
+        Assert.Null(src.ArgumentNames);
+        Assert.False(src.HasNamedArguments);
+        Assert.Equal(2, src.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_TvfAllNamedWithColonEquals_CapturesNames()
+    {
+        FunctionSource src = ParseFromTvf(
+            "SELECT * FROM range(start := 0, stop := 10)");
+
+        Assert.True(src.HasNamedArguments);
+        Assert.NotNull(src.ArgumentNames);
+        Assert.Equal(2, src.ArgumentNames.Count);
+        Assert.Equal("start", src.ArgumentNames[0]);
+        Assert.Equal("stop", src.ArgumentNames[1]);
+        Assert.Equal(2, src.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_TvfAllNamedWithFatArrow_CapturesNames()
+    {
+        FunctionSource src = ParseFromTvf(
+            "SELECT * FROM range(start => 0, stop => 10)");
+
+        Assert.NotNull(src.ArgumentNames);
+        Assert.Equal("start", src.ArgumentNames[0]);
+        Assert.Equal("stop", src.ArgumentNames[1]);
+    }
+
+    [Fact]
+    public void Parse_TvfPositionalThenNamed_CapturesNullForPositionalSlots()
+    {
+        FunctionSource src = ParseFromTvf(
+            "SELECT * FROM range(0, stop := 10)");
+
+        Assert.True(src.HasNamedArguments);
+        Assert.NotNull(src.ArgumentNames);
+        Assert.Equal(2, src.ArgumentNames.Count);
+        Assert.Null(src.ArgumentNames[0]);
+        Assert.Equal("stop", src.ArgumentNames[1]);
+    }
 }

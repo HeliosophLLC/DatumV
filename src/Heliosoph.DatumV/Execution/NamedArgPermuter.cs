@@ -1,3 +1,4 @@
+using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Catalog.Registries;
 using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Parsing.Ast;
@@ -42,11 +43,20 @@ namespace Heliosoph.DatumV.Execution;
 /// </list>
 /// </para>
 /// <para>
-/// <strong>What it doesn't handle.</strong> Aggregate, window, and
-/// table-valued functions are out of scope for v1 — named arguments
-/// reaching one of those resolve through the standard scalar lookup
-/// failure and surface as the usual "unknown function" diagnostic.
-/// Calls to functions with no registered scalar descriptor pass through
+/// <strong>Table-valued functions.</strong> TVF call sites in
+/// <c>FROM</c> / <c>JOIN</c> (the <see cref="FunctionSource"/> AST node)
+/// are permuted through the same path. The TVF registry's
+/// <see cref="TableValuedFunctionDescriptor.Signatures"/> drives variant
+/// selection; skipped middle slots are NULL-filled when the parameter
+/// is <see cref="ParameterSpec.IsOptional"/> (TVFs don't carry default
+/// AST fragments — the descriptor-level optional flag is sufficient).
+/// </para>
+/// <para>
+/// <strong>What it doesn't handle.</strong> Aggregate and window
+/// functions remain out of scope — named arguments reaching one of
+/// those resolve through the standard scalar lookup failure and
+/// surface as the usual "unknown function" diagnostic. Calls to
+/// functions with no registered scalar / TVF descriptor pass through
 /// unchanged (the evaluator's standard error path reports the unknown
 /// name with full source context).
 /// </para>
@@ -136,14 +146,23 @@ public static class NamedArgPermuter
         private TableSource RewriteTableSource(TableSource source) => source switch
         {
             SubquerySource sub => new SubquerySource(RewriteSelect(sub.Query), sub.Alias),
-            FunctionSource fn => new FunctionSource(
+            FunctionSource fn => RewriteFunctionSource(fn),
+            _ => source,
+        };
+
+        private TableSource RewriteFunctionSource(FunctionSource fn)
+        {
+            FunctionSource rewritten = new(
                 fn.FunctionName,
                 fn.Arguments.Select(Rewrite).ToList(),
                 fn.Alias,
                 fn.Span,
-                fn.SchemaName),
-            _ => source,
-        };
+                fn.SchemaName,
+                fn.ArgumentNames);
+            return rewritten.HasNamedArguments
+                ? PermuteFunctionSource(rewritten)
+                : rewritten;
+        }
 
         private JoinClause RewriteJoin(JoinClause join) => new(
             join.Type,
@@ -254,8 +273,10 @@ public static class NamedArgPermuter
             }
 
             // 3. Choose the signature variant that admits all supplied names.
-            FunctionSignatureVariant? variant = ChooseVariant(descriptor.Signatures, names, positionalCount, call.CallName);
-            IReadOnlyList<ParameterSpec> parameters = variant.Parameters;
+            IReadOnlyList<IReadOnlyList<ParameterSpec>> signatures = descriptor.Signatures
+                .Select(v => v.Parameters)
+                .ToList();
+            IReadOnlyList<ParameterSpec> parameters = ChooseVariant(signatures, names, positionalCount, call.CallName);
             int paramCount = parameters.Count;
 
             if (positionalCount > paramCount)
@@ -342,22 +363,24 @@ public static class NamedArgPermuter
         /// Picks the first signature variant compatible with the call's
         /// argument shape: all named-arg names appear in the variant's
         /// parameter list AND the variant has room for the positional
-        /// prefix. Returns the first match; for overloaded functions the
-        /// signature order in <see cref="FunctionDescriptor.Signatures"/>
-        /// is the disambiguator. Throws with a precise reason when nothing
-        /// matches.
+        /// prefix. Returns the matching parameter list; for overloaded
+        /// functions the descriptor's signature order is the disambiguator.
+        /// Throws with a precise reason when nothing matches. Generic over
+        /// the variant type because scalar (<see cref="FunctionDescriptor"/>)
+        /// and TVF (<see cref="TableValuedFunctionDescriptor"/>) descriptors
+        /// share parameter shapes but not return-side metadata.
         /// </summary>
-        private static FunctionSignatureVariant ChooseVariant(
-            IReadOnlyList<FunctionSignatureVariant> signatures,
+        private static IReadOnlyList<ParameterSpec> ChooseVariant(
+            IReadOnlyList<IReadOnlyList<ParameterSpec>> signatures,
             string?[] names,
             int positionalCount,
             string callName)
         {
-            FunctionSignatureVariant? best = null;
+            IReadOnlyList<ParameterSpec>? best = null;
             string? lastUnknown = null;
-            foreach (FunctionSignatureVariant variant in signatures)
+            foreach (IReadOnlyList<ParameterSpec> parameters in signatures)
             {
-                if (variant.Parameters.Count < positionalCount)
+                if (parameters.Count < positionalCount)
                 {
                     // Positional prefix doesn't even fit; skip.
                     continue;
@@ -367,7 +390,7 @@ public static class NamedArgPermuter
                 for (int i = positionalCount; i < names.Length; i++)
                 {
                     string name = names[i]!;
-                    if (FindParameterIndex(variant.Parameters, name) < 0)
+                    if (FindParameterIndex(parameters, name) < 0)
                     {
                         allNamesPresent = false;
                         lastUnknown = name;
@@ -376,7 +399,7 @@ public static class NamedArgPermuter
                 }
                 if (!allNamesPresent) continue;
 
-                best = variant;
+                best = parameters;
                 break;
             }
 
@@ -388,6 +411,129 @@ public static class NamedArgPermuter
                         : $"Function '{callName}': no signature variant matches the supplied named arguments.");
             }
             return best;
+        }
+
+        /// <summary>
+        /// TVF-flavoured sibling of <see cref="PermuteCall"/>. Same
+        /// positional/named partitioning + variant selection + slot
+        /// placement; differs only in registry lookup
+        /// (<see cref="FunctionRegistry.TryGetTableValuedDescriptor"/>)
+        /// and the absence of a parallel UDF-default path (TVFs don't
+        /// carry default AST fragments — skipped optional slots are
+        /// NULL-filled).
+        /// </summary>
+        private TableSource PermuteFunctionSource(FunctionSource fn)
+        {
+            TableValuedFunctionDescriptor? descriptor =
+                _functions.TryGetTableValuedDescriptor(new QualifiedName(fn.SchemaName ?? string.Empty, fn.FunctionName))
+                ?? (fn.SchemaName is null
+                    ? _functions.TryGetTableValuedDescriptor(new QualifiedName("system", fn.FunctionName))
+                    : null);
+            if (descriptor is null)
+            {
+                // Unknown TVF — let SourcePlanner produce the standard
+                // diagnostic with full source context. Carry the
+                // ArgumentNames forward so a later stage can still
+                // distinguish "we never resolved this" from "permuter
+                // already consumed it".
+                return fn;
+            }
+
+            string?[] names = fn.ArgumentNames!.ToArray();
+            int argCount = names.Length;
+
+            // 1. Locate the boundary between positional and named arguments.
+            int positionalCount = 0;
+            while (positionalCount < argCount && names[positionalCount] is null) positionalCount++;
+
+            // 2. Enforce "no positional after named".
+            for (int i = positionalCount; i < argCount; i++)
+            {
+                if (names[i] is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Function '{fn.CallName}': positional argument at position {i + 1} appears after a named argument. " +
+                        "All positional arguments must precede every named argument.");
+                }
+            }
+
+            // 3. Choose the signature variant that admits all supplied names.
+            IReadOnlyList<IReadOnlyList<ParameterSpec>> signatures = descriptor.Signatures
+                .Select(v => v.Parameters)
+                .ToList();
+            IReadOnlyList<ParameterSpec> parameters = ChooseVariant(signatures, names, positionalCount, fn.CallName);
+            int paramCount = parameters.Count;
+
+            if (positionalCount > paramCount)
+            {
+                throw new InvalidOperationException(
+                    $"Function '{fn.CallName}': too many positional arguments " +
+                    $"({positionalCount}) for signature with {paramCount} parameter(s).");
+            }
+
+            // 4. Place each argument into its declared slot.
+            Expression?[] slots = new Expression?[paramCount];
+            for (int i = 0; i < positionalCount; i++)
+            {
+                slots[i] = fn.Arguments[i];
+            }
+            for (int i = positionalCount; i < argCount; i++)
+            {
+                string name = names[i]!;
+                int paramIndex = FindParameterIndex(parameters, name);
+                
+                if (paramIndex < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Function '{fn.CallName}': no parameter named '{name}'.");
+                }
+                else if (paramIndex < positionalCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Function '{fn.CallName}': parameter '{name}' is already supplied positionally.");
+                }
+                else if (slots[paramIndex] is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Function '{fn.CallName}': parameter '{name}' supplied more than once.");
+                }
+
+                slots[paramIndex] = fn.Arguments[i];
+            }
+
+            // 5. Trim trailing nulls; middle skips NULL-fill when the slot
+            // is optional, error otherwise.
+            int lastFilled = -1;
+            for (int i = paramCount - 1; i >= 0; i--)
+            {
+                if (slots[i] is not null) { lastFilled = i; break; }
+            }
+            int totalSlots = lastFilled + 1;
+
+            Expression[] permutedArgs = new Expression[totalSlots];
+            for (int i = 0; i < totalSlots; i++)
+            {
+                if (slots[i] is not null)
+                {
+                    permutedArgs[i] = slots[i]!;
+                    continue;
+                }
+
+                if (parameters[i].IsOptional)
+                {
+                    permutedArgs[i] = new LiteralExpression(null);
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    $"Function '{fn.CallName}': missing required argument for parameter '{parameters[i].Name}'.");
+            }
+
+            return fn with
+            {
+                Arguments = permutedArgs,
+                ArgumentNames = null,
+            };
         }
 
         private static int FindParameterIndex(IReadOnlyList<ParameterSpec> parameters, string name)

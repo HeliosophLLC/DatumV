@@ -415,11 +415,15 @@ public static partial class SqlParser
     /// <summary>
     /// A table-valued function source: identifier(args) [AS] alias.
     /// Must be tried before table reference because both start with Identifier.
+    /// Arguments share the named-or-positional combinator with scalar
+    /// <see cref="FunctionCall"/> so <c>fn(a := 1, b =&gt; 2)</c> parses at
+    /// a TVF call site too; the <c>NamedArgPermuter</c> planner pass
+    /// resolves the names against the TVF signature.
     /// </summary>
     private static readonly TokenListParser<SqlToken, TableSource> FunctionSourceParser =
         from nameTuple in NamespacedFunctionName
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from args in SP.Ref(() => ExpressionParser!)
+        from rawArgs in NamedOrPositionalArgument
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
         from alias in (
@@ -428,12 +432,15 @@ public static partial class SqlParser
             select GetTokenText(aliasName)
         ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
+        let args = ExtractArgumentExpressions(rawArgs)
+        let argNames = ExtractArgumentNames(rawArgs)
         select (TableSource)new FunctionSource(
             GetTokenText(nameTuple.Name),
             args,
             alias,
             ToSpan(nameTuple.Name),
-            SchemaName: nameTuple.Namespace);
+            SchemaName: nameTuple.Namespace,
+            ArgumentNames: argNames);
 
     /// <summary>A table source: subquery, function call, or table reference.</summary>
     /// <remarks>

@@ -91,12 +91,7 @@ test2017 ships images-only until then.
 
 ## Screenshots
 
-<!--
-Drop images under datasets/cards/coco2017/ and reference them with a
-relative path. Example:
-
-![Sample images from COCO test2017](coco2017/sample-grid.png)
--->
+![Sample images from COCO test2017](screenshot.jpg)
 
 ## Tips
 

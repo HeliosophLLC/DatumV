@@ -153,4 +153,102 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
 
         Assert.Equal(105, values[0].AsInt32());
     }
+
+    // ─── TVF named arguments in FROM ──────────────────────────────────
+    //
+    // Same parser → NamedArgPermuter → dispatch pipeline as scalar
+    // calls, except the call site is a TableSource (FunctionSource)
+    // rather than a FunctionCallExpression. Exercised against
+    // generate_series — a numeric three-arg TVF with an optional step
+    // and stable PG-compatible parameter names (start, stop, step).
+
+    private static async Task<List<DataValue>> CollectColumnAsync(
+        TableCatalog catalog, string sql, string column)
+    {
+        StatementPlan plan = catalog.Plan(sql);
+        List<DataValue> values = new();
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                values.Add(batch[i][column]);
+            }
+        }
+        return values;
+    }
+
+    /// <summary>
+    /// Two named args, source-order matching declared parameter order.
+    /// The TVF must receive (0, 4) and yield 0..4 inclusive.
+    /// </summary>
+    [Fact]
+    public async Task Tvf_AllNamedInDeclaredOrder_YieldsPositionalRange()
+    {
+        TableCatalog catalog = CreateCatalog();
+        List<DataValue> values = await CollectColumnAsync(catalog,
+            "SELECT value FROM generate_series(start := 0, stop := 4)", "value");
+
+        Assert.Equal(5, values.Count);
+        for (int i = 0; i < values.Count; i++)
+        {
+            Assert.Equal(i, values[i].AsInt32());
+        }
+    }
+
+    /// <summary>
+    /// Same call, names supplied in reverse source order. The permuter
+    /// must place stop in slot 1 and start in slot 0 regardless of
+    /// textual ordering — otherwise generate_series would interpret
+    /// (4, 0) as an empty range.
+    /// </summary>
+    [Fact]
+    public async Task Tvf_AllNamedReversed_PermutesToDeclaredOrder()
+    {
+        TableCatalog catalog = CreateCatalog();
+        List<DataValue> values = await CollectColumnAsync(catalog,
+            "SELECT value FROM generate_series(stop := 4, start := 0)", "value");
+
+        Assert.Equal(5, values.Count);
+        Assert.Equal(0, values[0].AsInt32());
+        Assert.Equal(4, values[4].AsInt32());
+    }
+
+    /// <summary>
+    /// Positional prefix + trailing named arg. Skipping the optional
+    /// middle slot is the case the MS MARCO recipe needs — call
+    /// open_csv_typed(path, header := FALSE) without supplying
+    /// skip_lines/comment/null_token in between. generate_series stands
+    /// in here with the same shape: (start, stop, step) and step
+    /// optional.
+    /// </summary>
+    [Fact]
+    public async Task Tvf_PositionalPlusTrailingNamed_RangeUsesStep()
+    {
+        TableCatalog catalog = CreateCatalog();
+        List<DataValue> values = await CollectColumnAsync(catalog,
+            "SELECT value FROM generate_series(0, 6, step := 2)", "value");
+
+        Assert.Equal(4, values.Count);
+        Assert.Equal(0, values[0].AsInt32());
+        Assert.Equal(2, values[1].AsInt32());
+        Assert.Equal(4, values[2].AsInt32());
+        Assert.Equal(6, values[3].AsInt32());
+    }
+
+    /// <summary>
+    /// Unknown parameter name surfaces the permuter's diagnostic with
+    /// the call-site function name and the offending parameter, same
+    /// shape as the scalar path.
+    /// </summary>
+    [Fact]
+    public void Tvf_UnknownParameterName_ThrowsWithSpecificMessage()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            catalog.Plan("SELECT * FROM generate_series(start := 0, nope := 4)"));
+
+        Assert.Contains("generate_series", ex.Message);
+        Assert.Contains("nope", ex.Message);
+    }
 }

@@ -153,12 +153,7 @@ public static class UdfInliner
         private TableSource RewriteTableSource(TableSource source) => source switch
         {
             SubquerySource sub => new SubquerySource(RewriteSelect(sub.Query), sub.Alias),
-            FunctionSource fn => new FunctionSource(
-                fn.FunctionName,
-                fn.Arguments.Select(Rewrite).ToList(),
-                fn.Alias,
-                fn.Span,
-                fn.SchemaName),
+            FunctionSource fn => fn with { Arguments = fn.Arguments.Select(Rewrite).ToList() },
             _ => source,
         };
 

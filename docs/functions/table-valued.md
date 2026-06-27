@@ -291,6 +291,12 @@ ORDER BY n DESC;
 -- Bound parameter (substituted to a literal at plan time)
 SELECT *
 FROM open_csv_typed($manifest_path);
+
+-- Headerless TSV: the autodetector trips on first-row-looks-like-data files
+-- (e.g. MS MARCO collection.tsv) and consumes a real data row as headers.
+-- Pass header := FALSE to force synthetic col_0, col_1, … names instead.
+SELECT col_0 AS passage_id, col_1 AS text
+FROM open_csv_typed('/path/to/collection.tsv', header := FALSE);
 ```
 
 ### open_json
