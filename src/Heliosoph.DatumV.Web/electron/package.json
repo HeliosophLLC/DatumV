@@ -38,7 +38,7 @@
     "electron-icon-builder": "^2.0.1",
     "license-checker-rseidelsohn": "^5.0.1",
     "rimraf": "^6.0.1",
-    "typescript": "^5.7.2",
+    "typescript": "^6.0.3",
     "wait-on": "^9.0.10"
   }
 }
