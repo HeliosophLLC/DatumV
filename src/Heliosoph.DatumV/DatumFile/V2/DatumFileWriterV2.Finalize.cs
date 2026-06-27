@@ -199,6 +199,14 @@ public sealed partial class DatumFileWriterV2
         {
             disposableSidecar.Dispose();
         }
+
+        // Release the writer lock last. The lock file's existence is the
+        // signal to other writers that this path is in use, so it must
+        // outlive the data-file handle — otherwise a second writer could
+        // briefly observe "no lock file" while the data file is still
+        // half-closed, slip in, and corrupt the commit.
+        _writerLock?.Dispose();
+        _writerLock = null;
     }
 
     /// <summary>

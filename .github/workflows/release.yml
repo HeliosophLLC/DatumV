@@ -55,7 +55,7 @@ jobs:
         run: |
           # Full matrix, expressed as JSON. Each entry's `attach_glob`
           # is a newline-separated string of upload paths — keep in
-          # sync with `actions/upload-artifact@v4` + `softprops/action-gh-release@v2`
+          # sync with `actions/upload-artifact@v5` + `softprops/action-gh-release@v3`
           # both of which accept multi-line glob input. Update manifests
           # are per-channel (`<channel>.yml` on Windows, `<channel>-linux.yml`
           # on Linux) because the npm dist scripts pass
@@ -119,8 +119,93 @@ jobs:
           echo "$MATRIX" | jq .
           echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
 
+  # Release gate: run the test suite on both Windows and Linux before any
+  # installer is built. PR CI only runs ubuntu-latest, so this is the first
+  # time Windows tests get exercised. Failing here cancels the installer
+  # matrix entirely — better to abort a release than to ship binaries whose
+  # tests don't pass on the target OS.
+  #
+  # GpuVariant=standard mirrors the PR CI command. We don't run the cuda
+  # variant here: it pulls a ~500 MB NVIDIA payload that no CI runner can
+  # actually exercise (no GPU), and the standard variant covers the
+  # cross-platform code paths that matter for test correctness.
+  release-gate-tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      # Linux runs inside a jammy container so OpenCvSharp's manylinux
+      # transitive deps (libtiff5, libopenexr25, libpng16-16, ...) are
+      # satisfied via apt without per-package .deb pins. Microsoft ships no
+      # .NET 10 jammy SDK image, so we use plain ubuntu:22.04 and let
+      # setup-dotnet install the SDK. Windows runs native — no container
+      # support / no need. Empty `container` is treated as no container.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            container: ubuntu:22.04
+          - os: windows-latest
+            container: ''
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Linux container is bare ubuntu:22.04: install git (checkout + push),
+      # the setup-dotnet prereqs (ca-certificates, curl, libicu70), xz-utils
+      # for the BtbN FFmpeg tarball, and the OpenCvSharp slim transitive
+      # runtime set. Add new entries here if a DllNotFoundException surfaces
+      # for a lib not yet listed. Windows runner is fully provisioned.
+      - name: Install system deps (Linux only)
+        if: runner.os == 'Linux'
+        env:
+          # tzdata (and a few other packages) issue debconf prompts that
+          # `apt-get -y` doesn't suppress on its own. Setting frontend to
+          # noninteractive picks defaults and proceeds without blocking.
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates curl libicu70 xz-utils tzdata \
+            libtbb2 libopenexr25 libtiff5 libpng16-16 libjpeg-turbo8 libwebp7 libopenjp2-7 \
+            fonts-dejavu-core fontconfig
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore
+        run: dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
+
+      - name: Build
+        run: dotnet build Heliosoph.DatumV.slnx -c Release --no-restore -p:SkipClientApp=true -p:GpuVariant=standard
+
+      # Sdcb.FFmpeg 7.0 needs libavutil.so.59 (FFmpeg 7 ABI). Jammy ships
+      # FFmpeg 4.4.x and Sdcb publishes no Linux NuGet, so we drop the BtbN
+      # shared libs into /usr/local/lib even inside the jammy container.
+      # Container runs as root, so no sudo. Windows side ships natives via
+      # Sdcb.FFmpeg.runtime.windows-x64; no equivalent step needed there.
+      - name: Install FFmpeg 7 shared libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          curl -sSL -o /tmp/ffmpeg.tar.xz \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz
+          mkdir -p /tmp/ffmpeg
+          tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1
+          cp -P /tmp/ffmpeg/lib/lib*.so* /usr/local/lib/
+          ldconfig
+
+      - name: Test
+        run: dotnet test tests/Heliosoph.DatumV.Tests -c Release --no-build --no-restore
+
   installer:
-    needs: resolve-matrix
+    needs: [resolve-matrix, release-gate-tests]
     name: ${{ matrix.label }}
     strategy:
       fail-fast: false
@@ -133,11 +218,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -185,7 +270,7 @@ jobs:
         working-directory: src/Heliosoph.DatumV.Web/electron
         run: npm run ${{ matrix.script }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           if-no-files-found: error
@@ -193,7 +278,7 @@ jobs:
 
       - name: Attach to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.attach_glob }}
           fail_on_unmatched_files: true
