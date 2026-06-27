@@ -1097,6 +1097,53 @@
       ]
     },
     {
+      "name": "NFCorpus",
+      "summary": "3,633 medical/nutrition documents drawn from NutritionFacts.org, paired with 3,237 natural-language health queries and graded relevance judgments. The small, fast counterpart to MS MARCO Passages — same TextEmbedder / TextReranker shape, two orders of magnitude smaller, domain-shifted into medical IR.",
+      "description": "Released in 2016 by Boteva, Gholipour, Sokolov, and Riezler (Heidelberg StatNLP group, ECIR 2016) and reused as one of the original BEIR zero-shot retrieval benchmarks. The corpus side is 3,633 long-form medical articles harvested from NutritionFacts.org — each with a title, an abstract / body text, and an integer document id; the query side is 3,237 natural-language questions a layperson might paste into a health-search box (\"Does eating broccoli reduce cancer risk?\"). Sizes are small enough that the whole corpus embeds end-to-end on CPU in seconds with MiniLM-L6, which makes NFCorpus the right substrate for prototyping a retrieval recipe before stepping up to MS MARCO Passages — same `passages` table shape (`passage_id`, `text`), drop-in for any embedder + cosine-ranking pipeline. This variant ingests the corpus side only; queries + qrels splits (used for headline nDCG@10 numbers in the BEIR / MTEB leaderboards) are deferred to a follow-up variant.",
+      "modalities": ["Text"],
+      "licenseIds": ["cc-by-sa-4.0"],
+      "attributions": [
+        "Vera Boteva, Demian Gholipour, Artem Sokolov, Stefan Riezler (NFCorpus — A Full-Text Learning to Rank Dataset for Medical Information Retrieval, ECIR 2016)",
+        "NutritionFacts.org / Michael Greger, MD (source articles, used under CC BY-SA 4.0)"
+      ],
+      "suitableForTasks": [
+        "TextEmbedder",
+        "TextReranker"
+      ],
+      "variants": [
+        {
+          "id": "nfcorpus_passages",
+          "displayName": "passages (3.6k)",
+          "summary": "3,633 medical passages in a two-column TSV (`passage_id`, `text`). A few MB on disk; ingests in under a second and embeds end-to-end on CPU in seconds with MiniLM-L6. Reach for this first when prototyping a retrieval recipe — graduate to MS MARCO Passages once the pipeline works.",
+          "approxArchiveBytes": 1897632,
+          "approxIngestedBytes": 5932260,
+          "expectedRowCounts": { "passages": 3633 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2016",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/NFCorpus",
+                  "revision": "413bcedebc1650f04dfad5940f06cf5744898c3e",
+                  "include": ["corpus.jsonl.gz"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "passages",
+                  "artifact": "corpus.jsonl.gz",
+                  "sqlFile": "nfcorpus/passages.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Quora Question Pairs",
       "summary": "404,290 pairs of user-submitted Quora questions, each pair flagged 0/1 for whether the two questions ask the same thing. The reference benchmark for English sentence-similarity / duplicate-detection evaluation — every text embedder reports paired-cosine accuracy on this corpus.",
       "description": "Released by Quora in January 2017 alongside the Kaggle competition of the same name. Each row pairs two real Quora questions with a human-labelled `is_duplicate` flag, which makes it the canonical small benchmark for sentence embedders: encode both questions, take the cosine similarity of the unit vectors, threshold for a binary classifier, report accuracy / F1 against the gold labels. Drop-in for any of the text embedders in the model catalog — MiniLM-L6, BGE Small, Jina — because every modern English sentence embedder targets this exact shape of task during fine-tuning. The recipe ingests the canonical TSV release verbatim (six columns: id, qid1, qid2, question1, question2, is_duplicate); embedding-friendly variants that explode the table into one question per row, or that materialize positive / negative / hard-negative triplets, are deferred to follow-up recipes.",
