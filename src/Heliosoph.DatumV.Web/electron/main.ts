@@ -1129,7 +1129,7 @@ function buildReleaseUrl(version: string): string {
   // electron-updater's GitHub provider doesn't surface the canonical
   // release page URL on update-available — construct it from owner +
   // repo + tag (the tag is `v<version>` per release.yml's convention).
-  return `https://github.com/HeliosophLLC/DatumIngest/releases/tag/v${version}`;
+  return `https://github.com/HeliosophLLC/DatumV/releases/tag/v${version}`;
 }
 
 function broadcastUpdateStatus(status: UpdateStatus): void {

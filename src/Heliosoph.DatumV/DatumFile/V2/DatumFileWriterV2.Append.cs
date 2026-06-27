@@ -48,20 +48,32 @@ public sealed partial class DatumFileWriterV2
     {
         ArgumentNullException.ThrowIfNull(datumPath);
 
-        // FileShare.Read mirrors the initial-write path: concurrent
-        // readers see the last-committed footer; concurrent writers
-        // (this or other processes) are excluded because we omit
-        // FileShare.Write. This is the writer-lock convention from the
-        // v4 design — OS file-share rules serialize writers, no
-        // separate lock primitive needed for single-process or
-        // multi-process exclusion.
-        FileStream stream = new(
-            datumPath,
-            FileMode.Open,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            bufferSize: 65_536,
-            FileOptions.RandomAccess);
+        // Acquire writer lock before opening the data file. Throws
+        // IOException if another writer holds the path. Must precede the
+        // FileStream open so a second concurrent OpenForAppend on the
+        // same path fails fast at the lock acquire, not at some later
+        // point where the file is partially modified. See WriterLockFile
+        // for the cross-platform rationale (Windows FileShare is
+        // mandatory; Linux's is advisory, so share-based exclusion alone
+        // does not portably serialize writers).
+        WriterLockFile writerLock = WriterLockFile.AcquireFor(datumPath);
+
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(
+                datumPath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.Read,
+                bufferSize: 65_536,
+                FileOptions.RandomAccess);
+        }
+        catch
+        {
+            writerLock.Dispose();
+            throw;
+        }
 
         try
         {
@@ -87,6 +99,7 @@ public sealed partial class DatumFileWriterV2
             // create on Windows. Sequencing read-then-write resolves
             // the conflict cleanly.
             DatumFileWriterV2 writer = new(stream, sink: null, ownsStream: true, ownsSidecar: false);
+            writer._writerLock = writerLock;
 
             // Snapshot the base tail bytes so FinalizeWriter can verify
             // nobody else committed during this session. The check is
@@ -122,6 +135,7 @@ public sealed partial class DatumFileWriterV2
         catch
         {
             stream.Dispose();
+            writerLock.Dispose();
             throw;
         }
     }

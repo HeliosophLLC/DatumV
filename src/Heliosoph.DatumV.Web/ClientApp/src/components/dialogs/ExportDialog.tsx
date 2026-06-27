@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -190,7 +191,7 @@ function FormatSection({
 }: {
   format: FormatId;
   onChange: (next: FormatId) => void;
-  t: ReturnType<typeof useTranslation>['t'];
+  t: TFunction<'dialogs'>;
 }) {
   return (
     <fieldset>
@@ -277,7 +278,7 @@ function ParquetSection({
 }: {
   state: ParquetState;
   onChange: (next: ParquetState) => void;
-  t: ReturnType<typeof useTranslation>['t'];
+  t: TFunction<'dialogs'>;
 }) {
   // Compression level is only honoured by gzip / zstd / brotli on the
   // backend — disabling the field for snappy / lz4 / none keeps the UI
@@ -347,7 +348,7 @@ function CsvSection({
 }: {
   state: CsvState;
   onChange: (next: CsvState) => void;
-  t: ReturnType<typeof useTranslation>['t'];
+  t: TFunction<'dialogs'>;
 }) {
   return (
     <fieldset className="space-y-3">
@@ -422,7 +423,7 @@ function CsvSection({
 function ArrowSection({
   t,
 }: {
-  t: ReturnType<typeof useTranslation>['t'];
+  t: TFunction<'dialogs'>;
 }) {
   // No options in v1. The format is the on-disk IPC file format,
   // typed-media metadata is fixed, and we don't expose body-compression
@@ -443,7 +444,7 @@ function JsonSection({
 }: {
   state: JsonState;
   onChange: (next: JsonState) => void;
-  t: ReturnType<typeof useTranslation>['t'];
+  t: TFunction<'dialogs'>;
 }) {
   // Indent is incompatible with JSONL on the backend (one-object-per-line
   // is the definition; indentation splits each object across multiple
