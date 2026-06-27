@@ -29,6 +29,12 @@ jobs:
     # drop the .NET install prereqs (git/curl/libicu/ca-certificates) from
     # the apt step.
     container: ubuntu:22.04
+    # GH Actions defaults `run:` to /bin/sh inside containers (dash on
+    # ubuntu:*, no pipefail / no <<< etc). Force bash so the script bodies
+    # below behave the same way as on the host runner.
+    defaults:
+      run:
+        shell: bash
     steps:
       # All apt-installed deps in one batch:
       #   - git, ca-certificates, curl, libicu70: setup-dotnet prereqs.
