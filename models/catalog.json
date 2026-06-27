@@ -158,6 +158,7 @@
       "attributions": [
         "Jina AI"
       ],
+      "cardFile": "cards/jina-embeddings-v2.md",
       "variants": [
         {
           "id": "jina-embeddings-v2-base-en",
