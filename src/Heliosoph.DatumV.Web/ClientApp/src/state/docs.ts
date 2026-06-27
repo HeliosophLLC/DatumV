@@ -48,19 +48,37 @@ function extractHeadings(content: string): string {
   return out.join('\n');
 }
 
+// Strip a leading YAML frontmatter block (`---\n…\n---\n`) from the raw
+// markdown. ReactMarkdown has no frontmatter plugin wired up, so anything
+// left in would render as a horizontal rule plus literal `title: …` text.
+// We don't currently use any of the frontmatter fields, so a flat strip
+// is enough — when we want the `title`, add a parser here.
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith('---')) return content;
+  // Accept either Unix or Windows line endings on the opening fence.
+  const afterOpen = content.match(/^---\r?\n/);
+  if (!afterOpen) return content;
+  const rest = content.slice(afterOpen[0].length);
+  const close = rest.match(/\r?\n---\r?\n/);
+  if (!close) return content;
+  return rest.slice(close.index! + close[0].length);
+}
+
 function buildEntries(): DocEntry[] {
   const entries: DocEntry[] = [];
-  for (const [rawKey, content] of Object.entries(RAW_MODULES)) {
+  for (const [rawKey, rawContent] of Object.entries(RAW_MODULES)) {
     // rawKey looks like `../../../../../docs/sql/select.md`; trim back to
     // a `docs-relative` slashed path.
     const marker = '/docs/';
     const idx = rawKey.indexOf(marker);
     if (idx < 0) continue;
     const path = rawKey.slice(idx + marker.length).replace(/\\/g, '/');
+    if (path === 'technical' || path.startsWith('technical/')) continue;
     const segments = path.split('/');
     const file = segments[segments.length - 1];
     const folders = segments.slice(0, -1);
     const name = file.replace(/\.md$/i, '');
+    const content = stripFrontmatter(rawContent);
     entries.push({
       path,
       name,
