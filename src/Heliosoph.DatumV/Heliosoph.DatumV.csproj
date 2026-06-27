@@ -194,6 +194,7 @@
       bundles both CUDA and CPU binaries in one package.
     -->
     <PackageReference Include="LLamaSharp.Backend.Cpu" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 
   <ItemGroup>
