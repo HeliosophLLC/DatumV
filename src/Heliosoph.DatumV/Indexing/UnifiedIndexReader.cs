@@ -63,6 +63,19 @@ internal static class UnifiedIndexReader
     {
         long fileCapacity = fileLength;
 
+        // Guard before issuing the MMF read. Windows pads view accessors to
+        // a page boundary so a short read zero-fills and the magic-byte check
+        // below catches the issue; Linux sizes views to the exact file length
+        // and ReadArray throws ArgumentException for an out-of-range read.
+        // Validate the file length explicitly so both platforms raise the
+        // same InvalidDataException with a torn-write message.
+        if (fileCapacity < UnifiedIndexWriter.HeaderSize)
+        {
+            throw new InvalidDataException(
+                $"Unified index file is too small ({fileCapacity} bytes) to hold a header; " +
+                "treat as torn write and run REINDEX.");
+        }
+
         // Read and validate header (24 bytes).
         Span<byte> headerBytes = stackalloc byte[UnifiedIndexWriter.HeaderSize];
         sharedAccessor.ReadArray(0, headerBytes);
