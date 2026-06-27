@@ -3425,6 +3425,7 @@ export interface SettingsDto {
     defaultLlmModel?: string | undefined;
     imageGalleryLayout?: boolean;
     gpuInstallPromptDismissed?: boolean;
+    gpuWrongBuildPromptDismissed?: boolean;
 }
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -3453,6 +3454,7 @@ export interface SettingsPatchDto {
     clearDefaultLlmModel?: boolean;
     imageGalleryLayout?: boolean | undefined;
     gpuInstallPromptDismissed?: boolean | undefined;
+    gpuWrongBuildPromptDismissed?: boolean | undefined;
 }
 
 export interface FileResponse {
