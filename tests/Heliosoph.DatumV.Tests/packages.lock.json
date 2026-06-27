@@ -4,9 +4,9 @@
     "net10.0": {
       "coverlet.collector": {
         "type": "Direct",
-        "requested": "[6.0.4, )",
-        "resolved": "6.0.4",
-        "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
+        "requested": "[10.0.1, )",
+        "resolved": "10.0.1",
+        "contentHash": "27jXSV/0DbVqF5jDrAxuQFZ9oaz6gmG03p8ttxAFk+X0M4woFYj7MoWDLCna5EGLb0CE6OE7X6ZH3Wt5smTtaA=="
       },
       "Microsoft.Extensions.DependencyInjection": {
         "type": "Direct",
@@ -23,6 +23,15 @@
         "resolved": "10.7.0",
         "contentHash": "THd3CJ9e/ftm/3+Z69E51MQy4n46so4Zs/vUevMCYR5tjZsP+INqD4npXARVQwB2nnG+eQ8SI6ERLe/tn6gwSA=="
       },
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Direct",
+        "requested": "[1.24.4, )",
+        "resolved": "1.24.4",
+        "contentHash": "895huFBVrZkZEGjlsxBSZD3p6D32Cdz6q8DM9UcUps2YKFYdFR8TefaTggFBUTYlvcSyfNTpmOOU/ZkeL69izw==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.24.4"
+        }
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[17.14.1, )",
@@ -32,6 +41,18 @@
           "Microsoft.CodeCoverage": "17.14.1",
           "Microsoft.TestPlatform.TestHost": "17.14.1"
         }
+      },
+      "OpenCvSharp4.official.runtime.linux-x64.slim": {
+        "type": "Direct",
+        "requested": "[4.13.0.20260302, )",
+        "resolved": "4.13.0.20260302",
+        "contentHash": "nVGlt2/I1ScgcGuiYlcLiYjgWtcl0oS5ZPM2nZfjAufKXpgtDTClP3Fmr5G7VyS2qPsX98g8HhkrCXu5O4efjA=="
+      },
+      "SkiaSharp.NativeAssets.Linux.NoDependencies": {
+        "type": "Direct",
+        "requested": "[3.119.0, )",
+        "resolved": "3.119.0",
+        "contentHash": "e92vdqf1VOETPjy1T67Fs1zPxfGMM1nbrpt69GM5foXSI/iIbq6L9avPz/bl/DbWtb81D0yF/NKjRmXuOZoLcg=="
       },
       "xunit": {
         "type": "Direct",
@@ -317,7 +338,7 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "CardinalityEstimation": "[1.14.0, )",
+          "CardinalityEstimation": "[1.15.0, )",
           "Heliosoph.DatumV.Parsing": "[0.1.1.175, )",
           "LLamaSharp": "[0.27.0, )",
           "LLamaSharp.Backend.Cpu": "[0.27.0, )",
@@ -340,7 +361,7 @@
           "SkiaSharp": "[3.119.0, )",
           "Snappier": "[1.3.1, )",
           "System.Formats.Cbor": "[9.0.0, )",
-          "System.IO.Hashing": "[9.0.0, )",
+          "System.IO.Hashing": "[10.0.7, )",
           "ZstdSharp.Port": "[0.8.7, )"
         }
       },
@@ -367,11 +388,11 @@
       },
       "CardinalityEstimation": {
         "type": "CentralTransitive",
-        "requested": "[1.14.0, )",
-        "resolved": "1.14.0",
-        "contentHash": "SkVunyRkEm8ml/rrnAzstJL4yig0rzHzAHchkK92aSl5wZqqihX2lse8CghZGPf/coQLyFQLiWYuMCzrOnAlKw==",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "3ovZw41PtLzq8uxUCFusftW0heFEu0zg3ZozDw3hTzeiMojr3SRIK9/2b1L5ePAlJKIHUCekeyGrQ+wteCWHQw==",
         "dependencies": {
-          "System.IO.Hashing": "8.0.0",
+          "System.IO.Hashing": "10.0.7",
           "murmurhash": "1.0.3"
         }
       },
@@ -545,9 +566,9 @@
       },
       "System.IO.Hashing": {
         "type": "CentralTransitive",
-        "requested": "[9.0.0, )",
-        "resolved": "9.0.0",
-        "contentHash": "seeO8icDfED/Qwl9PDFUx2Gf/7xv7dPsMnw5PnRwNZuz4EWMpy0wIVohC4MfCcTIoJgp+KUrWG4WH3NPSusQOA=="
+        "requested": "[10.0.7, )",
+        "resolved": "10.0.7",
+        "contentHash": "6hsjdSr4VOXSOnhALkYplHpAxnTG1J33YN42IB6nH2fEg4QnJqrZ4Ft+qn7mkrKAOYC8pCSFYwVWw6rQbmwgLQ=="
       },
       "ZstdSharp.Port": {
         "type": "CentralTransitive",

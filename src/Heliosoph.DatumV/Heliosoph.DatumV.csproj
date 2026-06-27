@@ -84,12 +84,19 @@
     <!--
       OpenCvSharp4 supplies ORB feature detection, descriptor matching, and
       Mat-based SVD used by pose_from_rgbd to recover camera pose between
-      consecutive RGB-D frames. Native deps ship in the .runtime.win
-      sub-package (Windows-only for now; add the matching linux/osx
-      runtime packages if the target list grows).
+      consecutive RGB-D frames. Native deps ship in per-platform sub-
+      packages: .runtime.win bundles OpenCvSharpExtern.dll for Windows;
+      .official.runtime.linux-x64.slim bundles libOpenCvSharpExtern.so for
+      Linux. The .slim variant omits highgui (no GTK3 dependency) — the
+      engine only uses compute APIs (Mat/ORB/SVD/matchers), never imshow
+      or named windows, so the GUI dependencies would be dead weight. Add
+      a macOS runtime package alongside if/when the target list grows.
+      RID-gated so a Windows publish doesn't drag a Linux .so along.
     -->
     <PackageReference Include="OpenCvSharp4" />
     <PackageReference Include="OpenCvSharp4.runtime.win" />
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64.slim"
+                      Condition="'$(RuntimeIdentifier)' == 'linux-x64'" />
     <PackageReference Include="PureHDF" />
     <PackageReference Include="Parquet.Net" />
     <PackageReference Include="Sdcb.FFmpeg" />
