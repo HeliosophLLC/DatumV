@@ -18,7 +18,7 @@ WHERE c.value.label = 'person'
 LIMIT 100
 ```
 
-See [Examples — Person crops with YOLOX](examples/yolox-person-crops.md) for the full walkthrough.
+See [Examples — Person crops with YOLOX](docs/examples/yolox-person-crops.md) for the full walkthrough.
 
 ## Same input, four depth models
 
