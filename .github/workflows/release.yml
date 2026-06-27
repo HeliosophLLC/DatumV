@@ -158,6 +158,11 @@ jobs:
       # for a lib not yet listed. Windows runner is fully provisioned.
       - name: Install system deps (Linux only)
         if: runner.os == 'Linux'
+        env:
+          # tzdata (and a few other packages) issue debconf prompts that
+          # `apt-get -y` doesn't suppress on its own. Setting frontend to
+          # noninteractive picks defaults and proceeds without blocking.
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euxo pipefail
           apt-get update

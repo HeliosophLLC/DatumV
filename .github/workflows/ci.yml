@@ -45,6 +45,11 @@ jobs:
       #     OpenCvSharp slim's transitive dlopen set. If a new
       #     DllNotFoundException surfaces in test output, add it here.
       - name: Install system deps
+        env:
+          # tzdata (and a few other packages) issue debconf prompts that
+          # `apt-get -y` doesn't suppress on its own. Setting frontend to
+          # noninteractive picks defaults and proceeds without blocking.
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euxo pipefail
           apt-get update
