@@ -67,6 +67,25 @@ interface CalibrationState {
   recentCompletions: RecentCompletion[];
   revision: number;
   seeded: boolean;
+  // One-time coach-mark: true while the "first run must be
+  // calibrated" bubble should pop out of the status-bar chip. Raised
+  // the first time a ramp starts in this install; cleared (and
+  // persisted) once the user acknowledges it.
+  coachMarkVisible: boolean;
+}
+
+// localStorage flag recording that the user has dismissed the
+// first-run calibration explainer. Once set, the coach-mark never
+// shows again on this machine. Best-effort: private mode / quota
+// failures just mean the hint can reappear, which is harmless.
+const COACH_MARK_ACK_KEY = 'datumv.calibrationCoachMarkAck';
+
+function coachMarkAcknowledged(): boolean {
+  try {
+    return localStorage.getItem(COACH_MARK_ACK_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 // Display window for the "just finished" chip flash. After this many
@@ -82,7 +101,22 @@ export const calibrationState = proxy<CalibrationState>({
   recentCompletions: [],
   revision: 0,
   seeded: false,
+  coachMarkVisible: false,
 });
+
+/**
+ * Marks the first-run calibration explainer as acknowledged. Hides
+ * the chip's coach-mark immediately and persists the choice so it
+ * never reappears on this machine.
+ */
+export function dismissCalibrationCoachMark(): void {
+  calibrationState.coachMarkVisible = false;
+  try {
+    localStorage.setItem(COACH_MARK_ACK_KEY, '1');
+  } catch {
+    /* private mode / quota — best-effort */
+  }
+}
 
 function bump(): void {
   calibrationState.revision = (calibrationState.revision + 1) | 0;
@@ -142,6 +176,12 @@ onCalibrationRampStarted((ev) => {
     stepsSoFar: [],
     startedAt: Date.now(),
   };
+  // First time a model calibrates on this machine, pop the explainer
+  // out of the chip so the user understands the unexpected pause. The
+  // ack flag is persisted, so this only ever fires once.
+  if (!calibrationState.coachMarkVisible && !coachMarkAcknowledged()) {
+    calibrationState.coachMarkVisible = true;
+  }
   bump();
 });
 
