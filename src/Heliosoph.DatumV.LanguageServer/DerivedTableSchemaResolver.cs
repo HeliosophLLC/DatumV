@@ -34,17 +34,18 @@ using Heliosoph.DatumV.Parsing.Ast;
 /// </list>
 /// </para>
 /// </remarks>
-internal static class CteSchemaResolver
+internal static class DerivedTableSchemaResolver
 {
     /// <summary>
     /// Empty result returned when parsing fails or no CTEs are present.
     /// Kept as a singleton to avoid allocating a new empty dictionary on
     /// every classify call.
     /// </summary>
-    public static readonly CteSchemaResult Empty = new(
+    public static readonly DerivedTableSchemaResult Empty = new(
         new Dictionary<string, IReadOnlyList<TableColumnEntry>>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Parses <paramref name="sql"/> and resolves every CTE's projected
@@ -52,7 +53,7 @@ internal static class CteSchemaResolver
     /// parser will usually still return a tree, but defensively we treat any
     /// exception as "no CTE info available").
     /// </summary>
-    public static CteSchemaResult Resolve(string sql, LanguageServerManifest manifest)
+    public static DerivedTableSchemaResult Resolve(string sql, LanguageServerManifest manifest)
     {
         if (string.IsNullOrWhiteSpace(sql)) return Empty;
 
@@ -85,9 +86,14 @@ internal static class CteSchemaResolver
 
         Dictionary<string, IReadOnlyList<TableColumnEntry>> schemas =
             new(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, string> fromAliasToCte =
+        Dictionary<string, string> fromAliasToSource =
             new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> letKinds =
+            new(StringComparer.OrdinalIgnoreCase);
+        // Tracks which entries in `schemas` came from FROM/JOIN subquery
+        // aliases versus CTE definitions, so the hover label can render
+        // "subquery" instead of "CTE" for derived-table aliases.
+        HashSet<string> subqueryAliases =
             new(StringComparer.OrdinalIgnoreCase);
 
         if (root.CommonTableExpressions is not null)
@@ -111,9 +117,93 @@ internal static class CteSchemaResolver
         // lookups like `f1.frame_index` can route to the CTE's schema.
         // Walked from the root and from every CTE body — an inner CTE may
         // alias an earlier CTE source too.
-        CollectCteFromAliases(root, schemas, fromAliasToCte);
+        CollectCteFromAliases(root, schemas, fromAliasToSource);
 
-        return new CteSchemaResult(schemas, fromAliasToCte, letKinds);
+        // Project every FROM / JOIN subquery alias's columns into `schemas`
+        // so the LSP's qualified-column lookups (`t.col`) and dot-completion
+        // (`t.`) treat `FROM (SELECT …) t` the same as a CTE reference. The
+        // engine resolves `t` against the subquery's projection at runtime;
+        // mirroring that here keeps hover / completion in sync with what the
+        // engine accepts.
+        CollectSubqueryAliases(root, manifest, schemas, subqueryAliases, letKinds, declaredVariables);
+
+        return new DerivedTableSchemaResult(schemas, fromAliasToSource, letKinds, subqueryAliases);
+    }
+
+    /// <summary>
+    /// Walks <paramref name="statement"/>'s FROM / JOIN sources (and any CTE
+    /// body's sources) for <see cref="SubquerySource"/> nodes, projects each
+    /// inner SELECT's column list using the same machinery as
+    /// <see cref="ResolveCteColumns"/>, and writes the result into
+    /// <paramref name="schemas"/> keyed on the subquery's alias.
+    /// </summary>
+    /// <remarks>
+    /// First-write-wins on alias collisions, so a CTE entry already in
+    /// <paramref name="schemas"/> shadows a same-named subquery alias —
+    /// matches the engine's CTE-shadows-table rule and avoids confusing
+    /// the hover popup when the same name is reused.
+    /// </remarks>
+    private static void CollectSubqueryAliases(
+        SelectStatement statement,
+        LanguageServerManifest manifest,
+        Dictionary<string, IReadOnlyList<TableColumnEntry>> schemas,
+        HashSet<string> subqueryAliases,
+        Dictionary<string, string> letKinds,
+        IReadOnlyDictionary<string, string?> declaredVariables)
+    {
+        if (statement.CommonTableExpressions is not null)
+        {
+            foreach (CommonTableExpression cte in statement.CommonTableExpressions)
+            {
+                SelectStatement? cteBody = ExtractRootStatement(cte.Body);
+                if (cteBody is not null)
+                {
+                    CollectSubqueryAliases(cteBody, manifest, schemas, subqueryAliases, letKinds, declaredVariables);
+                }
+            }
+        }
+
+        if (statement.From is not null)
+        {
+            BindSubqueryAlias(statement.From.Source, manifest, schemas, subqueryAliases, letKinds, declaredVariables);
+        }
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                BindSubqueryAlias(join.Source, manifest, schemas, subqueryAliases, letKinds, declaredVariables);
+            }
+        }
+    }
+
+    private static void BindSubqueryAlias(
+        TableSource source,
+        LanguageServerManifest manifest,
+        Dictionary<string, IReadOnlyList<TableColumnEntry>> schemas,
+        HashSet<string> subqueryAliases,
+        Dictionary<string, string> letKinds,
+        IReadOnlyDictionary<string, string?> declaredVariables)
+    {
+        if (source is not SubquerySource subquery) return;
+
+        // SubquerySource.Query is already a SelectStatement, so no
+        // ExtractRootStatement detour the way a CTE body needs.
+        SelectStatement inner = subquery.Query;
+
+        // Recurse so a subquery whose body itself contains another
+        // subquery alias surfaces that nested alias too — same scope rule
+        // the recursive CTE walk above uses.
+        CollectSubqueryAliases(inner, manifest, schemas, subqueryAliases, letKinds, declaredVariables);
+
+        if (schemas.ContainsKey(subquery.Alias)) return;
+
+        IReadOnlyList<TableColumnEntry>? columns = ProjectSelectColumns(
+            inner, manifest, schemas, letKinds, declaredVariables, columnRename: null);
+        if (columns is not null)
+        {
+            schemas[subquery.Alias] = columns;
+            subqueryAliases.Add(subquery.Alias);
+        }
     }
 
     private static SelectStatement? ExtractRootStatement(QueryExpression query) => query switch
@@ -144,6 +234,26 @@ internal static class CteSchemaResolver
         SelectStatement? inner = ExtractRootStatement(cte.Body);
         if (inner is null) return null;
 
+        return ProjectSelectColumns(
+            inner, manifest, earlierCtes, letKinds, declaredVariables, cte.ColumnNames);
+    }
+
+    /// <summary>
+    /// Projects an inner <see cref="SelectStatement"/>'s SELECT list into a
+    /// flat <see cref="TableColumnEntry"/> list — the schema a CTE body or a
+    /// subquery source would expose to the surrounding query. Handles bare
+    /// <c>SELECT *</c>, qualified <c>alias.*</c>, named expressions, LET
+    /// snapshotting, and optional positional column rename
+    /// (<c>WITH foo (a, b) AS …</c>).
+    /// </summary>
+    private static IReadOnlyList<TableColumnEntry>? ProjectSelectColumns(
+        SelectStatement inner,
+        LanguageServerManifest manifest,
+        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> earlierCtes,
+        Dictionary<string, string> letKinds,
+        IReadOnlyDictionary<string, string?> declaredVariables,
+        IReadOnlyList<string>? columnRename)
+    {
         InnerScope scope = BuildInnerScope(inner, manifest, earlierCtes)
             with { DeclaredVariables = declaredVariables };
 
@@ -197,7 +307,7 @@ internal static class CteSchemaResolver
         // Explicit column rename: `WITH foo (a, b) AS (...)`. Replaces the
         // derived names but keeps the kinds — same rule the engine applies
         // when projecting through a CTE with an explicit column list.
-        if (cte.ColumnNames is { Count: > 0 } rename)
+        if (columnRename is { Count: > 0 } rename)
         {
             List<TableColumnEntry> renamed = new(projected.Count);
             for (int i = 0; i < projected.Count; i++)
@@ -719,11 +829,28 @@ internal static class CteSchemaResolver
                 }
             case SubquerySource subquery:
                 {
-                    // Subqueries in FROM project a derived row shape. We
-                    // could resolve their projection the same way we do
-                    // for CTEs; deferred for now — derived-table support
-                    // is an extension on top of this slice.
-                    _ = subquery;
+                    // Derived-table projection: walk the inner SELECT and
+                    // project its columns the same way we do for a CTE
+                    // body, then expose the result under the subquery's
+                    // alias so qualified references (`sub.col`) in the
+                    // surrounding SELECT list resolve correctly.
+                    SelectStatement innerBody = subquery.Query;
+                    // LET kinds and DECLARE variables collected at the
+                    // outer scope aren't threaded down here — names still
+                    // resolve correctly; any opaque expression kinds fall
+                    // back to "?" the same way an unresolvable CTE column
+                    // would.
+                    IReadOnlyList<TableColumnEntry>? subColumns = ProjectSelectColumns(
+                        innerBody,
+                        manifest,
+                        earlierCtes,
+                        letKinds: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                        declaredVariables: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+                        columnRename: null);
+                    if (subColumns is not null)
+                    {
+                        aliasToColumns.TryAdd(subquery.Alias, subColumns);
+                    }
                     break;
                 }
         }
@@ -778,15 +905,15 @@ internal static class CteSchemaResolver
     /// </summary>
     private static void CollectCteFromAliases(
         SelectStatement statement,
-        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> cteSchemas,
-        Dictionary<string, string> fromAliasToCte)
+        IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> derivedSchemas,
+        Dictionary<string, string> fromAliasToSource)
     {
         if (statement.CommonTableExpressions is not null)
         {
             foreach (CommonTableExpression cte in statement.CommonTableExpressions)
             {
                 SelectStatement? inner = ExtractRootStatement(cte.Body);
-                if (inner is not null) CollectCteFromAliases(inner, cteSchemas, fromAliasToCte);
+                if (inner is not null) CollectCteFromAliases(inner, derivedSchemas, fromAliasToSource);
             }
         }
 
@@ -798,14 +925,14 @@ internal static class CteSchemaResolver
 
         void CollectFromSource(TableSource source)
         {
-            if (source is TableReference tableRef && cteSchemas.ContainsKey(tableRef.Name))
+            if (source is TableReference tableRef && derivedSchemas.ContainsKey(tableRef.Name))
             {
                 if (tableRef.Alias is not null)
                 {
-                    fromAliasToCte.TryAdd(tableRef.Alias, tableRef.Name);
+                    fromAliasToSource.TryAdd(tableRef.Alias, tableRef.Name);
                 }
                 // Bare CTE name (no alias) is also a valid qualifier.
-                fromAliasToCte.TryAdd(tableRef.Name, tableRef.Name);
+                fromAliasToSource.TryAdd(tableRef.Name, tableRef.Name);
             }
         }
     }
@@ -910,21 +1037,26 @@ internal static class CteSchemaResolver
 }
 
 /// <summary>
-/// Output of <see cref="CteSchemaResolver.Resolve"/>. <see cref="Schemas"/>
-/// maps each CTE's name to its projected column list; <see cref="FromAliasToCteName"/>
+/// Output of <see cref="DerivedTableSchemaResolver.Resolve"/>. <see cref="Schemas"/>
+/// maps each derived-table source's name (CTE name or FROM/JOIN subquery alias)
+/// to its projected column list; <see cref="FromAliasToSourceName"/>
 /// maps every <c>FROM &lt;cte&gt; [AS] alias</c> alias (including the bare
 /// CTE name when no alias was given) to the CTE name for qualified lookups.
 /// <see cref="LetBindingKinds"/> maps every LET binding's name (across the
 /// outermost SELECT and every CTE body) to its resolved kind label so the
 /// hover path can surface a type for LET names that aren't projected.
+/// <see cref="SubqueryAliases"/> lists the subset of <see cref="Schemas"/>
+/// keys that came from inline FROM/JOIN subqueries (the rest being CTE
+/// definitions), so consumers can pick the right hover label.
 /// </summary>
-internal sealed record CteSchemaResult(
+internal sealed record DerivedTableSchemaResult(
     IReadOnlyDictionary<string, IReadOnlyList<TableColumnEntry>> Schemas,
-    IReadOnlyDictionary<string, string> FromAliasToCteName,
-    IReadOnlyDictionary<string, string> LetBindingKinds);
+    IReadOnlyDictionary<string, string> FromAliasToSourceName,
+    IReadOnlyDictionary<string, string> LetBindingKinds,
+    IReadOnlySet<string> SubqueryAliases);
 
 /// <summary>
-/// Per-CTE inner-FROM scope used by <see cref="CteSchemaResolver"/>: maps
+/// Per-CTE inner-FROM scope used by <see cref="DerivedTableSchemaResolver"/>: maps
 /// each source alias (or unaliased name) to the column list that alias
 /// resolves to, plus the CTE's LET bindings (name → expression) so the
 /// SELECT-list resolver can chase a reference like <c>prev_image</c>

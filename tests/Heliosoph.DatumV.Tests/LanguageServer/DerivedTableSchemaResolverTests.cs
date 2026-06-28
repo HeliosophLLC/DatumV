@@ -4,11 +4,11 @@ using Heliosoph.DatumV.LanguageServer;
 using Heliosoph.DatumV.Manifest;
 
 /// <summary>
-/// Direct tests for <see cref="CteSchemaResolver"/> — covers the
+/// Direct tests for <see cref="DerivedTableSchemaResolver"/> — covers the
 /// projection-derivation logic in isolation so failures don't get hidden by
 /// the broader completion / hover pipelines.
 /// </summary>
-public sealed class CteSchemaResolverTests : ServiceTestBase
+public sealed class DerivedTableSchemaResolverTests : ServiceTestBase
 {
     private static LanguageServerManifest CreateManifest() => new()
     {
@@ -39,7 +39,7 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "WITH frames AS (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT f1.x FROM frames f1";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, CreateManifest());
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, CreateManifest());
 
         Assert.True(result.Schemas.ContainsKey("frames"));
         IReadOnlyList<TableColumnEntry> cols = result.Schemas["frames"];
@@ -95,7 +95,7 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT prev_image FROM thumb";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enrichedManifest);
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, enrichedManifest);
 
         Assert.True(result.Schemas.ContainsKey("thumb"));
         IReadOnlyList<TableColumnEntry> cols = result.Schemas["thumb"];
@@ -155,7 +155,7 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT out_image FROM thumb";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enrichedManifest);
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, enrichedManifest);
 
         Assert.True(result.Schemas.ContainsKey("thumb"));
         TableColumnEntry? outCol = result.Schemas["thumb"].FirstOrDefault(c => c.Name == "out_image");
@@ -226,7 +226,7 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT depth_only FROM thumb";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enriched);
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, enriched);
 
         Assert.True(result.Schemas.ContainsKey("thumb"));
         TableColumnEntry? depthOnly = result.Schemas["thumb"].FirstOrDefault(c => c.Name == "depth_only");
@@ -284,7 +284,7 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT chosen FROM thumb";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, enriched);
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, enriched);
 
         Assert.True(result.Schemas.ContainsKey("thumb"));
         TableColumnEntry? chosen = result.Schemas["thumb"].FirstOrDefault(c => c.Name == "chosen");
@@ -303,9 +303,66 @@ public sealed class CteSchemaResolverTests : ServiceTestBase
             "WITH frames AS (SELECT frame_index FROM video_unnest_frames('x.mp4') vid) " +
             "SELECT f1.x FROM frames f1";
 
-        CteSchemaResult result = CteSchemaResolver.Resolve(sql, CreateManifest());
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, CreateManifest());
 
-        Assert.True(result.FromAliasToCteName.ContainsKey("f1"));
-        Assert.Equal("frames", result.FromAliasToCteName["f1"]);
+        Assert.True(result.FromAliasToSourceName.ContainsKey("f1"));
+        Assert.Equal("frames", result.FromAliasToSourceName["f1"]);
+    }
+
+    [Fact]
+    public void Resolve_AliasedSubqueryAtTopLevel_ProjectsColumnsUnderAlias()
+    {
+        // `FROM (SELECT …) t` should expose its projected columns under
+        // `t` for downstream qualified-column lookups, matching how CTE
+        // references work. Without this the hover / completion paths
+        // would miss `t.frame_index` even though the engine resolves it.
+        const string sql =
+            "SELECT t.frame_index FROM (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) t";
+
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, CreateManifest());
+
+        Assert.True(result.Schemas.ContainsKey("t"));
+        IReadOnlyList<TableColumnEntry> cols = result.Schemas["t"];
+        Assert.Equal(2, cols.Count);
+        Assert.Equal("frame_index", cols[0].Name);
+        Assert.Equal("Int32", cols[0].Kind);
+        Assert.Equal("frame", cols[1].Name);
+        Assert.Equal("VideoFrame", cols[1].Kind);
+    }
+
+    [Fact]
+    public void Resolve_AliasedSubqueryOverLiteral_SurfacesLiteralColumn()
+    {
+        // The minimum case from the engine bug report: an aliased
+        // subquery over a literal SELECT. The literal column must show
+        // up in the LSP's per-alias schema map.
+        const string sql = "SELECT t.test FROM (SELECT 'hello' AS test) t";
+
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, CreateManifest());
+
+        Assert.True(result.Schemas.ContainsKey("t"));
+        IReadOnlyList<TableColumnEntry> cols = result.Schemas["t"];
+        Assert.Single(cols);
+        Assert.Equal("test", cols[0].Name);
+        Assert.Equal("String", cols[0].Kind);
+    }
+
+    [Fact]
+    public void Resolve_SubqueryAliasShadowedByCteName_FavorsCte()
+    {
+        // If a CTE and an aliased subquery share a name, the CTE entry
+        // already in the schemas map wins — matches the engine's
+        // CTE-shadows-table convention and avoids confusing hover popups
+        // when the user reuses a name.
+        const string sql =
+            "WITH t AS (SELECT 1 AS cte_col) " +
+            "SELECT * FROM (SELECT 2 AS sub_col) t";
+
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, CreateManifest());
+
+        Assert.True(result.Schemas.ContainsKey("t"));
+        IReadOnlyList<TableColumnEntry> cols = result.Schemas["t"];
+        Assert.Single(cols);
+        Assert.Equal("cte_col", cols[0].Name);
     }
 }

@@ -104,7 +104,7 @@ public sealed class HoverProvider
         // CTE projection schemas — same global-scope simplification as the
         // TVF alias map. A bare CTE name or a FROM alias bound to a CTE
         // resolves to the CTE's derived output columns.
-        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(sql, _manifest);
+        DerivedTableSchemaResult derivedSchemas = DerivedTableSchemaResolver.Resolve(sql, _manifest);
         // DECLAREd variables visible anywhere in the batch — covers both the
         // declaration site and downstream references (engine resolves these
         // by name through the variable scope before the row schema, so the
@@ -129,14 +129,14 @@ public sealed class HoverProvider
             && TemplateSpliceLocator.TryLocate(sql, cursorOffset, out var splice))
         {
             HoverResult? spliceHover = ResolveSpliceHover(
-                sql, cursorOffset, splice, tvfAliases, tvfAliasSources, tableAliases, cteSchemas, declaredVariables);
+                sql, cursorOffset, splice, tvfAliases, tvfAliasSources, tableAliases, derivedSchemas, declaredVariables);
             if (spliceHover is not null) return spliceHover;
             // Locator hit but inner dispatch produced nothing — fall
             // through to the generic template hover so the user still
             // gets some context for the click.
         }
 
-        string? markdown = ResolveHoverMarkdown(hit, tokens, tvfAliases, tvfAliasSources, tableAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey);
+        string? markdown = ResolveHoverMarkdown(hit, tokens, tvfAliases, tvfAliasSources, tableAliases, derivedSchemas, lambdaScopes, declaredVariables, out docKey);
 
         if (markdown is null)
         {
@@ -170,7 +170,7 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
         Dictionary<string, string> tableAliases,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         IReadOnlyList<LambdaScope> lambdaScopes,
         Dictionary<string, string?> declaredVariables,
         out string? docKey)
@@ -178,7 +178,7 @@ public sealed class HoverProvider
         docKey = null;
         return hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, tvfAliasSources, tableAliases, cteSchemas, lambdaScopes, declaredVariables, out docKey),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, tvfAliases, tvfAliasSources, tableAliases, derivedSchemas, lambdaScopes, declaredVariables, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
@@ -207,7 +207,7 @@ public sealed class HoverProvider
     /// </summary>
     /// <remarks>
     /// Scope objects passed in (<paramref name="tvfAliases"/>,
-    /// <paramref name="cteSchemas"/>, <paramref name="declaredVariables"/>)
+    /// <paramref name="derivedSchemas"/>, <paramref name="declaredVariables"/>)
     /// are computed off the outer SQL once — splices live inline in the
     /// outer SQL so the same maps are valid inside them. Lambda scopes
     /// are recomputed against the splice's own token list because lambda
@@ -222,7 +222,7 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
         Dictionary<string, string> tableAliases,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         Dictionary<string, string?> declaredVariables)
     {
         List<TokenHit> innerTokens = TokenizeWithSpans(splice.Body);
@@ -234,7 +234,7 @@ public sealed class HoverProvider
             LambdaScopeWalker.FindActiveScopes(innerTokens, innerCursor);
 
         string? markdown = ResolveHoverMarkdown(
-            innerHit, innerTokens, tvfAliases, tvfAliasSources, tableAliases, cteSchemas, innerLambdaScopes,
+            innerHit, innerTokens, tvfAliases, tvfAliasSources, tableAliases, derivedSchemas, innerLambdaScopes,
             declaredVariables, out string? docKey);
 
         if (markdown is null) return null;
@@ -293,7 +293,7 @@ public sealed class HoverProvider
     /// SQL to its manifest signature so column hovers originating from a
     /// table-valued function source (e.g. <c>FROM video_unnest_frames(...) vid</c>)
     /// can resolve to the TVF's output columns — the persistent-table column
-    /// lookup doesn't know about these. <paramref name="cteSchemas"/> serves
+    /// lookup doesn't know about these. <paramref name="derivedSchemas"/> serves
     /// the same purpose for <c>WITH</c>-clause CTEs.
     /// </summary>
     private string? ResolveIdentifierHover(
@@ -303,7 +303,7 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
         Dictionary<string, string> tableAliases,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         IReadOnlyList<LambdaScope> lambdaScopes,
         Dictionary<string, string?> declaredVariables,
         out string? docKey)
@@ -436,7 +436,7 @@ public sealed class HoverProvider
             string structColumn = tokens[currentIndex - 2].Text;
             string? threePartHover = TryGetStructFieldChainHover(
                 outerAlias, structColumn, name,
-                tvfAliases, tvfAliasSources, tableAliases, cteSchemas);
+                tvfAliases, tvfAliasSources, tableAliases, derivedSchemas);
             if (threePartHover is not null) return threePartHover;
         }
 
@@ -470,19 +470,19 @@ public sealed class HoverProvider
             // `alias.column` where `alias` is a TVF source — look up the
             // column in the TVF's output schema before falling back to the
             // persistent-table column path.
-            string? tvfQualifiedHover = GetTvfColumnHover(qualifier, name, tvfAliases, tvfAliasSources, cteSchemas);
+            string? tvfQualifiedHover = GetTvfColumnHover(qualifier, name, tvfAliases, tvfAliasSources, derivedSchemas);
             if (tvfQualifiedHover is not null) return tvfQualifiedHover;
 
             // CTE alias or bare CTE name (e.g. `frames.frame_index` or
             // `f1.frame_index` where `f1` is `FROM frames f1`).
-            string? cteQualifiedHover = GetCteColumnHover(qualifier, name, cteSchemas);
+            string? cteQualifiedHover = GetCteColumnHover(qualifier, name, derivedSchemas);
             if (cteQualifiedHover is not null) return cteQualifiedHover;
 
             // Struct field access: `curr_depth.depth` where `curr_depth` is a
             // CTE-projected column carrying a `Struct<…>` annotation (typically
             // the output of a struct-returning model call). Parse the column's
             // kind back into fields and look up the requested field by name.
-            string? structFieldHover = GetStructFieldHover(qualifier, name, cteSchemas);
+            string? structFieldHover = GetStructFieldHover(qualifier, name, derivedSchemas);
             if (structFieldHover is not null) return structFieldHover;
 
             // Plain FROM/JOIN alias: when the qualifier is `t` from
@@ -526,22 +526,38 @@ public sealed class HoverProvider
             }
         }
 
+        // Derived-table alias: hover on the `t` in `FROM (SELECT …) t`,
+        // a bare CTE name, or an alias bound to a CTE
+        // (`FROM frames f1` → hover on `f1`). Surface the projected
+        // column list so the user can see what the alias exposes without
+        // re-reading the subquery. Same source the qualified-column path
+        // uses, so the two stay consistent.
+        if (derivedSchemas.Schemas.TryGetValue(name, out IReadOnlyList<TableColumnEntry>? derivedColumns))
+        {
+            return FormatDerivedTableHover(name, derivedColumns);
+        }
+        else if (derivedSchemas.FromAliasToSourceName.TryGetValue(name, out string? boundCteName)
+            && derivedSchemas.Schemas.TryGetValue(boundCteName, out IReadOnlyList<TableColumnEntry>? boundColumns))
+        {
+            return FormatDerivedTableHover(name, boundColumns);
+        }
+
         // Unqualified column referenced from a TVF source. Walk every TVF
         // alias in the SQL — first match wins. Same-name collisions across
         // different TVFs in one statement are rare and best resolved by
         // the user qualifying the reference.
-        string? tvfUnqualifiedHover = GetTvfColumnHoverUnqualified(name, tvfAliases, tvfAliasSources, cteSchemas);
+        string? tvfUnqualifiedHover = GetTvfColumnHoverUnqualified(name, tvfAliases, tvfAliasSources, derivedSchemas);
         if (tvfUnqualifiedHover is not null) return tvfUnqualifiedHover;
 
         // Unqualified CTE column — same first-match-wins policy. Walks
         // every CTE projection in the statement.
-        string? cteUnqualifiedHover = GetCteColumnHoverUnqualified(name, cteSchemas);
+        string? cteUnqualifiedHover = GetCteColumnHoverUnqualified(name, derivedSchemas);
         if (cteUnqualifiedHover is not null) return cteUnqualifiedHover;
 
         // LET-bound name. LETs aren't part of the CTE's output schema
         // unless explicitly aliased, but the user still references them
         // by name throughout the body — surface their resolved kind here.
-        if (cteSchemas.LetBindingKinds.TryGetValue(name, out string? letKind))
+        if (derivedSchemas.LetBindingKinds.TryGetValue(name, out string? letKind))
         {
             return $"**{name}**: `{letKind}`\n\n*LET binding*";
         }
@@ -717,9 +733,9 @@ public sealed class HoverProvider
     /// to a CTE; returns <see langword="null"/> when neither matches the
     /// requested column.
     /// </summary>
-    private static string? GetCteColumnHover(string qualifier, string columnName, CteSchemaResult cteSchemas)
+    private static string? GetCteColumnHover(string qualifier, string columnName, DerivedTableSchemaResult derivedSchemas)
     {
-        if (!TryResolveCteSchema(qualifier, cteSchemas, out string? cteName, out IReadOnlyList<TableColumnEntry>? cols))
+        if (!TryResolveCteSchema(qualifier, derivedSchemas, out string? sourceName, out IReadOnlyList<TableColumnEntry>? cols))
         {
             return null;
         }
@@ -727,7 +743,7 @@ public sealed class HoverProvider
         {
             if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
             {
-                return FormatCteColumnHover(qualifier, cteName, column);
+                return FormatDerivedTableColumnHover(qualifier, sourceName, column, derivedSchemas.SubqueryAliases);
             }
         }
         return null;
@@ -739,15 +755,15 @@ public sealed class HoverProvider
     /// the unqualified TVF lookup; collisions are rare in practice and
     /// best disambiguated by qualifying the reference.
     /// </summary>
-    private static string? GetCteColumnHoverUnqualified(string columnName, CteSchemaResult cteSchemas)
+    private static string? GetCteColumnHoverUnqualified(string columnName, DerivedTableSchemaResult derivedSchemas)
     {
-        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> entry in cteSchemas.Schemas)
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> entry in derivedSchemas.Schemas)
         {
             foreach (TableColumnEntry column in entry.Value)
             {
                 if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return FormatCteColumnHover(entry.Key, entry.Key, column);
+                    return FormatDerivedTableColumnHover(entry.Key, entry.Key, column, derivedSchemas.SubqueryAliases);
                 }
             }
         }
@@ -763,9 +779,9 @@ public sealed class HoverProvider
     /// Returns <see langword="null"/> for non-struct columns and unknown
     /// fields.
     /// </summary>
-    private string? GetStructFieldHover(string qualifier, string fieldName, CteSchemaResult cteSchemas)
+    private string? GetStructFieldHover(string qualifier, string fieldName, DerivedTableSchemaResult derivedSchemas)
     {
-        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in derivedSchemas.Schemas)
         {
             foreach (TableColumnEntry column in cte.Value)
             {
@@ -775,7 +791,8 @@ public sealed class HoverProvider
                 foreach (StructFieldShape field in fields)
                 {
                     if (!string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase)) continue;
-                    return $"**{qualifier}.{field.Name}**: `{field.Kind}`\n\nSource: CTE `{cte.Key}` field `{qualifier}`";
+                    string sourceLabel = derivedSchemas.SubqueryAliases.Contains(cte.Key) ? "subquery" : "CTE";
+                    return $"**{qualifier}.{field.Name}**: `{field.Kind}`\n\nSource: {sourceLabel} `{cte.Key}` field `{qualifier}`";
                 }
             }
         }
@@ -783,7 +800,7 @@ public sealed class HoverProvider
         // LET-bound struct: `LET curr_depth = models.X(...)` then
         // `curr_depth.depth`. LETs without an OutputAlias don't appear in
         // the CTE schema above; consult the dedicated LET map.
-        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind)
+        if (derivedSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind)
             && TryResolveStructFields(letKind) is { } letFields)
         {
             foreach (StructFieldShape field in letFields)
@@ -809,10 +826,10 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
         Dictionary<string, string> tableAliases,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         string? columnKind = TryResolveAliasColumnKind(
-            outerAlias, structColumn, tvfAliases, tvfAliasSources, tableAliases, cteSchemas);
+            outerAlias, structColumn, tvfAliases, tvfAliasSources, tableAliases, derivedSchemas);
         if (columnKind is null) return null;
 
         IReadOnlyList<StructFieldShape>? fields = TryResolveStructFields(columnKind);
@@ -840,7 +857,7 @@ public sealed class HoverProvider
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
         Dictionary<string, string> tableAliases,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         // TVF static output schema first, then per-call synthesis (unnest).
         if (tvfAliases.TryGetValue(alias, out FunctionSignature? signature))
@@ -855,13 +872,13 @@ public sealed class HoverProvider
             }
             if (tvfAliasSources.TryGetValue(alias, out FunctionSource? source))
             {
-                string? synthesized = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, cteSchemas);
+                string? synthesized = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, derivedSchemas);
                 if (synthesized is not null) return synthesized;
             }
         }
 
         // CTE direct name, then FROM-alias → CTE.
-        if (TryResolveCteSchema(alias, cteSchemas, out _, out IReadOnlyList<TableColumnEntry>? cteColumns))
+        if (TryResolveCteSchema(alias, derivedSchemas, out _, out IReadOnlyList<TableColumnEntry>? cteColumns))
         {
             foreach (TableColumnEntry column in cteColumns)
             {
@@ -887,18 +904,18 @@ public sealed class HoverProvider
 
     private static bool TryResolveCteSchema(
         string qualifier,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? cteName,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<TableColumnEntry>? columns)
     {
-        if (cteSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
+        if (derivedSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
         {
             cteName = qualifier;
             columns = direct;
             return true;
         }
-        if (cteSchemas.FromAliasToCteName.TryGetValue(qualifier, out string? mapped)
-            && cteSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
+        if (derivedSchemas.FromAliasToSourceName.TryGetValue(qualifier, out string? mapped)
+            && derivedSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
         {
             cteName = mapped;
             columns = aliasCols;
@@ -909,13 +926,25 @@ public sealed class HoverProvider
         return false;
     }
 
-    private static string FormatCteColumnHover(string qualifier, string cteName, TableColumnEntry column)
+    /// <summary>
+    /// Renders a column hover for a derived-table source (a CTE definition
+    /// or an inline FROM/JOIN subquery alias). The "CTE" vs "subquery"
+    /// label is picked from <paramref name="subqueryAliases"/> so the popup
+    /// reflects what the user actually wrote rather than the LSP's
+    /// internal storage shape.
+    /// </summary>
+    private static string FormatDerivedTableColumnHover(
+        string qualifier,
+        string sourceName,
+        TableColumnEntry column,
+        IReadOnlySet<string> subqueryAliases)
     {
         string nullable = column.Nullable ? " *(nullable)*" : "";
-        string source = string.Equals(qualifier, cteName, StringComparison.OrdinalIgnoreCase)
-            ? cteName
-            : $"{cteName} (via `{qualifier}`)";
-        return $"**{qualifier}.{column.Name}**: `{column.Kind}`{nullable}\n\nSource: CTE `{source}`";
+        string source = string.Equals(qualifier, sourceName, StringComparison.OrdinalIgnoreCase)
+            ? sourceName
+            : $"{sourceName} (via `{qualifier}`)";
+        string label = subqueryAliases.Contains(sourceName) ? "subquery" : "CTE";
+        return $"**{qualifier}.{column.Name}**: `{column.Kind}`{nullable}\n\nSource: {label} `{source}`";
     }
 
     /// <summary>
@@ -929,7 +958,7 @@ public sealed class HoverProvider
         string alias, string columnName,
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         if (!tvfAliases.TryGetValue(alias, out FunctionSignature? signature)) return null;
         if (signature.OutputColumns is not null)
@@ -945,7 +974,7 @@ public sealed class HoverProvider
 
         if (tvfAliasSources.TryGetValue(alias, out FunctionSource? source))
         {
-            string? synthesizedKind = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, cteSchemas);
+            string? synthesizedKind = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, derivedSchemas);
             if (synthesizedKind is not null)
             {
                 TableColumnEntry synthesized = new() { Name = columnName, Kind = synthesizedKind, Nullable = true };
@@ -964,7 +993,7 @@ public sealed class HoverProvider
         string columnName,
         Dictionary<string, FunctionSignature> tvfAliases,
         Dictionary<string, FunctionSource> tvfAliasSources,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         foreach (KeyValuePair<string, FunctionSignature> entry in tvfAliases)
         {
@@ -980,7 +1009,7 @@ public sealed class HoverProvider
             }
             if (tvfAliasSources.TryGetValue(entry.Key, out FunctionSource? source))
             {
-                string? synthesizedKind = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, cteSchemas);
+                string? synthesizedKind = TryGetTvfSynthesizedColumnKind(source, columnName, _manifest, derivedSchemas);
                 if (synthesizedKind is not null)
                 {
                     TableColumnEntry synthesized = new() { Name = columnName, Kind = synthesizedKind, Nullable = true };
@@ -1017,13 +1046,13 @@ public sealed class HoverProvider
         FunctionSource source,
         string columnName,
         LanguageServerManifest manifest,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         if (!string.Equals(source.FunctionName, "unnest", StringComparison.OrdinalIgnoreCase)) return null;
         if (!string.Equals(columnName, "value", StringComparison.OrdinalIgnoreCase)) return null;
         if (source.Arguments.Count != 1) return null;
 
-        string? argKind = TryResolveManifestExpressionKind(source.Arguments[0], manifest, cteSchemas);
+        string? argKind = TryResolveManifestExpressionKind(source.Arguments[0], manifest, derivedSchemas);
         return TryStripArrayWrapper(argKind);
     }
 
@@ -1033,7 +1062,7 @@ public sealed class HoverProvider
     /// schema/CTE-qualified column reference (<c>unnest(a.classes)</c>),
     /// or a function call whose return type is declared in the manifest
     /// (<c>unnest(models.X(file))</c>). Mirrors the manifest-only paths in
-    /// <see cref="CteSchemaResolver"/> without taking a dependency on its
+    /// <see cref="DerivedTableSchemaResolver"/> without taking a dependency on its
     /// private <c>InnerScope</c> — anything more exotic (arithmetic,
     /// CASE) stays unresolved here and the caller's hover falls back to
     /// the static manifest entry.
@@ -1041,15 +1070,15 @@ public sealed class HoverProvider
     private static string? TryResolveManifestExpressionKind(
         Expression expression,
         LanguageServerManifest manifest,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         switch (expression)
         {
             case ColumnReference colRef when colRef.TableName is null && colRef.SchemaName is null:
                 // Bare name — try LET bindings first, then unqualified CTE columns.
-                if (cteSchemas.LetBindingKinds.TryGetValue(colRef.ColumnName, out string? letKind))
+                if (derivedSchemas.LetBindingKinds.TryGetValue(colRef.ColumnName, out string? letKind))
                     return letKind;
-                foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+                foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in derivedSchemas.Schemas)
                 {
                     foreach (TableColumnEntry column in cte.Value)
                     {
@@ -1064,7 +1093,7 @@ public sealed class HoverProvider
                 // (Plain-table column lookup would need the manifest's Table
                 // entries; not wired here today since the user-driven shapes
                 // are LET / model-return / CTE — extend if a real case needs it.)
-                if (cteSchemas.Schemas.TryGetValue(colRef.TableName, out IReadOnlyList<TableColumnEntry>? direct))
+                if (derivedSchemas.Schemas.TryGetValue(colRef.TableName, out IReadOnlyList<TableColumnEntry>? direct))
                 {
                     foreach (TableColumnEntry column in direct)
                     {
@@ -1072,8 +1101,8 @@ public sealed class HoverProvider
                             return column.Kind;
                     }
                 }
-                if (cteSchemas.FromAliasToCteName.TryGetValue(colRef.TableName, out string? cteName)
-                    && cteSchemas.Schemas.TryGetValue(cteName, out IReadOnlyList<TableColumnEntry>? aliased))
+                if (derivedSchemas.FromAliasToSourceName.TryGetValue(colRef.TableName, out string? cteName)
+                    && derivedSchemas.Schemas.TryGetValue(cteName, out IReadOnlyList<TableColumnEntry>? aliased))
                 {
                     foreach (TableColumnEntry column in aliased)
                     {
@@ -1828,6 +1857,23 @@ public sealed class HoverProvider
         }));
 
         return header + columns;
+    }
+
+    /// <summary>
+    /// Renders a hover card for a derived-table alias — a CTE name or a
+    /// subquery alias bound via <c>FROM (SELECT …) t</c>. Mirrors the
+    /// <see cref="GetTableHover"/> layout so the popup reads consistently
+    /// regardless of whether the source is persistent or projected.
+    /// </summary>
+    private static string FormatDerivedTableHover(string alias, IReadOnlyList<TableColumnEntry> columns)
+    {
+        string header = $"**Derived table: {alias}** ({columns.Count} columns)\n\n";
+        string body = string.Join("\n", columns.Select(column =>
+        {
+            string nullable = column.Nullable ? " *(nullable)*" : "";
+            return $"- `{column.Name}`: `{column.Kind}`{nullable}";
+        }));
+        return header + body;
     }
 
     // Resolves a hover target against the dataset manifest, accepting

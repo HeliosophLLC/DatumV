@@ -405,6 +405,26 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, item => item.Label == "frame");
     }
 
+    // ───────────────────── Subquery (derived-table) projections ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterSubqueryAliasDot_OffersInnerSelectColumns()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        // `FROM (SELECT …) t` is a derived table — `t.` should offer the
+        // subquery's projected columns the same way `cte_alias.` offers a
+        // CTE's projection.
+        const string sql =
+            "SELECT t.frame_index FROM (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) t";
+        int offset = sql.LastIndexOf("t.", StringComparison.Ordinal) + "t.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "frame_index" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "frame" && item.Kind == CompletionItemKind.Column);
+        Assert.DoesNotContain(items, item => item.Label == "id");
+    }
+
     [Fact]
     public void GetCompletions_RenamedCteColumn_UsesAlias()
     {
@@ -488,7 +508,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
     {
         // Same end shape, but the unnest argument is a LET name rather
         // than a direct function call. The resolver should chase
-        // cteSchemas.LetBindingKinds → the model's annotated return type
+        // derivedSchemas.LetBindingKinds → the model's annotated return type
         // → strip Array<> → expand named type → fields.
         LanguageServerManifest manifest = new()
         {
@@ -542,7 +562,7 @@ public sealed class CompletionProviderTests : ServiceTestBase
         // `LET d = models.depth(img)` where the model's ReturnType is a
         // named struct (here `DepthResult`). Typing `d.` should surface
         // the struct's field names. The resolver path:
-        // cteSchemas.LetBindingKinds[d] = "DepthResult" → named-type
+        // derivedSchemas.LetBindingKinds[d] = "DepthResult" → named-type
         // expansion → fields. Previously the qualified-completion path
         // only parsed inline `Struct<…>` annotations and so missed any
         // LET bound to a value typed by a named struct.

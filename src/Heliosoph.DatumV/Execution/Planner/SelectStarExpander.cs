@@ -50,6 +50,8 @@ internal static class SelectStarExpander
     public static IReadOnlyList<SelectColumn> ExpandSelectStar(
         SelectStatement statement, IReadOnlyList<SelectColumn> projectionColumns)
     {
+        projectionColumns = RewriteQualifiedStarsOverUnprefixedSources(statement, projectionColumns);
+
         if (projectionColumns.Count != 1
             || projectionColumns[0] is not SelectAllColumns selectAll)
         {
@@ -98,5 +100,56 @@ internal static class SelectStarExpander
         }
 
         return projectionColumns;
+    }
+
+    /// <summary>
+    /// Rewrites user-written <c>SELECT alias.*</c> entries into bare
+    /// <see cref="SelectAllColumns"/> when <c>alias</c> refers to a source
+    /// whose runtime output carries no <c>alias.</c> prefix — currently a
+    /// <see cref="SubquerySource"/>, whose <see cref="Operators.SubqueryOperator"/>
+    /// is a pure passthrough.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The runtime <see cref="Operators.ProjectOperator"/> expands
+    /// <see cref="SelectTableColumns"/> by string-prefix-matching the input
+    /// batch's column names against <c>"alias."</c> (plus a bare-<c>alias</c>
+    /// equality fallback). Sources wrapped by
+    /// <see cref="Operators.AliasOperator"/> carry that prefix on every
+    /// column, so the match works; subquery sources don't, so the same
+    /// match silently produces an empty projection. Rewriting at plan time
+    /// lets the operator's already-correct
+    /// <see cref="SelectAllColumns"/> arm handle the case.
+    /// </para>
+    /// <para>
+    /// Limited to the no-join case: in a join, <c>SELECT t.*</c> must emit
+    /// only <c>t</c>'s columns out of a mixed input batch, and a bare
+    /// <c>*</c> rewrite would over-project. Join-context subquery
+    /// qualified-star expansion needs a different lowering and is not
+    /// handled here.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<SelectColumn> RewriteQualifiedStarsOverUnprefixedSources(
+        SelectStatement statement, IReadOnlyList<SelectColumn> projectionColumns)
+    {
+        if (statement.From is null) return projectionColumns;
+        if (statement.Joins is not null && statement.Joins.Count > 0) return projectionColumns;
+        if (statement.From.Source is not SubquerySource subquery) return projectionColumns;
+
+        List<SelectColumn>? rewritten = null;
+        for (int i = 0; i < projectionColumns.Count; i++)
+        {
+            SelectColumn column = projectionColumns[i];
+            if (column is SelectTableColumns qualifiedStar
+                && string.Equals(qualifiedStar.TableName, subquery.Alias, StringComparison.OrdinalIgnoreCase))
+            {
+                rewritten ??= new List<SelectColumn>(projectionColumns);
+                rewritten[i] = new SelectAllColumns(
+                    ExcludedColumns: qualifiedStar.ExcludedColumns,
+                    ReplacedColumns: qualifiedStar.ReplacedColumns);
+            }
+        }
+
+        return rewritten ?? projectionColumns;
     }
 }
