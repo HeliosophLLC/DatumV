@@ -59,6 +59,9 @@
     "curveColumnActivation": "Activation",
     "curveStatusUncalibrated": "Uncalibrated",
     "curveStatusCalibrated": "Calibrated",
-    "curveStatusStale": "Stale"
+    "curveStatusStale": "Stale",
+    "coachMarkBody": "The first time a model is run, it must be calibrated.",
+    "coachMarkHint": "We measure its VRAM footprint once so later runs pick the largest batch that fits your GPU.",
+    "coachMarkDismiss": "Got it"
   }
 }

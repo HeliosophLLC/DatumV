@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
 
 import {
   calibrationState,
+  dismissCalibrationCoachMark,
   refreshCalibration,
   type RecentCompletion,
 } from '@/state/calibration';
@@ -78,18 +79,88 @@ export function CalibrationChip() {
     chipClasses = 'border-border hover:bg-muted/40 text-muted-foreground';
   }
 
+  // Anchor for the first-run coach-mark. It renders in a portal (to
+  // escape the status bar's `overflow-hidden`) and positions itself
+  // relative to this chip element.
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+
   return (
-    <Popover.Root>
-      <Popover.Trigger
-        className={`flex w-32 shrink-0 cursor-pointer items-center justify-center overflow-hidden whitespace-nowrap border-l px-3 font-mono text-xs ${chipClasses}`}
-        aria-label={t('calibrationChip.label')}
-      >
-        <span className="truncate">{chipLabel}</span>
-      </Popover.Trigger>
+    <>
+      <Popover.Root>
+        <Popover.Trigger
+          ref={chipRef}
+          className={`flex w-32 shrink-0 cursor-pointer items-center justify-center overflow-hidden whitespace-nowrap border-l px-3 font-mono text-xs ${chipClasses}`}
+          aria-label={t('calibrationChip.label')}
+        >
+          <span className="truncate">{chipLabel}</span>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Positioner side="top" align="end" sideOffset={6} className="z-[100]">
+            <Popover.Popup className="bg-popover text-popover-foreground border-border w-[28rem] rounded-md border p-3 shadow-md">
+              <CalibrationPopoverBody />
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+
+      <CalibrationCoachMark anchor={chipRef} open={snap.coachMarkVisible} />
+    </>
+  );
+}
+
+// One-time explainer that pops up out of the chip the first time any
+// model calibrates. A controlled, anchored Popover so it portals out
+// of the status bar's `overflow-hidden` (an absolutely-positioned
+// sibling would be clipped) and opens upward with an arrow pointing
+// down at the chip. Dismissal is persisted in calibration state, so it
+// never reappears.
+function CalibrationCoachMark({
+  anchor,
+  open,
+}: {
+  anchor: React.RefObject<HTMLButtonElement | null>;
+  open: boolean;
+}) {
+  const { t } = useTranslation('status');
+
+  return (
+    <Popover.Root open={open}>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="end" sideOffset={6} className="z-[100]">
-          <Popover.Popup className="bg-popover text-popover-foreground border-border w-[28rem] rounded-md border p-3 shadow-md">
-            <CalibrationPopoverBody />
+        <Popover.Positioner
+          anchor={anchor}
+          side="top"
+          align="end"
+          sideOffset={8}
+          className="z-[110]"
+        >
+          <Popover.Popup
+            role="status"
+            aria-live="polite"
+            className="animate-[calib-coach-pop_220ms_ease-out] w-64 origin-bottom-right rounded-lg border border-blue-500 bg-blue-600 p-3 text-white shadow-lg dark:border-blue-400 dark:bg-blue-500"
+          >
+            <style>{`
+              @keyframes calib-coach-pop {
+                0% { opacity: 0; transform: translateY(6px) scale(0.92); }
+                60% { transform: translateY(-1px) scale(1.02); }
+                100% { opacity: 1; transform: translateY(0) scale(1); }
+              }
+            `}</style>
+            <Popover.Arrow>
+              <div className="h-2.5 w-2.5 -translate-y-1/2 rotate-45 border-r border-b border-blue-500 bg-blue-600 dark:border-blue-400 dark:bg-blue-500" />
+            </Popover.Arrow>
+            <p className="text-xs font-medium">{t('calibrationChip.coachMarkBody')}</p>
+            <p className="mt-1 text-[11px] leading-snug text-blue-100">
+              {t('calibrationChip.coachMarkHint')}
+            </p>
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={dismissCalibrationCoachMark}
+                className="rounded bg-white/15 px-2 py-1 text-[11px] font-medium hover:bg-white/25"
+              >
+                {t('calibrationChip.coachMarkDismiss')}
+              </button>
+            </div>
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
