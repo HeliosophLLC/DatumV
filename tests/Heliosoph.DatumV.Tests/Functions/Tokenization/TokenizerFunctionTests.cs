@@ -395,6 +395,103 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task EncodeBert_MaxLength_TruncatesAndKeepsTrailingSep()
+    {
+        // Encode "abcdef" with a vocab that produces one token per character
+        // ([CLS] a ##b ##c ##d ##e ##f [SEP] = 8 tokens), then cap at 5.
+        // Expected layout: [CLS=2] a=5 ##b=32 ##c=33 [SEP=3]
+        // Trailing [SEP] is reapplied so the model still sees a terminating
+        // separator after truncation — matches HuggingFace's default
+        // single-sequence truncation behaviour.
+        string bertVocab = Path.Combine(_tmpDir, "bert-trunc-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert('abcdef', 'file://{bertVocab}', max_length => 5)['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(plan);
+
+        Assert.Equal(new long[] { 2, 5, 32, 33, 3 }, ids);
+    }
+
+    [Fact]
+    public async Task EncodeBert_MaxLengthOmitted_DoesNotTruncate()
+    {
+        // Sanity check that the no-truncation path still matches the legacy
+        // length when max_length is omitted entirely. "abcdef" → 8 tokens.
+        string bertVocab = Path.Combine(_tmpDir, "bert-no-trunc-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert('abcdef', 'file://{bertVocab}')['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(plan);
+
+        Assert.Equal(8, ids.Length);
+        Assert.Equal(2L, ids[0]);
+        Assert.Equal(3L, ids[^1]);
+    }
+
+    [Fact]
+    public async Task EncodeBert_MaxLengthLargerThanInput_LeavesSequenceUnchanged()
+    {
+        // When the input already fits under max_length, no truncation should
+        // happen — the result must be identical to the no-cap encoding.
+        string bertVocab = Path.Combine(_tmpDir, "bert-big-cap-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan capped = catalog.Plan(
+            $"SELECT tokenizer.encode_bert('ab', 'file://{bertVocab}', max_length => 512)['input_ids']");
+        StatementPlan uncapped = catalog.Plan(
+            $"SELECT tokenizer.encode_bert('ab', 'file://{bertVocab}')['input_ids']");
+
+        Assert.Equal(await CollectFirstArrayAsync(uncapped), await CollectFirstArrayAsync(capped));
+    }
+
+    [Fact]
+    public async Task EncodeBertPair_MaxLength_LongestFirstTruncation()
+    {
+        // Pair-encode "aaaa" + "bb" with a tight max_length=6. Pre-truncation:
+        //   query=[a, ##a, ##a, ##a]    (4 tokens)
+        //   passage=[b, ##b]            (2 tokens)
+        //   assembled: [CLS] q[4] [SEP] p[2] [SEP] = 9
+        //   budget = 6 - 3 = 3 content tokens
+        // Longest-first: while q+p > 3, trim from longer side. Iterations
+        // (q=4,p=2)→(3,2)→(2,2)→(1,2)→(1,1) so qLen=1, pLen=1, total = 5.
+        // Wait — the loop runs while q+p > budget. q+p=6 > 3 → drop q
+        // (4>2): (3,2). 5>3 → drop q (3>2): (2,2). 4>3 → drop q (q>=p): (1,2).
+        // 3>3 false, stop. Final qLen=1, pLen=2, total=1+1+1+2+1=6.
+        // Layout: [CLS=2] a=5 [SEP=3] b=6 ##b=32 [SEP=3].
+        string bertVocab = Path.Combine(_tmpDir, "bert-pair-trunc-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert_pair('aaaa', 'bb', 'file://{bertVocab}', max_length => 6)['input_ids']");
+        long[] ids = await CollectFirstArrayAsync(plan);
+
+        Assert.Equal(new long[] { 2, 5, 3, 6, 32, 3 }, ids);
+    }
+
+    [Fact]
+    public async Task EncodeBert_MaxLengthTooSmall_ThrowsClearError()
+    {
+        // max_length must leave room for [CLS] and [SEP]; <= 2 is rejected
+        // so callers don't accidentally lose the special tokens that
+        // BERT-family encoders depend on.
+        string bertVocab = Path.Combine(_tmpDir, "bert-too-small-vocab.txt");
+        WriteBertVocab(bertVocab);
+
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_bert('ab', 'file://{bertVocab}', max_length => 2)['input_ids']");
+
+        Exception root = await CaptureRootExceptionAsync(plan);
+        Assert.Contains("max_length", root.Message);
+    }
+
+    [Fact]
     public async Task Encode_UnsupportedModelType_ThrowsClearError()
     {
         string unigramPath = Path.Combine(_tmpDir, "unigram.json");

@@ -30,7 +30,10 @@ AS BEGIN
   -- Tokenize. The function returns the canonical BERT input bundle with
   -- field names matching the ONNX input names (input_ids / attention_mask /
   -- token_type_ids) so the (Struct, Struct) infer() form lines up by name.
-  DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt');
+  -- max_length caps the sequence at MiniLM's 512-slot position-embedding
+  -- table; longer inputs index past the end and abort inside the ONNX
+  -- embeddings layer.
+  DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt', max_length => 512);
 
   -- All three inputs share the same shape [1, seq_len]. seq_len comes from
   -- the tokenizer; we read it once off input_ids.

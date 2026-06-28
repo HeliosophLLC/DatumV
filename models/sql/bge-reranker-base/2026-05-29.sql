@@ -51,7 +51,9 @@ IMPLEMENTS TextPairScorer
 USING 'bge-reranker-base/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the bundle root (sibling to the onnx/ folder).
-  DECLARE encoded Struct = tokenizer.encode_bert_pair(query, passage, '../vocab.txt');
+  -- max_length caps the assembled pair at the 512-slot position-embedding
+  -- table; longest-first truncation trims the longer side first.
+  DECLARE encoded Struct = tokenizer.encode_bert_pair(query, passage, '../vocab.txt', max_length => 512);
   DECLARE n Int32 = cardinality(encoded['input_ids']);
   RETURN infer(
     encoded,

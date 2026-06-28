@@ -37,7 +37,8 @@ CREATE OR REPLACE MODEL biomedclip_text_embed_fp16(text String) RETURNS Float32[
 IMPLEMENTS TextEmbedder
 USING 'biomedclip-vit-base-patch16-224-fp16/2026-06-09/onnx/text_model_fp16.onnx'
 AS BEGIN
-  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
+  -- max_length caps the sequence at the 256-row position-embedding table.
+  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt', max_length => 256);
   DECLARE input_ids Int64[] = encoded['input_ids'];
   DECLARE n Int32 = cardinality(input_ids);
   DECLARE text_embeds Float32[] = infer(
