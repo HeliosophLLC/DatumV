@@ -1299,6 +1299,87 @@
       ]
     },
     {
+      "name": "Jigsaw Toxic Comments",
+      "summary": "159,571 Wikipedia talk-page comments labelled with six binary toxicity flags (toxic, severe_toxic, obscene, threat, insult, identity_hate). The reference small benchmark for English multi-label toxicity classification — the original 2017–2018 Kaggle competition corpus that every content-moderation classifier reports against.",
+      "description": "Released by Jigsaw (Google) in late 2017 for the Kaggle 'Toxic Comment Classification Challenge'. Each row is one Wikipedia talk-page comment paired with six independent 0/1 labels — comments can carry any combination of flags, including none. The training cut is 159,571 rows; the held-out test cut is 153,164 rows of which roughly 63,978 (the rows whose labels are not `-1`) were used for the official private-leaderboard scoring — the rest were dropped from evaluation and ship with `-1` sentinels in `test_labels.csv`. The recipe joins `test.csv` and `test_labels.csv` on the `id` column and filters out the `-1`-bearing rows so the resulting table holds only the scoring slice. Jigsaw released the corpus under CC0 on the competition page; the underlying comment text comes from Wikipedia talk-page revision history. Reach for it as the small-but-real text-classification benchmark — fits in memory, embeds end-to-end in minutes with MiniLM-L6, and gives a multi-label F1 number directly comparable to the Kaggle leaderboard.",
+      "modalities": ["Text"],
+      "licenseIds": ["public-domain"],
+      "attributions": [
+        "Jigsaw / Google (Toxic Comment Classification Challenge, Kaggle 2017–2018)",
+        "Wikipedia talk-page contributors (source comment text)"
+      ],
+      "suitableForTasks": [
+        "TextEmbedder",
+        "TextClassifier",
+        "LabeledTextClassifier"
+      ],
+      "variants": [
+        {
+          "id": "jigsaw_toxic_train",
+          "displayName": "train (160k)",
+          "summary": "159,571 labelled training comments in an eight-column CSV (`id`, `comment_text`, plus six 0/1 label columns). ~25 MB gzipped on the wire; ingests in seconds and embeds end-to-end on CPU in a few minutes with MiniLM-L6.",
+          "approxArchiveBytes": 26663628,
+          "approxIngestedBytes": 70000000,
+          "expectedRowCounts": { "comments": 159571 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2018",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/Jigsaw-Toxic-Comments",
+                  "revision": "78e67fb081bc05846a90e944d7bb8f2f4d36e438",
+                  "include": ["train.csv.gz"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "comments",
+                  "artifact": "train.csv.gz",
+                  "sqlFile": "jigsaw_toxic/train.sql"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "jigsaw_toxic_test",
+          "displayName": "test (64k scoring rows)",
+          "summary": "63,978 scored test comments after joining `test.csv` (the held-out comment text) with `test_labels.csv` (post-competition gold labels) on `id` and filtering out rows whose labels are `-1` (excluded from official private-leaderboard scoring). Use as the canonical held-out evaluation slice paired with the 160k train split.",
+          "approxArchiveBytes": 25018689,
+          "approxIngestedBytes": 30000000,
+          "expectedRowCounts": { "comments": 63978 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2018",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/Jigsaw-Toxic-Comments",
+                  "revision": "78e67fb081bc05846a90e944d7bb8f2f4d36e438",
+                  "include": ["test.csv.gz", "test_labels.csv.gz"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "comments",
+                  "sqlFile": "jigsaw_toxic/test.sql",
+                  "artifacts": {
+                    "comments": "test.csv.gz",
+                    "labels": "test_labels.csv.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Chicago Crimes",
       "summary": "8M+ Chicago Police Department incident reports from 2001 to the present. The reach-for big-tabular benchmark for time-series, geospatial, and categorical analytics over a single municipal stream.",
       "description": "Published by the Chicago Police Department through the City of Chicago Open Data Portal (Socrata-hosted). Each row is one reported incident: timestamp, block-level address, FBI / IUCR offense codes, arrest + domestic flags, lat/lng (Socrata rounds to the city block to protect privacy), and the beat / district / ward / community-area administrative codes. The corpus refreshes daily with a roughly 7-day reporting lag, so the headline row count and on-disk size drift over time. The ingest recipe drives `open_csv_typed` at plan time so the schema lands with real per-column types (TIMESTAMPTZ for the date columns, FLOAT for lat/lng, narrowed integers for the FBI code) rather than the `Array<String>` shape `open_csv` yields — queries can write `WHERE \"Primary Type\" = 'THEFT' AND \"Year\" = 2024` against typed columns directly.",
