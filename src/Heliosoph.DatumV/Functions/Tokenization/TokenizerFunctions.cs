@@ -623,6 +623,101 @@ public sealed class TokenizerEncodeRobertaFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
+/// <c>tokenizer.encode_xlm_roberta_pair(query, passage, tokenizer_json_path, [max_length]) →
+/// Struct{input_ids: Int64[], attention_mask: Int64[]}</c>. Pair-encodes a
+/// (query, passage) with an XLM-RoBERTa Unigram tokenizer and returns the
+/// two-tensor bundle XLM-R cross-encoders expect (no token_type_ids).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Why separate from <c>encode_bert_pair</c> and <c>encode_roberta</c>.</strong>
+/// XLM-RoBERTa (the base of multilingual rerankers like <c>bge-reranker-base</c>)
+/// tokenizes with a SentencePiece <em>Unigram</em> model — not WordPiece, not
+/// byte-level BPE. Its pair layout is
+/// <c>&lt;s&gt; query &lt;/s&gt;&lt;/s&gt; passage &lt;/s&gt;</c> (a doubled
+/// <c>&lt;/s&gt;</c> separator), the attention mask is all-1s, and there is no
+/// <c>token_type_ids</c> tensor (the model's <c>type_vocab_size</c> is 1).
+/// </para>
+/// <para>
+/// <strong>Tokenizer source.</strong> The vocabulary is read from the
+/// HuggingFace <c>tokenizer.json</c> (where the piece ids are already in
+/// fairseq/HuggingFace space), so the emitted ids feed the ONNX embedding
+/// table directly — no offset remap. See <see cref="UnigramTokenizer"/>.
+/// </para>
+/// </remarks>
+public sealed class TokenizerEncodeXlmRobertaPairFunction : IFunction, IScalarFunction
+{
+    /// <inheritdoc />
+    public static string Name => "encode_xlm_roberta_pair";
+
+    /// <inheritdoc />
+    public static FunctionCategory Category => FunctionCategory.Encoding;
+
+    /// <inheritdoc />
+    public static string Description =>
+        "Encodes a (query, passage) pair with an XLM-RoBERTa Unigram tokenizer "
+        + "(tokenizer.json path) and returns the cross-encoder bundle XLM-R "
+        + "rerankers expect: input_ids (<s> q </s></s> p </s>) and attention_mask "
+        + "(all 1s) — no token_type_ids. Optional max_length caps the total "
+        + "sequence (longest-first truncation between the two sides); omit or pass "
+        + "NULL for no truncation. Feeds multi-input infer() in a CREATE MODEL "
+        + "body directly.";
+
+    /// <inheritdoc />
+    public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
+    [
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("query",                DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("passage",              DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("tokenizer_json_path",  DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("max_length",           DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    IsOptional: true),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
+    ];
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
+        FunctionMetadata.Validate<TokenizerEncodeXlmRobertaPairFunction>(argumentKinds);
+
+    /// <inheritdoc />
+    public ValueTask<ValueRef> ExecuteAsync(
+        ReadOnlyMemory<ValueRef> arguments,
+        EvaluationFrame frame,
+        CancellationToken cancellationToken)
+    {
+        ReadOnlySpan<ValueRef> args = arguments.Span;
+        if (args[0].IsNull || args[1].IsNull || args[2].IsNull)
+        {
+            return new ValueTask<ValueRef>(ValueRef.NullStruct(0));
+        }
+
+        string query    = args[0].AsString();
+        string passage  = args[1].AsString();
+        string jsonPath = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
+            args[2].AsString(), "tokenizer.encode_xlm_roberta_pair", frame);
+
+        // Pair packing needs room for <s> + </s></s> + </s> = 4 specials, so a
+        // max_length below 5 leaves zero content tokens; reject it.
+        int? maxLength = args.Length > 3 && !args[3].IsNull
+            ? args[3].ToInt32()
+            : (int?)null;
+        if (maxLength is int ml && ml < 5)
+        {
+            throw new FunctionArgumentException("tokenizer.encode_xlm_roberta_pair",
+                $"max_length must be >= 5 to leave room for <s>, </s>, </s>, </s>; got {ml}.");
+        }
+
+        UnigramTokenizer tokenizer = TokenizerCache.GetUnigram(jsonPath);
+        return new ValueTask<ValueRef>(
+            TokenizerOps.EncodeXlmRobertaPairToValueRef(tokenizer, query, passage, maxLength, frame.Types));
+    }
+}
+
+/// <summary>
 /// Path resolution for the scalar tokenizer functions. Scalar evaluation
 /// frames don't carry a <c>ModelCatalog</c> reference today, so we can only
 /// honour the two non-catalog forms: <c>file://</c> URI and OS-absolute path.
@@ -946,6 +1041,91 @@ internal static class TokenizerOps
             attentionMask[i] = 1L;
         }
 
+        return PackRobertaStruct(inputIds, attentionMask, types);
+    }
+
+    /// <summary>
+    /// Canonical XLM-RoBERTa special-token ids: <c>&lt;s&gt;=0</c>,
+    /// <c>&lt;/s&gt;=2</c>.
+    /// </summary>
+    private const long XlmRBosId = 0L;
+    private const long XlmREosId = 2L;
+
+    /// <summary>
+    /// Pair-encodes <paramref name="query"/> and <paramref name="passage"/> into
+    /// the XLM-RoBERTa cross-encoder layout
+    /// (<c>&lt;s&gt; query &lt;/s&gt;&lt;/s&gt; passage &lt;/s&gt;</c>) with a
+    /// matching all-1s attention_mask and no token_type_ids — the two-tensor
+    /// bundle XLM-R rerankers / NLI models expect. The struct's TypeId is
+    /// interned into <paramref name="types"/> when supplied so downstream
+    /// <c>infer({encoded}, {...})</c> can resolve field names back to session
+    /// input names.
+    /// </summary>
+    /// <remarks>
+    /// Each side is Unigram-encoded independently (no specials; ids come from
+    /// <c>tokenizer.json</c> already in fairseq space), then the two sides are
+    /// glued together with <c>&lt;s&gt;</c> at the front, a doubled
+    /// <c>&lt;/s&gt;</c> separator, and a trailing <c>&lt;/s&gt;</c>.
+    /// Truncation, when requested, is longest-first across the two content
+    /// sides (matching HuggingFace's default pair strategy) over a budget of
+    /// <c>max_length - 4</c>.
+    /// </remarks>
+    internal static ValueRef EncodeXlmRobertaPairToValueRef(
+        UnigramTokenizer tokenizer, string query, string passage, int? maxLength, TypeRegistry? types)
+    {
+        List<int> queryIds   = tokenizer.Encode(query);
+        List<int> passageIds = tokenizer.Encode(passage);
+
+        int qLen = queryIds.Count;
+        int pLen = passageIds.Count;
+
+        // Longest-first truncation. The 4 fixed tokens are <s>, the doubled
+        // </s></s> separator, and the trailing </s>.
+        if (maxLength is int cap)
+        {
+            int budget = cap - 4;
+            while (qLen + pLen > budget)
+            {
+                if (qLen >= pLen) qLen--;
+                else pLen--;
+            }
+        }
+
+        // Layout: <s> q1..qN </s> </s> p1..pM </s>
+        int total = 1 + qLen + 2 + pLen + 1;
+
+        long[] inputIds      = new long[total];
+        long[] attentionMask = new long[total];
+
+        int pos = 0;
+        inputIds[pos++] = XlmRBosId;
+        for (int i = 0; i < qLen; i++)
+        {
+            inputIds[pos++] = queryIds[i];
+        }
+        inputIds[pos++] = XlmREosId;
+        inputIds[pos++] = XlmREosId;
+        for (int i = 0; i < pLen; i++)
+        {
+            inputIds[pos++] = passageIds[i];
+        }
+        inputIds[pos] = XlmREosId;
+
+        for (int i = 0; i < total; i++) attentionMask[i] = 1L;
+
+        return PackRobertaStruct(inputIds, attentionMask, types);
+    }
+
+    /// <summary>
+    /// Packages the two RoBERTa input arrays (<c>input_ids</c> /
+    /// <c>attention_mask</c>) into a struct ValueRef whose field names match
+    /// the canonical ONNX input names, interning the struct's type id into
+    /// <paramref name="types"/> when supplied. Shared by the single-text and
+    /// pair RoBERTa-family encoders.
+    /// </summary>
+    private static ValueRef PackRobertaStruct(
+        long[] inputIds, long[] attentionMask, TypeRegistry? types)
+    {
         ValueRef[] fields =
         [
             ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
