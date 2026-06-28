@@ -36,6 +36,20 @@ internal static class TokenizerCache
     private static readonly ConcurrentDictionary<string, BpeTokenizer> _byTokenizerJson = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<(string Vocab, string Merges), BpeTokenizer> _byVocabMerges = new();
     private static readonly ConcurrentDictionary<string, BertTokenizer> _byBertVocab = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, UnigramTokenizer> _byUnigramJson = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the SentencePiece <em>Unigram</em> tokenizer for
+    /// <paramref name="tokenizerJsonPath"/> (a HuggingFace <c>tokenizer.json</c>
+    /// with <c>model.type='Unigram'</c>), loading it on first request and
+    /// caching the result. Used by the XLM-RoBERTa family (multilingual
+    /// encoders, rerankers, NLI), whose tokenizer Microsoft.ML.Tokenizers can't
+    /// read — its SentencePiece support is BPE-only. See
+    /// <see cref="UnigramTokenizer"/> for why the vocab is read from
+    /// tokenizer.json rather than the raw <c>sentencepiece.bpe.model</c>.
+    /// </summary>
+    public static UnigramTokenizer GetUnigram(string tokenizerJsonPath)
+        => _byUnigramJson.GetOrAdd(tokenizerJsonPath, UnigramTokenizer.FromTokenizerJson);
 
     /// <summary>
     /// Returns the BERT/WordPiece tokenizer for <paramref name="vocabPath"/>

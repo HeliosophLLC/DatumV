@@ -1,5 +1,5 @@
 -- ============================================================================
--- BGE Reranker (base) — BERT cross-encoder for query/passage relevance.
+-- BGE Reranker (base) — XLM-RoBERTa cross-encoder for query/passage relevance.
 -- ============================================================================
 --
 -- Catalog id:  bge-reranker-base
@@ -8,27 +8,31 @@
 -- Upstream:    https://huggingface.co/BAAI/bge-reranker-base
 --              https://huggingface.co/Xenova/bge-reranker-base (ONNX export)
 --
--- BAAI's BERT-base cross-encoder fine-tuned for retrieval reranking. Scores
--- the relevance of a passage to a query as a single Float32 logit — higher
--- is more relevant. Use after a fast bi-encoder retrieval step (e.g.
+-- BAAI's XLM-RoBERTa-base cross-encoder fine-tuned for retrieval reranking.
+-- Scores the relevance of a passage to a query as a single Float32 logit —
+-- higher is more relevant. Use after a fast bi-encoder retrieval step (e.g.
 -- models.all_minilm_l6_v2 + cosine_similarity) to re-order the top-k
 -- candidates with substantially better accuracy than embedding similarity
--- alone.
+-- alone. The XLM-RoBERTa backbone makes it multilingual.
 --
 -- Output range. The raw logit is unbounded; ordering by it produces the
 -- right ranking. If you want a 0-1 probability, wrap the call in
 -- sigmoid() — the BAAI README's recommended mapping.
 --
 -- Pipeline:
---   1. tokenizer.encode_bert_pair — WordPiece encode of "[CLS] query [SEP]
---                                   passage [SEP]" with the per-segment
---                                   token_type_ids mask (0 for the query
---                                   half, 1 for the passage half) that
---                                   cross-encoders are trained with.
---   2. infer (multi-input)        — three-input BERT ONNX dispatch.
---                                   Output is [1, 1] = single relevance
---                                   logit; shape-product 1 surfaces as a
---                                   Float32 scalar.
+--   1. tokenizer.encode_xlm_roberta_pair — Unigram (SentencePiece) encode of
+--                                   "<s> query </s></s> passage </s>" with
+--                                   the all-1s attention_mask. XLM-RoBERTa is
+--                                   not a BERT-family WordPiece model: it has
+--                                   no token_type_ids (type_vocab_size = 1)
+--                                   and its tokenizer is a SentencePiece
+--                                   Unigram model (tokenizer.json), not a
+--                                   vocab.txt.
+--   2. infer (multi-input)        — two-input XLM-RoBERTa ONNX dispatch
+--                                   (input_ids + attention_mask). Output is
+--                                   [1, 1] = single relevance logit;
+--                                   shape-product 1 surfaces as a Float32
+--                                   scalar.
 --
 -- Example: rerank top-10 hits from a bi-encoder.
 --
@@ -50,16 +54,15 @@ CREATE OR REPLACE MODEL bge_reranker_base(
 IMPLEMENTS TextPairScorer
 USING 'bge-reranker-base/2026-05-29/onnx/model.onnx'
 AS BEGIN
-  -- vocab.txt sits at the bundle root (sibling to the onnx/ folder).
+  -- tokenizer.json sits at the bundle root (sibling to the onnx/ folder).
   -- max_length caps the assembled pair at the 512-slot position-embedding
   -- table; longest-first truncation trims the longer side first.
-  DECLARE encoded Struct = tokenizer.encode_bert_pair(query, passage, '../vocab.txt', max_length => 512);
+  DECLARE encoded Struct = tokenizer.encode_xlm_roberta_pair(query, passage, '../tokenizer.json', max_length => 512);
   DECLARE n Int32 = cardinality(encoded['input_ids']);
   RETURN infer(
     encoded,
     {
       input_ids:      [1::Int32, n],
-      attention_mask: [1::Int32, n],
-      token_type_ids: [1::Int32, n]
+      attention_mask: [1::Int32, n]
     })
 END

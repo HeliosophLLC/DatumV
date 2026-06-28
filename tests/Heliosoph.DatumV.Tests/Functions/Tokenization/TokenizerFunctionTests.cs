@@ -25,6 +25,7 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
     private readonly string _tokenizerJsonPath;
     private readonly string _vocabJsonPath;
     private readonly string _mergesPath;
+    private readonly string _unigramJsonPath;
 
     public TokenizerFunctionTests()
     {
@@ -33,8 +34,10 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         _tokenizerJsonPath = Path.Combine(_tmpDir, "tokenizer.json");
         _vocabJsonPath = Path.Combine(_tmpDir, "vocab.json");
         _mergesPath = Path.Combine(_tmpDir, "merges.txt");
+        _unigramJsonPath = Path.Combine(_tmpDir, "unigram-xlmr.json");
 
         WriteFixtures();
+        WriteUnigramFixture();
     }
 
     public override void Dispose()
@@ -89,6 +92,55 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
 
         // Empty merges.txt — no pair merges.
         File.WriteAllText(_mergesPath, "", Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Writes a minimal SentencePiece <em>Unigram</em> <c>tokenizer.json</c>
+    /// (the XLM-RoBERTa tokenizer family) for <c>encode_xlm_roberta_pair</c>.
+    /// model.vocab is an ordered array of <c>[piece, score]</c> pairs whose
+    /// index is the token id, and ids 0–3 follow the fairseq special-token
+    /// layout (<c>&lt;s&gt;/&lt;pad&gt;/&lt;/s&gt;/&lt;unk&gt;</c>). The pieces
+    /// carry the <c>▁</c> metaspace marker so the Viterbi decode is
+    /// deterministic: <c>"ab"</c> → <c>▁a</c>+<c>b</c>, <c>"cd"</c> →
+    /// <c>▁c</c>+<c>d</c>, and the words <c>hello</c>/<c>world</c> are single
+    /// pieces.
+    /// </summary>
+    private void WriteUnigramFixture()
+    {
+        // (piece, score) in id order. id = array index.
+        (string Piece, double Score)[] vocab =
+        [
+            ("<s>",     0.0),   // 0
+            ("<pad>",   0.0),   // 1
+            ("</s>",    0.0),   // 2
+            ("<unk>",   0.0),   // 3
+            ("▁", -3.0),   // 4  lone ▁
+            ("▁a", -1.0),  // 5  ▁a
+            ("b",      -1.0),   // 6
+            ("▁c", -1.0),  // 7  ▁c
+            ("d",      -1.0),   // 8
+            ("▁hello", -1.0), // 9  ▁hello
+            ("▁world", -1.0), // 10 ▁world
+        ];
+
+        using FileStream fs = File.Create(_unigramJsonPath);
+        using Utf8JsonWriter w = new(fs, new JsonWriterOptions { Indented = true });
+        w.WriteStartObject();
+        w.WriteString("version", "1.0");
+        w.WriteStartObject("model");
+        w.WriteString("type", "Unigram");
+        w.WriteNumber("unk_id", 3);
+        w.WriteStartArray("vocab");
+        foreach ((string piece, double score) in vocab)
+        {
+            w.WriteStartArray();
+            w.WriteStringValue(piece);
+            w.WriteNumberValue(score);
+            w.WriteEndArray();
+        }
+        w.WriteEndArray();
+        w.WriteEndObject();
+        w.WriteEndObject();
     }
 
     private static async Task<long[]> CollectFirstArrayAsync(StatementPlan plan)
@@ -506,5 +558,124 @@ public sealed class TokenizerFunctionTests : ServiceTestBase, IDisposable
         Assert.IsType<NotSupportedException>(root);
         Assert.Contains("Unigram", root.Message);
         Assert.Contains("BPE", root.Message);
+    }
+
+    private async Task<long[]> EncodeXlmrPairFieldAsync(
+        string query, string passage, string field, int? maxLength = null)
+    {
+        TableCatalog catalog = CreateCatalog();
+        string maxArg = maxLength is int ml ? $", max_length => {ml}" : "";
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_xlm_roberta_pair('{query}', '{passage}', " +
+            $"'file://{_unigramJsonPath}'{maxArg})['{field}']");
+        return await CollectFirstArrayAsync(plan);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_WrapsWithRobertaPairLayout()
+    {
+        // "ab" -> ▁a(5) b(6), "cd" -> ▁c(7) d(8). Pair layout is
+        //   <s> q </s></s> p </s>  =  [0, 5, 6, 2, 2, 7, 8, 2].
+        long[] ids = await EncodeXlmrPairFieldAsync("ab", "cd", "input_ids");
+        Assert.Equal(new long[] { 0, 5, 6, 2, 2, 7, 8, 2 }, ids);
+
+        // attention_mask is all-1s of the same length, and there is NO
+        // token_type_ids — XLM-R is a 2-input model.
+        long[] mask = await EncodeXlmrPairFieldAsync("ab", "cd", "attention_mask");
+        Assert.Equal(8, mask.Length);
+        Assert.All(mask, m => Assert.Equal(1L, m));
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_StructExposesExactlyTwoFields()
+    {
+        // The struct exposes exactly input_ids + attention_mask, in that order
+        // — no token_type_ids (BERT bundles have it, XLM-R doesn't).
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_xlm_roberta_pair('ab', 'cd', 'file://{_unigramJsonPath}')");
+
+        bool sawRow = false;
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                sawRow = true;
+                DataValue cell = batch[i][0];
+                Assert.Equal(DataKind.Struct, cell.Kind);
+                TypeDescriptor? desc = batch.Types!.GetDescriptor(cell.TypeId);
+                Assert.NotNull(desc);
+                Assert.NotNull(desc!.Fields);
+                Assert.Equal(
+                    new[] { "input_ids", "attention_mask" },
+                    desc.Fields!.Select(f => f.Name).ToArray());
+            }
+        }
+        Assert.True(sawRow);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_SinglePieceWords()
+    {
+        // hello/world are single ▁-prefixed pieces (ids 9, 10).
+        long[] ids = await EncodeXlmrPairFieldAsync("hello", "world", "input_ids");
+        Assert.Equal(new long[] { 0, 9, 2, 2, 10, 2 }, ids);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_LongestFirstTruncationRespectsSpecialBudget()
+    {
+        // max_length 5 leaves a content budget of 5 - 4 specials = 1 token.
+        // Longest-first trimming drops the whole query and one passage token,
+        // keeping <s> </s></s> <first-passage-piece> </s>.
+        long[] ids = await EncodeXlmrPairFieldAsync("ab", "cd", "input_ids", maxLength: 5);
+        Assert.Equal(new long[] { 0, 2, 2, 7, 2 }, ids);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_NullArgument_ShortCircuitsToNullStruct()
+    {
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_xlm_roberta_pair(CAST(NULL AS String), 'cd', " +
+            $"'file://{_unigramJsonPath}')");
+
+        bool sawRow = false;
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                sawRow = true;
+                Assert.True(batch[i][0].IsNull);
+            }
+        }
+        Assert.True(sawRow);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_MaxLengthTooSmall_ThrowsClearError()
+    {
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_xlm_roberta_pair('ab', 'cd', " +
+            $"'file://{_unigramJsonPath}', max_length => 4)['input_ids']");
+
+        Exception root = await CaptureRootExceptionAsync(plan);
+        Assert.Contains("max_length", root.Message);
+    }
+
+    [Fact]
+    public async Task EncodeXlmrPair_BpeTokenizer_ThrowsClearError()
+    {
+        // Handing the BPE fixture to the Unigram-only function must fail with a
+        // clear message naming the algorithm.
+        TableCatalog catalog = CreateCatalog();
+        StatementPlan plan = catalog.Plan(
+            $"SELECT tokenizer.encode_xlm_roberta_pair('ab', 'cd', " +
+            $"'file://{_tokenizerJsonPath}')['input_ids']");
+
+        Exception root = await CaptureRootExceptionAsync(plan);
+        Assert.IsType<NotSupportedException>(root);
+        Assert.Contains("Unigram", root.Message);
     }
 }

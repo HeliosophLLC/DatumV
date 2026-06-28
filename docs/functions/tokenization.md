@@ -121,6 +121,24 @@ Returns the two-field input bundle RoBERTa expects (no
 
 Canonical use: `models.twitter_roberta_sentiment`.
 
+### tokenizer.encode_xlm_roberta_pair
+
+`tokenizer.encode_xlm_roberta_pair(query, passage, tokenizer_json_path [, max_length])` → `Struct<input_ids: Int64[], attention_mask: Int64[]>`
+
+XLM-RoBERTa SentencePiece **Unigram** pair encode for cross-encoders
+(rerankers, NLI, paraphrase). Lays the two sides out as
+`<s> query </s></s> passage </s>` with an all-1s `attention_mask` and
+**no** `token_type_ids` (XLM-R has a single segment type). Reads the
+vocabulary from the HuggingFace `tokenizer.json`, where the piece ids
+are already in the model's id space.
+
+Optional `max_length` caps the total sequence length; when the pair is
+too long, tokens are trimmed longest-first between the two sides
+(matching HuggingFace's default pair-truncation strategy). The four
+fixed special tokens are always retained.
+
+Canonical use: `models.bge_reranker_base`.
+
 ### tokenizer.decode_bpe
 
 `tokenizer.decode_bpe(ids, vocab_path, merges_path)` → `String`

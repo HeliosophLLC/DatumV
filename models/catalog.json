@@ -205,7 +205,8 @@
       ],
       "tags": [
         "reranker",
-        "english"
+        "english",
+        "chinese"
       ],
       "licenseIds": [
         "mit"
@@ -214,6 +215,7 @@
         "BAAI — Beijing Academy of Artificial Intelligence",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
+      "cardFile": "cards/bge-reranker-base.md",
       "variants": [
         {
           "id": "bge-reranker-base",
@@ -236,7 +238,7 @@
                   "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101",
                   "include": [
                     "onnx/model.onnx",
-                    "vocab.txt"
+                    "tokenizer.json"
                   ]
                 }
               ],

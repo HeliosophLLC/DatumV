@@ -1174,6 +1174,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Tokenization.TokenizerEncodeBertPairFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeClipFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerEncodeRobertaFunction>("tokenizer");
+        registry.RegisterScalar<Tokenization.TokenizerEncodeXlmRobertaPairFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerDecodeBpeFunction>("tokenizer");
         registry.RegisterScalar<Tokenization.TokenizerByteLevelDecodeFunction>("tokenizer");
