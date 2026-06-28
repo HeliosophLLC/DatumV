@@ -341,7 +341,7 @@ public sealed class TokenizerByteLevelDecodeFunction : IFunction, IScalarFunctio
 }
 
 /// <summary>
-/// <c>tokenizer.encode_bert(text, vocab_path) → Struct{input_ids: Int64[],
+/// <c>tokenizer.encode_bert(text, vocab_path [, max_length]) → Struct{input_ids: Int64[],
 /// attention_mask: Int64[], token_type_ids: Int64[]}</c>. Tokenizes
 /// the input text with a BERT/WordPiece tokenizer (vocab.txt one
 /// wordpiece per line, lowercase-uncased defaults) and packages the three
@@ -349,6 +349,18 @@ public sealed class TokenizerByteLevelDecodeFunction : IFunction, IScalarFunctio
 /// field names match the canonical ONNX input names so multi-input
 /// <c>infer({encoded}, {...})</c> in a SQL model body lines up by name.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <strong>Truncation.</strong> The optional <c>max_length</c> caps the
+/// total emitted token count (including <c>[CLS]</c> and <c>[SEP]</c>) at
+/// that many tokens — long inputs are clipped from the tail, then the
+/// special tokens are reapplied. Omit or pass NULL for no truncation.
+/// Every BERT-family encoder has a fixed position-embedding table (commonly
+/// 512); inputs beyond that index out of range and abort inside the ONNX
+/// embeddings layer, so a SQL body driving such a model should pass
+/// <c>max_length =&gt; 512</c> (or whatever the model's documented cap is).
+/// </para>
+/// </remarks>
 public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
 {
     /// <inheritdoc />
@@ -363,6 +375,8 @@ public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
         + "a struct containing input_ids, attention_mask, and token_type_ids — the "
         + "canonical BERT input bundle. Special tokens [CLS]/[SEP] are added; mask "
         + "is all-1s (no padding); token_type_ids is all-0s (single sequence). "
+        + "Optional max_length truncates the total sequence (including specials); "
+        + "omit or pass NULL for no truncation. "
         + "Designed to feed multi-input infer() in a CREATE MODEL body directly.";
 
     /// <inheritdoc />
@@ -373,6 +387,8 @@ public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
             [
                 new ParameterSpec("text",       DataKindMatcher.Exact(DataKind.String)),
                 new ParameterSpec("vocab_path", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("max_length", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    IsOptional: true),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
@@ -398,8 +414,29 @@ public sealed class TokenizerEncodeBertFunction : IFunction, IScalarFunction
         string vocabPath  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
             args[1].AsString(), "tokenizer.encode_bert", frame);
 
+        int? maxLength = ReadOptionalMaxLength(args, index: 2, "tokenizer.encode_bert");
+
         BertTokenizer tokenizer = TokenizerCache.GetBertFromVocab(vocabPath);
-        return new ValueTask<ValueRef>(TokenizerOps.EncodeBertToValueRef(tokenizer, text, frame.Types));
+        return new ValueTask<ValueRef>(
+            TokenizerOps.EncodeBertToValueRef(tokenizer, text, maxLength, frame.Types));
+    }
+
+    /// <summary>
+    /// Reads an optional max-length argument at <paramref name="index"/>:
+    /// returns <c>null</c> if the slot is omitted or carries a SQL NULL
+    /// (callers want no truncation), throws on a non-positive value.
+    /// </summary>
+    internal static int? ReadOptionalMaxLength(
+        ReadOnlySpan<ValueRef> args, int index, string callerContext)
+    {
+        if (args.Length <= index || args[index].IsNull) return null;
+        int value = args[index].ToInt32();
+        if (value <= 2)
+        {
+            throw new FunctionArgumentException(callerContext,
+                $"max_length must be > 2 to leave room for [CLS] and [SEP]; got {value}.");
+        }
+        return value;
     }
 }
 
@@ -447,6 +484,9 @@ public sealed class TokenizerEncodeBertPairFunction : IFunction, IScalarFunction
         + "(vocab.txt path) and returns the canonical cross-encoder bundle: "
         + "input_ids ([CLS] q [SEP] p [SEP]), attention_mask (all 1s), and "
         + "token_type_ids (0 for q+surrounding specials, 1 for p+trailing SEP). "
+        + "Optional max_length caps the total sequence length (longest-first "
+        + "truncation between the two sides, matching HuggingFace tokenizers' "
+        + "default pair-truncation strategy); omit or pass NULL for no truncation. "
         + "Feeds multi-input infer() in a CREATE MODEL body for rerankers, NLI, "
         + "and paraphrase models.";
 
@@ -459,6 +499,8 @@ public sealed class TokenizerEncodeBertPairFunction : IFunction, IScalarFunction
                 new ParameterSpec("query",      DataKindMatcher.Exact(DataKind.String)),
                 new ParameterSpec("passage",    DataKindMatcher.Exact(DataKind.String)),
                 new ParameterSpec("vocab_path", DataKindMatcher.Exact(DataKind.String)),
+                new ParameterSpec("max_length", DataKindMatcher.Family(DataKindFamily.IntegerFamily),
+                    IsOptional: true),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Struct)),
@@ -485,9 +527,20 @@ public sealed class TokenizerEncodeBertPairFunction : IFunction, IScalarFunction
         string vocabPath  = TokenizerPath.ResolveAbsoluteOrCatalogRelative(
             args[2].AsString(), "tokenizer.encode_bert_pair", frame);
 
+        // Pair packing needs room for [CLS] + two [SEP]s, so a max_length of
+        // 3 leaves zero content tokens; reject anything below 4.
+        int? maxLength = args.Length > 3 && !args[3].IsNull
+            ? args[3].ToInt32()
+            : (int?)null;
+        if (maxLength is int ml && ml < 4)
+        {
+            throw new FunctionArgumentException("tokenizer.encode_bert_pair",
+                $"max_length must be >= 4 to leave room for [CLS], [SEP], [SEP]; got {ml}.");
+        }
+
         BertTokenizer tokenizer = TokenizerCache.GetBertFromVocab(vocabPath);
         return new ValueTask<ValueRef>(
-            TokenizerOps.EncodeBertPairToValueRef(tokenizer, query, passage, frame.Types));
+            TokenizerOps.EncodeBertPairToValueRef(tokenizer, query, passage, maxLength, frame.Types));
     }
 }
 
@@ -686,9 +739,17 @@ internal static class TokenizerOps
     /// The struct's TypeId is interned into <paramref name="types"/> when
     /// supplied so downstream <c>infer({encoded}, {...})</c> can resolve
     /// field names back to session input names.
+    /// <para>
+    /// When <paramref name="maxLength"/> is non-null, caps the total emitted
+    /// token count (including <c>[CLS]</c> and <c>[SEP]</c>) at that many
+    /// tokens — the tail of the sequence is dropped and the trailing
+    /// <c>[SEP]</c> is reapplied, matching HuggingFace's default
+    /// single-sequence truncation. <c>null</c> preserves the legacy no-cap
+    /// behaviour for callers that don't pass one.
+    /// </para>
     /// </summary>
     internal static ValueRef EncodeBertToValueRef(
-        BertTokenizer tokenizer, string text, TypeRegistry? types)
+        BertTokenizer tokenizer, string text, int? maxLength, TypeRegistry? types)
     {
         // BertTokenizer.EncodeToIds(addSpecialTokens=true) prepends [CLS]
         // and appends [SEP]. For a single sequence with no padding, the
@@ -698,6 +759,22 @@ internal static class TokenizerOps
         IReadOnlyList<int> ids = tokenizer.EncodeToIds(
             text, addSpecialTokens: true, considerPreTokenization: true);
         int n = ids.Count;
+
+        // Truncate to fit max_length while preserving the trailing [SEP].
+        // The full sequence ends with [SEP] (id = tokenizer.SeparatorTokenId);
+        // we drop content tokens between the last kept body token and the
+        // [SEP], then keep [SEP] as the final token.
+        if (maxLength is int cap && n > cap)
+        {
+            int sepId = tokenizer.SeparatorTokenId;
+            long[] truncated = new long[cap];
+            for (int i = 0; i < cap - 1; i++) truncated[i] = ids[i];
+            truncated[cap - 1] = sepId;
+            long[] mask = new long[cap];
+            long[] tti = new long[cap];
+            for (int i = 0; i < cap; i++) mask[i] = 1L;
+            return PackBertStruct(truncated, mask, tti, types);
+        }
 
         long[] inputIds = new long[n];
         long[] attentionMask = new long[n];
@@ -709,6 +786,20 @@ internal static class TokenizerOps
             // tokenTypeIds left at default 0L — single-sequence default.
         }
 
+        return PackBertStruct(inputIds, attentionMask, tokenTypeIds, types);
+    }
+
+    /// <summary>
+    /// Packages the three BERT input arrays into a struct ValueRef whose
+    /// field names match the canonical ONNX input names
+    /// (<c>input_ids</c> / <c>attention_mask</c> / <c>token_type_ids</c>),
+    /// interning the struct's type id into <paramref name="types"/> when
+    /// supplied. Centralised so the no-truncation and truncation paths in
+    /// the two BERT encoders share one struct-shape definition.
+    /// </summary>
+    private static ValueRef PackBertStruct(
+        long[] inputIds, long[] attentionMask, long[] tokenTypeIds, TypeRegistry? types)
+    {
         ValueRef[] fields =
         [
             ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
@@ -750,7 +841,7 @@ internal static class TokenizerOps
     /// glued together with the right specials in the right positions.
     /// </remarks>
     internal static ValueRef EncodeBertPairToValueRef(
-        BertTokenizer tokenizer, string query, string passage, TypeRegistry? types)
+        BertTokenizer tokenizer, string query, string passage, int? maxLength, TypeRegistry? types)
     {
         IReadOnlyList<int> queryIds = tokenizer.EncodeToIds(
             query, addSpecialTokens: false, considerPreTokenization: true);
@@ -765,6 +856,24 @@ internal static class TokenizerOps
         // attention_mask all 1s (no padding at this layer).
         int qLen = queryIds.Count;
         int pLen = passageIds.Count;
+
+        // Longest-first truncation. When the assembled length would exceed
+        // max_length, repeatedly trim one token from whichever side is
+        // currently longer until both sides plus the 3 specials fit. Matches
+        // HuggingFace's default truncation strategy for sentence-pair tasks
+        // and keeps the overall query/passage balance closer than truncating
+        // a single side outright. The 3 fixed tokens are the leading [CLS]
+        // and the two [SEP]s.
+        if (maxLength is int cap)
+        {
+            int budget = cap - 3;
+            while (qLen + pLen > budget)
+            {
+                if (qLen >= pLen) qLen--;
+                else pLen--;
+            }
+        }
+
         int total = 1 + qLen + 1 + pLen + 1;
 
         long[] inputIds      = new long[total];
@@ -800,27 +909,7 @@ internal static class TokenizerOps
         attentionMask[pos] = 1L;
         tokenTypeIds[pos]  = 1L;
 
-        ValueRef[] fields =
-        [
-            ValueRef.FromPrimitiveArray(inputIds,      DataKind.Int64),
-            ValueRef.FromPrimitiveArray(attentionMask, DataKind.Int64),
-            ValueRef.FromPrimitiveArray(tokenTypeIds,  DataKind.Int64),
-        ];
-
-        ushort typeId = 0;
-        if (types is not null)
-        {
-            int int64ArrayTypeId = types.InternArrayType(DataKind.Int64);
-            StructFieldDescriptor[] descriptors =
-            [
-                new("input_ids",      int64ArrayTypeId),
-                new("attention_mask", int64ArrayTypeId),
-                new("token_type_ids", int64ArrayTypeId),
-            ];
-            typeId = (ushort)types.InternStructType(descriptors);
-        }
-
-        return ValueRef.FromStruct(fields, typeId);
+        return PackBertStruct(inputIds, attentionMask, tokenTypeIds, types);
     }
 
     /// <summary>

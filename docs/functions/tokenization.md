@@ -23,7 +23,7 @@ prefixes short-circuit; bare relative paths resolve against the
 
 ### tokenizer.encode_bert
 
-`tokenizer.encode_bert(text, vocab_path)` → `Struct<input_ids: Int64[], attention_mask: Int64[], token_type_ids: Int64[]>`
+`tokenizer.encode_bert(text, vocab_path [, max_length])` → `Struct<input_ids: Int64[], attention_mask: Int64[], token_type_ids: Int64[]>`
 
 Bidirectional WordPiece tokenize with `[CLS]` prepended and `[SEP]`
 appended. The returned struct uses the canonical BERT ONNX input names
@@ -34,8 +34,17 @@ re-keying.
 `vocab_path` points at the model's `vocab.txt` (one token per line —
 the artifact every BERT-style export ships alongside `model.onnx`).
 
+The optional `max_length` caps the total emitted token count
+(including `[CLS]` and `[SEP]`). Long inputs are clipped from the
+tail and the trailing `[SEP]` is reapplied. Omit (or pass `NULL`)
+for no truncation. Every BERT-family encoder has a fixed
+position-embedding table — commonly 512 for BERT-base — and inputs
+beyond that index out of range and abort inside the ONNX embeddings
+layer, so a model body driving such a model should pass
+`max_length => 512` (or whatever the model's documented cap is).
+
 ```sql
-DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt');
+DECLARE encoded Struct = tokenizer.encode_bert(text, 'vocab.txt', max_length => 512);
 DECLARE n Int32 = cardinality(encoded['input_ids']);
 DECLARE last_hidden_state Float32[] = infer(encoded, {
   input_ids:      [1::Int32, n],
@@ -48,13 +57,20 @@ Canonical use: `models.all_minilm_l6_v2`.
 
 ### tokenizer.encode_bert_pair
 
-`tokenizer.encode_bert_pair(query, passage, vocab_path)` → `Struct<input_ids, attention_mask, token_type_ids>`
+`tokenizer.encode_bert_pair(query, passage, vocab_path [, max_length])` → `Struct<input_ids, attention_mask, token_type_ids>`
 
 Two-segment WordPiece tokenize for sentence-pair tasks (reranking,
 NLI, paraphrase detection). The output layout is `[CLS] query [SEP]
 passage [SEP]`; `token_type_ids` is zero across the query segment and
 one across the passage segment — the discriminator BERT cross-encoders
 were trained to read.
+
+The optional `max_length` caps the assembled sequence length.
+Truncation is longest-first — the longer of the two sides loses one
+token per step until both fit under the cap, matching HuggingFace
+tokenizers' default sentence-pair truncation strategy. Pass it
+whenever the model has a fixed position-embedding cap (e.g.
+`max_length => 512` for BERT-base cross-encoders).
 
 Canonical use: `models.bge_reranker_base`.
 

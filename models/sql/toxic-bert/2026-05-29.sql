@@ -35,7 +35,11 @@ IMPLEMENTS LabeledTextMultiClassifier
 USING 'toxic-bert/2026-05-29/onnx/model.onnx'
 AS BEGIN
   -- vocab.txt sits at the catalog root, one directory up from the ONNX file.
-  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
+  -- max_length caps the sequence at BERT-base's 512-slot position-embedding
+  -- table; longer inputs would index past the end and abort inside the ONNX
+  -- embeddings layer. The Jigsaw test split includes long Wikipedia talk-page
+  -- comments that trip this on the default 0.5-threshold sweep.
+  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt', max_length => 512);
   DECLARE n Int32 = cardinality(encoded['input_ids']);
   DECLARE logits Float32[] = infer(
     encoded,

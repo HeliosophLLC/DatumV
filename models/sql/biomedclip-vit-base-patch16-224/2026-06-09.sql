@@ -64,13 +64,13 @@ IMPLEMENTS TextEmbedder
 USING 'biomedclip-vit-base-patch16-224/2026-06-09/onnx/text_model.onnx'
 AS BEGIN
   -- WordPiece encode with [CLS]/[SEP]. vocab.txt sits at the bundle root,
-  -- one level up from the ONNX file.
-  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
+  -- one level up from the ONNX file. max_length caps the sequence at the
+  -- 256-row position-embedding table (the "_256" in the upstream repo name);
+  -- longer inputs would index past the end and abort inside the ONNX
+  -- embeddings layer.
+  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt', max_length => 256);
   -- The text tower was exported with a single ONNX input (input_ids); no
   -- padding is used so attention_mask isn't required at the wire boundary.
-  -- The position-embedding table has exactly 256 rows; sequences longer
-  -- than 256 would index out of bounds and should be truncated by the
-  -- caller until `array_slice` lands.
   DECLARE input_ids Int64[] = encoded['input_ids'];
   DECLARE n Int32 = cardinality(input_ids);
   -- Text encoder output: [1, 512] text_embeds (CLS pooled + projection).

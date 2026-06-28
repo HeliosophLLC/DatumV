@@ -25,7 +25,8 @@ AS BEGIN
   -- vocab.txt sits at the catalog root (`<id>/vocab.txt`), one directory up
   -- from the ONNX file (`<id>/onnx/model.onnx`). Relative paths resolve
   -- against the model's USING directory, so `../vocab.txt` walks back up.
-  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt');
+  -- max_length caps the sequence at BGE's 512-slot position-embedding table.
+  DECLARE encoded Struct = tokenizer.encode_bert(text, '../vocab.txt', max_length => 512);
   DECLARE n Int32 = cardinality(encoded['input_ids']);
   DECLARE last_hidden_state Float32[] = infer(
     encoded,
