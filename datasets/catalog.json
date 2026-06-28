@@ -1190,6 +1190,115 @@
       ]
     },
     {
+      "name": "TweetEval Sentiment",
+      "summary": "~60,000 short English tweets labelled negative / neutral / positive — the sentiment subtask of TweetEval (Cardiff NLP, 2020), itself a repackaging of the SemEval-2017 Task 4 sentiment-in-Twitter corpus. The reference small-text classification benchmark; drop-in for any TextClassifier recipe.",
+      "description": "Released in 2020 by Barbieri, Camacho-Collados, Espinosa-Anke, and Neves (Cardiff NLP, EMNLP Findings) as a unified seven-task benchmark for tweet classification. The sentiment subtask is the SemEval-2017 Task 4 corpus repackaged into a single English three-class problem (negative / neutral / positive) over ~60,000 tweets. Each row is one short tweet plus an integer label — text bodies are pre-redacted (URLs replaced with 'http', user mentions with '@user'), so the parquet is safe to embed and classify without a privacy preprocessing step. All three splits share the same `text` / `label` schema, so swap `datasets.tweeteval_sentiment_train` for `datasets.tweeteval_sentiment_test` in a query and the only thing that changes is the number of rows. The data is licensed CC BY 3.0 by the SemEval-2017 organizers and points directly at Cardiff NLP's upstream HuggingFace repo at a pinned revision — DatumV is not redistributing the tweet bodies. The underlying tweets remain subject to Twitter's Terms of Service and the Twitter API Developer Agreement; downstream redistribution or production-facing use should account for that layered constraint independently.",
+      "modalities": ["Text"],
+      "licenseIds": ["cc-by-3.0"],
+      "attributions": [
+        "Francesco Barbieri, Jose Camacho-Collados, Luis Espinosa-Anke, Leonardo Neves (TweetEval: Unified Benchmark and Comparative Evaluation for Tweet Classification, EMNLP Findings 2020)",
+        "Sara Rosenthal, Noura Farra, Preslav Nakov (SemEval-2017 Task 4: Sentiment Analysis in Twitter — source corpus, CC BY 3.0)",
+        "Twitter users (source tweets, subject to Twitter Terms of Service and Twitter API Developer Agreement)"
+      ],
+      "suitableForTasks": [
+        "TextClassifier",
+        "LabeledTextClassifier",
+        "TextEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "tweeteval_sentiment_train",
+          "displayName": "train (45.6k)",
+          "summary": "45,615 training tweets + integer sentiment labels (0=negative, 1=neutral, 2=positive). The standard training cut — fine-tunes a small encoder (DistilBERT / MiniLM / Twitter-RoBERTa) on a single GPU in minutes or on CPU in tens of minutes.",
+          "approxArchiveBytes": 3781982,
+          "approxIngestedBytes": 6048340,
+          "expectedRowCounts": { "tweets": 45615 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2020",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "cardiffnlp/tweet_eval",
+                  "revision": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be",
+                  "include": ["sentiment/train-00000-of-00001.parquet"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "tweets",
+                  "artifact": "sentiment/train-00000-of-00001.parquet",
+                  "sqlFile": "tweeteval_sentiment/sentiment.sql"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "tweeteval_sentiment_validation",
+          "displayName": "validation (2k)",
+          "summary": "2,000 validation tweets + integer labels. The smallest split — used to tune hyperparameters before reporting on test.",
+          "approxArchiveBytes": 167140,
+          "approxIngestedBytes": 266711,
+          "expectedRowCounts": { "tweets": 2000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2020",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "cardiffnlp/tweet_eval",
+                  "revision": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be",
+                  "include": ["sentiment/validation-00000-of-00001.parquet"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "tweets",
+                  "artifact": "sentiment/validation-00000-of-00001.parquet",
+                  "sqlFile": "tweeteval_sentiment/sentiment.sql"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "tweeteval_sentiment_test",
+          "displayName": "test (12.3k)",
+          "summary": "12,284 test tweets + integer labels. The held-out evaluation slice — every accuracy / macro-F1 number reported on the TweetEval sentiment leaderboard is computed against this split.",
+          "approxArchiveBytes": 900553,
+          "approxIngestedBytes": 1446711,
+          "expectedRowCounts": { "tweets": 12284 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "2020",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "cardiffnlp/tweet_eval",
+                  "revision": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be",
+                  "include": ["sentiment/test-00000-of-00001.parquet"]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "tweets",
+                  "artifact": "sentiment/test-00000-of-00001.parquet",
+                  "sqlFile": "tweeteval_sentiment/sentiment.sql"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Chicago Crimes",
       "summary": "8M+ Chicago Police Department incident reports from 2001 to the present. The reach-for big-tabular benchmark for time-series, geospatial, and categorical analytics over a single municipal stream.",
       "description": "Published by the Chicago Police Department through the City of Chicago Open Data Portal (Socrata-hosted). Each row is one reported incident: timestamp, block-level address, FBI / IUCR offense codes, arrest + domestic flags, lat/lng (Socrata rounds to the city block to protect privacy), and the beat / district / ward / community-area administrative codes. The corpus refreshes daily with a roughly 7-day reporting lag, so the headline row count and on-disk size drift over time. The ingest recipe drives `open_csv_typed` at plan time so the schema lands with real per-column types (TIMESTAMPTZ for the date columns, FLOAT for lat/lng, narrowed integers for the FBI code) rather than the `Array<String>` shape `open_csv` yields — queries can write `WHERE \"Primary Type\" = 'THEFT' AND \"Year\" = 2024` against typed columns directly.",
