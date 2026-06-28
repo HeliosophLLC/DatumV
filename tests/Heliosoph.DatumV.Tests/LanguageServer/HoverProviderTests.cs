@@ -405,6 +405,67 @@ public sealed class HoverProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetHover_BareSubqueryAlias_SurfacesDerivedTableCard()
+    {
+        // Hover on the bare `t` in `FROM (SELECT …) t` — should render a
+        // derived-table card listing the inner projection. Without this,
+        // the alias token had no hover even though `t.col` resolved fine.
+        HoverProvider provider = CreateProvider();
+
+        const string sql =
+            "SELECT t.frame_index FROM (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) t";
+        int offset = sql.LastIndexOf(") t", StringComparison.Ordinal) + ") ".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Derived table", result.Contents);
+        Assert.Contains("t", result.Contents);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("frame", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_QualifiedColumnThroughSubqueryAlias_LabelsSourceAsSubqueryNotCte()
+    {
+        // The source label has to reflect what the user wrote: hovering on
+        // `t.test` over `FROM (SELECT …) t` says "subquery", not "CTE".
+        // Same column-hover machinery is shared with CTE references — the
+        // LSP discriminates by tracking subquery aliases separately from
+        // CTE names in the resolved derived-table map.
+        HoverProvider provider = CreateProvider();
+
+        const string sql = "SELECT t.test FROM (SELECT 'hello' AS test) t";
+        int offset = sql.IndexOf("t.test", StringComparison.Ordinal) + "t.".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Source: subquery", result.Contents);
+        Assert.DoesNotContain("Source: CTE", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_QualifiedColumnThroughSubqueryAlias_ResolvesToInnerColumn()
+    {
+        // `t.frame_index` where `t` is a derived-table alias over an
+        // inline subquery — hover on the column should resolve through
+        // the subquery's projection to the inner kind. Without subquery
+        // alias resolution this used to fall through to no-hover.
+        HoverProvider provider = CreateProvider();
+
+        const string sql =
+            "SELECT t.frame_index FROM (SELECT frame_index, frame FROM video_unnest_frames('x.mp4') vid) t";
+        int offset = sql.IndexOf("t.frame_index", StringComparison.Ordinal) + "t.".Length;
+
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("frame_index", result.Contents);
+        Assert.Contains("Int32", result.Contents);
+    }
+
+    [Fact]
     public void GetHover_RenamedCteColumn_SurfacesAliasedName()
     {
         HoverProvider provider = CreateProvider();
@@ -486,7 +547,7 @@ public sealed class HoverProviderTests : ServiceTestBase
     {
         // Regression: when a DECLARE statement precedes the WITH clause,
         // ParseResult.Query is null (Query is reserved for single-query
-        // inputs; multi-statement batches use Statements). CteSchemaResolver
+        // inputs; multi-statement batches use Statements). DerivedTableSchemaResolver
         // and HoverProvider's TVF-alias map used to guard on
         // parseResult.Query and bail, leaving the LET map empty so hover on
         // a LET name returned nothing. EffectiveQuery falls through into
@@ -1215,7 +1276,7 @@ public sealed class HoverProviderTests : ServiceTestBase
     {
         // Same end shape, but unnest's arg is a LET name rather than a
         // direct function call. The resolver should follow
-        // cteSchemas.LetBindingKinds to the LET's declared kind, strip
+        // derivedSchemas.LetBindingKinds to the LET's declared kind, strip
         // the Array<…> wrapper, and surface the field hover.
         LanguageServerManifest manifest = new()
         {

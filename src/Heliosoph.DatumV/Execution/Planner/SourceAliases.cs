@@ -37,7 +37,12 @@ internal static class SourceAliases
 
     /// <summary>
     /// Returns the alias (or fallback name) introduced by a table source, used when
-    /// expanding <c>SELECT *</c> into per-table wildcards.
+    /// expanding <c>SELECT *</c> into per-table wildcards. An unaliased
+    /// <see cref="FunctionSource"/> falls back to its function name so it shows up
+    /// in wildcard expansion — matching PostgreSQL semantics
+    /// (<c>SELECT * FROM t, unnest(t.col)</c> includes the unnest column) and
+    /// mirroring the fallback <c>SourcePlanner.PlanFunctionSource</c> uses when
+    /// wrapping the source with an <see cref="Operators.AliasOperator"/>.
     /// </summary>
     public static string? GetSourceAlias(TableSource source)
     {
@@ -45,7 +50,7 @@ internal static class SourceAliases
         {
             TableReference tableRef => tableRef.Alias ?? tableRef.Name,
             SubquerySource subquery => subquery.Alias,
-            FunctionSource functionSource => functionSource.Alias,
+            FunctionSource functionSource => functionSource.Alias ?? functionSource.FunctionName,
             _ => null,
         };
     }
@@ -56,8 +61,11 @@ internal static class SourceAliases
     /// clause was written. Used to detect whether an <c>AliasOperator</c> wraps the
     /// source (and thus whether its physical columns carry a qualified <c>alias.col</c>
     /// prefix). <see cref="FunctionSource"/> without an alias is left unwrapped by the
-    /// planner; <see cref="SubquerySource"/> is wrapped by <c>SubqueryOperator</c>
-    /// (passthrough, no prefix).
+    /// planner. <see cref="SubquerySource"/> stays unwrapped in the no-join case
+    /// (a bare <c>SubqueryOperator</c> passthrough) and is wrapped with an
+    /// <c>AliasOperator</c> in join contexts — returning <see langword="null"/> here
+    /// keeps the no-join behaviour the rest of the planner expects; join-context
+    /// wildcard expansion goes through <see cref="GetSourceAlias"/> instead.
     /// </summary>
     public static string? GetExplicitSourceAlias(TableSource source)
     {

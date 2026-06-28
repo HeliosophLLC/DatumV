@@ -70,7 +70,7 @@ internal sealed class SourcePlanner
         return source switch
         {
             TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, hasJoins, commonTableExpressionOperators),
-            SubquerySource subquery => PlanSubquery(subquery),
+            SubquerySource subquery => PlanSubquery(subquery, hasJoins),
             FunctionSource functionSource => PlanFunctionSource(functionSource, hasJoins),
             _ => throw new InvalidOperationException(
                 $"Unsupported table source type: {source.GetType().Name}."),
@@ -125,7 +125,7 @@ internal sealed class SourcePlanner
             try
             {
                 SubquerySource subquery = new(view.Body, tableRef.Alias ?? tableRef.Name);
-                return PlanSubquery(subquery);
+                return PlanSubquery(subquery, hasJoins);
             }
             finally
             {
@@ -208,12 +208,23 @@ internal sealed class SourcePlanner
     /// <summary>
     /// Plans a subquery source by recursively invoking the parent planner via the
     /// <c>planStatement</c> delegate, then wraps the result in a
-    /// <see cref="SubqueryOperator"/> carrying the alias.
+    /// <see cref="SubqueryOperator"/> carrying the alias. In a join context the
+    /// pass-through is then wrapped with an <see cref="AliasOperator"/> so the
+    /// derived rows carry <c>alias.col</c> qualified names — matching how
+    /// <see cref="PlanTableReference"/> and <see cref="PlanFunctionSource"/>
+    /// surface their sources, and giving downstream operators (qualified-star
+    /// expansion, qualified column lookups, lateral cross joins like
+    /// <c>FROM (…) t, UNNEST(t.col)</c>) the prefix they expect.
     /// </summary>
-    public QueryOperator PlanSubquery(SubquerySource subquery)
+    public QueryOperator PlanSubquery(SubquerySource subquery, bool hasJoins)
     {
         QueryOperator innerPlan = _planStatement(subquery.Query);
-        return new SubqueryOperator(innerPlan, subquery.Alias);
+        QueryOperator outOperator = new SubqueryOperator(innerPlan, subquery.Alias);
+        if (hasJoins)
+        {
+            outOperator = new AliasOperator(outOperator, subquery.Alias);
+        }
+        return outOperator;
     }
 
     /// <summary>

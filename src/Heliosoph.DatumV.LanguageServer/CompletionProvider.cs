@@ -88,7 +88,7 @@ public sealed class CompletionProvider
         string resolverSql = zone.Kind == CompletionZoneKind.AfterDot && zone.TableQualifier is not null
             ? sql[..cursorOffset] + "_dvc_complete_" + sql[cursorOffset..]
             : sql;
-        CteSchemaResult cteSchemas = CteSchemaResolver.Resolve(resolverSql, _manifest);
+        DerivedTableSchemaResult derivedSchemas = DerivedTableSchemaResolver.Resolve(resolverSql, _manifest);
         // Lambda-context-aware scalar function filtering. When the cursor
         // sits inside a lambda body whose outer call's parameter slot
         // declared a `LambdaContextName`, the function whitelist switches
@@ -127,7 +127,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterSelect:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -155,21 +155,21 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterWhere:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOn:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.Expression:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -187,34 +187,34 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterOrderBy:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterHaving:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddAggregateFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterQualify:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterAssert:
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
@@ -240,7 +240,7 @@ public sealed class CompletionProvider
                 {
                     break;
                 }
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddAggregateFunctions(items);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
@@ -271,7 +271,7 @@ public sealed class CompletionProvider
                     // meaningful suggestion at this nesting.
                     AddStructFieldsForChain(
                         items, chainSegments,
-                        zone.TvfAliasesInScope, zone.TableAliasesInScope, cteSchemas, sql, cursorOffset);
+                        zone.TvfAliasesInScope, zone.TableAliasesInScope, derivedSchemas, sql, cursorOffset);
                     break;
                 }
                 if (zone.TableQualifier is not null)
@@ -288,7 +288,7 @@ public sealed class CompletionProvider
                         AddModels(items);
                         break;
                     }
-                    AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, zone.TableAliasesInScope, cteSchemas);
+                    AddQualifiedColumns(items, zone.TableQualifier, zone.TvfAliasesInScope, zone.TableAliasesInScope, derivedSchemas);
                     AddSchemaRoutines(items, zone.TableQualifier);
                     AddSchemaTables(items, zone.TableQualifier);
                     AddDatasetVariants(items, zone.TableQualifier);
@@ -353,7 +353,7 @@ public sealed class CompletionProvider
                 // INSERT INTO x / DELETE FROM x), the same path that feeds
                 // AfterReturning. Scope-filter to that target so columns
                 // from unrelated tables don't pollute the popup.
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
@@ -365,7 +365,7 @@ public sealed class CompletionProvider
                 // Same DML-target scoping as AfterInsertTable — the UPDATE
                 // target lands in zone.TablesInScope so columns surface
                 // only for that table, not every catalog table.
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -380,7 +380,7 @@ public sealed class CompletionProvider
                 // RETURNING. Target table is in scope via the augmented
                 // tablesInScope walk (picks up UPDATE x / INSERT INTO x /
                 // DELETE FROM x).
-                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, cteSchemas);
+                AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
                 AddSchemaNames(items, SchemaSurfaces.Expression);
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
@@ -557,14 +557,14 @@ public sealed class CompletionProvider
     /// </summary>
     private void AddColumns(List<CompletionItem> items, IReadOnlyList<string>? tablesInScope)
     {
-        AddColumns(items, tablesInScope, tvfAliases: null, cteSchemas: CteSchemaResolver.Empty);
+        AddColumns(items, tablesInScope, tvfAliases: null, derivedSchemas: DerivedTableSchemaResolver.Empty);
     }
 
     private void AddColumns(
         List<CompletionItem> items,
         IReadOnlyList<string>? tablesInScope,
         IReadOnlyDictionary<string, string>? tvfAliases,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         // Empty list = "FROM scope was extracted and there's nothing in it" —
         // surfacing every catalog column would be the bug we're fixing.
@@ -573,8 +573,8 @@ public sealed class CompletionProvider
         // surface; we still emit those.
         bool tablesEmpty = tablesInScope is { Count: 0 };
         bool tvfEmpty = tvfAliases is null or { Count: 0 };
-        bool cteEmpty = cteSchemas.Schemas.Count == 0;
-        bool letEmpty = cteSchemas.LetBindingKinds.Count == 0;
+        bool cteEmpty = derivedSchemas.Schemas.Count == 0;
+        bool letEmpty = derivedSchemas.LetBindingKinds.Count == 0;
         if (tablesEmpty && tvfEmpty && cteEmpty && letEmpty) return;
 
         foreach (TableSchemaEntry table in _manifest.Tables)
@@ -600,13 +600,13 @@ public sealed class CompletionProvider
         }
 
         AddTvfColumns(items, tvfAliases);
-        AddCteColumns(items, tablesInScope, cteSchemas);
-        AddLetBindings(items, cteSchemas);
+        AddCteColumns(items, tablesInScope, derivedSchemas);
+        AddLetBindings(items, derivedSchemas);
     }
 
     /// <summary>
     /// Surfaces every LET-bound name captured by
-    /// <see cref="CteSchemaResult.LetBindingKinds"/> as a completion item.
+    /// <see cref="DerivedTableSchemaResult.LetBindingKinds"/> as a completion item.
     /// LETs are synthesised columns on the augmented row, so they're
     /// usable in any expression position columns are — same zone reach as
     /// the column path. Per-CTE scoping isn't tracked yet
@@ -614,10 +614,10 @@ public sealed class CompletionProvider
     /// the same simplification the column / CTE-column paths use; once a
     /// real per-cursor scope arrives the same restriction applies to all.
     /// </summary>
-    private static void AddLetBindings(List<CompletionItem> items, CteSchemaResult cteSchemas)
+    private static void AddLetBindings(List<CompletionItem> items, DerivedTableSchemaResult derivedSchemas)
     {
-        if (cteSchemas.LetBindingKinds.Count == 0) return;
-        foreach (KeyValuePair<string, string> entry in cteSchemas.LetBindingKinds)
+        if (derivedSchemas.LetBindingKinds.Count == 0) return;
+        foreach (KeyValuePair<string, string> entry in derivedSchemas.LetBindingKinds)
         {
             items.Add(new CompletionItem
             {
@@ -642,17 +642,17 @@ public sealed class CompletionProvider
     private static void AddCteColumns(
         List<CompletionItem> items,
         IReadOnlyList<string>? tablesInScope,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
-        if (cteSchemas.Schemas.Count == 0) return;
+        if (derivedSchemas.Schemas.Count == 0) return;
 
-        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in derivedSchemas.Schemas)
         {
             // Only surface a CTE's columns when it (or an alias bound to
             // it) is actually in the FROM/JOIN scope at the cursor.
             // Otherwise typing inside one CTE's body would dump every
             // other CTE's projection into the popup.
-            if (tablesInScope is not null && !CteVisibleInScope(cte.Key, tablesInScope, cteSchemas.FromAliasToCteName))
+            if (tablesInScope is not null && !CteVisibleInScope(cte.Key, tablesInScope, derivedSchemas.FromAliasToSourceName))
             {
                 continue;
             }
@@ -739,7 +739,7 @@ public sealed class CompletionProvider
         IReadOnlyList<string> chainSegments,
         IReadOnlyDictionary<string, string>? tvfAliasesInScope,
         IReadOnlyDictionary<string, string>? tableAliasesInScope,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         string sql,
         int cursorOffset)
     {
@@ -751,7 +751,7 @@ public sealed class CompletionProvider
         // field-on-prior-kind chasing.
         string? currentKind = TryResolveAliasColumnKind(
             chainSegments[0], chainSegments[1],
-            tvfAliasesInScope, tableAliasesInScope, cteSchemas, sql, cursorOffset);
+            tvfAliasesInScope, tableAliasesInScope, derivedSchemas, sql, cursorOffset);
 
         // Walk every subsequent segment as a struct field of the prior
         // kind. Each hop expands the kind (inline or named) into fields,
@@ -806,7 +806,7 @@ public sealed class CompletionProvider
         string columnName,
         IReadOnlyDictionary<string, string>? tvfAliasesInScope,
         IReadOnlyDictionary<string, string>? tableAliasesInScope,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         string sql,
         int cursorOffset)
     {
@@ -836,7 +836,7 @@ public sealed class CompletionProvider
                 FunctionSource? unnestSource = FindFunctionSourceByAlias(sql, cursorOffset, alias);
                 if (unnestSource is { Arguments: { Count: 1 } args })
                 {
-                    string? argKind = TryResolveManifestExpressionKind(args[0], cteSchemas);
+                    string? argKind = TryResolveManifestExpressionKind(args[0], derivedSchemas);
                     string? inner = TryStripArrayWrapper(argKind);
                     if (inner is not null) return inner;
                 }
@@ -844,7 +844,7 @@ public sealed class CompletionProvider
         }
 
         // CTE direct name, then FROM-alias → CTE.
-        if (TryGetCteColumns(alias, cteSchemas, out _, out IReadOnlyList<TableColumnEntry>? cteColumns))
+        if (TryGetCteColumns(alias, derivedSchemas, out _, out IReadOnlyList<TableColumnEntry>? cteColumns))
         {
             foreach (TableColumnEntry column in cteColumns)
             {
@@ -1011,17 +1011,17 @@ public sealed class CompletionProvider
     /// qualified CTE column (<c>unnest(a.classes)</c>), or a function call
     /// whose return type is declared in the manifest (<c>unnest(models.X(file))</c>).
     /// Mirrors the hover-side helper without taking a dependency on
-    /// <see cref="CteSchemaResolver"/>'s private <c>InnerScope</c>; anything
+    /// <see cref="DerivedTableSchemaResolver"/>'s private <c>InnerScope</c>; anything
     /// more exotic stays unresolved.
     /// </summary>
-    private string? TryResolveManifestExpressionKind(Expression expression, CteSchemaResult cteSchemas)
+    private string? TryResolveManifestExpressionKind(Expression expression, DerivedTableSchemaResult derivedSchemas)
     {
         switch (expression)
         {
             case ColumnReference colRef when colRef.TableName is null && colRef.SchemaName is null:
-                if (cteSchemas.LetBindingKinds.TryGetValue(colRef.ColumnName, out string? letKind))
+                if (derivedSchemas.LetBindingKinds.TryGetValue(colRef.ColumnName, out string? letKind))
                     return letKind;
-                foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+                foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in derivedSchemas.Schemas)
                 {
                     foreach (TableColumnEntry column in cte.Value)
                     {
@@ -1032,7 +1032,7 @@ public sealed class CompletionProvider
                 return null;
 
             case ColumnReference colRef when colRef.TableName is not null:
-                if (cteSchemas.Schemas.TryGetValue(colRef.TableName, out IReadOnlyList<TableColumnEntry>? direct))
+                if (derivedSchemas.Schemas.TryGetValue(colRef.TableName, out IReadOnlyList<TableColumnEntry>? direct))
                 {
                     foreach (TableColumnEntry column in direct)
                     {
@@ -1040,8 +1040,8 @@ public sealed class CompletionProvider
                             return column.Kind;
                     }
                 }
-                if (cteSchemas.FromAliasToCteName.TryGetValue(colRef.TableName, out string? cteName)
-                    && cteSchemas.Schemas.TryGetValue(cteName, out IReadOnlyList<TableColumnEntry>? aliased))
+                if (derivedSchemas.FromAliasToSourceName.TryGetValue(colRef.TableName, out string? cteName)
+                    && derivedSchemas.Schemas.TryGetValue(cteName, out IReadOnlyList<TableColumnEntry>? aliased))
                 {
                     foreach (TableColumnEntry column in aliased)
                     {
@@ -1096,10 +1096,10 @@ public sealed class CompletionProvider
     /// </summary>
     private bool TryGetStructFieldsForColumn(
         string qualifier,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<StructFieldShape>? structFields)
     {
-        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in cteSchemas.Schemas)
+        foreach (KeyValuePair<string, IReadOnlyList<TableColumnEntry>> cte in derivedSchemas.Schemas)
         {
             foreach (TableColumnEntry column in cte.Value)
             {
@@ -1119,7 +1119,7 @@ public sealed class CompletionProvider
         // TryResolveStructFields so a named struct type (e.g. the
         // declared ReturnType of `models.depth(…)`) expands to its
         // fields, not just inline `Struct<…>` annotations.
-        if (cteSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind))
+        if (derivedSchemas.LetBindingKinds.TryGetValue(qualifier, out string? letKind))
         {
             IReadOnlyList<StructFieldShape>? letFields = TryResolveStructFields(letKind);
             if (letFields is not null)
@@ -1140,18 +1140,18 @@ public sealed class CompletionProvider
     /// </summary>
     private static bool TryGetCteColumns(
         string qualifier,
-        CteSchemaResult cteSchemas,
+        DerivedTableSchemaResult derivedSchemas,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? cteName,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<TableColumnEntry>? columns)
     {
-        if (cteSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
+        if (derivedSchemas.Schemas.TryGetValue(qualifier, out IReadOnlyList<TableColumnEntry>? direct))
         {
             cteName = qualifier;
             columns = direct;
             return true;
         }
-        if (cteSchemas.FromAliasToCteName.TryGetValue(qualifier, out string? mapped)
-            && cteSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
+        if (derivedSchemas.FromAliasToSourceName.TryGetValue(qualifier, out string? mapped)
+            && derivedSchemas.Schemas.TryGetValue(mapped, out IReadOnlyList<TableColumnEntry>? aliasCols))
         {
             cteName = mapped;
             columns = aliasCols;
@@ -1216,7 +1216,7 @@ public sealed class CompletionProvider
 
     private void AddQualifiedColumns(List<CompletionItem> items, string tableQualifier)
     {
-        AddQualifiedColumns(items, tableQualifier, tvfAliases: null, tableAliases: null, cteSchemas: CteSchemaResolver.Empty);
+        AddQualifiedColumns(items, tableQualifier, tvfAliases: null, tableAliases: null, derivedSchemas: DerivedTableSchemaResolver.Empty);
     }
 
     private void AddQualifiedColumns(
@@ -1224,7 +1224,7 @@ public sealed class CompletionProvider
         string tableQualifier,
         IReadOnlyDictionary<string, string>? tvfAliases,
         IReadOnlyDictionary<string, string>? tableAliases,
-        CteSchemaResult cteSchemas)
+        DerivedTableSchemaResult derivedSchemas)
     {
         // TVF aliases first — when the user typed `vid.`, we want the
         // popup to show the TVF's output columns rather than fall through
@@ -1254,7 +1254,7 @@ public sealed class CompletionProvider
         // f1 ↦ frames ↦ frames' projected columns. Same precedence as TVFs
         // because a SELECT-list reference qualifies a row source, not a
         // schema. Schema-qualified table lookup is the natural fallback.
-        if (TryGetCteColumns(tableQualifier, cteSchemas, out string? cteName, out IReadOnlyList<TableColumnEntry>? cteCols))
+        if (TryGetCteColumns(tableQualifier, derivedSchemas, out string? cteName, out IReadOnlyList<TableColumnEntry>? cteCols))
         {
             foreach (TableColumnEntry column in cteCols)
             {
@@ -1274,7 +1274,7 @@ public sealed class CompletionProvider
         // is a column whose kind is a canonical `Struct<…>` annotation
         // (typically the output of a struct-returning model call), suggest
         // the struct's field names alongside their declared kinds.
-        if (TryGetStructFieldsForColumn(tableQualifier, cteSchemas, out IReadOnlyList<StructFieldShape>? structFields))
+        if (TryGetStructFieldsForColumn(tableQualifier, derivedSchemas, out IReadOnlyList<StructFieldShape>? structFields))
         {
             foreach (StructFieldShape field in structFields)
             {
