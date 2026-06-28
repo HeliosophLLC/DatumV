@@ -272,6 +272,7 @@
         "Cardiff NLP — Cardiff University",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
+      "cardFile": "cards/twitter-roberta-sentiment.md",
       "variants": [
         {
           "id": "twitter-roberta-sentiment",
@@ -328,6 +329,7 @@
         "Unitary",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
+      "cardFile": "cards/toxic-bert.md",
       "variants": [
         {
           "id": "toxic-bert",
