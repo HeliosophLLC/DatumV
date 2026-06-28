@@ -1137,10 +1137,15 @@ public static partial class SqlParser
             (build, left, right) => build(left, right));
 
     /// <summary>
-    /// AT TIME ZONE level — sits between Additive and the comparison predicates so that
-    /// <c>ts AT TIME ZONE 'X' = ts AT TIME ZONE 'Y'</c> parses correctly without parens.
+    /// The operand precedence tier shared by every comparison-class operator:
+    /// the infix comparisons (<c>=</c>, <c>&lt;</c>, …) and the postfix predicates
+    /// (<c>LIKE</c>, <c>ILIKE</c>, <c>REGEXP</c>, <c>@@</c>). It is an
+    /// <see cref="Additive"/> expression plus an optional trailing
+    /// <c>AT TIME ZONE</c> — sitting between Additive and the comparison
+    /// predicates so that <c>ts AT TIME ZONE 'X' = ts AT TIME ZONE 'Y'</c> parses
+    /// without parens, and so a comparison operand binds tighter than AND/OR.
     /// </summary>
-    private static readonly TokenListParser<SqlToken, Expression> AtTimeZoneLevel =
+    private static readonly TokenListParser<SqlToken, Expression> ComparisonOperand =
         from expr in Additive
         from result in (
             from atKw in Token.EqualTo(SqlToken.At)
@@ -1153,10 +1158,10 @@ public static partial class SqlParser
 
     /// <summary>
     /// Postfix predicates: IS [NOT] NULL, [NOT] IN (...), [NOT] BETWEEN ... AND ..., LIKE.
-    /// Applied to the result of an AtTimeZoneLevel expression.
+    /// Applied to the result of a <see cref="ComparisonOperand"/> expression.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> Comparison =
-        from left in AtTimeZoneLevel
+        from left in ComparisonOperand
         from postfix in IsNullPostfix.Try()
             .Or(IsTypePostfix.Try())
             .Or(NotInSubqueryPostfix.Try())
@@ -1256,11 +1261,19 @@ public static partial class SqlParser
             new BetweenExpression(expr, low, high, Negated: true));
 
     /// <summary>LIKE pattern postfix (case-sensitive), with optional ESCAPE clause.</summary>
+    /// <remarks>
+    /// The pattern (and ESCAPE) operands parse at <see cref="ComparisonOperand"/> —
+    /// the same precedence level <see cref="ComparisonPostfix"/> uses for its
+    /// right operand — so LIKE binds tighter than AND/OR. Using the full
+    /// <c>ExpressionParser</c> here would let the pattern greedily swallow a
+    /// trailing boolean operator, so <c>x LIKE 'a' OR x LIKE 'b'</c> would
+    /// misparse as <c>x LIKE ('a' OR x LIKE 'b')</c>.
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> LikePostfix =
         from likeKw in Token.EqualTo(SqlToken.Like)
-        from pattern in SP.Ref(() => ExpressionParser!)
+        from pattern in SP.Ref(() => ComparisonOperand!)
         from escape in Token.EqualTo(SqlToken.Escape)
-            .IgnoreThen(SP.Ref(() => ExpressionParser!))
+            .IgnoreThen(SP.Ref(() => ComparisonOperand!))
             .OptionalOrDefault()
         select (Func<Expression, Expression>)(expr =>
             escape is not null
@@ -1268,11 +1281,13 @@ public static partial class SqlParser
                 : new BinaryExpression(expr, BinaryOperator.Like, pattern));
 
     /// <summary>ILIKE pattern postfix (case-insensitive), with optional ESCAPE clause.</summary>
+    /// <remarks>Pattern/ESCAPE operands parse at <see cref="ComparisonOperand"/>; see
+    /// <see cref="LikePostfix"/> for why the full expression parser is wrong here.</remarks>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> ILikePostfix =
         from ilikeKw in Token.EqualTo(SqlToken.ILike)
-        from pattern in SP.Ref(() => ExpressionParser!)
+        from pattern in SP.Ref(() => ComparisonOperand!)
         from escape in Token.EqualTo(SqlToken.Escape)
-            .IgnoreThen(SP.Ref(() => ExpressionParser!))
+            .IgnoreThen(SP.Ref(() => ComparisonOperand!))
             .OptionalOrDefault()
         select (Func<Expression, Expression>)(expr =>
             escape is not null
@@ -1280,9 +1295,11 @@ public static partial class SqlParser
                 : new BinaryExpression(expr, BinaryOperator.ILike, pattern));
 
     /// <summary>REGEXP pattern postfix (regular expression matching).</summary>
+    /// <remarks>Pattern operand parses at <see cref="ComparisonOperand"/>; see
+    /// <see cref="LikePostfix"/> for why the full expression parser is wrong here.</remarks>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> RegexpPostfix =
         from regexpKw in Token.EqualTo(SqlToken.Regexp)
-        from pattern in SP.Ref(() => ExpressionParser!)
+        from pattern in SP.Ref(() => ComparisonOperand!)
         select (Func<Expression, Expression>)(expr =>
             new BinaryExpression(expr, BinaryOperator.Regexp, pattern));
 
@@ -1294,7 +1311,7 @@ public static partial class SqlParser
             .Or(Token.EqualTo(SqlToken.GreaterOrEqual).Select(_ => BinaryOperator.GreaterThanOrEqual))
             .Or(Token.EqualTo(SqlToken.LessThan).Select(_ => BinaryOperator.LessThan))
             .Or(Token.EqualTo(SqlToken.GreaterThan).Select(_ => BinaryOperator.GreaterThan))
-        from right in SP.Ref(() => AtTimeZoneLevel!)
+        from right in SP.Ref(() => ComparisonOperand!)
         select (Func<Expression, Expression>)(left =>
             new BinaryExpression(left, op, right));
 
@@ -1306,7 +1323,7 @@ public static partial class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> MatchPostfix =
         from atAt in Token.EqualTo(SqlToken.AtAt)
-        from right in SP.Ref(() => AtTimeZoneLevel!)
+        from right in SP.Ref(() => ComparisonOperand!)
         select (Func<Expression, Expression>)(left =>
             new FunctionCallExpression("tsquery_match", [left, right]));
 
