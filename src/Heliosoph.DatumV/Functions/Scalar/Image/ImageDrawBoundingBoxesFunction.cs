@@ -15,6 +15,14 @@ namespace Heliosoph.DatumV.Functions.Scalar.Image;
 ///   <item><c>image_draw_bounding_boxes(image, box)</c> — <c>box</c> is a single
 ///   <c>Struct</c>, drawn as one rectangle.</item>
 /// </list>
+/// Both shapes accept two optional trailing <see cref="DataKind.Color"/>
+/// arguments — <c>stroke_color</c> then <c>fill_color</c> — that override the
+/// box outline and box interior colours respectively. The <c>Color</c> kind
+/// carries an alpha component, so a translucent fill (e.g. alpha 0x40) paints a
+/// see-through highlight over each box. <c>fill_color</c> defaults to fully
+/// transparent (no interior fill); <c>stroke_color</c> defaults to opaque red.
+/// The label background tracks <c>stroke_color</c> so the overlay reads as one
+/// colour scheme.
 /// The element struct exposes <c>x</c>, <c>y</c>, <c>w</c>, <c>h</c> (numeric,
 /// in source-image pixel coordinates, top-left origin) plus optional
 /// <c>label</c> (String) and <c>score</c> (numeric, 0–1) fields. Field names
@@ -48,7 +56,10 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
         "Overlays bounding-box rectangles (with optional labels) on an image. "
         + "The second argument is either an Array<Struct> of boxes or a single Struct "
         + "with x, y, w, h fields plus optional label and score; field names are resolved "
-        + "via the per-query type registry.";
+        + "via the per-query type registry. Two optional trailing Color arguments — "
+        + "stroke_color then fill_color — override the box outline and interior; both "
+        + "carry an alpha component, so a translucent fill paints a see-through highlight. "
+        + "fill_color defaults to transparent (no fill); stroke_color defaults to red.";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -58,6 +69,8 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
             [
                 new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("boxes", DataKindMatcher.Exact(DataKind.Struct), IsOptional: false, IsArray: ArrayMatch.FlatArray),
+                new ParameterSpec("stroke_color", DataKindMatcher.Exact(DataKind.Color), IsOptional: true, IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("fill_color",   DataKindMatcher.Exact(DataKind.Color), IsOptional: true, IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
@@ -66,6 +79,8 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
             [
                 new ParameterSpec("image", DataKindMatcher.Exact(DataKind.Image)),
                 new ParameterSpec("box",   DataKindMatcher.Exact(DataKind.Struct), IsOptional: false, IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("stroke_color", DataKindMatcher.Exact(DataKind.Color), IsOptional: true, IsArray: ArrayMatch.Scalar),
+                new ParameterSpec("fill_color",   DataKindMatcher.Exact(DataKind.Color), IsOptional: true, IsArray: ArrayMatch.Scalar),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Image)),
@@ -91,6 +106,13 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
         }
 
         SKBitmap source = imgArg.AsImage();
+
+        // Optional trailing colours. stroke_color defaults to opaque red;
+        // fill_color defaults to transparent, which suppresses the interior
+        // fill entirely. A null argument keeps the default rather than
+        // painting "nothing", matching the other optional-arg functions.
+        SKColor stroke = args.Length > 2 && !args[2].IsNull ? ToSKColor(args[2]) : DefaultStroke;
+        SKColor fill = args.Length > 3 && !args[3].IsNull ? ToSKColor(args[3]) : SKColor.Empty;
 
         // Null array, empty array, or null single struct — pass the source
         // through unchanged. We still re-encode so the result is owned by this
@@ -122,7 +144,16 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
         // us tolerate a leading null without a per-row registry hop.
         FieldIndices indices = ResolveFieldIndices(elements, frame.Types);
 
-        return new ValueTask<ValueRef>(DrawBoxes(source, elements, indices));
+        return new ValueTask<ValueRef>(DrawBoxes(source, elements, indices, stroke, fill));
+    }
+
+    /// <summary>Default box-outline colour — opaque red.</summary>
+    private static readonly SKColor DefaultStroke = new(0xFF, 0x40, 0x40);
+
+    private static SKColor ToSKColor(ValueRef color)
+    {
+        (byte r, byte g, byte b, byte a) = color.AsColor();
+        return new SKColor(r, g, b, a);
     }
 
     /// <summary>
@@ -137,7 +168,11 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
     }
 
     private static ValueRef DrawBoxes(
-        SKBitmap source, ReadOnlySpan<ValueRef> elements, FieldIndices indices)
+        SKBitmap source,
+        ReadOnlySpan<ValueRef> elements,
+        FieldIndices indices,
+        SKColor strokeColor,
+        SKColor fillColor)
     {
         using SKBitmap copy = source.Copy()
             ?? throw new InvalidOperationException(
@@ -146,15 +181,28 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
 
         using SKPaint stroke = new()
         {
-            Color = new SKColor(0xFF, 0x40, 0x40),  // red
+            Color = strokeColor,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = MathF.Max(2f, source.Width / 400f),
             IsAntialias = true,
         };
 
+        // Interior fill is only painted when the caller supplied a fill colour
+        // with non-zero alpha; the default transparent fill is skipped so the
+        // box footprint stays untouched.
+        bool hasFill = fillColor.Alpha != 0;
+        using SKPaint fill = new()
+        {
+            Color = fillColor,
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+
+        // Label background tracks the stroke colour at a fixed 0xCC alpha so the
+        // overlay reads as one colour scheme regardless of the chosen stroke.
         using SKPaint labelBg = new()
         {
-            Color = new SKColor(0xFF, 0x40, 0x40, 0xCC),
+            Color = strokeColor.WithAlpha(0xCC),
             Style = SKPaintStyle.Fill,
             IsAntialias = true,
         };
@@ -195,6 +243,10 @@ public sealed class ImageDrawBoundingBoxesFunction : IFunction, IScalarFunction
                 h = fields[indices.H].ToFloat();
             }
 
+            if (hasFill)
+            {
+                canvas.DrawRect(x, y, w, h, fill);
+            }
             canvas.DrawRect(x, y, w, h, stroke);
 
             string? labelText_ = BuildLabelText(fields, indices);
