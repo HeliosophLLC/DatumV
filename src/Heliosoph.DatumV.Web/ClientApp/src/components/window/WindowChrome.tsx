@@ -10,14 +10,18 @@ import { ZoomChip } from '@/components/status/ZoomChip';
 // bar) from this one prop, so callers state intent once instead of
 // composing a handful of booleans.
 //
-//   main   = SPA host window: everything on
-//   loader = pre-SPA splash / welcome: menu + status bar off,
-//            favicon + min/max on (it's still the app window)
-//   dialog = modal child window: only the close button + favicon-less
-//            titlebar; min/max are disabled at the BrowserWindow
-//            level too (electron/main.ts), so even OS shortcuts
-//            can't trigger them.
-export type WindowChromeKind = 'main' | 'loader' | 'dialog';
+//   main    = SPA host window: everything on
+//   tearout = torn-out tab window: like main but no MenuBar (the
+//             File/Edit/View menu is a main-window concept; a
+//             torn-out window is a bare editor surface). Favicon +
+//             min/max + status bar stay on — it's still an app window.
+//   loader  = pre-SPA splash / welcome: menu + status bar off,
+//             favicon + min/max on (it's still the app window)
+//   dialog  = modal child window: only the close button + favicon-less
+//             titlebar; min/max are disabled at the BrowserWindow
+//             level too (electron/main.ts), so even OS shortcuts
+//             can't trigger them.
+export type WindowChromeKind = 'main' | 'tearout' | 'loader' | 'dialog';
 
 // Outer chrome shared across every Electron window in the app:
 //
@@ -54,7 +58,7 @@ export function WindowChrome({
     <div className="bg-background text-foreground border-border flex h-screen flex-col border">
       <TitleBar kind={kind} title={title} />
       <div className="flex flex-1 overflow-hidden">{children}</div>
-      {kind === 'main' && (
+      {(kind === 'main' || kind === 'tearout') && (
         <GlobalStatusBar
           leftChips={<DownloadsChip />}
           rightChips={

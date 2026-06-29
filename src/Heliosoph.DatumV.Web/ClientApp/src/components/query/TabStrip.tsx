@@ -27,6 +27,7 @@ import {
   moveTab,
   findLeaf,
   importTabIntoLeaf,
+  isTornOutWindow,
   type TabKind,
 } from '@/state/tabs';
 import { executionsState } from '@/state/execution';
@@ -173,6 +174,15 @@ export function TabStrip({ leafId }: { leafId: string }) {
 
   return (
     <div className="bg-background flex h-9 shrink-0 items-stretch">
+      {/* Torn-out windows have no left dock, so the strip would sit
+          flush against the window's left edge. A short leading spacer
+          nudges the first tab in ~30px; `app-drag` makes the gap double
+          as a window-move handle (the only empty chrome region left in
+          a torn-out window once the dock is gone). Carries the bottom
+          border so the strip's separator line stays continuous. */}
+      {isTornOutWindow && (
+        <div className="app-drag border-border w-[36px] shrink-0 border-b border-r" aria-hidden />
+      )}
       {/* Left rail: pinned tabs (Models) live here, outside the
           scrollable region so they're always visible regardless of how
           many other tabs the user has open. Rendered as icon-only chips

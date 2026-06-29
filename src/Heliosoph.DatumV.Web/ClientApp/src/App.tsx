@@ -63,7 +63,7 @@ export default function App() {
   // tabs back into the main works seamlessly.
   if (isTornOutWindow) {
     return (
-      <WindowChrome>
+      <WindowChrome kind="tearout">
         <div className="flex flex-1 flex-col overflow-hidden">
           <QueryEditorView />
         </div>
