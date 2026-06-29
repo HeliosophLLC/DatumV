@@ -22,7 +22,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "highlight.js": "^11.11.1",
-    "i18next": "^26.1.0",
+    "i18next": "^26.3.3",
     "i18next-icu": "^2.4.3",
     "lucide-react": "^1.21.0",
     "minisearch": "^7.2.0",
