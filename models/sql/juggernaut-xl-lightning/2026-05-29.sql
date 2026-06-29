@@ -30,7 +30,9 @@ CREATE OR REPLACE MODEL juggernaut_xl_lightning(
   prompt String,
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
-    COMMENT 'Number of Euler denoising steps. Lightning was distilled for 1-8 steps; 1 is fastest, 4 is the recommended minimum for face / fine-detail quality, 8 for hero outputs.'
+    COMMENT 'Number of Euler denoising steps. Lightning was distilled for 1-8 steps; 1 is fastest, 4 is the recommended minimum for face / fine-detail quality, 8 for hero outputs.',
+  seed   Int64 = NULL
+    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt and steps. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'juggernaut-xl-lightning/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
@@ -77,7 +79,7 @@ AS BEGIN
   DECLARE sigmas Float32[] = schedule['sigmas'];
   DECLARE timesteps Float32[] = schedule['timesteps'];
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * 128 * 128), sigmas[1]);
+    sample_normal(4 * 128 * 128, seed), sigmas[1]);
 
   -- 8. Euler denoising loop. UNet has 5 named inputs.
   DECLARE i Int32 = 1;

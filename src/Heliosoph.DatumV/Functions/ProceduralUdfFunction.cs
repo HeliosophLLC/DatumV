@@ -323,23 +323,36 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             // (SQL literals pick the narrowest exact type, so `0.5` is
             // Float32 but `0.9` is Float64; an unchecked bind drops the
             // mismatch into the body's downstream signature checks).
-            if (!value.IsNull && param.TypeName is not null
+            if (param.TypeName is not null
                 && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
                 && NeedsCoercion(value, declaredKind, declaredIsArray))
             {
-                paramEvaluator ??= paramContext.CreateEvaluator();
-                if (paramFrame.Source is null)
+                if (value.IsNull)
                 {
-                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
+                    // A null carries no kind of its own (a bare `NULL` default
+                    // is Unknown), so stamp the declared kind onto it so body
+                    // call sites resolve function overloads against the
+                    // parameter's declared type rather than Unknown.
+                    value = declaredIsArray
+                        ? ValueRef.NullArray(declaredKind)
+                        : ValueRef.Null(declaredKind);
                 }
-                DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
-                CastExpression cast = new(
-                    new LiteralValueExpression(asData),
-                    param.TypeName,
-                    Span: null);
-                value = await paramEvaluator
-                    .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
-                    .ConfigureAwait(false);
+                else
+                {
+                    paramEvaluator ??= paramContext.CreateEvaluator();
+                    if (paramFrame.Source is null)
+                    {
+                        paramFrame = paramEvaluator.CreateFrame(Row.Empty);
+                    }
+                    DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
+                    CastExpression cast = new(
+                        new LiteralValueExpression(asData),
+                        param.TypeName,
+                        Span: null);
+                    value = await paramEvaluator
+                        .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
             // Declare before the check so any CustomCheck expression can

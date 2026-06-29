@@ -41,7 +41,9 @@ CREATE OR REPLACE MODEL realistic_vision_hyper(
   prompt String,
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
-    COMMENT 'Number of Euler denoising steps. Hyper-SD was distilled for 1-4 steps; 1 is fastest, 4 is the recommended minimum for face / detail quality, beyond 4 returns diminishing gains.'
+    COMMENT 'Number of Euler denoising steps. Hyper-SD was distilled for 1-4 steps; 1 is fastest, 4 is the recommended minimum for face / detail quality, beyond 4 returns diminishing gains.',
+  seed   Int64 = NULL
+    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt and steps. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'realistic-vision-hyper/2026-05-29/text_encoder/model.onnx' AS text_encoder,
@@ -65,7 +67,7 @@ AS BEGIN
   -- 4. Initial noisy latent (4 channels x 64 x 64) scaled to sigma_max.
   -- SQL arrays are 1-indexed so sigmas[1] is the first (largest) sigma.
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * 64 * 64), sigmas[1]);
+    sample_normal(4 * 64 * 64, seed), sigmas[1]);
 
   -- 5. Euler denoising loop.
   DECLARE i Int32 = 1;

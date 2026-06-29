@@ -25,7 +25,9 @@ CREATE OR REPLACE MODEL sdxl_turbo(
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
     STEP 8
     UNIT 'pixels'
-    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.'
+    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.',
+  seed   Int64 = NULL
+    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt, steps, and size. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sdxl-turbo/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
@@ -76,7 +78,7 @@ AS BEGIN
   DECLARE sigmas Float32[] = schedule['sigmas'];
   DECLARE timesteps Float32[] = schedule['timesteps'];
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
 
   -- 8. Euler denoising loop.
   DECLARE i Int32 = 1;

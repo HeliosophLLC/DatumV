@@ -30,7 +30,9 @@ CREATE OR REPLACE MODEL sd_turbo(
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
     STEP 8
     UNIT 'pixels'
-    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.'
+    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.',
+  seed   Int64 = NULL
+    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt, steps, and size. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sd-turbo/2026-05-29/text_encoder/model.onnx' AS text_encoder,
@@ -50,7 +52,7 @@ AS BEGIN
   DECLARE timesteps Float32[] = schedule['timesteps'];
 
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
 
   DECLARE i Int32 = 1;
   WHILE i <= steps

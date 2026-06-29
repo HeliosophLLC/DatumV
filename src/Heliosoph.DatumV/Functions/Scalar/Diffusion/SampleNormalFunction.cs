@@ -5,11 +5,14 @@ using Heliosoph.DatumV.Model;
 namespace Heliosoph.DatumV.Functions.Scalar.Diffusion;
 
 /// <summary>
-/// <c>sample_normal(count Int32) → Float32[]</c>. Draws <c>count</c> independent
-/// samples from the standard normal distribution N(0, 1). The seed source is
-/// the process-wide <see cref="Random.Shared"/> instance — every call returns
-/// a different draw, mirroring the <c>IsDeterministic = false</c> contract
-/// SQL-defined diffusion bodies declare.
+/// <c>sample_normal(count Int32 [, seed Int64]) → Float32[]</c>. Draws
+/// <c>count</c> independent samples from the standard normal distribution
+/// N(0, 1). Without a <c>seed</c> — or with a NULL <c>seed</c> — the source is
+/// the process-wide <see cref="Random.Shared"/> instance, so every call
+/// returns a different draw, mirroring the <c>IsDeterministic = false</c>
+/// contract SQL-defined diffusion bodies declare. A non-null <c>seed</c>
+/// makes the draw reproducible: the same <c>(count, seed)</c> pair always
+/// yields the same array.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,6 +31,13 @@ namespace Heliosoph.DatumV.Functions.Scalar.Diffusion;
 /// this once at the start of each generation to fill the initial latent
 /// buffer with sigma-scaled noise.
 /// </para>
+/// <para>
+/// <strong>Reproducibility scope.</strong> Seeding fixes only the initial
+/// latent noise. A given seed reproduces this engine's own output on a fixed
+/// execution provider; it does not match torch.randn (the distribution is
+/// close but not identical) and does not, on its own, defeat non-deterministic
+/// GPU kernels downstream.
+/// </para>
 /// </remarks>
 public sealed class SampleNormalFunction : IFunction, IScalarFunction
 {
@@ -40,8 +50,12 @@ public sealed class SampleNormalFunction : IFunction, IScalarFunction
     /// <inheritdoc />
     public static string Description =>
         "Draws `count` independent samples from N(0, 1) via Box-Muller and returns Float32[]. " +
-        "Uses Random.Shared as the seed source — every call produces a different draw. " +
+        "With no seed (or a NULL seed) it uses Random.Shared, so every call produces a different " +
+        "draw; an explicit integer seed makes the draw reproducible. " +
         "Used by diffusion model bodies to fill the initial latent buffer with Gaussian noise.";
+
+    private static readonly ReturnTypeRule Float32ArrayReturn =
+        ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32));
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -52,12 +66,26 @@ public sealed class SampleNormalFunction : IFunction, IScalarFunction
                 new ParameterSpec("count", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
             ],
             VariadicTrailing: null,
-            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+            ReturnType: Float32ArrayReturn),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("count", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+                new ParameterSpec("seed", DataKindMatcher.Family(DataKindFamily.IntegerFamily)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: Float32ArrayReturn),
     ];
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<SampleNormalFunction>(argumentKinds);
+
+    /// <summary>
+    /// Not pure: the unseeded form draws from <see cref="Random.Shared"/>, so
+    /// CSE must never collapse two textual call sites into one evaluation.
+    /// </summary>
+    public bool IsPure => false;
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -85,8 +113,24 @@ public sealed class SampleNormalFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(Array.Empty<float>(), DataKind.Float32));
         }
 
+        // A non-null seed makes the draw reproducible; otherwise (no seed arg,
+        // or an explicit NULL seed) fall back to the shared RNG.
+        Random rng;
+        if (args.Length > 1 && !args[1].IsNull)
+        {
+            if (!args[1].TryToInt64(out long seed))
+            {
+                throw new FunctionArgumentException(Name,
+                    $"seed of kind {args[1].Kind} could not be widened to Int64.");
+            }
+            rng = new Random(unchecked((int)seed));
+        }
+        else
+        {
+            rng = Random.Shared;
+        }
+
         float[] noise = new float[count];
-        Random rng = Random.Shared;
         for (int i = 0; i < count; i += 2)
         {
             // Box-Muller: 1 - rng to map (0, 1] (avoids log(0) when the draw is exactly 0).
