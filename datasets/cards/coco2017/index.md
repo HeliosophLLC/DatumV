@@ -30,8 +30,8 @@ Run a pretrained YOLOX detector over every COCO image:
 
 ```sql
 SELECT
-  name,
-  models.yolox_s(image) AS detections
+  file_name,
+  models.yolox_s(file) AS detections
 FROM datasets.coco_test2017
 LIMIT 100;
 ```
@@ -40,23 +40,23 @@ Unnest into one row per box:
 
 ```sql
 SELECT
-  i.name,
-  d.label,
-  d.score,
-  d.box
+  i.file_name,
+  d.value.label,
+  d.value.score,
+  d.value.bbox
 FROM datasets.coco_test2017 AS i
-CROSS JOIN UNNEST(models.yolox_s(i.image)) AS d
-WHERE d.score > 0.5;
+CROSS JOIN UNNEST(models.yolox_s(i.file)) AS d
+WHERE d.value.score > 0.5;
 ```
 
 Count detections by class across the whole split:
 
 ```sql
-SELECT d.label, COUNT(*) AS hits
+SELECT d.value.label AS label, COUNT(*) AS hits
 FROM datasets.coco_test2017 AS i
-CROSS JOIN UNNEST(models.yolox_s(i.image)) AS d
-WHERE d.score > 0.4
-GROUP BY d.label
+CROSS JOIN UNNEST(models.yolox_s(i.file)) AS d
+WHERE d.value.score > 0.4
+GROUP BY d.value.label
 ORDER BY hits DESC;
 ```
 
@@ -64,8 +64,8 @@ Draw boxes for spot-checking:
 
 ```sql
 SELECT
-  name,
-  draw_boxes(image, models.yolox_s(image)) AS annotated
+  file_name,
+  image_draw_bounding_boxes(file, models.yolox_s(file)) AS annotated
 FROM datasets.coco_test2017
 LIMIT 12;
 ```
@@ -75,8 +75,8 @@ LIMIT 12;
 Every split produces the same `images` table:
 
 ```
-name:         String      -- entry path inside the source zip
-image:        Image       -- decoded JPEG, sidecar-backed
+file_name:    String      -- entry path inside the source zip
+file:         Image       -- decoded JPEG, sidecar-backed
 file_width:   Int32       -- pixel width (null when header parse failed)
 file_height:  Int32       -- pixel height
 file_channels: UInt8      -- 1 / 3 / 4
@@ -85,7 +85,7 @@ file_orientation: String  -- "landscape" / "portrait" / "square"
 ```
 
 When annotations are present (val2017, train2017) a sibling `annotations`
-table joins on `name` and carries bbox / segmentation / category_id. The
+table joins on `file_name` and carries bbox / segmentation / category_id. The
 JSON loader that produces it is staged for a follow-up release —
 test2017 ships images-only until then.
 
@@ -95,7 +95,7 @@ test2017 ships images-only until then.
 
 ## Tips
 
-- **Sidecar-backed images** — the `image` column carries a handle into
+- **Sidecar-backed images** — the `file` column carries a handle into
   a `.datum-blob` companion file, not inline bytes. Materializing the
   full pixel data is lazy; most filter / count queries never touch the
   blob store at all.

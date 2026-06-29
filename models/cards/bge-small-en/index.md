@@ -23,8 +23,7 @@ Embed a sentence:
 SELECT models.bge_small_en_v1_5('a quick brown fox jumps over the lazy dog') AS embedding;
 ```
 
-Compare similarity between two questions against the duplicate-question
-gold labels:
+Compare similarity between two questions against the duplicate-question gold labels:
 
 ```sql
 SELECT
@@ -37,6 +36,10 @@ SELECT
 FROM datasets.quora_question_pairs
 LIMIT 10;
 ```
+
+Output:
+
+![Compare similarity between two questions against the duplicate-question gold labels](query.jpg)
 
 ## Output shape
 

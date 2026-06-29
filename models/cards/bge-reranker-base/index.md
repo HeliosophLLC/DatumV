@@ -57,6 +57,10 @@ ORDER BY rerank_score DESC
 LIMIT 10;
 ```
 
+Output:
+
+![Two-stage retrieve-then-rerank against the NFCorpus medical passages](query.jpg)
+
 The bi-encoder cosine pass narrows 3,633 passages down to 50 cheap
 candidates; the reranker then re-orders that short list with much
 better accuracy than cosine alone.

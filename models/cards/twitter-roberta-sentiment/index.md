@@ -23,8 +23,7 @@ SELECT models.twitter_roberta_sentiment('honestly the new release just made my d
 -- result = {label: 'positive', score: 0.97}
 ```
 
-Score the TweetEval sentiment test split and measure accuracy against
-the gold labels:
+Score the TweetEval sentiment test split and measure accuracy against the gold labels:
 
 ```sql
 WITH predictions AS (
@@ -43,6 +42,10 @@ FROM predictions
 GROUP BY gold, predicted
 ORDER BY gold, predicted;
 ```
+
+Output:
+
+![Score the TweetEval sentiment test split and measure accuracy against the gold labels](query.jpg)
 
 That's the full 3×3 confusion matrix over 12,284 held-out tweets.
 

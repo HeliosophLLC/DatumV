@@ -52,19 +52,25 @@ WITH labels AS (
   UNION ALL SELECT 'healthy',      models.biomedclip_text_embed('a chest X-ray of a healthy patient')
 ),
 images AS (
-  SELECT path, models.biomedclip_image_embed(img) AS emb
+  SELECT path, img, models.biomedclip_image_embed(img) AS emb
   FROM datasets.mednist_classes
   LIMIT 100
 )
 SELECT
   i.path,
+  i.img,
   l.dx,
   dot_product(i.emb, l.emb) AS score
 FROM images i
 CROSS JOIN labels l
 QUALIFY rank() OVER (PARTITION BY i.path ORDER BY dot_product(i.emb, l.emb) DESC) = 1
 ORDER BY i.path;
+
 ```
+
+Output:
+
+![Zero-shot diagnosis over a dataset of X-rays — rank each image against a fixed list of candidate descriptions, return the top match per image](query.jpg)
 
 Cross-modal retrieval — given a free-text description, surface the
 MedNIST thumbnails that look most like it. Top hits should fall in the

@@ -40,6 +40,10 @@ ORDER BY similarity DESC
 LIMIT 10;
 ```
 
+Output:
+
+![Rank a real web corpus by similarity to a natural-language query](query.jpg)
+
 For a real retrieval system you'd materialize `p_emb` into a stored
 `Float32[]` column once and re-rank against the stored vectors per
 query — see the "Embed once, compare many" tip below.

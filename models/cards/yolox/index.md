@@ -44,12 +44,16 @@ Unnest detections into rows (one per box):
 SELECT
     LET classes = models.yolox_s(a.file),
     file AS baseline,
-    image_draw_bounding_boxes(file, c.value),
+    image_draw_bounding_boxes(file, c.value, color(50, 50, 200), color(50, 50, 200, 100)),
     image_crop(file, c.value.bbox)
 FROM datasets.coco_val2017 a
 CROSS JOIN unnest(classes) c
 LIMIT 100
 ```
+
+Output:
+
+![Unnest detections into rows (one per box))](query.jpg)
 
 Filter to a single class (people):
 
@@ -70,10 +74,14 @@ LIMIT 100
 Every variant returns `Array<LabeledDetection>`:
 
 ```
+bbox:  BoundingBox -- {x, y, w, h} in pixel coordinates
 label: String      -- COCO class name (e.g. "person", "car")
 score: Float32     -- 0.0–1.0 confidence
-box:   BoundingBox -- {x, y, width, height} in pixel coordinates
 ```
+
+`UNNEST` exposes each element as a single `value` column, so field
+access is `value.label` / `value.score` / `value.bbox` (as in the
+examples above).
 
 The 80 COCO categories are the standard set — see the
 [COCO label list](https://github.com/amikelive/coco-labels) for the
@@ -82,10 +90,10 @@ full vocabulary.
 ## Screenshots
 
 <!--
-Drop images under models/cards/yolox/ and reference them with a
-relative path. Example:
+Drop images in this folder (models/cards/yolox/) and reference them
+with a sibling relative path. Example:
 
-![Detection on a street scene](yolox/street-detections.png)
+![Detection on a street scene](street-detections.png)
 -->
 
 ## Tips

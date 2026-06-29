@@ -33,6 +33,10 @@ FROM datasets.quora_question_pairs
 LIMIT 10;
 ```
 
+Output:
+
+![Compare similarity between two questions](query.jpg)
+
 ## Output shape
 
 `Float32[]` — length 384, L2-normalised.

@@ -60,6 +60,10 @@ GROUP BY predicted
 ORDER BY n_predicted DESC;
 ```
 
+Output:
+
+![Score the Jigsaw test split and measure per-label precision/recall against the gold flags](query.jpg)
+
 ## Output shape
 
 `Array<ScoredLabel>` — zero to six entries, each `{label: String,
