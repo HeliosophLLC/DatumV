@@ -33,8 +33,10 @@ The resolved instance's `Field` value identifies which inline-metadata field to 
 | `image_height(img)` | Image | `_p4` high 16 bits | SkiaSharp decode |
 | `image_channels(img)` | Image | `_p5` low byte | SkiaSharp decode (`BytesPerPixel`) |
 | `audio_sample_rate(a)` | Audio | `_p4` | NULL (no decode fallback today) |
+| `audio_duration(a)` | Audio | `_p5` ÷ `_p4` (frames ÷ rate) | Decode-free container-duration read |
 | `video_width(v)` | Video | `_p4` low 16 bits | NULL (no decode fallback today) |
 | `video_height(v)` | Video | `_p4` high 16 bits | NULL (no decode fallback today) |
+| `video_duration(v)` | Video | `_p6` ÷ `_p5` (frames ÷ fps) | Decode-free container-duration read |
 | `point_cloud_count(pc)` | PointCloud | `_p4` | Blob-header read |
 | `point_cloud_has_color(pc)` | PointCloud | `_p5` low byte, `HasColor` bit | Blob-header read |
 | `mesh_vertex_count(m)` | Mesh | `_p4` | Blob-header read |

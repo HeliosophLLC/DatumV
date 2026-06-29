@@ -1014,10 +1014,12 @@ public sealed class FunctionRegistry
         // Video
         registry.RegisterScalar<Scalar.Video.VideoWidthFunction>();
         registry.RegisterScalar<Scalar.Video.VideoHeightFunction>();
+        registry.RegisterScalar<Scalar.Video.VideoDurationFunction>();
 
         // Audio
         registry.RegisterScalar<Scalar.Audio.AudioDecodeFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioSampleRateFunction>();
+        registry.RegisterScalar<Scalar.Audio.AudioDurationFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioSamplesFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToMonoFunction>();
         registry.RegisterScalar<Scalar.Audio.AudioToLogMelFunction>();
