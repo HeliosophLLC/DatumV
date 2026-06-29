@@ -369,6 +369,8 @@ internal static class DerivedTableSchemaResolver
                 return ResolveLiteralKind(literal);
             case FunctionCallExpression functionCall:
                 return ResolveFunctionCallKind(functionCall, manifest);
+            case StructLiteralExpression structLiteral:
+                return ResolveStructLiteralKind(structLiteral, scope, manifest);
             case IndexAccessExpression indexAccess:
                 return ResolveIndexAccessKind(indexAccess, scope, manifest);
             case BinaryExpression binary:
@@ -388,6 +390,27 @@ internal static class DerivedTableSchemaResolver
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Builds a canonical <c>Struct&lt;name: Kind, …&gt;</c> annotation for an
+    /// inline struct literal (<c>{ label: 'x', score: 0.9 }</c>). Field names
+    /// come straight from the AST; each field's kind is resolved recursively,
+    /// falling back to <c>"?"</c> for shapes we can't derive (the name still
+    /// surfaces for completion). Returns <see langword="null"/> for the empty
+    /// literal so the caller's <c>"?"</c> fallback applies.
+    /// </summary>
+    private static string? ResolveStructLiteralKind(
+        StructLiteralExpression literal, InnerScope scope, LanguageServerManifest manifest)
+    {
+        if (literal.Fields.Count == 0) return null;
+        List<StructFieldShape> shapes = new(literal.Fields.Count);
+        foreach (StructField field in literal.Fields)
+        {
+            string fieldKind = ResolveExpressionKind(field.Value, scope, manifest) ?? "?";
+            shapes.Add(new StructFieldShape(field.Name, fieldKind));
+        }
+        return StructTypeAnnotation.Format(shapes);
     }
 
     /// <summary>
@@ -603,12 +626,28 @@ internal static class DerivedTableSchemaResolver
         // Schema-qualified call (e.g. `models.X(...)`, `inference.devices(...)`).
         if (call.SchemaName is not null)
         {
+            // `models.X(...)` — registered models live in their own manifest
+            // list, not the function list. A struct-returning model surfaces
+            // its field shape so `models.X(...) AS p` then `p.` completes the
+            // struct's fields; otherwise fall back to the scalar output kind.
+            if (string.Equals(call.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
+                && manifest.Models is { } models)
+            {
+                foreach (ModelEntry model in models)
+                {
+                    if (string.Equals(model.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return StructKindFromSignatures(model.OutputStructFields) ?? model.OutputKind;
+                    }
+                }
+            }
+
             foreach (FunctionSignature f in manifest.Functions)
             {
                 if (string.Equals(f.SchemaName, call.SchemaName, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return f.ReturnType;
+                    return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
                 }
             }
             return null;
@@ -622,7 +661,7 @@ internal static class DerivedTableSchemaResolver
                 if (string.Equals(f.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return f.ReturnType;
+                    return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
                 }
             }
         }
@@ -630,10 +669,28 @@ internal static class DerivedTableSchemaResolver
         {
             if (string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
             {
-                return f.ReturnType;
+                return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Builds a canonical <c>Struct&lt;name: Kind, …&gt;</c> annotation from a
+    /// model/function's declared <c>OutputStructFields</c>, or
+    /// <see langword="null"/> when there are none. The annotation round-trips
+    /// through <see cref="StructTypeAnnotation.TryParse"/>, so a column carrying
+    /// it expands to its fields in hover and dot completion.
+    /// </summary>
+    private static string? StructKindFromSignatures(IReadOnlyList<StructFieldSignature>? fields)
+    {
+        if (fields is not { Count: > 0 }) return null;
+        List<StructFieldShape> shapes = new(fields.Count);
+        foreach (StructFieldSignature field in fields)
+        {
+            shapes.Add(new StructFieldShape(field.Name, field.Kind));
+        }
+        return StructTypeAnnotation.Format(shapes);
     }
 
     /// <summary>

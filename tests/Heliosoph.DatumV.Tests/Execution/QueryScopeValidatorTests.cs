@@ -1,7 +1,10 @@
 using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Model;
+using Heliosoph.DatumV.Models;
 using Heliosoph.DatumV.Parsing;
 using Heliosoph.DatumV.Parsing.Ast;
+using Heliosoph.DatumV.Pooling;
 
 namespace Heliosoph.DatumV.Tests.Execution;
 
@@ -31,6 +34,31 @@ public sealed class QueryScopeValidatorTests : ServiceTestBase
         return stmt is QueryStatement qs
             ? qs.Query
             : throw new InvalidOperationException("Test SQL must parse as a QueryStatement.");
+    }
+
+    /// <summary>
+    /// A model catalog with one entry <c>classify</c> whose declared output is
+    /// a struct of <c>{ label, score }</c>. The loader throws — plan-time
+    /// validation reads only the declared <c>OutputStructFields</c> metadata
+    /// and never instantiates the model.
+    /// </summary>
+    private static ModelCatalog BuildModelCatalogWithClassify()
+    {
+        ModelCatalog models = new(modelDirectory: System.IO.Path.GetTempPath());
+        models.Register(new ModelCatalogEntry(
+            Name: "classify",
+            Backend: "test",
+            RelativePath: null,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Struct,
+            IsDeterministic: true,
+            Loader: _ => throw new NotSupportedException("Plan-time validation must not load the model."),
+            OutputStructFields:
+            [
+                new ModelStructFieldInfo("label", DataKind.String, IsArray: false, KindLabel: "String"),
+                new ModelStructFieldInfo("score", DataKind.Float32, IsArray: false, KindLabel: "Float32"),
+            ]));
+        return models;
     }
 
     [Fact]
@@ -182,6 +210,158 @@ public sealed class QueryScopeValidatorTests : ServiceTestBase
             "SELECT id AS s FROM items ORDER BY s.field");
 
         catalog.PlanQuery(query);
+    }
+
+    [Fact]
+    public void Plan_StructColumnFromSubquery_UsedAsQualifier_DoesNotThrow()
+    {
+        // A subquery projects a struct-valued column `s`; the outer query
+        // accesses its fields via `s.label` / `s.score`. The subquery is an
+        // opaque source — the outer scope can't see that it emits `s` — so
+        // the 2-part qualifier path must defer to the opaque source in scope
+        // rather than throw "Unknown table or alias 's'". The runtime
+        // row-evaluator resolves `s` as a column and `.label` as a struct
+        // field. Mirrors the bare-name path, which already defers to opaque
+        // sources via ScopeChainContainsOpaqueSource.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+
+        QueryExpression query = Parse(
+            "SELECT s.label, s.score FROM ("
+            + "SELECT { label: 'test', score: 0.9 } s) t");
+
+        catalog.PlanQuery(query);
+    }
+
+    /// <summary>
+    /// A model catalog with one detector <c>detect</c> whose declared output is
+    /// an <em>array</em> of struct <c>{ bbox, label, score }</c> — the shape an
+    /// <c>UNNEST(models.detect(file))</c> source expands one struct per row.
+    /// </summary>
+    private static ModelCatalog BuildModelCatalogWithDetector()
+    {
+        ModelCatalog models = new(modelDirectory: System.IO.Path.GetTempPath());
+        models.Register(new ModelCatalogEntry(
+            Name: "detect",
+            Backend: "test",
+            RelativePath: null,
+            InputKinds: [DataKind.Image],
+            OutputKind: DataKind.Struct,
+            IsDeterministic: true,
+            Loader: _ => throw new NotSupportedException("Plan-time validation must not load the model."),
+            OutputIsArray: true,
+            OutputStructFields:
+            [
+                new ModelStructFieldInfo("bbox", DataKind.Struct, IsArray: false, KindLabel: "Struct"),
+                new ModelStructFieldInfo("label", DataKind.String, IsArray: false, KindLabel: "String"),
+                new ModelStructFieldInfo("score", DataKind.Float32, IsArray: false, KindLabel: "Float32"),
+            ]));
+        return models;
+    }
+
+    [Fact]
+    public void Plan_UnknownStructFieldFromUnnestedDetector_Throws()
+    {
+        // The 3-part shape from the detector model cards:
+        // `UNNEST(models.detect(file)) AS d` then `d.value.bogus`. The model's
+        // OutputStructFields describe the element struct UNNEST yields as
+        // `value`, so a typo'd field fails AT PLAN TIME — before the detector
+        // runs over the whole input (the GROUP BY d.value.label shape is
+        // blocking, so the runtime error would otherwise wait for every frame).
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+        catalog.Models = BuildModelCatalogWithDetector();
+
+        QueryExpression query = Parse(
+            "SELECT d.value.bogus FROM items i CROSS JOIN UNNEST(models.detect(i.file)) AS d");
+
+        ExecutionException ex = Assert.Throws<ExecutionException>(() => catalog.PlanQuery(query));
+        Assert.Contains("Struct column 'd.value' has no field named 'bogus'", ex.Message);
+    }
+
+    [Fact]
+    public void Plan_KnownStructFieldFromUnnestedDetector_DoesNotThrow()
+    {
+        // Companion: real element-struct fields (`d.value.label`,
+        // `d.value.score`) plan cleanly, including in WHERE / GROUP BY / ORDER
+        // BY — every clause routes through the same field check.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+        catalog.Models = BuildModelCatalogWithDetector();
+
+        QueryExpression query = Parse(
+            "SELECT d.value.label AS label, COUNT(*) AS hits "
+            + "FROM items i CROSS JOIN UNNEST(models.detect(i.file)) AS d "
+            + "WHERE d.value.score > 0.4 "
+            + "GROUP BY d.value.label ORDER BY hits DESC");
+
+        catalog.PlanQuery(query);
+    }
+
+    [Fact]
+    public void Plan_UnknownStructFieldFromSubqueryModelColumn_Throws()
+    {
+        // The headline of Slice 3: a typo'd struct field on a model-projected
+        // column (`p.labxl` where the subquery emits `models.classify(file) AS p`
+        // and the model declares fields label/score) FAILS AT PLAN TIME. Before
+        // this, the error surfaced only per-row at the very end of execution —
+        // after the model inference had already run for minutes.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+        catalog.Models = BuildModelCatalogWithClassify();
+
+        QueryExpression query = Parse(
+            "SELECT p.labxl FROM (SELECT models.classify(file) AS p FROM items) t");
+
+        ExecutionException ex = Assert.Throws<ExecutionException>(() => catalog.PlanQuery(query));
+        Assert.Contains("Struct column 'p' has no field named 'labxl'", ex.Message);
+    }
+
+    [Fact]
+    public void Plan_KnownStructFieldFromSubqueryModelColumn_DoesNotThrow()
+    {
+        // Companion: real fields of the model's declared output struct plan
+        // cleanly — the field-name check must not false-positive.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+        catalog.Models = BuildModelCatalogWithClassify();
+
+        QueryExpression query = Parse(
+            "SELECT p.label, p.score FROM (SELECT models.classify(file) AS p FROM items) t");
+
+        catalog.PlanQuery(query);
+    }
+
+    [Fact]
+    public void Plan_UnknownStructFieldFromSubqueryStructLiteralColumn_Throws()
+    {
+        // The struct shape can also come from a struct literal, whose field
+        // names live directly in the AST — no model needed. `s.bogus` fails at
+        // plan time; `s.label` / `s.score` would pass.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+
+        QueryExpression query = Parse(
+            "SELECT s.bogus FROM (SELECT { label: 'test', score: 0.9 } s) t");
+
+        ExecutionException ex = Assert.Throws<ExecutionException>(() => catalog.PlanQuery(query));
+        Assert.Contains("Struct column 's' has no field named 'bogus'", ex.Message);
+    }
+
+    [Fact]
+    public async Task StructColumnFromSubquery_FieldAccess_RunsEndToEnd()
+    {
+        // End-to-end companion to the plan-time test above: the exact
+        // user-reported shape executes and projects the struct's fields.
+        TableCatalog catalog = BuildCatalogWithItemsTable();
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT s.label, s.score FROM ("
+            + "SELECT { label: 'test', score: 0.9 } s) t",
+            catalog);
+
+        Row row = Assert.Single(rows);
+        Arena scratch = catalog.Pool.Backing.RentArena();
+        try
+        {
+            Assert.Equal("test", row["label"].AsString(scratch));
+            Assert.Equal(0.9, row["score"].AsFloat64(), 5);
+        }
+        finally { catalog.Pool.Backing.TryReturn(scratch); }
     }
 
     [Fact]

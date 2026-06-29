@@ -504,6 +504,127 @@ public sealed class CompletionProviderTests : ServiceTestBase
     }
 
     [Fact]
+    public void GetCompletions_AfterThreePartDot_OnUnnestOfModelEntryArray_OffersStructFields()
+    {
+        // `d.value.` where `d` is `UNNEST(models.rtdetr_r18(file))` and
+        // `rtdetr_r18` is a `ModelEntry` (not a function-registered model)
+        // whose OutputKind label is `Array<LabeledDetection>`. The unnest
+        // path strips the array wrapper, expands the named type, and surfaces
+        // the element struct's fields — the exact `d.value.label` shape from
+        // the detector model cards.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "items", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "unnest",
+                    Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                    IsTableValued = true,
+                },
+            ],
+            Models =
+            [
+                new ModelEntry { Name = "rtdetr_r18", OutputKind = "Array<LabeledDetection>" },
+            ],
+            NamedTypes =
+            [
+                new NamedTypeEntry
+                {
+                    Name = "BoundingBox",
+                    Description = "Struct<x: Float32, y: Float32, w: Float32, h: Float32>",
+                },
+                new NamedTypeEntry
+                {
+                    Name = "LabeledDetection",
+                    Description = "Struct<bbox: BoundingBox, label: String, score: Float32>",
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT d.value. FROM items i CROSS JOIN unnest(models.rtdetr_r18(i.file)) d";
+        int offset = sql.IndexOf("d.value.", StringComparison.Ordinal) + "d.value.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "bbox" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "label" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "score" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterDot_OnSubqueryModelStructColumn_OffersStructFields()
+    {
+        // `p.` where `p` is a struct-valued column projected by a subquery —
+        // `FROM (SELECT models.mobilenetv2(file) AS p ...) t`. The model entry
+        // declares `OutputStructFields` (label, score), so the derived-table
+        // resolver gives `p` a `Struct<…>` kind and dot completion surfaces
+        // the fields. This is the headline case for the original `p.label` bug.
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry { Name = "images", Columns =
+                    [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] },
+            ],
+            Functions = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "mobilenetv2",
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "label", Kind = "String" },
+                        new StructFieldSignature { Name = "score", Kind = "Float32" },
+                    ],
+                },
+            ],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT p. FROM (SELECT models.mobilenetv2(file) AS p FROM images) t";
+        int offset = sql.IndexOf("p.", StringComparison.Ordinal) + "p.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "label" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "score" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterDot_OnSubqueryStructLiteralColumn_OffersStructFields()
+    {
+        // `s.` where `s` is a struct literal projected by a subquery —
+        // `FROM (SELECT { label: 'test', score: 0.9 } s) t`. Field names come
+        // straight from the literal's AST; no manifest entry required.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        const string sql =
+            "SELECT s. FROM (SELECT { label: 'test', score: 0.9 } s) t";
+        int offset = sql.IndexOf("s.", StringComparison.Ordinal) + "s.".Length;
+        CompletionItem[] items = provider.GetCompletions(sql, offset);
+
+        Assert.Contains(items, item => item.Label == "label" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "score" && item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
     public void GetCompletions_AfterThreePartDot_OnUnnestOfLetBinding_OffersStructFields()
     {
         // Same end shape, but the unnest argument is a LET name rather
