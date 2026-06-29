@@ -7,10 +7,13 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { CodeBlock } from '@/components/markdown/CodeBlock';
 import { isExternalUrl, openExternalUrl } from '@/lib/openExternal';
+import { openDocInDocsTab, resolveDocCorpusLink } from '@/state/docs';
 import {
   isDriftedVariant,
   loadEntryCard,
   modelsState,
+  openModelEntry,
+  resolveCardEntryLink,
   setSelectedVariant,
   type CatalogEntrySnapshot,
   type CatalogVariantSnapshot,
@@ -252,6 +255,12 @@ export function ModelDetail({
               // Rewrite relative URLs to the entry-card-asset endpoint.
               urlTransform={(url) => {
                 if (/^https?:|^data:|^mailto:|^#|^\//i.test(url)) return url;
+                // Leave sibling-card and docs-corpus links untouched so the
+                // click handler can route them in-app (to the linked model
+                // or the Documentation tab) rather than rewriting them to
+                // the card-asset endpoint.
+                if (resolveCardEntryLink(entry.cardFile, url)) return url;
+                if (resolveDocCorpusLink(url)) return url;
                 const clean = url.replace(/^\.\//, '');
                 return `/api/model-catalog/entries/${encodeURIComponent(entryName)}/card/assets/${clean}`;
               }}
@@ -259,20 +268,54 @@ export function ModelDetail({
                 pre: ({ children, ...rest }) => (
                   <CodeBlock {...rest}>{children}</CodeBlock>
                 ),
-                a: ({ href, children, ...rest }) => (
-                  <a
-                    {...rest}
-                    href={href}
-                    onClick={(e) => {
-                      if (isExternalUrl(href)) {
-                        e.preventDefault();
-                        openExternalUrl(href);
-                      }
-                    }}
-                  >
-                    {children}
-                  </a>
-                ),
+                a: ({ href, children, ...rest }) => {
+                  const targetEntry = href
+                    ? resolveCardEntryLink(entry.cardFile, href)
+                    : null;
+                  const docPath = href ? resolveDocCorpusLink(href) : null;
+                  // Captured separately: `isExternalUrl`'s type guard
+                  // narrows `href` away below, so the safety-net check at
+                  // the end can't reuse it.
+                  const rawHref = href ?? '';
+                  return (
+                    <a
+                      {...rest}
+                      href={href}
+                      title={isExternalUrl(href) ? href : rest.title}
+                      onClick={(e) => {
+                        if (targetEntry) {
+                          // In-card link to a sibling model — swap the
+                          // detail pane to that entry instead of navigating
+                          // the webview.
+                          e.preventDefault();
+                          openModelEntry(targetEntry);
+                          return;
+                        }
+                        if (docPath) {
+                          // In-app docs link — switch to the Documentation
+                          // tab instead of navigating the webview.
+                          e.preventDefault();
+                          openDocInDocsTab(docPath);
+                          return;
+                        }
+                        if (isExternalUrl(href)) {
+                          e.preventDefault();
+                          openExternalUrl(href);
+                          return;
+                        }
+                        // Anything else (a relative link we couldn't
+                        // resolve, or one rewritten to the card-asset
+                        // endpoint) must NOT navigate — letting the webview
+                        // follow it unloads the SPA and blanks the screen.
+                        // Pure `#anchor` links are harmless, so let those
+                        // through.
+                        if (rawHref && !rawHref.startsWith('#')) e.preventDefault();
+                      }}
+                    >
+                      {children}
+                    </a>
+                  );
+                },
               }}
             >
               {entryCard}

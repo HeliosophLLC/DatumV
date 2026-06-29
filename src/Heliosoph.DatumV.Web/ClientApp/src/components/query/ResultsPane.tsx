@@ -834,11 +834,11 @@ function cellTextForMeasure(cell: JsonCell): string {
     return `${cell.elementKind ?? '?'}[${dim}] · [0.0000..9.9999]`;
   }
   if (cell.kind === 'struct') {
-    // The inline chip shows "{f1, f2, f3, …}" — measure against the joined
-    // field-name list, capped so a wide struct doesn't push every other
-    // column off-screen (the chip itself truncates).
-    const names = (cell.fields ?? []).map((f) => f.name).join(', ');
-    return `{${names.length > 64 ? names.substring(0, 64) + '…' : names}}`;
+    // The inline chip shows the compact JSON of the struct's values —
+    // measure against that, capped so a wide struct doesn't push every
+    // other column off-screen (the chip itself truncates).
+    const summary = structSummary(cell);
+    return summary.length > 64 ? summary.substring(0, 64) + '…' : summary;
   }
   return cell.text ?? '';
 }
@@ -2561,11 +2561,17 @@ function MatrixView({
 // Grid view shows a compact `{f1, f2, …}` chip with click-to-open;
 // the single-value view shows the full key/value table inline.
 
+// Compact single-line preview of the struct's actual values — e.g.
+// `{"label":"negative","score":0.4777}` — so small structs read at a
+// glance in the grid without a click-to-open round-trip, matching how
+// the JSON cell surfaces its content inline. Rich nested payloads
+// (media, arrays, meshes) collapse to short descriptors via
+// cellToJsonValue. The chip truncates on overflow and the modal still
+// shows the full tree.
 function structSummary(cell: JsonCell): string {
   const fields = cell.fields ?? [];
   if (fields.length === 0) return '{}';
-  const names = fields.map((f) => f.name).join(', ');
-  return `{${names}}`;
+  return JSON.stringify(cellToJsonValue(cell));
 }
 
 function StructCell({ cell }: { cell: JsonCell }) {

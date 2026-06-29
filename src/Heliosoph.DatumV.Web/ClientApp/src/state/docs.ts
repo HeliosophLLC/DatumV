@@ -1,5 +1,6 @@
 import { proxy } from 'valtio';
 import MiniSearch, { type SearchResult } from 'minisearch';
+import { DOCS_TAB_ID, selectTab } from './tabs';
 
 // All markdown documents under repo `/docs/`, bundled into the JS at build
 // time via Vite's `import.meta.glob`. The `?raw` query yields the file
@@ -237,6 +238,14 @@ export function selectDoc(path: DocPath): void {
   docsState.selectedPath = path;
 }
 
+/** Open `path` in the pinned Documentation tab, switching focus to that
+ *  tab. Used by surfaces outside the docs view (e.g. model cards) that
+ *  link into the bundled docs corpus — see `resolveDocCorpusLink`. */
+export function openDocInDocsTab(path: DocPath): void {
+  selectDoc(path);
+  selectTab(DOCS_TAB_ID);
+}
+
 export function setDocQuery(query: string): void {
   docsState.query = query;
 }
@@ -301,6 +310,32 @@ export function resolveDocLink(
   const match = DOC_ENTRIES.find((e) => e.path === resolved);
   if (!match) return null;
   return { kind: 'doc', path: match.path, anchor };
+}
+
+/**
+ * Resolve a markdown link `href` that points into the bundled docs corpus
+ * from *outside* the docs tree — e.g. a model card linking with
+ * `../../../docs/sql/let-bindings.md`. Anchors on the `docs/` path
+ * segment rather than the link's relative depth, so it doesn't need to
+ * know where the linking file lives. Returns the matching in-corpus
+ * `DocPath`, or null when the href isn't a relative `.md` reference into a
+ * bundled doc (external URL, asset, doc we don't ship, …).
+ */
+export function resolveDocCorpusLink(href: string): DocPath | null {
+  if (href.length === 0) return null;
+  // Protocol-qualified (http, mailto, …) links never point into the
+  // bundled corpus.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  // Strip any `#anchor` — cross-tab anchor scrolling isn't wired up, so
+  // we open the doc at the top.
+  const hashIdx = href.indexOf('#');
+  const rawPath = (hashIdx < 0 ? href : href.slice(0, hashIdx)).replace(/\\/g, '/');
+  // Everything after a `docs/` path segment is a docs-relative path.
+  const match = /(?:^|\/)docs\/(.+)$/.exec(rawPath);
+  if (!match) return null;
+  const candidate = match[1];
+  if (!candidate.toLowerCase().endsWith('.md')) return null;
+  return findDoc(candidate) ? candidate : null;
 }
 
 /** Walk a `relPath` from the directory of `fromPath`, honouring `.` and
