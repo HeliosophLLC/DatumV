@@ -542,68 +542,6 @@
       ]
     },
     {
-      "name": "Moondream2 (Compact VLM)",
-      "summary": "Tiny (1.9B) image-aware chat model with Apache-2.0 licensing throughout. Captions images and answers questions about them. Pick when permissive license and small footprint matter more than top-tier quality.",
-      "description": "1.86B-param vision-language model from Vikhyat Korrapati. Surprisingly capable for its size — does captioning, VQA, and basic grounding. Apache-2.0 throughout. Drive via raw onnxruntime sessions (the onnxruntime-genai model_builder doesn't currently accept Moondream2's architecture).",
-      "tasks": [
-        "VisualQA",
-        "ImageCaptioner"
-      ],
-      "tags": [
-        "vlm",
-        "captioning",
-        "vqa",
-        "compact"
-      ],
-      "licenseIds": [
-        "apache-2.0"
-      ],
-      "attributions": [
-        "Vikhyat Korrapati — Moondream",
-        "Heliosoph (Optimum ONNX export from vikhyatk/moondream2 PyTorch weights)"
-      ],
-      "variants": [
-        {
-          "id": "moondream2",
-          "displayName": "Moondream2 (Compact VLM)",
-          "summary": "Tiny (1.9B) image-aware chat model with Apache-2.0 licensing throughout. Captions images and answers questions about them. Pick when permissive license and small footprint matter more than top-tier quality.",
-          "tags": [],
-          "hardware": {
-            "minRamMb": 4096,
-            "minVramMb": 0,
-            "preferred": "cpu"
-          },
-          "approxSizeMb": 2000,
-          "versions": [
-            {
-              "version": "2026-05-29",
-              "sources": [
-                {
-                  "type": "huggingface",
-                  "repo": "Heliosoph/moondream2-onnx",
-                  "revision": "a5a7e0a0e55a53de6b1ae349edeba6a33a0d4f83",
-                  "include": [
-                    "decoder_model_merged_fp16.onnx",
-                    "decoder_model_merged_fp16.onnx_data",
-                    "embed_tokens_fp16.onnx",
-                    "vision_encoder_fp16.onnx",
-                    "*.json",
-                    "*.txt"
-                  ]
-                }
-              ],
-              "installSql": "sql/moondream2/2026-05-29.sql",
-              "models": [
-                {
-                  "identifier": "moondream2"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "YOLOX",
       "summary": "Find and box common objects in a photo (people, cars, dogs — 80 COCO categories). Apache-2.0 alternative to YOLOv8. Pick a size variant: nano/tiny for edge, s/m for CPU defaults, l/x for GPU + accuracy, darknet for the legacy backbone.",
       "description": "All variants share the same 80-class COCO label space, the same preprocessing (BGR, 0–255, letterbox to a multiple of 32), and the same decode logic — they differ only in backbone size. Swap variant ids in a query and the only thing that changes is mAP and latency.",
