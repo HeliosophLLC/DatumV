@@ -5,6 +5,8 @@ using Heliosoph.DatumV.Inference;
 using Heliosoph.DatumV.Inference.OnnxRuntime;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.ModelLibrary;
+using Heliosoph.DatumV.Parsing;
+using Heliosoph.DatumV.Parsing.Ast;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -47,6 +49,36 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Heliosoph.DatumV", "models");
         return File.Exists(Path.Combine(root, folder, firstFile));
+    }
+
+    /// <summary>
+    /// Every text-to-image generator exposes an optional <c>seed Int64 = NULL</c>
+    /// parameter that threads into the <c>sample_normal</c> noise draw. This
+    /// reads the real catalog SQL and parses it (no bundle, no Plan), so it
+    /// runs everywhere and guards the seed surface against accidental removal
+    /// or a missing default.
+    /// </summary>
+    [Theory]
+    [InlineData("absolute-reality-hyper")]
+    [InlineData("dreamshaper-hyper")]
+    [InlineData("epicrealism-hyper")]
+    [InlineData("mo-di-hyper")]
+    [InlineData("openjourney-hyper")]
+    [InlineData("realistic-vision-hyper")]
+    [InlineData("sd-turbo")]
+    [InlineData("sdxl-turbo")]
+    [InlineData("juggernaut-xl-lightning")]
+    public void TextToImage_DeclaresOptionalSeedParameter(string modelId)
+    {
+        Statement stmt = SqlParser.ParseStatement(LoadCanonicalSql(modelId));
+        CreateModelStatement model = Assert.IsType<CreateModelStatement>(stmt);
+
+        UdfParameter seed = Assert.Single(
+            model.Parameters, p => p.Name == "seed");
+        Assert.Equal("Int64", seed.TypeName, ignoreCase: true);
+        Assert.False(seed.IsNotNull);
+        // NULL default — omitting the arg falls back to the shared RNG.
+        Assert.NotNull(seed.Default);
     }
 
     [Fact]

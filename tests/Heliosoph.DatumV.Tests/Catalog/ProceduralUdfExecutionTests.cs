@@ -72,6 +72,36 @@ public class ProceduralUdfExecutionTests : ServiceTestBase
         Assert.Equal(8, values[0].AsInt32());
     }
 
+    // ————————————————————— NULL-default typed parameters —————————————————————
+
+    [Fact]
+    public async Task NullDefaultTypedParam_ResolvesOverloadByDeclaredKind()
+    {
+        // A parameter that defaults to NULL must still carry its declared kind
+        // into the body, otherwise call sites resolve function overloads
+        // against Unknown. Here `seed Int64 = NULL` feeds the two-arg
+        // sample_normal(count, seed) overload; before typed-null binding this
+        // threw "no matching signature for argument kinds [Int32, Unknown]".
+        TableCatalog catalog = CreateCatalog("data",
+            columns: ["v"],
+            new object?[] { 1 });
+
+        catalog.Plan(
+            "CREATE FUNCTION noise_len(seed INT64 = NULL) RETURNS INT32 BEGIN " +
+                "RETURN cardinality(sample_normal(8, seed)) " +
+            "END");
+
+        // Omitted argument → NULL default → unseeded draw, still length 8.
+        StatementPlan omitted = catalog.Plan("SELECT noise_len() FROM data");
+        List<DataValue> omittedValues = await CollectFirstColumnAsync(omitted);
+        Assert.Equal(8, omittedValues[0].AsInt32());
+
+        // Explicit seed → seeded draw, same length.
+        StatementPlan seeded = catalog.Plan("SELECT noise_len(42) FROM data");
+        List<DataValue> seededValues = await CollectFirstColumnAsync(seeded);
+        Assert.Equal(8, seededValues[0].AsInt32());
+    }
+
     // ————————————————————— Per-call evaluation semantics —————————————————————
 
     [Fact]

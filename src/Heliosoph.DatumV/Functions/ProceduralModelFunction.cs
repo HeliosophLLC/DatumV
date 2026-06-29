@@ -835,23 +835,37 @@ public sealed class ProceduralModelFunction : IScalarFunction
             // an exact Float32 parameter touches it. The cast funnels
             // every supplied argument through the same coercion path the
             // body's DECLARE statements use.
-            if (!value.IsNull && param.TypeName is not null
+            if (param.TypeName is not null
                 && TypeAnnotationResolver.TryParse(param.TypeName, out DataKind declaredKind, out bool declaredIsArray)
                 && NeedsCoercion(value, declaredKind, declaredIsArray))
             {
-                paramEvaluator ??= paramContext.CreateEvaluator();
-                if (paramFrame.Source is null)
+                if (value.IsNull)
                 {
-                    paramFrame = paramEvaluator.CreateFrame(Row.Empty);
+                    // A null carries no kind of its own (a bare `NULL` default
+                    // is Unknown), so stamp the declared kind onto it. Without
+                    // this, body call sites resolve function overloads against
+                    // Unknown — e.g. a `seed Int64 = NULL` default feeding a
+                    // typed `sample_normal(count, seed)` signature would fail.
+                    value = declaredIsArray
+                        ? ValueRef.NullArray(declaredKind)
+                        : ValueRef.Null(declaredKind);
                 }
-                DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
-                CastExpression cast = new(
-                    new LiteralValueExpression(asData),
-                    param.TypeName,
-                    Span: null);
-                value = await paramEvaluator
-                    .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
-                    .ConfigureAwait(false);
+                else
+                {
+                    paramEvaluator ??= paramContext.CreateEvaluator();
+                    if (paramFrame.Source is null)
+                    {
+                        paramFrame = paramEvaluator.CreateFrame(Row.Empty);
+                    }
+                    DataValue asData = value.ToDataValue(variableStore, value.TypeId, frame.Types);
+                    CastExpression cast = new(
+                        new LiteralValueExpression(asData),
+                        param.TypeName,
+                        Span: null);
+                    value = await paramEvaluator
+                        .EvaluateAsValueRefAsync(cast, paramFrame, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
             // Declare into scope BEFORE running the check so any CustomCheck
