@@ -346,10 +346,17 @@ Crop rectangular region. Three call shapes: explicit pixel coordinates, a single
 
 ### image_draw_bounding_boxes
 
-`image_draw_bounding_boxes(img, boxes Array<Struct>)` → Image
-`image_draw_bounding_boxes(img, box Struct)` → Image
+`image_draw_bounding_boxes(img, boxes Array<Struct> [, stroke_color Color [, fill_color Color]])` → Image
+`image_draw_bounding_boxes(img, box Struct [, stroke_color Color [, fill_color Color]])` → Image
 
-Overlay bounding-box rectangles (with optional labels) on an image. The element struct exposes `x`, `y`, `w`, `h` (numeric, in source-image pixel coordinates, top-left origin) plus optional `label` (String) and `score` (numeric, 0–1) fields. Two element shapes are accepted: flat `{x, y, w, h, ...}`, or a nested `{bbox: BoundingBox, label?, score?}` where the inner `BoundingBox` carries `x/y/w/h` — the named-type detection shapes (`ScoredDetection`, `FaceDetection`, `OcrLine`, `RegionScore`, ...) use the nested form. Field names are resolved via the per-query type registry, so any box-producing model that declares its `OutputFields` drops in directly. When `label` and/or `score` are present, a red label chip is drawn at the box's top-left corner showing `"<label> <score>"` (or whichever fields are non-null). A null or empty `boxes` argument returns the source image unchanged.
+Overlay bounding-box rectangles (with optional labels) on an image. The element struct exposes `x`, `y`, `w`, `h` (numeric, in source-image pixel coordinates, top-left origin) plus optional `label` (String) and `score` (numeric, 0–1) fields. Two element shapes are accepted: flat `{x, y, w, h, ...}`, or a nested `{bbox: BoundingBox, label?, score?}` where the inner `BoundingBox` carries `x/y/w/h` — the named-type detection shapes (`ScoredDetection`, `FaceDetection`, `OcrLine`, `RegionScore`, ...) use the nested form. Field names are resolved via the per-query type registry, so any box-producing model that declares its `OutputFields` drops in directly. When `label` and/or `score` are present, a label chip is drawn at the box's top-left corner showing `"<label> <score>"` (or whichever fields are non-null). A null or empty `boxes` argument returns the source image unchanged.
+
+Two optional trailing `Color` arguments customise the overlay:
+
+- **`stroke_color`** — the box outline colour. Defaults to opaque red (`#FF4040`). The label chip background tracks this colour (at a fixed alpha), so the whole overlay reads as one colour scheme.
+- **`fill_color`** — the box *interior* colour, painted beneath the outline. Defaults to fully transparent (no fill). Because `Color` carries an alpha component, a translucent fill paints a see-through highlight over each box — e.g. `color(0, 255, 0, 64)` shades detections in faint green without hiding the underlying image.
+
+Build colours with `color(r, g, b [, a])` or `color_hex('#rrggbbaa')` — see [Drawing Functions](drawing.md). A `NULL` color argument falls back to its default.
 
 ```sql
 -- Array of detections from a YOLO-style model
@@ -357,6 +364,11 @@ SELECT image_draw_bounding_boxes(img, models.yolov8n(img)) AS annotated FROM pho
 
 -- Single bounding box (e.g. one face from a face detector)
 SELECT image_draw_bounding_boxes(img, models.scrfd(img)[0]) AS annotated FROM portraits
+
+-- Blue outline with a translucent blue fill highlight
+SELECT image_draw_bounding_boxes(
+    img, models.yolov8n(img), color_hex('#1e88e5'), color(30, 136, 229, 48)
+) AS annotated FROM photos
 ```
 
 ### grayscale
