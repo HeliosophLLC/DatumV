@@ -17,6 +17,16 @@ Sample rate in Hz, read from the audio value's inline metadata. [Elidable access
 SELECT audio_sample_rate(audio) FROM clips
 ```
 
+### audio_duration
+
+`audio_duration(audio)` → Float64
+
+Clip length in seconds. [Elidable accessor](../technical/planner-time-elision.md) — computed inline as `frame_count ÷ sample_rate` (exact) when both are stamped at ingest, which covers WAV and FLAC. For containers whose frame count isn't surfaced by the header parser (MP3, OGG), it falls back to a decode-free read of the container's recorded duration. Returns NULL only when no duration is recorded.
+
+```sql
+SELECT path FROM clips WHERE audio_duration(audio) > 30.0
+```
+
 ## Loading & Decode
 
 ### audio_decode

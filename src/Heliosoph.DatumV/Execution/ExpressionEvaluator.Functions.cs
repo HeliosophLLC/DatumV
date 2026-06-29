@@ -199,12 +199,31 @@ public sealed partial class ExpressionEvaluator
             case InlineAccessorField.AudioSampleRate:
                 uint rate = dv.AudioSampleRate;
                 return rate != 0 ? ValueRef.FromInt32(checked((int)rate)) : null;
+            case InlineAccessorField.AudioDuration:
+                // Exact: frame count (samples per channel) ÷ sample rate. Both
+                // must be stamped; lossy containers (MP3/OGG) carry a 0 frame
+                // count and fall through to the function's container-duration read.
+                uint audioFrames = dv.AudioFrameCount;
+                uint audioRate = dv.AudioSampleRate;
+                return audioFrames != 0 && audioRate != 0
+                    ? ValueRef.FromFloat64(audioFrames / (double)audioRate)
+                    : null;
             case InlineAccessorField.VideoWidth:
                 ushort vw = dv.VideoWidth;
                 return vw != 0 ? ValueRef.FromInt32(vw) : null;
             case InlineAccessorField.VideoHeight:
                 ushort vh = dv.VideoHeight;
                 return vh != 0 ? ValueRef.FromInt32(vh) : null;
+            case InlineAccessorField.VideoDuration:
+                // Approximate: frame count ÷ fps (fps is 8.8 fixed-point, so a
+                // non-integer rate like 23.976 rounds). Both must be stamped;
+                // containers that don't record a frame count fall through to the
+                // function's authoritative container-duration read.
+                uint videoFrames = dv.VideoFrameCount;
+                ushort fpsX256 = dv.VideoFpsX256;
+                return videoFrames != 0 && fpsX256 != 0
+                    ? ValueRef.FromFloat64(videoFrames / (fpsX256 / 256.0))
+                    : null;
             case InlineAccessorField.PointCloudCount:
                 uint pc = dv.PointCloudCount;
                 return pc != 0 ? ValueRef.FromInt32(checked((int)pc)) : null;

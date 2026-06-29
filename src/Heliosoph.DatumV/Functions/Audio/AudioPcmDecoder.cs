@@ -67,6 +67,43 @@ public static class AudioPcmDecoder
     public static float[] DecodeDownmixedFloat32(byte[] audioBytes, out int sourceRate)
         => DecodeFloat32Internal(audioBytes, targetRate: null, requireMonoSource: false, out sourceRate);
 
+    /// <summary>
+    /// Reads the playback duration (seconds) of an encoded audio container
+    /// without decoding any PCM. Opens the format context, prefers the audio
+    /// stream's own duration, and falls back to the container-level duration.
+    /// Returns <see langword="null"/> when neither is recorded (rare — some
+    /// live/streamed captures) or the blob has no decodable audio stream.
+    /// </summary>
+    /// <remarks>
+    /// Backs the slow path of <c>audio_duration()</c> for containers whose
+    /// inline frame count wasn't stamped at ingest (MP3 / OGG). For WAV / FLAC
+    /// the elider serves an exact <c>frame_count ÷ sample_rate</c> result inline
+    /// and never reaches here.
+    /// </remarks>
+    public static double? TryReadDurationSeconds(byte[] audioBytes)
+    {
+        ArgumentNullException.ThrowIfNull(audioBytes);
+        if (audioBytes.Length == 0) return null;
+
+        using MemoryStream sourceStream = new(audioBytes, writable: false);
+        using IOContext io = IOContext.ReadStream(sourceStream, bufferSize: 32 * 1024);
+        using FormatContext fc = FormatContext.OpenInputIO(io);
+        fc.LoadStreamInfo();
+
+        MediaStream? audioStreamOpt = fc.FindBestStreamOrNull(AVMediaType.Audio);
+        if (audioStreamOpt is null) return null;
+
+        MediaStream audioStream = audioStreamOpt.Value;
+        if (audioStream.Duration != ffmpeg.AV_NOPTS_VALUE && audioStream.TimeBase.Num > 0)
+        {
+            return audioStream.Duration * (double)audioStream.TimeBase.Num / audioStream.TimeBase.Den;
+        }
+
+        long fcDuration = fc.Duration;
+        // FormatContext.Duration is in AV_TIME_BASE units (1e6 / sec).
+        return fcDuration > 0 ? fcDuration / (double)ffmpeg.AV_TIME_BASE : null;
+    }
+
     private static float[] DecodeFloat32Internal(
         byte[] audioBytes, int? targetRate, bool requireMonoSource, out int sourceRate)
     {

@@ -31,11 +31,29 @@ public enum InlineAccessorField
     /// <summary><c>audio_sample_rate</c> — full <c>_p4</c> on an <see cref="DataKind.Audio"/> value.</summary>
     AudioSampleRate,
 
+    /// <summary>
+    /// <c>audio_duration</c> — derived from <c>AudioFrameCount</c> (<c>_p5</c>) ÷
+    /// <c>AudioSampleRate</c> (<c>_p4</c>) on an <see cref="DataKind.Audio"/> value.
+    /// Exact when both are stamped (WAV / FLAC); falls back to a decode-free
+    /// container-duration read for formats whose frame count isn't surfaced at
+    /// parse time (MP3 / OGG).
+    /// </summary>
+    AudioDuration,
+
     /// <summary><c>video_width</c> — low 16 bits of <c>_p4</c> on a <see cref="DataKind.Video"/> value.</summary>
     VideoWidth,
 
     /// <summary><c>video_height</c> — high 16 bits of <c>_p4</c> on a <see cref="DataKind.Video"/> value.</summary>
     VideoHeight,
+
+    /// <summary>
+    /// <c>video_duration</c> — derived from <c>VideoFrameCount</c> (<c>_p6</c>) ÷
+    /// <c>VideoFpsX256/256</c> (<c>_p5</c>) on a <see cref="DataKind.Video"/> value.
+    /// The inline fast path is approximate (fps is 8.8 fixed-point); the slow-path
+    /// fallback reads the container's authoritative duration when frame count or
+    /// fps wasn't stamped (some MKV / fragmented MP4).
+    /// </summary>
+    VideoDuration,
 
     /// <summary><c>point_cloud_count</c> — full <c>_p4</c> on a <see cref="DataKind.PointCloud"/> value.</summary>
     PointCloudCount,
@@ -98,8 +116,10 @@ public static class InlineAccessorDescriptors
         new(InlineAccessorField.ImageHeight, DataKind.Image, DataKind.Int32, "image_height"),
         new(InlineAccessorField.ImageChannels, DataKind.Image, DataKind.Int32, "image_channels"),
         new(InlineAccessorField.AudioSampleRate, DataKind.Audio, DataKind.Int32, "audio_sample_rate"),
+        new(InlineAccessorField.AudioDuration, DataKind.Audio, DataKind.Float64, "audio_duration"),
         new(InlineAccessorField.VideoWidth, DataKind.Video, DataKind.Int32, "video_width"),
         new(InlineAccessorField.VideoHeight, DataKind.Video, DataKind.Int32, "video_height"),
+        new(InlineAccessorField.VideoDuration, DataKind.Video, DataKind.Float64, "video_duration"),
         new(InlineAccessorField.PointCloudCount, DataKind.PointCloud, DataKind.Int32, "point_cloud_count"),
         new(InlineAccessorField.PointCloudHasColor, DataKind.PointCloud, DataKind.Boolean, "point_cloud_has_color"),
         new(InlineAccessorField.MeshVertexCount, DataKind.Mesh, DataKind.Int32, "mesh_vertex_count"),

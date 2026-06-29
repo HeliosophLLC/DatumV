@@ -106,6 +106,49 @@ public static class VideoHeaderParser
     }
 
     /// <summary>
+    /// Reads the playback duration (seconds) of an encoded video container
+    /// without decoding any frames. Prefers the best video stream's own
+    /// duration and falls back to the container-level duration. Returns
+    /// <see langword="null"/> when neither is recorded or FFmpeg can't open the
+    /// blob. Backs the slow path of <c>video_duration()</c> for containers whose
+    /// inline frame count / fps wasn't stamped at ingest.
+    /// </summary>
+    public static double? TryReadDurationSeconds(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 16) return null;
+
+        byte[] copy = data.ToArray();
+        using MemoryStream ms = new(copy, writable: false);
+        IOContext? io = null;
+        FormatContext? fc = null;
+        try
+        {
+            io = IOContext.ReadStream(ms, StreamBufferSize);
+            fc = FormatContext.OpenInputIO(io);
+            fc.LoadStreamInfo();
+
+            MediaStream? videoStream = fc.FindBestStreamOrNull(AVMediaType.Video);
+            if (videoStream is { } s && s.Duration != ffmpeg.AV_NOPTS_VALUE && s.TimeBase.Num > 0)
+            {
+                return s.Duration * (double)s.TimeBase.Num / s.TimeBase.Den;
+            }
+
+            long fcDuration = fc.Duration;
+            // FormatContext.Duration is in AV_TIME_BASE units (1e6 / sec).
+            return fcDuration > 0 ? fcDuration / (double)ffmpeg.AV_TIME_BASE : null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            fc?.Free();
+            io?.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Maps an FFmpeg codec id to a single byte for inline storage. The byte is a
     /// stable engine-side discriminator (not the raw <see cref="AVCodecID"/> integer
     /// since those can shift across FFmpeg versions). 0 = unknown.

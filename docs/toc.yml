@@ -223,6 +223,10 @@
       href: functions/uuid.md
     - name: Image
       href: functions/image.md
+    - name: Audio
+      href: functions/audio.md
+    - name: Video
+      href: functions/video.md
     - name: Random & Sampling
       href: functions/random.md
     - name: Utility & Type Conversion
