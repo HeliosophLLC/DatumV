@@ -155,6 +155,61 @@ export function selectEntryByIdentifier(identifier: string): void {
   }
 }
 
+/** Select the catalog entry named `entryName` (defaulting to its first
+ *  variant) so its detail pane renders in the right column. No-op when the
+ *  name isn't in the loaded manifest. Used by in-card links that point at
+ *  a sibling model card — see `resolveCardEntryLink`. */
+export function openModelEntry(entryName: string): void {
+  const m = modelsState.manifest;
+  if (m === null) return;
+  const entry = (m.entries ?? []).find((e) => e.name === entryName);
+  if (!entry) return;
+  setSelectedEntry(entry.name ?? null, entry.variants?.[0]?.id ?? null);
+}
+
+/**
+ * Resolve a markdown link `href` written inside the card whose source path
+ * is `fromCardFile` (the linking entry's `cardFile`, e.g.
+ * `cards/dpt-large/index.md`) that points at a *sibling model card*. Card
+ * authors link by folder slug — `../depth-anything-v2/index.md` — which is
+ * distinct from the entry's display `name`, so resolution walks the link
+ * against the linking card's directory (honouring `.`/`..`) and matches
+ * the result against every entry's `cardFile`. Returns the target entry's
+ * `name` (the key `openModelEntry` / `setSelectedEntry` expect), or null
+ * for self-links, external/anchor links, non-card paths (e.g. image
+ * assets), and links that don't resolve to a known entry's card.
+ */
+export function resolveCardEntryLink(
+  fromCardFile: string | undefined,
+  href: string,
+): string | null {
+  if (!fromCardFile || href.length === 0) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null; // external protocol
+  if (href.startsWith('#')) return null; // same-page anchor
+  const hashIdx = href.indexOf('#');
+  const rawPath = (hashIdx < 0 ? href : href.slice(0, hashIdx)).replace(/\\/g, '/');
+  const fromNorm = fromCardFile.replace(/\\/g, '/');
+  // Resolve the link against the linking card's directory.
+  const stack = fromNorm.split('/').slice(0, -1);
+  for (const seg of rawPath.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (stack.length === 0) return null;
+      stack.pop();
+      continue;
+    }
+    stack.push(seg);
+  }
+  const resolved = stack.join('/');
+  if (resolved === fromNorm) return null; // self-link
+  const manifest = modelsState.manifest;
+  if (manifest === null) return null;
+  const target = (manifest.entries ?? []).find(
+    (e) => (e.cardFile ?? '').replace(/\\/g, '/') === resolved,
+  );
+  return target?.name ?? null;
+}
+
 export function toggleTask(taskName: string): void {
   const next = new Set(modelsState.selectedTasks);
   if (next.has(taskName)) next.delete(taskName);
