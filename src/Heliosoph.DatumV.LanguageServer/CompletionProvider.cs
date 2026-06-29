@@ -1052,6 +1052,25 @@ public sealed class CompletionProvider
                 return null;
 
             case FunctionCallExpression fnCall:
+                // `models.X(...)` — registered models live in their own list,
+                // not the function list. The model's OutputKind label already
+                // carries any `Array<…>` wrapper, so an UNNEST over a
+                // detector's array-of-struct output (e.g.
+                // `UNNEST(models.rtdetr_r18(file)) AS d`) strips back to the
+                // element struct and `d.value.` then completes its fields.
+                if (fnCall.SchemaName is not null
+                    && string.Equals(fnCall.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
+                    && _manifest.Models is { } modelsInScope)
+                {
+                    foreach (ModelEntry model in modelsInScope)
+                    {
+                        if (string.Equals(model.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrEmpty(model.OutputKind))
+                        {
+                            return model.OutputKind;
+                        }
+                    }
+                }
                 foreach (FunctionSignature sig in _manifest.Functions)
                 {
                     if (!string.Equals(sig.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;

@@ -41,6 +41,22 @@ internal sealed class SemanticAnalyzer
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Struct-valued projection columns emitted by subqueries in the current
+    /// statement, mapped output-column-name → the struct's field-name set.
+    /// Populated from a subquery's SELECT list when a projection resolves to
+    /// a struct (a struct literal, or a model/function call whose manifest
+    /// entry carries <c>OutputStructFields</c>). Lets a 2-part reference like
+    /// <c>p.label</c> — where the subquery projects
+    /// <c>models.mobilenetv2(file) AS p</c> — validate the field name against
+    /// the struct's actual fields instead of either false-positiving as an
+    /// unknown alias or silently deferring to the opaque-source suppression.
+    /// Save/restore'd around <see cref="AnalyzeStatement"/> so recursive
+    /// subquery analysis doesn't clobber the enclosing statement's set.
+    /// </summary>
+    private Dictionary<string, HashSet<string>> _currentStatementStructColumns =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Index of table names → (column name → DataKind string) for O(1) lookup.
     /// Keys are case-insensitive because Heliosoph.DatumV SQL is case-insensitive.
     /// </summary>
@@ -175,8 +191,10 @@ internal sealed class SemanticAnalyzer
         // at the end of this method.
         HashSet<string> previousLetNames = _currentStatementLetNames;
         Dictionary<string, HashSet<string>> previousTvfColumns = _currentStatementTvfColumns;
+        Dictionary<string, HashSet<string>> previousStructColumns = _currentStatementStructColumns;
         _currentStatementLetNames = new(StringComparer.OrdinalIgnoreCase);
         _currentStatementTvfColumns = new(StringComparer.OrdinalIgnoreCase);
+        _currentStatementStructColumns = new(StringComparer.OrdinalIgnoreCase);
         try
         {
             AnalyzeStatementCore(statement, diagnostics);
@@ -185,6 +203,7 @@ internal sealed class SemanticAnalyzer
         {
             _currentStatementLetNames = previousLetNames;
             _currentStatementTvfColumns = previousTvfColumns;
+            _currentStatementStructColumns = previousStructColumns;
         }
     }
 
@@ -438,11 +457,120 @@ internal sealed class SemanticAnalyzer
                 // Subqueries are opaque — the inner columns are not exposed.
                 opaqueAliases.Add(subquerySource.Alias);
 
+                // Surface struct-valued projection columns so the outer query
+                // can validate field access on them (`p.label` where the
+                // subquery projects `models.foo(x) AS p`). Runs against the
+                // enclosing statement's map; the recursive Analyze below
+                // save/restores its own copy, so these entries survive it.
+                CollectSubqueryStructColumns(subquerySource.Query);
+
                 // Recurse into the subquery with a fresh scope.
                 Diagnostic[] subDiagnostics = Analyze(subquerySource.Query);
                 diagnostics.AddRange(subDiagnostics);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Walks a subquery's SELECT list and registers each struct-valued
+    /// projection into <see cref="_currentStatementStructColumns"/> under its
+    /// output column name. Only projections we can statically resolve to a
+    /// struct shape are recorded — a struct literal (field names come from the
+    /// AST) or a model/function call whose manifest entry carries
+    /// <c>OutputStructFields</c>. Everything else is left out, so the outer
+    /// reference falls back to the opaque-source suppression rather than a
+    /// false "unknown field".
+    /// </summary>
+    private void CollectSubqueryStructColumns(SelectStatement subquery)
+    {
+        if (subquery.Columns is null) return;
+
+        foreach (SelectColumn col in subquery.Columns)
+        {
+            // Output column name: an explicit alias wins; otherwise a bare
+            // column reference carries its own name. An unaliased expression
+            // (e.g. a bare model call) gets an engine-generated name we don't
+            // replicate here, so it can't be referenced by a stable qualifier.
+            string? outputName = col.Alias;
+            if (outputName is null
+                && col.Expression is ColumnReference { ColumnName: { } bareName }
+                && bareName != "*")
+            {
+                outputName = bareName;
+            }
+            if (outputName is null) continue;
+
+            HashSet<string>? fieldNames = TryResolveProjectionStructFieldNames(col.Expression);
+            if (fieldNames is not null)
+            {
+                _currentStatementStructColumns[outputName] = fieldNames;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves the struct field-name set for a projection expression, or
+    /// <see langword="null"/> when the expression isn't a statically-known
+    /// struct. Handles struct literals (field names straight from the AST)
+    /// and model/scalar-function calls (field names from the manifest's
+    /// <c>OutputStructFields</c>).
+    /// </summary>
+    private HashSet<string>? TryResolveProjectionStructFieldNames(Expression expression)
+    {
+        if (expression is StructLiteralExpression structLiteral)
+        {
+            if (structLiteral.Fields.Count == 0) return null;
+            HashSet<string> literalNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (StructField field in structLiteral.Fields)
+            {
+                literalNames.Add(field.Name);
+            }
+            return literalNames;
+        }
+
+        if (expression is FunctionCallExpression call)
+        {
+            IReadOnlyList<StructFieldSignature>? fields = TryResolveCallOutputStructFields(call);
+            if (fields is not { Count: > 0 }) return null;
+            HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+            foreach (StructFieldSignature field in fields)
+            {
+                names.Add(field.Name);
+            }
+            return names;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Looks up the declared output struct fields for a call: a
+    /// <c>models.X(...)</c> call resolves against the manifest's model
+    /// entries; any other call resolves against the scalar-function
+    /// signatures (which also back SQL-defined models). Returns
+    /// <see langword="null"/> for non-struct returns or unknown callees.
+    /// </summary>
+    private IReadOnlyList<StructFieldSignature>? TryResolveCallOutputStructFields(FunctionCallExpression call)
+    {
+        if (call.SchemaName is not null
+            && string.Equals(call.SchemaName, "models", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_manifest.Models is { } models)
+            {
+                foreach (ModelEntry model in models)
+                {
+                    if (string.Equals(model.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return model.OutputStructFields;
+                    }
+                }
+            }
+            return null;
+        }
+
+        return _functionSignatures.TryGetValue(call.FunctionName, out FunctionSignature? signature)
+            ? signature.OutputStructFields
+            : null;
     }
 
     /// <summary>
@@ -1192,6 +1320,40 @@ internal sealed class SemanticAnalyzer
             // analyzer doesn't track struct field shapes here, so any
             // existence check would either over-reject or no-op.
             if (_currentStatementLetNames.Contains(qualifier))
+            {
+                return;
+            }
+
+            // Struct-field access on a struct-valued column projected by a
+            // subquery in scope (`p.label` where the subquery emits
+            // `models.foo(x) AS p`). We resolved the struct's field names when
+            // collecting the subquery's projection, so validate the field
+            // directly — a precise "unknown field" beats deferring to the
+            // opaque-source suppression below. Guarded on the qualifier not
+            // being a real table alias so `alias.column` keeps its meaning.
+            if (!aliasToTable.ContainsKey(qualifier)
+                && _currentStatementStructColumns.TryGetValue(qualifier, out HashSet<string>? structFields))
+            {
+                if (!structFields.Contains(column.ColumnName))
+                {
+                    EmitWarning(diagnostics, column.Span,
+                        $"Unknown field '{column.ColumnName}' on struct column '{qualifier}'.");
+                }
+                return;
+            }
+
+            // The qualifier matched no known alias, TVF, or LET. If any source
+            // in scope is opaque — a subquery, CTE, or TVF whose output columns
+            // we can't introspect — the qualifier may be a struct-valued column
+            // it projects. `p.label` where `p` is `models.foo(x) AS p` inside
+            // `FROM (...) t` is the canonical case: the runtime resolves `p` as a
+            // row column and `.label` as a struct field. We can't prove the
+            // column is absent, so suppress the qualifier warning rather than
+            // false-positive on a real struct-field access. Mirrors the
+            // bare-column path's deference to opaque sources below.
+            if (!aliasToTable.ContainsKey(qualifier)
+                && !opaqueAliases.Contains(qualifier)
+                && opaqueAliases.Count > 0)
             {
                 return;
             }

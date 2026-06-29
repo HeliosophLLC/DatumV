@@ -256,12 +256,118 @@ internal sealed class QueryScopeValidator
                 {
                     scope.RegisterOpaqueAlias(functionAlias);
                 }
+                CollectUnnestStructFields(functionSource, functionAlias, scope);
                 break;
             case SubquerySource subquery:
                 VisitSelect(subquery.Query, scope);
                 scope.RegisterOpaqueAlias(subquery.Alias);
+                CollectSubqueryStructColumns(subquery.Query, scope);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Records every struct-valued column a subquery projects with a
+    /// statically-known field shape into <paramref name="scope"/>, keyed on
+    /// the column's output name. Only projections we can resolve cheaply are
+    /// recorded — a struct literal (field names from the AST) or a
+    /// <c>models.X(...)</c> call whose catalog entry declares
+    /// <c>OutputStructFields</c>. Columns we can't resolve are left out, so
+    /// the surrounding query defers to the opaque-source path rather than
+    /// false-rejecting a real field access.
+    /// </summary>
+    private void CollectSubqueryStructColumns(SelectStatement subquery, Scope scope)
+    {
+        if (subquery.Columns is null) return;
+
+        foreach (SelectColumn col in subquery.Columns)
+        {
+            string? outputName = col.Alias;
+            if (outputName is null
+                && col.Expression is ColumnReference { ColumnName: { } bareName }
+                && bareName != "*")
+            {
+                outputName = bareName;
+            }
+            if (outputName is null) continue;
+
+            HashSet<string>? fieldNames = TryResolveProjectionStructFields(col.Expression);
+            if (fieldNames is not null)
+            {
+                scope.RegisterStructColumn(outputName, fieldNames);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves the struct field-name set for a projection expression that
+    /// yields a struct <em>value</em> (referenced as <c>column.field</c>), or
+    /// <see langword="null"/> when its shape isn't statically known. Handles
+    /// inline struct literals and scalar-struct-returning <c>models.X(...)</c>
+    /// calls — <c>OutputIsArray</c> models are excluded here because their
+    /// projected column is an array, not a field-accessible struct (those flow
+    /// through the UNNEST path instead).
+    /// </summary>
+    private HashSet<string>? TryResolveProjectionStructFields(Expression expression)
+    {
+        if (expression is StructLiteralExpression structLiteral)
+        {
+            if (structLiteral.Fields.Count == 0) return null;
+            HashSet<string> literalNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (StructField field in structLiteral.Fields)
+            {
+                literalNames.Add(field.Name);
+            }
+            return literalNames;
+        }
+
+        if (expression is FunctionCallExpression call
+            && TryGetModelCallEntry(call) is { OutputStructFields: { Count: > 0 } modelFields, OutputIsArray: false })
+        {
+            return StructFieldNameSet(modelFields);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Records the per-row struct shape an <c>UNNEST(models.X(...)) AS d</c>
+    /// source exposes as its <c>value</c> column, so a 3-part reference
+    /// <c>d.value.field</c> can be field-validated at plan time. Fires only
+    /// when the unnest argument is a single array-returning model call whose
+    /// catalog entry declares the element struct's fields — the model's
+    /// <c>OutputStructFields</c> describes that element struct directly.
+    /// </summary>
+    private void CollectUnnestStructFields(FunctionSource source, string alias, Scope scope)
+    {
+        if (!string.Equals(source.FunctionName, "unnest", StringComparison.OrdinalIgnoreCase)) return;
+        if (source.Arguments.Count != 1) return;
+        if (source.Arguments[0] is not FunctionCallExpression call) return;
+
+        if (TryGetModelCallEntry(call) is { OutputStructFields: { Count: > 0 } elementFields, OutputIsArray: true })
+        {
+            scope.RegisterAliasStructColumn(alias, "value", StructFieldNameSet(elementFields));
+        }
+    }
+
+    /// <summary>
+    /// Returns the catalog entry for a <c>models.X(...)</c> call, or
+    /// <see langword="null"/> for non-model calls or unknown model names.
+    /// </summary>
+    private Models.ModelCatalogEntry? TryGetModelCallEntry(FunctionCallExpression call)
+        => call.SchemaName is not null
+            && string.Equals(call.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
+                ? _catalog.Models?.TryGetEntry(call.FunctionName)
+                : null;
+
+    private static HashSet<string> StructFieldNameSet(IReadOnlyList<Models.ModelStructFieldInfo> fields)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Models.ModelStructFieldInfo field in fields)
+        {
+            names.Add(field.Name);
+        }
+        return names;
     }
 
     private void AddTableReferenceToScope(TableReference tableRef, Scope scope)
@@ -550,11 +656,28 @@ internal sealed class QueryScopeValidator
         // — wildcards are validated by SelectAllColumns / SelectTableColumns.
         if (colRef.ColumnName == "*") return;
 
-        // 3-part `schema.table.column` — accept. Either a real schema-
-        // qualified table reference (the runtime accessor handles via
-        // row lookup) or alias.column.structField (the SemanticAnalyzer
-        // disambiguates at edit time). Don't false-positive.
-        if (colRef.SchemaName is not null) return;
+        // 3-part `schema.table.column`. Two readings: a real schema-
+        // qualified table reference (the runtime accessor handles via row
+        // lookup) OR `alias.column.structField` — struct-field access on a
+        // qualified column. When `alias.column` resolves to a struct column
+        // whose shape we know statically (the canonical case being `value`
+        // from `UNNEST(models.detector(...)) AS d`, where the model's
+        // element-struct fields are declared), validate the field name at
+        // plan time so `d.value.labxl` fails before the detector inference
+        // runs. Otherwise accept — either a genuine schema.table.column or a
+        // struct access whose shape we can't see (defer to runtime).
+        if (colRef.SchemaName is not null)
+        {
+            if (TryResolveAliasStructColumnFields(
+                    scope, colRef.SchemaName, colRef.TableName!, out HashSet<string>? nestedFields)
+                && !nestedFields.Contains(colRef.ColumnName))
+            {
+                throw new ExecutionException(
+                    $"Struct column '{colRef.SchemaName}.{colRef.TableName}' has no field named "
+                    + $"'{colRef.ColumnName}'.");
+            }
+            return;
+        }
 
         if (colRef.TableName is not null)
         {
@@ -572,6 +695,38 @@ internal sealed class QueryScopeValidator
             if (ScopeKnowsProjectionAlias(scope, colRef.TableName)) return;
             if (_knownProceduralVariables.Contains(colRef.TableName)) return;
             if (LambdaParameterInScope(colRef.TableName)) return;
+
+            // Struct-field access on a struct-valued column whose shape we
+            // resolved statically when a subquery in scope projected it
+            // (`p.label` where the subquery emits `models.mobilenetv2(file) AS p`
+            // or a struct literal `{ … } p`). Validate the field name HERE, at
+            // plan time, so a typo fails before any operator runs — crucially
+            // before the upstream model inference the runtime would otherwise
+            // grind through for minutes only to throw the same error per-row at
+            // the very end. Only known-shape columns reach this check; columns
+            // whose struct shape we can't determine fall through to the
+            // opaque-source deferral below and stay a runtime concern.
+            if (TryResolveStructColumnFields(scope, colRef.TableName, out HashSet<string>? structFields))
+            {
+                if (!structFields.Contains(colRef.ColumnName))
+                {
+                    throw new ExecutionException(
+                        $"Struct column '{colRef.TableName}' has no field named "
+                        + $"'{colRef.ColumnName}'.");
+                }
+                return;
+            }
+
+            // The qualifier matched no alias, value binding, projection
+            // alias, procedural variable, or lambda parameter. If the scope
+            // chain contains an opaque source — a subquery, CTE, or TVF
+            // whose output columns we can't enumerate — the qualifier may be
+            // a struct-valued column it projects, with the runtime resolving
+            // `qualifier` as a row column and `.column` as a struct field
+            // (e.g. `s.label` where `s` is `{ ... } s` inside `FROM (...) t`).
+            // We can't prove the column absent, so defer rather than
+            // false-positive. Mirrors the bare-name path below.
+            if (ScopeChainContainsOpaqueSource(scope)) return;
             throw new ExecutionException(
                 $"Unknown table or alias '{colRef.TableName}' in reference "
                 + $"'{colRef.TableName}.{colRef.ColumnName}'.");
@@ -663,6 +818,35 @@ internal sealed class QueryScopeValidator
         return false;
     }
 
+    private static bool TryResolveStructColumnFields(
+        Scope? scope,
+        string columnName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HashSet<string>? fieldNames)
+    {
+        while (scope is not null)
+        {
+            if (scope.TryGetStructColumnFields(columnName, out fieldNames)) return true;
+            scope = scope.Parent;
+        }
+        fieldNames = null;
+        return false;
+    }
+
+    private static bool TryResolveAliasStructColumnFields(
+        Scope? scope,
+        string alias,
+        string columnName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HashSet<string>? fieldNames)
+    {
+        while (scope is not null)
+        {
+            if (scope.TryGetAliasStructColumnFields(alias, columnName, out fieldNames)) return true;
+            scope = scope.Parent;
+        }
+        fieldNames = null;
+        return false;
+    }
+
     /// <summary>
     /// Per-statement validation scope: aliases, column sets for non-
     /// opaque sources, LET bindings, projection aliases (visible to
@@ -676,6 +860,19 @@ internal sealed class QueryScopeValidator
         private readonly Dictionary<string, HashSet<string>?> _aliasColumns =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
+
+        // Struct-valued columns a subquery in this scope projects with a
+        // statically-known field shape: column name → field-name set. Lets
+        // the 2-part `column.field` path validate field access at plan time.
+        private readonly Dictionary<string, HashSet<string>> _structColumnFields =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        // Qualified struct columns: alias → (column → field-name set). Lets
+        // the 3-part `alias.column.field` path validate a struct field on a
+        // qualified column — the canonical case being `value` from an
+        // `UNNEST(models.detector(...)) AS d` source.
+        private readonly Dictionary<string, Dictionary<string, HashSet<string>>> _aliasStructColumnFields =
+            new(StringComparer.OrdinalIgnoreCase);
 
         public HashSet<string> LetBindings { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> ProjectionAliases { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -715,6 +912,40 @@ internal sealed class QueryScopeValidator
         public void RegisterCteName(string cteName)
         {
             _cteNames.Add(cteName);
+        }
+
+        public void RegisterStructColumn(string columnName, HashSet<string> fieldNames)
+        {
+            _structColumnFields[columnName] = fieldNames;
+        }
+
+        public bool TryGetStructColumnFields(
+            string columnName,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HashSet<string>? fieldNames)
+            => _structColumnFields.TryGetValue(columnName, out fieldNames);
+
+        public void RegisterAliasStructColumn(string alias, string columnName, HashSet<string> fieldNames)
+        {
+            if (!_aliasStructColumnFields.TryGetValue(alias, out Dictionary<string, HashSet<string>>? columns))
+            {
+                columns = new(StringComparer.OrdinalIgnoreCase);
+                _aliasStructColumnFields[alias] = columns;
+            }
+            columns[columnName] = fieldNames;
+        }
+
+        public bool TryGetAliasStructColumnFields(
+            string alias,
+            string columnName,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HashSet<string>? fieldNames)
+        {
+            if (_aliasStructColumnFields.TryGetValue(alias, out Dictionary<string, HashSet<string>>? columns)
+                && columns.TryGetValue(columnName, out fieldNames))
+            {
+                return true;
+            }
+            fieldNames = null;
+            return false;
         }
 
         public void RegisterLetBinding(string name)

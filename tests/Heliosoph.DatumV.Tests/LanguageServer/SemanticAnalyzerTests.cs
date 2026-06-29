@@ -12,13 +12,36 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     /// <summary>Builds a minimal manifest with the specified tables and functions.</summary>
     private static LanguageServerManifest CreateManifest(
         IReadOnlyList<TableSchemaEntry>? tables = null,
-        IReadOnlyList<FunctionSignature>? functions = null)
+        IReadOnlyList<FunctionSignature>? functions = null,
+        IReadOnlyList<ModelEntry>? models = null)
     {
         return new LanguageServerManifest
         {
             Tables = tables ?? [],
             Functions = functions ?? [],
+            Models = models,
             Keywords = ["SELECT", "FROM", "WHERE"],
+        };
+    }
+
+    /// <summary>
+    /// Builds a scalar-function signature whose output is a struct with the
+    /// given field names (each typed <c>Float32</c> — the kind is irrelevant
+    /// to the field-name validation under test).
+    /// </summary>
+    private static FunctionSignature StructFunction(string name, params string[] fieldNames)
+    {
+        List<StructFieldSignature> fields = new();
+        foreach (string fieldName in fieldNames)
+        {
+            fields.Add(new StructFieldSignature { Name = fieldName, Kind = "Float32" });
+        }
+
+        return new FunctionSignature
+        {
+            Name = name,
+            Parameters = [new ParameterSignature { Name = "x", Kind = "Any" }],
+            OutputStructFields = fields,
         };
     }
 
@@ -405,6 +428,130 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
 
         Assert.DoesNotContain(diagnostics, diagnostic =>
             diagnostic.Message.Contains("Unknown table or alias 't.props'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryColumn_DoesNotWarn()
+    {
+        // `p.label` where `p` is a struct-valued column (`models.foo(x) AS p`)
+        // projected by a subquery `FROM (...) t`. The 2-part reference parses as
+        // alias=p, column=label, but `p` is a row column the opaque subquery
+        // emits — the runtime resolves it as struct-field access. The subquery's
+        // output columns aren't introspected, so the analyzer must defer rather
+        // than emit "Unknown table or alias 'p'".
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("images", "file", "file_name")],
+            functions: [Function("classify", "img")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT file_name, p.label, p.score FROM ("
+            + "SELECT file_name, file, classify(file) AS p FROM images) t",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown table or alias 'p'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryStructColumn_KnownField_DoesNotWarn()
+    {
+        // The subquery projects a struct-valued column `p` from a scalar
+        // function whose manifest entry declares `OutputStructFields`
+        // (label, score). Accessing a real field — `p.label` / `p.score` —
+        // resolves cleanly now that the analyzer threads the subquery's
+        // struct shape into the outer scope.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("images", "file", "file_name")],
+            functions: [StructFunction("classify", "label", "score")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT file_name, p.label, p.score FROM ("
+            + "SELECT file_name, classify(file) AS p FROM images) t",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown field")
+            || diagnostic.Message.Contains("Unknown table or alias 'p'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryStructColumn_UnknownField_Warns()
+    {
+        // The payoff of threading the struct shape: a typo'd field name
+        // (`p.scxre` instead of `p.score`) is now caught at edit time with a
+        // precise "unknown field" diagnostic, where before it either
+        // false-positived as an unknown alias or slipped through the
+        // opaque-source suppression.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("images", "file", "file_name")],
+            functions: [StructFunction("classify", "label", "score")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT p.scxre FROM (SELECT classify(file) AS p FROM images) t",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown field 'scxre' on struct column 'p'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryModelStructColumn_UnknownField_Warns()
+    {
+        // Same, but the struct column comes from a `models.X(...)` call whose
+        // output fields are declared on the model entry — the engine's real
+        // shape for `models.mobilenetv2(file) AS p`.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("images", "file", "file_name")],
+            models:
+            [
+                new ModelEntry
+                {
+                    Name = "mobilenetv2",
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "label", Kind = "String" },
+                        new StructFieldSignature { Name = "score", Kind = "Float32" },
+                    ],
+                },
+            ]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT p.labxl FROM (SELECT models.mobilenetv2(file) AS p FROM images) t",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown field 'labxl' on struct column 'p'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryStructLiteralColumn_UnknownField_Warns()
+    {
+        // The struct shape can also come from a struct literal, whose field
+        // names live directly in the AST — no manifest entry required.
+        // `s.label`/`s.score` are valid; `s.bogus` is not.
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT s.bogus FROM (SELECT { label: 'test', score: 0.9 } s) t",
+            manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown field 'bogus' on struct column 's'"));
+    }
+
+    [Fact]
+    public void Analyze_StructFieldAccess_OnSubqueryStructLiteralColumn_KnownField_DoesNotWarn()
+    {
+        // Companion: real fields of the struct literal resolve cleanly.
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT s.label, s.score FROM (SELECT { label: 'test', score: 0.9 } s) t",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown field")
+            || diagnostic.Message.Contains("Unknown table or alias 's'"));
     }
 
     [Fact]
