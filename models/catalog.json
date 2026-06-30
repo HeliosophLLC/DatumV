@@ -1730,7 +1730,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/zoedepth-nyu-kitti-onnx",
-                  "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a",
+                  "revision": "181dcea7dfa1bc7ca7daaec094e0562446ca11fb",
                   "include": [
                     "model.onnx",
                     "config.json",
@@ -1770,7 +1770,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/zoedepth-nyu-kitti-onnx",
-                  "revision": "c98acf691bb1b7f52744e5e31dcdfa7094fd8a1a",
+                  "revision": "181dcea7dfa1bc7ca7daaec094e0562446ca11fb",
                   "include": [
                     "model_fp16.onnx",
                     "config.json",
