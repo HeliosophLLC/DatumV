@@ -31,6 +31,21 @@
 			"preLaunchTask": "Release: Electron + Backend"
 		},
 		{
+			// Same as "App: Release" but the preLaunchTask sets
+			// GpuVariant=cuda, so Electron's `dotnet run` builds the
+			// NVIDIA-only stack (ORT.Gpu + LLamaSharp.Backend.Cuda12)
+			// instead of the default cross-vendor standard stack
+			// (ORT.DirectML + Vulkan). Use on an NVIDIA box when you want
+			// the CUDA execution provider in dev. Note the first run after
+			// switching rewrites packages.lock.json (CUDA package graph) —
+			// see the task comment for cleanup.
+			"name": "App: Release (CUDA)",
+			"type": "node-terminal",
+			"request": "launch",
+			"command": "exit 0",
+			"preLaunchTask": "Release: Electron + Backend (CUDA)"
+		},
+		{
 			"name": "ExecuteOnce: Debug",
 			"type": "coreclr",
 			"request": "launch",

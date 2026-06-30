@@ -99,6 +99,58 @@
 			}
 		},
 		{
+			// CUDA variant of "Release: Electron + Backend". Same Vite +
+			// Electron pipeline and Release .NET config, but GpuVariant=cuda
+			// is read by MSBuild as a property when Electron spawns
+			// `dotnet run` (see startDotnetBackend in main.ts), swapping the
+			// default cross-vendor standard stack (ORT.DirectML + Vulkan) for
+			// the NVIDIA-only stack (ORT.Gpu + LLamaSharp.Backend.Cuda12).
+			//
+			// First run after switching variants triggers a NuGet restore of
+			// the ~500 MB CUDA package graph and rewrites packages.lock.json
+			// in the working tree — discard that with
+			// `git checkout -- '**/packages.lock.json'` when done (see
+			// CONTRIBUTING.md). Requires the CUDA toolkit / runtime libs to
+			// be resolvable (installed CUDA bundle or system CUDA on PATH);
+			// otherwise the CUDA execution provider falls back to CPU.
+			"label": "Release: Electron + Backend (CUDA)",
+			"type": "shell",
+			"command": "npm",
+			"args": ["run", "electron:dev"],
+			"options": {
+				"cwd": "${workspaceFolder}/src/Heliosoph.DatumV.Web/electron",
+				"env": {
+					"DOTNET_CONFIGURATION": "Release",
+					"GpuVariant": "cuda"
+				},
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			"problemMatcher": {
+				"owner": "dev-electron",
+				"pattern": {
+					"regexp": "^([^\\s].*)\\((\\d+|\\d+,\\d+|\\d+,\\d+,\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(.*)$",
+					"file": 1,
+					"location": 2,
+					"severity": 3,
+					"message": 4
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "Heliosoph.DatumV listening at"
+				}
+			}
+		},
+		{
 			// Builds the Linux x64 CUDA AppImage from Windows by delegating
 			// to WSL (Ubuntu-24.04, root). The script stashes Windows
 			// node_modules, runs Linux npm ci, dotnet publish, and
