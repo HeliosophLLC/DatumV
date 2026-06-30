@@ -22,18 +22,12 @@
 -- update is NOT: as an ADD/Turbo model this body uses ancestral Euler
 -- (renoising each step), where the deterministic SD 1.x Hyper/Lightning
 -- bodies use plain Euler.
--- The denoising schedule, CLIP tokenization, sample_normal noise, and
--- tensor->image conversion are shared with the SD 1.x bodies. The Euler
--- update is NOT: as an ADD/Turbo model this body uses ancestral Euler
--- (renoising each step), where the deterministic SD 1.x Hyper/Lightning
--- bodies use plain Euler.
 -- ============================================================================
 
 CREATE OR REPLACE MODEL sd_turbo(
   prompt String,
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
-    COMMENT 'Number of ancestral-Euler denoising steps. SD Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot, beyond 4 returns diminishing gains. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
     COMMENT 'Number of ancestral-Euler denoising steps. SD Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot, beyond 4 returns diminishing gains. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
   size   Int32 = 512
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
@@ -61,7 +55,7 @@ AS BEGIN
   DECLARE timesteps Float32[] = schedule['timesteps'];
 
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
 
   -- Ancestral Euler denoising loop. SD Turbo is ADD-distilled and its
   -- reference sampler is EulerAncestralDiscreteScheduler: each intermediate
