@@ -167,19 +167,19 @@ AS BEGIN
   DECLARE w Int32 = image_width(img);
   DECLARE sx Float32 = w::Float32 / 518.0::Float32;
   DECLARE sy Float32 = h::Float32 / 518.0::Float32;
-  -- intrinsics is flattened on struct extraction; row-major (1,1,3,3)
-  -- lays out as [fx, 0, cx, 0, fy, cy, 0, 0, 1], so flat 1-based indices
-  -- 1=fx, 3=cx, 5=fy, 6=cy.
-  DECLARE k Float32[] = outputs['intrinsics'];
+  -- intrinsics extracts as a shape-aware (1,1,3,3); array_flatten gives the
+  -- row-major buffer [fx, 0, cx, 0, fy, cy, 0, 0, 1] for 1-based array_get,
+  -- so flat indices 1=fx, 3=cx, 5=fy, 6=cy.
+  DECLARE k Float32[] = array_flatten(outputs['intrinsics']);
   RETURN {
     depth:      array_resize_2d(outputs['predicted_depth'], h, w),
     confidence: array_resize_2d(outputs['confidence'], h, w),
     extrinsics: outputs['extrinsics'],
-    intrinsics: [
+    intrinsics: CAST([
       array_get(k, 1) * sx,  0.0::Float32,          array_get(k, 3) * sx,
       0.0::Float32,          array_get(k, 5) * sy,  array_get(k, 6) * sy,
       0.0::Float32,          0.0::Float32,          1.0::Float32
-    ]
+    ] AS Array<Float32>(3, 3))
   }
 END;
 

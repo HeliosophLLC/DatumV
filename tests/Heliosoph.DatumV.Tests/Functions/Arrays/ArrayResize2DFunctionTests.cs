@@ -172,4 +172,62 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
             [2, 1],
             rows[0]["r"].AsArraySpan<int>(arena, catalog.SidecarRegistry).ToArray());
     }
+
+    [Fact]
+    public async Task StructFieldExtraction_PreservesMultiDimShape()
+    {
+        // Phase 2 probe: a multi-dim value stored as a struct field and then
+        // extracted (`s['field']`) must keep its shape — struct fields round-trip
+        // as raw DataValue records, so the IsMultiDim flag + shape prefix survive.
+        // Confirms the `_full` bundles' array_resize_2d(outputs['depth'], …) works
+        // once the old bare-CAST flatten is gone.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (id INT32)");
+        catalog.Plan("INSERT INTO t VALUES (1)");
+        catalog.Plan(
+            "CREATE FUNCTION struct_field_probe() RETURNS Array<Int32> BEGIN "
+            + "DECLARE m Array<Float32>(2, 3) = "
+            + "[1.0::Float32, 2.0::Float32, 3.0::Float32, 4.0::Float32, 5.0::Float32, 6.0::Float32]; "
+            + "DECLARE s Struct = { field: m }; "
+            + "DECLARE extracted Array<Float32> = s['field']; "
+            + "RETURN [array_ndims(extracted), array_ndims(array_flatten(extracted))] END");
+
+        using Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT struct_field_probe() AS r FROM t", catalog, store: arena);
+
+        // Extracted field keeps ndim 2; array_flatten drops it to 1.
+        Assert.Equal(
+            [2, 1],
+            rows[0]["r"].AsArraySpan<int>(arena, catalog.SidecarRegistry).ToArray());
+    }
+
+    [Fact]
+    public async Task ShapedCastLiteral_InStructField_RoundTripsShape()
+    {
+        // Mirrors the DAv3 _full intrinsics fix: a flat array literal reshaped
+        // via CAST(... AS Array<Float32>(r, c)) and stored as a struct field
+        // comes back carrying the declared (r, c) shape on extraction.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (id INT32)");
+        catalog.Plan("INSERT INTO t VALUES (1)");
+        catalog.Plan(
+            "CREATE FUNCTION shaped_field_probe() RETURNS Array<Int32> BEGIN "
+            + "DECLARE s Struct = { mat: CAST("
+            + "[1.0::Float32, 2.0::Float32, 3.0::Float32, 4.0::Float32] AS Array<Float32>(2, 2)) }; "
+            + "DECLARE m Array<Float32> = s['mat']; "
+            + "RETURN [array_ndims(m), array_length(m, 1), array_length(m, 2)] END");
+
+        using Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT shaped_field_probe() AS r FROM t", catalog, store: arena);
+
+        // ndim 2, both dims size 2 — the shape imposed by the cast survived the
+        // struct round-trip.
+        Assert.Equal(
+            [2, 2, 2],
+            rows[0]["r"].AsArraySpan<int>(arena, catalog.SidecarRegistry).ToArray());
+    }
 }
