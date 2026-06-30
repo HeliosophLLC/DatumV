@@ -2262,7 +2262,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/swinir-onnx",
-                  "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06",
+                  "revision": "d2ccd7036c7baba0e971f54af2387bce0fff84b9",
                   "include": [
                     "swinir_realsr_x4.onnx"
                   ]
@@ -2317,7 +2317,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/swinir-onnx",
-                  "revision": "d2500929641e9bb1e03f7ab83793ba59c307fb06",
+                  "revision": "d2ccd7036c7baba0e971f54af2387bce0fff84b9",
                   "include": [
                     "swinir_denoising_color_25.onnx"
                   ]
