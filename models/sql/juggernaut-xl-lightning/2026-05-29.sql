@@ -24,6 +24,13 @@
 --      the colours).
 -- The denoising schedule, CLIP framing, sample_normal noise, Euler update,
 -- and tensor->image conversion are shared with the SD 1.x bodies.
+--
+-- Classifier-free guidance: Lightning's reference guidance scale is ~1.8, so
+-- whenever cfg > 1 the loop runs an unconditional ("") UNet pass alongside the
+-- conditional one and extrapolates: pred = uncond + cfg * (cond - uncond).
+-- At cfg <= 1 it short-circuits to a single conditional pass (matching
+-- diffusers' do_classifier_free_guidance gate). This is the opposite of the
+-- ADD/Turbo bodies, which must stay at cfg = 0 (no guidance at all).
 -- ============================================================================
 
 CREATE OR REPLACE MODEL juggernaut_xl_lightning(
@@ -32,7 +39,10 @@ CREATE OR REPLACE MODEL juggernaut_xl_lightning(
     CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of Euler denoising steps. Lightning was distilled for 1-8 steps; 1 is fastest, 4 is the recommended minimum for face / fine-detail quality, 8 for hero outputs.',
   seed   Int64 = NULL
-    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt and steps. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
+    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt and steps. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.',
+  cfg    Float32 = 1.8
+    CHECK (cfg BETWEEN 0.0 AND 15.0)
+    COMMENT 'Classifier-free guidance scale. The Juggernaut XL Lightning reference is ~1.5-2.0; higher tightens prompt adherence and contrast but over-burns past ~3 on a Lightning distillation. cfg > 1 runs a second (unconditional) UNet pass per step and extrapolates, roughly doubling per-step cost; cfg <= 1 short-circuits to a single conditional pass — fastest, with no guidance.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'juggernaut-xl-lightning/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
@@ -67,6 +77,26 @@ AS BEGIN
   SET pooled = array_clamp(
     pooled, CAST(-65504.0 AS Float32), CAST(65504.0 AS Float32));
 
+  -- 5b. Unconditional ("") embeddings for classifier-free guidance, encoded
+  --     once up front by the same two-encoder path. The loop consumes them only
+  --     when cfg > 1; we compute them unconditionally because DECLARE scoping
+  --     would otherwise hide them from the loop, and the two text-encoder passes
+  --     are cheap next to the per-step UNet.
+  DECLARE uncond_ids Int64[] = tokenizer.encode_clip(
+    '', '../tokenizer/vocab.json', '../tokenizer/merges.txt');
+  DECLARE uncond_hidden_1 Float32[] = infer(
+    'text_encoder_1', uncond_ids, [1::Int32, 77::Int32]);
+  DECLARE uncond_outputs_2 Struct = infer_outputs(
+    'text_encoder_2', uncond_ids, [1::Int32, 77::Int32]);
+  DECLARE uncond_hidden_2 Float32[] = uncond_outputs_2['last_hidden_state'];
+  DECLARE uncond_pooled   Float32[] = uncond_outputs_2['text_embeds'];
+  DECLARE uncond_embeds   Float32[] = array_concat_last_dim(
+    uncond_hidden_1, 768::Int32, uncond_hidden_2, 1280::Int32);
+  SET uncond_embeds = array_clamp(
+    uncond_embeds, CAST(-65504.0 AS Float32), CAST(65504.0 AS Float32));
+  SET uncond_pooled = array_clamp(
+    uncond_pooled, CAST(-65504.0 AS Float32), CAST(65504.0 AS Float32));
+
   -- 6. SDXL's added_cond_kwargs.time_ids — micro-conditioning declaring
   --    the original + target resolution and any crop offsets.
   DECLARE time_ids Float32[] = [
@@ -91,7 +121,8 @@ AS BEGIN
       / sqrt(sigma * sigma + CAST(1.0 AS Float32));
     DECLARE scaled Float32[] = array_scale(latents, c_in);
 
-    DECLARE noise_pred Float32[] = infer(
+    -- Conditional UNet pass — always needed.
+    DECLARE pred_cond Float32[] = infer(
       'unet',
       { sample: scaled,
         timestep: timesteps[i],
@@ -103,7 +134,31 @@ AS BEGIN
         text_embeds: [1::Int32, 1280::Int32],
         time_ids: [1::Int32, 6::Int32] });
 
-    SET latents = array_axpy(latents, sigma_next - sigma, noise_pred);
+    -- Classifier-free guidance only when cfg > 1 (a single conditional pass is
+    -- exactly cfg = 1). Second pass on the unconditional embeddings, then
+    -- extrapolate: pred = uncond + cfg * (cond - uncond).
+    IF cfg > CAST(1.0 AS Float32)
+    BEGIN
+      DECLARE pred_uncond Float32[] = infer(
+        'unet',
+        { sample: scaled,
+          timestep: timesteps[i],
+          encoder_hidden_states: uncond_embeds,
+          text_embeds: uncond_pooled,
+          time_ids: time_ids },
+        { sample: [1::Int32, 4::Int32, 128::Int32, 128::Int32],
+          encoder_hidden_states: [1::Int32, 77::Int32, 2048::Int32],
+          text_embeds: [1::Int32, 1280::Int32],
+          time_ids: [1::Int32, 6::Int32] });
+      DECLARE diff Float32[] = array_axpy(
+        pred_cond, CAST(-1.0 AS Float32), pred_uncond);   -- cond - uncond
+      DECLARE guided Float32[] = array_axpy(pred_uncond, cfg, diff);
+      SET latents = array_axpy(latents, sigma_next - sigma, guided);
+    END
+    ELSE
+    BEGIN
+      SET latents = array_axpy(latents, sigma_next - sigma, pred_cond);
+    END;
     SET i = i + 1
   END;
 
