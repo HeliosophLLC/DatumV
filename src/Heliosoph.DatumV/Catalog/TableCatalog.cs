@@ -1129,6 +1129,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.ProceduralLeafPlan.ForSet(this, set);
         }
+        else if (statement is AppendStatement append)
+        {
+            return Plans.ProceduralLeafPlan.ForAppend(this, append);
+        }
+        else if (statement is ReserveStatement reserve)
+        {
+            return Plans.ProceduralLeafPlan.ForReserve(this, reserve);
+        }
         else if (statement is PrintStatement print)
         {
             return Plans.ProceduralLeafPlan.ForPrint(this, print);

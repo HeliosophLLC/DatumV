@@ -126,6 +126,16 @@ public sealed class CompletionProvider
                 AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
+            case CompletionZoneKind.AfterListAppendTarget:
+                // APPEND expr TO ⌷ / RESERVE expr FOR ⌷ — the only legal target
+                // is a List<T> accumulator. Offer the lists in scope; fall back
+                // to every procedural variable when none are typed as lists (so
+                // the popup is still useful while the body is being written).
+                AddListTargets(
+                    items,
+                    zone.ListVariablesInScope is { Count: > 0 } lists ? lists : zone.VariablesInScope);
+                break;
+
             case CompletionZoneKind.AfterSelect:
                 AddColumns(items, zone.TablesInScope, zone.TvfAliasesInScope, derivedSchemas);
                 AddScalarFunctions(items, effectiveScalarWhitelist);
@@ -2110,6 +2120,28 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Variable,
                 InsertText = name,
                 Detail = "procedural variable",
+                SortOrder = 0,
+            });
+        }
+    }
+
+    /// <summary>
+    /// Surfaces the candidate target variables for an <c>APPEND … TO</c> /
+    /// <c>RESERVE … FOR</c> slot. The caller passes the <c>List&lt;T&gt;</c>
+    /// accumulators in scope when any exist; otherwise the full procedural
+    /// variable set, so a half-written body still gets suggestions.
+    /// </summary>
+    private static void AddListTargets(List<CompletionItem> items, IReadOnlyList<string>? targets)
+    {
+        if (targets is null) return;
+        foreach (string name in targets)
+        {
+            items.Add(new CompletionItem
+            {
+                Label = name,
+                Kind = CompletionItemKind.Variable,
+                InsertText = name,
+                Detail = "List accumulator",
                 SortOrder = 0,
             });
         }

@@ -57,6 +57,18 @@ internal sealed class SemanticAnalyzer
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Procedural variables (<c>DECLARE</c> / <c>FOR</c> / <c>CATCH</c> names)
+    /// declared anywhere in the surrounding batch. A bare reference to one of
+    /// these in a SELECT resolves to the variable at run time (variables-first
+    /// precedence), so it must not be flagged as an unknown column. Empty when
+    /// the analyzer is invoked without batch context.
+    /// </summary>
+    private IReadOnlySet<string> _declaredVariables = EmptyVariableSet;
+
+    private static readonly IReadOnlySet<string> EmptyVariableSet =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Index of table names → (column name → DataKind string) for O(1) lookup.
     /// Keys are case-insensitive because Heliosoph.DatumV SQL is case-insensitive.
     /// </summary>
@@ -162,8 +174,18 @@ internal sealed class SemanticAnalyzer
     /// Analyzes a <see cref="QueryExpression"/> tree, recursively walking compound
     /// set operations and producing semantic warnings for each branch.
     /// </summary>
-    public Diagnostic[] Analyze(QueryExpression queryExpression)
+    public Diagnostic[] Analyze(QueryExpression queryExpression) =>
+        Analyze(queryExpression, EmptyVariableSet);
+
+    /// <summary>
+    /// Same as <see cref="Analyze(QueryExpression)"/> but with the procedural
+    /// variables declared in the surrounding batch, so bare references to them
+    /// in the query are not flagged as unknown columns.
+    /// </summary>
+    public Diagnostic[] Analyze(QueryExpression queryExpression, IReadOnlySet<string> declaredVariables)
     {
+        _declaredVariables = declaredVariables ?? EmptyVariableSet;
+
         List<Diagnostic> diagnostics = new();
 
         switch (queryExpression)
@@ -1436,6 +1458,13 @@ internal sealed class SemanticAnalyzer
         // behaviour swallowed typos like `filex` whenever any LET was
         // declared in the same SELECT).
         if (!found && _currentStatementLetNames.Contains(column.ColumnName))
+        {
+            found = true;
+        }
+
+        // A bare reference to a procedural variable (DECLARE @x / FOR @i /
+        // CATCH @err) resolves to the variable at run time, not a column.
+        if (!found && _declaredVariables.Contains(column.ColumnName))
         {
             found = true;
         }

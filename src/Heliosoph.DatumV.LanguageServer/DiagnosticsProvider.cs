@@ -70,8 +70,21 @@ public static class DiagnosticsProvider
         QueryExpression? analyzed = parseResult.EffectiveQuery;
         if (manifest is not null && analyzed is not null)
         {
+            // Procedural variables declared earlier in the batch (DECLARE @x,
+            // FOR @i, CATCH @err) resolve as values in a trailing SELECT, so
+            // pass their names to the analyzer to suppress unknown-column
+            // warnings on bare references to them.
+            HashSet<string> declaredVariables = new(StringComparer.OrdinalIgnoreCase);
+            if (parseResult.Statements is not null)
+            {
+                foreach (Statement statement in parseResult.Statements)
+                {
+                    CollectDeclaredVariableNames(statement, declaredVariables);
+                }
+            }
+
             SemanticAnalyzer analyzer = new(manifest);
-            Diagnostic[] semanticDiagnostics = analyzer.Analyze(analyzed);
+            Diagnostic[] semanticDiagnostics = analyzer.Analyze(analyzed, declaredVariables);
             diagnostics.AddRange(semanticDiagnostics);
         }
 
@@ -87,6 +100,48 @@ public static class DiagnosticsProvider
         }
 
         return diagnostics.ToArray();
+    }
+
+    /// <summary>
+    /// Walks a statement (recursing into block / branch / loop / handler
+    /// bodies) and collects every procedural variable name it introduces —
+    /// <c>DECLARE</c>, the counter / cursor of a <c>FOR</c>, and a
+    /// <c>CATCH</c> error variable. Over-collecting nested-scope names is
+    /// harmless here: the set only suppresses unknown-column warnings, and a
+    /// real typo is unlikely to collide with a declared variable name.
+    /// </summary>
+    private static void CollectDeclaredVariableNames(Statement statement, HashSet<string> sink)
+    {
+        switch (statement)
+        {
+            case DeclareStatement decl:
+                sink.Add(decl.VariableName);
+                break;
+            case ForCounterStatement forCtr:
+                sink.Add(forCtr.VariableName);
+                CollectDeclaredVariableNames(forCtr.Body, sink);
+                break;
+            case ForInStatement forIn:
+                sink.Add(forIn.VariableName);
+                CollectDeclaredVariableNames(forIn.Body, sink);
+                break;
+            case BlockStatement block:
+                foreach (Statement child in block.Statements) CollectDeclaredVariableNames(child, sink);
+                break;
+            case IfStatement ifStmt:
+                CollectDeclaredVariableNames(ifStmt.Then, sink);
+                if (ifStmt.Else is not null) CollectDeclaredVariableNames(ifStmt.Else, sink);
+                break;
+            case WhileStatement whileStmt:
+                CollectDeclaredVariableNames(whileStmt.Body, sink);
+                break;
+            case TryStatement tryStmt:
+                CollectDeclaredVariableNames(tryStmt.TryBody, sink);
+                sink.Add(tryStmt.ErrorVariableName);
+                CollectDeclaredVariableNames(tryStmt.CatchBody, sink);
+                if (tryStmt.FinallyBody is not null) CollectDeclaredVariableNames(tryStmt.FinallyBody, sink);
+                break;
+        }
     }
 
     /// <summary>

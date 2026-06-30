@@ -501,6 +501,8 @@ internal static class KeywordRegistry
         [SqlToken.Return] = [],         // Procedural-UDF body terminator; only meaningful inside BEGIN…END.
         [SqlToken.Pure] = [],           // CREATE [OR REPLACE] PURE FUNCTION modifier; component of the DDL prefix.
         [SqlToken.Print] = [],
+        [SqlToken.Append] = [],         // APPEND … TO list; only meaningful inside a procedural body.
+        [SqlToken.Reserve] = [],        // RESERVE … FOR list; only meaningful inside a procedural body.
         [SqlToken.Try] = [],
         [SqlToken.Catch] = [],
         [SqlToken.Finally] = [],

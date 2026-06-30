@@ -941,6 +941,18 @@ public static class ParameterBinder
                     BindExpression(set.Value, parameters),
                     set.Span);
 
+            case AppendStatement append:
+                return new AppendStatement(
+                    BindExpression(append.Value, parameters),
+                    append.TargetVariable,
+                    append.Span);
+
+            case ReserveStatement reserve:
+                return new ReserveStatement(
+                    BindExpression(reserve.Capacity, parameters),
+                    reserve.TargetVariable,
+                    reserve.Span);
+
             case ReturnStatement ret:
                 return new ReturnStatement(BindExpression(ret.Value, parameters), ret.Span);
 
@@ -1136,6 +1148,14 @@ public static class ParameterBinder
 
             case SetStatement set:
                 CollectFromExpression(set.Value, names);
+                break;
+
+            case AppendStatement append:
+                CollectFromExpression(append.Value, names);
+                break;
+
+            case ReserveStatement reserve:
+                CollectFromExpression(reserve.Capacity, names);
                 break;
 
             case ReturnStatement ret:

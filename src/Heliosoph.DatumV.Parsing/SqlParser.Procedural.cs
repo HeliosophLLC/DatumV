@@ -243,6 +243,32 @@ public static partial class SqlParser
         select (Statement)new PrintStatement(value, ToSpan(printKw));
 
     /// <summary>
+    /// <c>APPEND expr TO @list</c> — in-place append to a body-local
+    /// <c>List&lt;T&gt;</c> accumulator. The value is parsed eagerly (any SELECT-
+    /// projection expression); the target is a plain variable name. That the
+    /// target is actually a list is checked at execution time, not parse time.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> AppendStatementParser =
+        from appendKw in Token.EqualTo(SqlToken.Append)
+        from value in SP.Ref(() => ExpressionParser!)
+        from toKw in Token.EqualTo(SqlToken.To)
+        from target in IdentifierOrKeywordAsName
+        select (Statement)new AppendStatement(value, target, ToSpan(appendKw));
+
+    /// <summary>
+    /// <c>RESERVE expr FOR @list</c> — capacity hint for a body-local
+    /// <c>List&lt;T&gt;</c> accumulator. Mirrors <see cref="AppendStatementParser"/>
+    /// but uses <c>FOR</c> as the target preposition. List-ness of the target is
+    /// enforced at execution time.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ReserveStatementParser =
+        from reserveKw in Token.EqualTo(SqlToken.Reserve)
+        from capacity in SP.Ref(() => ExpressionParser!)
+        from forKw in Token.EqualTo(SqlToken.For)
+        from target in IdentifierOrKeywordAsName
+        select (Statement)new ReserveStatement(capacity, target, ToSpan(reserveKw));
+
+    /// <summary>
     /// <c>ASSERT predicate [MESSAGE message-expr]</c> — procedural invariant
     /// check. Distinct from the SELECT-clause <c>ASSERT</c>: this form is a
     /// standalone statement, always aborts on failure, and does not support
@@ -713,6 +739,8 @@ public static partial class SqlParser
             .Or(ContinueStatementParser.Try())
             .Or(ReturnStatementParser.Try())
             .Or(PrintStatementParser.Try())
+            .Or(AppendStatementParser.Try())
+            .Or(ReserveStatementParser.Try())
             .Or(AssertStatementParser.Try())
             .Or(RaiseStatementParser.Try())
             .Or(TryStatementParser.Try())

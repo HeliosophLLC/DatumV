@@ -97,6 +97,9 @@ public static class CompletionContext
         // suggestions are friendlier than no suggestions, and at worst the
         // engine will reject the resulting query at run time.
         IReadOnlyList<string> variablesInScope = ExtractVariablesInScope(tokens);
+        // The subset declared as List<T> — used to scope the APPEND / RESERVE
+        // target popup to valid list accumulators.
+        IReadOnlyList<string> listVariablesInScope = ExtractListVariablesInScope(tokens);
 
         // Tables / aliases bound by FROM / JOIN — extracted from the *full*
         // SQL text, not just the prefix up to the cursor. The user often
@@ -137,7 +140,7 @@ public static class CompletionContext
             IReadOnlyList<string>? dotChain = ExtractDotChainSegments(tokens, prefix);
             return new CompletionZone(
                 CompletionZoneKind.AfterDot, prefix, tableQualifier, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope,
-                DotChainSegments: dotChain);
+                DotChainSegments: dotChain, ListVariablesInScope: listVariablesInScope);
         }
 
         // Walk backwards through tokens to find the governing keyword.
@@ -151,7 +154,8 @@ public static class CompletionContext
         CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefixIsLastToken);
 
         return new CompletionZone(
-            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope);
+            zone, prefix, TableQualifier: null, variablesInScope, tablesInScope, tvfAliasesInScope, tableAliasesInScope,
+            ListVariablesInScope: listVariablesInScope);
     }
 
     /// <summary>
@@ -439,6 +443,41 @@ public static class CompletionContext
                 || k == SqlToken.Catch;
             if (!introduces) continue;
             if (tokens[i + 1].Kind != SqlToken.Identifier) continue;
+            string name = tokens[i + 1].Text;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (seen.Add(name)) ordered.Add(name);
+        }
+        return ordered;
+    }
+
+    /// <summary>
+    /// Collects the names declared as <c>List&lt;T&gt;</c> accumulators —
+    /// <c>DECLARE name List &lt; … &gt;</c>. Used to scope the
+    /// <c>APPEND … TO ⌷</c> / <c>RESERVE … FOR ⌷</c> target popup to valid
+    /// list variables. The element type is irrelevant here, so the inner
+    /// <c>&lt; … &gt;</c> isn't inspected — the <c>List</c> identifier
+    /// immediately followed by <c>&lt;</c> is the signal.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractListVariablesInScope(List<TokenInfo> tokens)
+    {
+        if (tokens.Count == 0) return Array.Empty<string>();
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> ordered = new();
+
+        for (int i = 0; i + 3 < tokens.Count; i++)
+        {
+            if (tokens[i].Kind != SqlToken.Declare) continue;
+            if (tokens[i + 1].Kind != SqlToken.Identifier) continue;
+            // The type token: `List` lexes as a plain identifier (the parser's
+            // generic-wrapper rule recognises it), so match on text + a
+            // following `<`.
+            if (tokens[i + 2].Kind != SqlToken.Identifier
+                || !string.Equals(tokens[i + 2].Text, "List", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (tokens[i + 3].Kind != SqlToken.LessThan) continue;
+
             string name = tokens[i + 1].Text;
             if (string.IsNullOrEmpty(name)) continue;
             if (seen.Add(name)) ordered.Add(name);
@@ -1023,6 +1062,13 @@ public static class CompletionContext
                     // — no row context, so columns aren't legal here.
                     return CompletionZoneKind.ProceduralExpression;
 
+                case SqlToken.Append:
+                case SqlToken.Reserve:
+                    // `APPEND ⌷ TO list` / `RESERVE ⌷ FOR list` — the value /
+                    // capacity expression position. The target (after TO / FOR)
+                    // is handled by those tokens' own cases.
+                    return CompletionZoneKind.ProceduralExpression;
+
                 case SqlToken.Call:
                     // CALL <schema>.<proc>(args) — surface procedures from
                     // search-path schemas as bare names, plus off-search-
@@ -1147,6 +1193,13 @@ public static class CompletionContext
                         : CompletionZoneKind.AfterCopy;
 
                 case SqlToken.To:
+                    // `APPEND expr TO ⌷` — the list-mutation target. Detected by
+                    // walking back to the statement's leading keyword; takes
+                    // precedence over the COPY shapes below.
+                    if (IsListMutationTarget(tokens, index, SqlToken.Append))
+                    {
+                        return CompletionZoneKind.AfterListAppendTarget;
+                    }
                     // `COPY (q) TO 'path' ⌷` — user has typed the target path
                     // (passedContent==true), surface the opening paren of the
                     // option block. Bare `TO ⌷` is the path-typing position;
@@ -1154,6 +1207,16 @@ public static class CompletionContext
                     return passedContent
                         ? CompletionZoneKind.AfterCopyTo
                         : CompletionZoneKind.AfterAs;
+
+                case SqlToken.For:
+                    // `RESERVE expr FOR ⌷` — the list-mutation target. Other FOR
+                    // shapes (loops, PIVOT) keep their existing behaviour: FOR had
+                    // no dedicated case before, so defer to the default walk-back.
+                    if (IsListMutationTarget(tokens, index, SqlToken.Reserve))
+                    {
+                        return CompletionZoneKind.AfterListAppendTarget;
+                    }
+                    goto default;
 
                 case SqlToken.Reindex:
                     // After REINDEX — offer table names. The optional TABLE
@@ -1485,6 +1548,43 @@ public static class CompletionContext
         if (back < 0 || tokens[back].Kind != SqlToken.To) return false;
         return true;
     }
+
+    /// <summary>
+    /// True when the <paramref name="prepositionIndex"/> token (a <c>TO</c> /
+    /// <c>FOR</c>) is the preposition of a list-mutation statement led by
+    /// <paramref name="leadKeyword"/> (<c>APPEND … TO</c> /
+    /// <c>RESERVE … FOR</c>). Walks back through the value expression to the
+    /// statement's leading keyword, stopping at any statement boundary so a
+    /// preposition belonging to a different statement (a <c>FOR … TO</c> loop,
+    /// <c>COPY … TO</c>) doesn't match.
+    /// </summary>
+    private static bool IsListMutationTarget(List<TokenInfo> tokens, int prepositionIndex, SqlToken leadKeyword)
+    {
+        for (int i = prepositionIndex - 1; i >= 0; i--)
+        {
+            SqlToken k = tokens[i].Kind;
+            if (k == leadKeyword) return true;
+            if (IsStatementBoundaryToken(k)) return false;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True for tokens that begin or separate a procedural statement. Used to
+    /// bound the backward walk in <see cref="IsListMutationTarget"/> so it never
+    /// crosses into a neighbouring statement.
+    /// </summary>
+    private static bool IsStatementBoundaryToken(SqlToken kind) => kind switch
+    {
+        SqlToken.Semicolon or SqlToken.Begin or SqlToken.End
+            or SqlToken.Select or SqlToken.Insert or SqlToken.Update or SqlToken.Delete
+            or SqlToken.Declare or SqlToken.Set or SqlToken.If or SqlToken.While
+            or SqlToken.For or SqlToken.Else or SqlToken.Print or SqlToken.Raise
+            or SqlToken.Return or SqlToken.Copy or SqlToken.Create or SqlToken.Drop
+            or SqlToken.Alter or SqlToken.Call or SqlToken.Append or SqlToken.Reserve
+            or SqlToken.Try or SqlToken.Catch or SqlToken.Finally or SqlToken.Assert => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Sub-classifier for the cursor sitting inside a CREATE FUNCTION /
@@ -1823,6 +1923,12 @@ internal readonly record struct CursorContext(CursorContextKind Kind, int Splice
 /// <see langword="null"/> for 2-segment <c>alias.</c> chains and any
 /// non-AfterDot zone.
 /// </param>
+/// <param name="ListVariablesInScope">
+/// The subset of <see cref="VariablesInScope"/> declared as
+/// <c>List&lt;T&gt;</c> accumulators. Used to scope the
+/// <see cref="CompletionZoneKind.AfterListAppendTarget"/> popup to valid
+/// <c>APPEND … TO</c> / <c>RESERVE … FOR</c> targets.
+/// </param>
 public sealed record CompletionZone(
     CompletionZoneKind Kind,
     string? Prefix,
@@ -1831,7 +1937,8 @@ public sealed record CompletionZone(
     IReadOnlyList<string>? TablesInScope = null,
     IReadOnlyDictionary<string, string>? TvfAliasesInScope = null,
     IReadOnlyDictionary<string, string>? TableAliasesInScope = null,
-    IReadOnlyList<string>? DotChainSegments = null);
+    IReadOnlyList<string>? DotChainSegments = null,
+    IReadOnlyList<string>? ListVariablesInScope = null);
 
 /// <summary>
 /// The kind of SQL context the cursor is in, determining which completions to offer.
@@ -1840,6 +1947,14 @@ public enum CompletionZoneKind
 {
     /// <summary>Before any keyword — offer SELECT and other statement-starting keywords.</summary>
     StatementStart,
+
+    /// <summary>
+    /// The target slot of a list mutation — <c>APPEND expr TO ⌷</c> or
+    /// <c>RESERVE expr FOR ⌷</c>. The only legal target is a <c>List&lt;T&gt;</c>
+    /// variable, so the popup offers the list accumulators in scope (falling
+    /// back to every procedural variable when none are typed as lists).
+    /// </summary>
+    AfterListAppendTarget,
 
     /// <summary>After SELECT — offer columns, functions, *, table.*.</summary>
     AfterSelect,

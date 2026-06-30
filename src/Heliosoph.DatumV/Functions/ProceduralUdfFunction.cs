@@ -426,10 +426,20 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             case ReturnStatement ret:
             {
                 ValueRef value = await evaluator.EvaluateAsValueRefAsync(ret.Value, frame, cancellationToken).ConfigureAwait(false);
+                // A List<T> accumulator freezes to a flat Array<T> as it leaves
+                // the body — RETURN is one of its promotion boundaries.
+                if (value.IsListBuilder)
+                {
+                    value = value.FreezeToArray();
+                }
                 return new ReturnSignal(value);
             }
             case DeclareStatement decl:
             {
+                if (ProceduralListOps.TryDeclareList(decl, scope))
+                {
+                    return null;
+                }
                 ValueRef declValue;
                 if (decl.Initializer is not null)
                 {
@@ -456,6 +466,18 @@ public sealed class ProceduralUdfFunction : IScalarFunction
             {
                 ValueRef value = await evaluator.EvaluateAsValueRefAsync(set.Value, frame, cancellationToken).ConfigureAwait(false);
                 scope.Set(set.VariableName, value);
+                return null;
+            }
+            case AppendStatement append:
+            {
+                ValueRef value = await evaluator.EvaluateAsValueRefAsync(append.Value, frame, cancellationToken).ConfigureAwait(false);
+                ProceduralListOps.Append(append.TargetVariable, value, scope, frame.Source);
+                return null;
+            }
+            case ReserveStatement reserve:
+            {
+                ValueRef capacity = await evaluator.EvaluateAsValueRefAsync(reserve.Capacity, frame, cancellationToken).ConfigureAwait(false);
+                ProceduralListOps.Reserve(reserve.TargetVariable, capacity, scope);
                 return null;
             }
             case IfStatement ifStmt:

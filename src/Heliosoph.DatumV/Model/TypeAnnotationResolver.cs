@@ -39,6 +39,49 @@ public static class TypeAnnotationResolver
         => TryParse(annotation, types: null, out kind, out isArray, out _, out _, out _);
 
     /// <summary>
+    /// Recognises a body-local list-accumulator annotation
+    /// (<c>List&lt;T&gt;</c>) and resolves its element kind. Distinct from the
+    /// storable type surface: <see cref="TryParse(string, out DataKind, out bool)"/>
+    /// deliberately does <em>not</em> resolve <c>List&lt;T&gt;</c>, so a
+    /// <c>List&lt;T&gt;</c> used as a column / cast / parameter type falls through
+    /// to a "cannot resolve type" rejection. Only the procedural <c>DECLARE</c>
+    /// path consults this method. The element kind must be a fixed-width
+    /// primitive (the same matrix <see cref="DataValue.ScalarByteSize"/> accepts);
+    /// reference / nested element kinds are rejected.
+    /// </summary>
+    public static bool TryParseListBuilder(string annotation, out DataKind elementKind)
+    {
+        elementKind = default;
+        if (string.IsNullOrEmpty(annotation) || !TryStripListWrapper(annotation, out string inner))
+        {
+            return false;
+        }
+        // No nested wrappers, no inner paren suffix — same single-level discipline
+        // as Array<T>; the element must be a bare fixed-width scalar.
+        if (TryStripArrayWrapper(inner, out _)
+            || TryStripListWrapper(inner, out _)
+            || TryStripParenSuffix(inner, out _, out _))
+        {
+            return false;
+        }
+        return TryResolveScalar(inner, out elementKind, out _)
+            && IsFixedWidthPrimitive(elementKind);
+    }
+
+    private static bool IsFixedWidthPrimitive(DataKind kind)
+    {
+        try
+        {
+            _ = DataValue.ScalarByteSize(kind);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// True when <paramref name="annotation"/> matches an entry in the
     /// engine-defined named-type vocabulary (case-insensitive). Used by
     /// the 2-arg <see cref="TryParse(string, out DataKind, out bool)"/>
@@ -275,6 +318,27 @@ public static class TypeAnnotationResolver
     private static bool TryStripArrayWrapper(string annotation, out string inner)
     {
         const string Prefix = "Array<";
+        if (annotation.Length > Prefix.Length + 1
+            && annotation.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+            && annotation[^1] == '>')
+        {
+            inner = annotation[Prefix.Length..^1].Trim();
+            return inner.Length > 0;
+        }
+
+        inner = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Strips a single <c>List&lt;...&gt;</c> wrapper from
+    /// <paramref name="annotation"/>, mirroring <see cref="TryStripArrayWrapper"/>.
+    /// Used only by <see cref="TryParseListBuilder"/> — the storable type surface
+    /// never recognises <c>List&lt;T&gt;</c>.
+    /// </summary>
+    private static bool TryStripListWrapper(string annotation, out string inner)
+    {
+        const string Prefix = "List<";
         if (annotation.Length > Prefix.Length + 1
             && annotation.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
             && annotation[^1] == '>')

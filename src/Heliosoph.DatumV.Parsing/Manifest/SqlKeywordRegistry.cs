@@ -74,6 +74,7 @@ public static class SqlKeywordRegistry
         "BEGIN", "WHILE", "DECLARE", "TO",
         "BREAK", "CONTINUE", "PRINT",
         "TRY", "CATCH", "FINALLY", "RAISE",
+        "APPEND", "RESERVE",
     ];
 
     /// <summary>Boolean and null literal keywords.</summary>
@@ -116,8 +117,10 @@ public static class SqlKeywordRegistry
         // tokenises it as a plain identifier — the parser's recursive
         // TypeNameParser does the wrapper recognition — but the editor's
         // Monarch highlighter consults this list to colour the word with
-        // the same theme entry as scalar type names.
+        // the same theme entry as scalar type names. List<T> (the body-local
+        // growable accumulator) is the same shape and gets the same colour.
         "Array",
+        "List",
     ];
 
 }

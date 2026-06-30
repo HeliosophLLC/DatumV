@@ -100,6 +100,20 @@ public readonly struct ValueRef
     public bool IsByteArrayKind => _inline.IsByteArrayKind;
 
     /// <summary>
+    /// True when this is a body-local growable list accumulator
+    /// (<see cref="DataKind.ListBuilder"/> carrying a <see cref="ListBuilderValue"/>
+    /// payload). List builders are mutable and non-storable; they freeze to a flat
+    /// <c>Array&lt;T&gt;</c> via <see cref="FreezeToArray"/> at any outbound boundary.
+    /// </summary>
+    public bool IsListBuilder => _inline.Kind == DataKind.ListBuilder && _materialized is ListBuilderValue;
+
+    /// <summary>
+    /// The element kind of a <see cref="IsListBuilder"/> value. Throws when this is
+    /// not a list builder.
+    /// </summary>
+    public DataKind ListElementKind => AsListBuilder().ElementKind;
+
+    /// <summary>
     /// True when the value is a typed array carrying an explicit multi-dimensional
     /// shape — either as a scan-output ValueRef whose inline DataValue's
     /// <see cref="DataValue.IsMultiDim"/> is set, or as a function-output ValueRef
@@ -554,6 +568,18 @@ public readonly struct ValueRef
             ?? throw new ArgumentNullException(nameof(drawing)));
 
     /// <summary>
+    /// Wraps a body-local growable list accumulator. The list is
+    /// <em>body-scoped</em>: it flows as a <see cref="ValueRef"/> only within a
+    /// procedural body's variable scope and freezes to a flat <c>Array&lt;T&gt;</c>
+    /// (<see cref="FreezeToArray"/>) the moment it crosses an outbound boundary;
+    /// <see cref="ToDataValue"/> auto-freezes the payload to its array and
+    /// materialises that.
+    /// </summary>
+    public static ValueRef FromListBuilder(ListBuilderValue list) =>
+        new(DataValue.Null(DataKind.ListBuilder), list
+            ?? throw new ArgumentNullException(nameof(list)));
+
+    /// <summary>
     /// JSON payload as a byte slice over canonical CBOR bytes — used by
     /// <c>json_query</c> to return a subdocument view without copying. The
     /// segment's <c>(Array, Offset, Count)</c> identifies a window into a
@@ -832,6 +858,63 @@ public readonly struct ValueRef
         throw new InvalidOperationException(
             $"ValueRef of kind Drawing does not carry a DrawingPayload "
             + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Returns the <see cref="ListBuilderValue"/> backing a
+    /// <see cref="DataKind.ListBuilder"/> <see cref="ValueRef"/>. Throws when the
+    /// kind is wrong or the value carries no managed payload.
+    /// </summary>
+    public ListBuilderValue AsListBuilder()
+    {
+        if (_inline.Kind != DataKind.ListBuilder)
+        {
+            throw new InvalidOperationException(
+                $"AsListBuilder called on a {_inline.Kind} value (expected ListBuilder).");
+        }
+        else if (_materialized is ListBuilderValue list)
+        {
+            return list;
+        }
+
+        throw new InvalidOperationException(
+            $"ValueRef of kind ListBuilder does not carry a ListBuilderValue payload "
+            + $"(Materialized: {_materialized?.GetType().Name ?? "<none>"}).");
+    }
+
+    /// <summary>
+    /// Freezes a body-local list accumulator into a flat 1-D <c>Array&lt;T&gt;</c>
+    /// <see cref="ValueRef"/> with the list's element kind. One O(K) copy of the
+    /// accumulated bytes into a typed array — the single materialisation cost the
+    /// list pays when it crosses an outbound boundary (a non-opting scalar-function
+    /// argument, <c>RETURN</c>, or a type-annotated <c>DECLARE</c> / <c>SET</c>).
+    /// </summary>
+    public ValueRef FreezeToArray()
+    {
+        ListBuilderValue list = AsListBuilder();
+        DataKind kind = list.ElementKind;
+        // Carry each kind in the typed array that downstream `_materialized as T[]`
+        // readers expect (the kind drives the DataValue at materialisation; the T
+        // here must be the semantic match, not merely a same-width stand-in).
+        return kind switch
+        {
+            DataKind.UInt8 => FromPrimitiveArray(list.FreezeTo<byte>(), kind),
+            DataKind.Int8 => FromPrimitiveArray(list.FreezeTo<sbyte>(), kind),
+            DataKind.Boolean => FromPrimitiveArray(list.FreezeTo<bool>(), kind),
+            DataKind.UInt16 => FromPrimitiveArray(list.FreezeTo<ushort>(), kind),
+            DataKind.Int16 => FromPrimitiveArray(list.FreezeTo<short>(), kind),
+            DataKind.UInt32 => FromPrimitiveArray(list.FreezeTo<uint>(), kind),
+            DataKind.Int32 or DataKind.Date => FromPrimitiveArray(list.FreezeTo<int>(), kind),
+            DataKind.Float32 => FromPrimitiveArray(list.FreezeTo<float>(), kind),
+            DataKind.UInt64 => FromPrimitiveArray(list.FreezeTo<ulong>(), kind),
+            DataKind.Int64 or DataKind.Timestamp or DataKind.TimestampTz
+                or DataKind.Time or DataKind.Duration =>
+                FromPrimitiveArray(list.FreezeTo<long>(), kind),
+            DataKind.Float64 => FromPrimitiveArray(list.FreezeTo<double>(), kind),
+            _ => throw new NotSupportedException(
+                $"Freezing a List<{kind}> to an array is not supported. List builders "
+                + "carry fixed-width numeric / temporal element kinds in this version."),
+        };
     }
 
     /// <summary>
@@ -1217,6 +1300,16 @@ public readonly struct ValueRef
                     + "or any other arena-write boundary today. They exist only as "
                     + "intra-query intermediate values; render(drawing, size) "
                     + "rasterises a Drawing into a persistable Image."),
+            // A List<T> accumulator auto-freezes to its flat Array<T> at any
+            // materialisation boundary (projecting a bare list variable, an
+            // INSERT, a result row). Freezing is always the correct promotion —
+            // the list is a transient builder for exactly this array — so rather
+            // than refuse, freeze and materialise the array. Scalar-function
+            // arguments freeze earlier (in the dispatcher) so functions receive
+            // an array ValueRef, not a live list; this arm is the catch-all for
+            // the remaining DataValue boundaries.
+            ListBuilderValue when _inline.Kind == DataKind.ListBuilder =>
+                FreezeToArray().ToDataValue(targetStore, typeId, types),
             string s when _inline.Kind == DataKind.String && !_inline.IsArray =>
                 DataValue.FromString(s, targetStore),
             byte[] bytes when IsByteArrayKind => DataValue.FromByteArray(bytes, targetStore),

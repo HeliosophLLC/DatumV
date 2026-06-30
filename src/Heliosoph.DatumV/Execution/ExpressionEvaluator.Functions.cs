@@ -61,6 +61,14 @@ public sealed partial class ExpressionEvaluator
             for (int index = 0; index < argumentCount; index++)
             {
                 arguments[index] = await EvaluateAsValueRefAsync(function.Arguments[index], frame, cancellationToken).ConfigureAwait(false);
+                // Promotion boundary: a body-local List<T> accumulator freezes to
+                // a flat Array<T> before it reaches a scalar function. (A future
+                // ParameterSpec.AcceptsList opt-in will let specific functions —
+                // e.g. cardinality — receive the live list without this copy.)
+                if (arguments[index].IsListBuilder)
+                {
+                    arguments[index] = arguments[index].FreezeToArray();
+                }
             }
 
             if (_validatedScalarCalls.Add(function))

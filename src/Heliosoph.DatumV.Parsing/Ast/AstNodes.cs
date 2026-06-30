@@ -2206,6 +2206,36 @@ public sealed record PrintStatement(
     SourceSpan? Span = null) : Statement;
 
 /// <summary>
+/// <c>APPEND value TO @list</c> — appends an element (or the elements of a peer
+/// array) to a body-local <c>List&lt;T&gt;</c> accumulator in place, giving
+/// amortised O(1) growth instead of the copy-on-modify of
+/// <c>SET @list = array_append(@list, value)</c>. The target must be a
+/// <c>List&lt;T&gt;</c> variable; legality is enforced at execution time.
+/// </summary>
+/// <param name="Value">Element (or peer array) to append; its kind must match the list's element kind.</param>
+/// <param name="TargetVariable">Name of the target list variable, without the <c>@</c> prefix.</param>
+/// <param name="Span">Source location of the <c>APPEND</c> keyword.</param>
+public sealed record AppendStatement(
+    Expression Value,
+    string TargetVariable,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
+/// <c>RESERVE count FOR @list</c> — pre-sizes a body-local <c>List&lt;T&gt;</c>
+/// accumulator to hold at least <paramref name="Capacity"/> elements without
+/// reallocating. A pure capacity hint: it does not change the list's length.
+/// The target must be a <c>List&lt;T&gt;</c> variable; legality is enforced at
+/// execution time.
+/// </summary>
+/// <param name="Capacity">Integer-valued element-count hint (≥ 0).</param>
+/// <param name="TargetVariable">Name of the target list variable, without the <c>@</c> prefix.</param>
+/// <param name="Span">Source location of the <c>RESERVE</c> keyword.</param>
+public sealed record ReserveStatement(
+    Expression Capacity,
+    string TargetVariable,
+    SourceSpan? Span = null) : Statement;
+
+/// <summary>
 /// <c>ASSERT predicate [MESSAGE message-expr]</c> — procedural invariant
 /// check. Evaluates the predicate; if false or NULL, throws with the
 /// rendered message. When <see cref="Message"/> is omitted, the message

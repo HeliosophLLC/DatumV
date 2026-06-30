@@ -62,6 +62,20 @@ internal sealed class ProceduralLeafPlan : StatementPlan
         return new ProceduralLeafPlan(catalog, statement, "Set", $"@{statement.VariableName} = <expr>");
     }
 
+    /// <summary>Builds a plan for <c>APPEND expr TO @list</c>.</summary>
+    public static ProceduralLeafPlan ForAppend(TableCatalog catalog, AppendStatement statement)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        return new ProceduralLeafPlan(catalog, statement, "Append", $"<expr> TO @{statement.TargetVariable}");
+    }
+
+    /// <summary>Builds a plan for <c>RESERVE expr FOR @list</c>.</summary>
+    public static ProceduralLeafPlan ForReserve(TableCatalog catalog, ReserveStatement statement)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        return new ProceduralLeafPlan(catalog, statement, "Reserve", $"<expr> FOR @{statement.TargetVariable}");
+    }
+
     /// <summary>Builds a plan for <c>PRINT expression</c>.</summary>
     public static ProceduralLeafPlan ForPrint(TableCatalog catalog, PrintStatement statement)
     {
@@ -102,6 +116,12 @@ internal sealed class ProceduralLeafPlan : StatementPlan
             case SetStatement set:
                 await ExecuteSetAsync(set, context, cancellationToken).ConfigureAwait(false);
                 break;
+            case AppendStatement append:
+                await ExecuteAppendAsync(append, context, cancellationToken).ConfigureAwait(false);
+                break;
+            case ReserveStatement reserve:
+                await ExecuteReserveAsync(reserve, context, cancellationToken).ConfigureAwait(false);
+                break;
             case PrintStatement print:
                 await ExecutePrintAsync(print, context, cancellationToken).ConfigureAwait(false);
                 break;
@@ -120,6 +140,14 @@ internal sealed class ProceduralLeafPlan : StatementPlan
     private static async Task ExecuteDeclareAsync(
         DeclareStatement decl, Execution.ExecutionContext context, CancellationToken ct)
     {
+        // List<T> accumulator: declared empty (no initializer), populated by
+        // APPEND / RESERVE, frozen to Array<T> when read. Same handling as the
+        // procedural-body executors, via the shared helper.
+        if (ProceduralListOps.TryDeclareList(decl, context.VariableScope))
+        {
+            return;
+        }
+
         ValueRef bound;
         if (decl.Initializer is not null)
         {
@@ -154,6 +182,22 @@ internal sealed class ProceduralLeafPlan : StatementPlan
     {
         DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(set.Value, context, ct).ConfigureAwait(false);
         context.VariableScope.Set(set.VariableName, ProceduralEvaluator.LiftBoundaryValue(stable, context));
+    }
+
+    private static async Task ExecuteAppendAsync(
+        AppendStatement append, Execution.ExecutionContext context, CancellationToken ct)
+    {
+        DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(append.Value, context, ct).ConfigureAwait(false);
+        ValueRef value = ProceduralEvaluator.LiftBoundaryValue(stable, context);
+        ProceduralListOps.Append(append.TargetVariable, value, context.VariableScope, context.VariableStore);
+    }
+
+    private static async Task ExecuteReserveAsync(
+        ReserveStatement reserve, Execution.ExecutionContext context, CancellationToken ct)
+    {
+        DataValue stable = await ProceduralEvaluator.EvaluateScalarAsync(reserve.Capacity, context, ct).ConfigureAwait(false);
+        ValueRef capacity = ProceduralEvaluator.LiftBoundaryValue(stable, context);
+        ProceduralListOps.Reserve(reserve.TargetVariable, capacity, context.VariableScope);
     }
 
     private static async Task ExecutePrintAsync(

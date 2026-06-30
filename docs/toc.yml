@@ -196,6 +196,19 @@
           href: sql/procedural.md#for
         - name: CREATE PROCEDURE
           href: sql/procedural.md#create-procedure
+    - name: List Accumulators (List<T>)
+      href: sql/list.md
+      items:
+        - name: Why use it
+          href: sql/list.md#why-use-it
+        - name: Declaring a list
+          href: sql/list.md#declaring-a-list
+        - name: APPEND
+          href: sql/list.md#append
+        - name: RESERVE
+          href: sql/list.md#reserve
+        - name: Reading a list (freeze to Array)
+          href: sql/list.md#reading-a-list--it-freezes-to-arrayt
 
 - name: Functions
   items:

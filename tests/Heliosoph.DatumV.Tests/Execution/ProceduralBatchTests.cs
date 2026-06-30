@@ -1759,4 +1759,74 @@ public sealed class ProceduralBatchTests : ServiceTestBase
         // these statements bind no variables.
         Assert.Empty(result.FinalBindings);
     }
+
+    // ————————————————————— List<T> accumulator (top-level script) —————————————————————
+
+    [Fact]
+    public async Task TopLevelScript_DeclareListAppendScalars_UsableViaFunction()
+    {
+        // A List<T> accumulator works in a top-level batch (no enclosing
+        // procedure/model), declared empty and grown with APPEND; cardinality()
+        // freezes it to an array at the call boundary.
+        BatchSnapshot result = await RunAsync(
+            "DECLARE acc List<Int32>; " +
+            "APPEND 1 TO acc; APPEND 2 TO acc; APPEND 3 TO acc; " +
+            "DECLARE n INT32 = cardinality(acc)");
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["n"]));
+    }
+
+    [Fact]
+    public async Task TopLevelScript_AppendArray_Concatenates()
+    {
+        BatchSnapshot result = await RunAsync(
+            "DECLARE acc List<Int32>; " +
+            "APPEND [10::Int32, 20::Int32] TO acc; " +
+            "APPEND [30::Int32] TO acc; " +
+            "DECLARE n INT32 = cardinality(acc)");
+        Assert.Equal(3, Convert.ToInt32(result.FinalBindings["n"]));
+    }
+
+    [Fact]
+    public async Task TopLevelScript_ReserveThenAppend_SumsViaStrictArrayFunction()
+    {
+        // RESERVE + a strict Float32[] consumer (array_sum) at top level.
+        BatchSnapshot result = await RunAsync(
+            "DECLARE acc List<Float32>; " +
+            "RESERVE 64 FOR acc; " +
+            "APPEND CAST(1.5 AS Float32) TO acc; " +
+            "APPEND CAST(2.5 AS Float32) TO acc; " +
+            "DECLARE s FLOAT32 = array_sum(acc)");
+        Assert.Equal(4.0, Convert.ToDouble(result.FinalBindings["s"]), 3);
+    }
+
+    [Fact]
+    public async Task TopLevelScript_AppendToNonListVariable_Throws()
+    {
+        await Assert.ThrowsAnyAsync<ExecutionException>(() => RunAsync(
+            "DECLARE notalist INT32 = 1; APPEND 2 TO notalist"));
+    }
+
+    [Fact]
+    public async Task TopLevelScript_SelectBareList_FreezesAndProjects()
+    {
+        // A bare projection of a list variable freezes it to an array and
+        // returns it as a row — completing without throwing is the signal that
+        // the materialisation boundary auto-freezes the list.
+        BatchSnapshot result = await RunAsync(
+            "DECLARE acc List<Int32>; " +
+            "APPEND 1 TO acc; APPEND 2 TO acc; " +
+            "SELECT acc");
+        Assert.True(result.FinalBindings.ContainsKey("acc"));
+    }
+
+    [Fact]
+    public async Task TopLevelScript_AppendArrayLiteral_Documented()
+    {
+        // The array-literal append form shown in the docs.
+        BatchSnapshot result = await RunAsync(
+            "DECLARE v List<Float32>; " +
+            "APPEND [3.0::Float32, 4.0::Float32] TO v; " +
+            "DECLARE n INT32 = cardinality(v)");
+        Assert.Equal(2, Convert.ToInt32(result.FinalBindings["n"]));
+    }
 }
