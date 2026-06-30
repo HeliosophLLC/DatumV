@@ -49,7 +49,7 @@ AS BEGIN
     [1::Int32, 3::Int32, 224::Int32, 224::Int32]);
   -- Project to the unit sphere so cosine similarity = dot product
   -- between matching pairs.
-  RETURN l2_normalize(image_embeds)
+  RETURN l2_normalize(array_flatten(image_embeds))
 END;
 
 -- ---- Text embedding -------------------------------------------------------
@@ -81,5 +81,5 @@ AS BEGIN
   DECLARE text_embeds Float32[] = infer(
     wrapped,
     [1::Int32, n]);
-  RETURN l2_normalize(text_embeds)
+  RETURN l2_normalize(array_flatten(text_embeds))
 END

@@ -286,18 +286,13 @@ public sealed class CastFunctionTests
     }
 
     [Fact]
-    public async Task Cast_MultiDimArrayToFlatArrayAnnotation_StripsShape()
+    public async Task Cast_MultiDimArrayToBareAnnotation_PreservesShape()
     {
-        // CAST(multi_dim AS T[]) intentionally flattens. Both `_inline.IsMultiDim`
-        // AND the wrapper `_shape` must come back false so downstream 1-D-only
-        // consumers (array_slice, single-index bracket) can read the value.
-        //
-        // Historical note (2026-05-31): an earlier AsFlatArray implementation
-        // cleared only the wrapper shape; the inline carrier kept IsMultiDim
-        // and leaked through, breaking array_slice. This test pins the
-        // post-fix behaviour. Inverse direction: 2-D consumers
-        // (pose_from_rgbd, array_resize_2d) that depended on the no-op CAST
-        // must use the source without the CAST (see project_procedural_body_arena_lifetime.md).
+        // CAST(multi_dim AS Array<T>) — a bare annotation carries no shape, so
+        // the cast is a no-op: shape is a property of the VALUE, preserved
+        // through a same-type cast. Multi-dim stays multi-dim. Flattening is the
+        // job of the explicit array_flatten(), never a side effect of an
+        // annotation that looks like a no-op.
         float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
         ValueRef multi = ValueRef.FromPrimitiveMultiDimArray(data, [2, 3], DataKind.Float32);
         Assert.True(multi.IsMultiDim, "fixture precondition: source must be multi-dim");
@@ -308,11 +303,11 @@ public sealed class CastFunctionTests
 
         Assert.True(result.IsArray);
         Assert.Equal(DataKind.Float32, result.Kind);
-        Assert.False(result.IsMultiDim,
-            "CAST(multi_dim AS T[]) must produce a fully-flat array — neither " +
-            "the wrapper shape nor the inline IsMultiDim flag may survive. " +
-            "Regressing this leaks the multi-dim shape through to consumers " +
-            "that test IsMultiDim (array_slice, single-index bracket).");
+        Assert.True(result.IsMultiDim,
+            "a bare Array<T> cast must PRESERVE the source shape — it carries no "
+            + "shape to impose, and a same-type cast is a no-op. Use array_flatten() "
+            + "to drop the shape explicitly.");
+        Assert.Equal(2, result.Ndim);
         Assert.Equal(6, result.GetArrayLength());
     }
 

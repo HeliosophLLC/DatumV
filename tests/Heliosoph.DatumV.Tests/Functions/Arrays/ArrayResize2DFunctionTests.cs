@@ -143,4 +143,33 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
             [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f],
             r.AsArraySpan<float>(arena, catalog.SidecarRegistry).ToArray());
     }
+
+    [Fact]
+    public async Task BareDeclare_PreservesShape_ArrayFlatten_DropsIt()
+    {
+        // The core of the shape-preserving design: a bare typed DECLARE
+        // (`Array<Float32>`) must carry the source's multi-dim shape through
+        // unchanged — ndim stays 2 — while array_flatten() is the only thing
+        // that drops it back to 1-D. Exercised over a 1-row table so the body
+        // runs the per-row evaluator (the path that used to flatten on DECLARE).
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (id INT32)");
+        catalog.Plan("INSERT INTO t VALUES (1)");
+        catalog.Plan(
+            "CREATE FUNCTION ndim_probe() RETURNS Array<Int32> BEGIN "
+            + "DECLARE m Array<Float32>(2, 3) = "
+            + "[1.0::Float32, 2.0::Float32, 3.0::Float32, 4.0::Float32, 5.0::Float32, 6.0::Float32]; "
+            + "DECLARE p Array<Float32> = m; "                  // bare DECLARE: must PRESERVE (2,3)
+            + "RETURN [array_ndims(p), array_ndims(array_flatten(m))] END");
+
+        using Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT ndim_probe() AS r FROM t", catalog, store: arena);
+
+        // p preserves the 2-D shape (ndim 2); array_flatten(m) drops it (ndim 1).
+        Assert.Equal(
+            [2, 1],
+            rows[0]["r"].AsArraySpan<int>(arena, catalog.SidecarRegistry).ToArray());
+    }
 }

@@ -888,6 +888,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Arrays.ArrayLengthFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayConcatFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArraySliceFunction>();
+        registry.RegisterScalar<Scalar.Arrays.ArrayFlattenFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayRepeatFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayTransformFunction>();
         registry.RegisterScalar<Scalar.Arrays.ArrayShapeFunction>();

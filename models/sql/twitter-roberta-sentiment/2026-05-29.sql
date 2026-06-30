@@ -36,12 +36,12 @@ AS BEGIN
   DECLARE n Int32 = cardinality(encoded['input_ids']);
   -- Multi-input infer: RoBERTa takes input_ids + attention_mask only.
   -- Both share [1, seq_len] shape.
-  DECLARE logits Float32[] = infer(
+  DECLARE logits Float32[] = array_flatten(infer(
     encoded,
     {
       input_ids:      [CAST(1 AS Int32), n],
       attention_mask: [CAST(1 AS Int32), n]
-    });
+    }));
   DECLARE probs Float32[] = softmax(logits);
   DECLARE top Int32 = argmax(probs);
   -- TweetEval sentiment uses Cardiff NLP's canonical id→label mapping:
