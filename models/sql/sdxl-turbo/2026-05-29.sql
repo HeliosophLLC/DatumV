@@ -21,6 +21,7 @@ CREATE OR REPLACE MODEL sdxl_turbo(
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
     COMMENT 'Number of ancestral-Euler denoising steps. SDXL Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
+    COMMENT 'Number of ancestral-Euler denoising steps. SDXL Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
   size   Int32 = 512
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
     STEP 8
@@ -83,7 +84,7 @@ AS BEGIN
   DECLARE sigmas Float32[] = schedule['sigmas'];
   DECLARE timesteps Float32[] = schedule['timesteps'];
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
 
   -- 8. Ancestral Euler denoising loop. SDXL Turbo is ADD-distilled and its
   --    reference sampler is EulerAncestralDiscreteScheduler: each intermediate
