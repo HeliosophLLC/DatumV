@@ -20,14 +20,12 @@ CREATE OR REPLACE MODEL sdxl_turbo(
   prompt String,
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
-    COMMENT 'Number of Euler denoising steps. SDXL Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot.',
+    COMMENT 'Number of ancestral-Euler denoising steps. SDXL Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
   size   Int32 = 512
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
     STEP 8
     UNIT 'pixels'
-    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.',
-  seed   Int64 = NULL
-    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt, steps, and size. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
+    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. 768 and 1024 work since the underlying UNet is full SDXL, but VRAM grows roughly with size² and quality drifts away from the 512 distillation point. Other multiples of 8 are accepted but untested.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sdxl-turbo/2026-05-29/text_encoder/model.onnx'   AS text_encoder_1,
@@ -68,8 +66,13 @@ AS BEGIN
     pooled, CAST(-65504.0 AS Float32), CAST(65504.0 AS Float32));
 
   -- 6. SDXL added_cond_kwargs.time_ids — original size, crop offset, target size.
+  --    original_size is micro-conditioning: SDXL learned that a small source
+  --    resolution means a low-fidelity training image, so passing the actual
+  --    output `size` here (e.g. 512) tells the model to deliberately soften.
+  --    Pin original_size to SDXL's 1024 training resolution to ask for full
+  --    fidelity regardless of output size; target_size stays the real `size`.
   DECLARE time_ids Float32[] = [
-    size_f, size_f,
+    CAST(1024.0 AS Float32), CAST(1024.0 AS Float32),
     CAST(0.0 AS Float32), CAST(0.0 AS Float32),
     size_f, size_f];
 
@@ -78,9 +81,15 @@ AS BEGIN
   DECLARE sigmas Float32[] = schedule['sigmas'];
   DECLARE timesteps Float32[] = schedule['timesteps'];
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
 
-  -- 8. Euler denoising loop.
+  -- 8. Ancestral Euler denoising loop. SDXL Turbo is ADD-distilled and its
+  --    reference sampler is EulerAncestralDiscreteScheduler: each intermediate
+  --    step moves deterministically only as far as sigma_down, then re-injects
+  --    fresh noise of magnitude sigma_up for the next UNet pass to denoise.
+  --    Plain (non-ancestral) Euler drifts off the distillation trajectory and
+  --    the error compounds with step count — fine at 1 step (sigma_up is 0
+  --    there) but progressively more crystalline/"stained-glass" at 2-4.
   DECLARE i Int32 = 1;
   WHILE i <= steps
   BEGIN
@@ -102,7 +111,20 @@ AS BEGIN
         text_embeds: [1::Int32, 1280::Int32],
         time_ids: [1::Int32, 6::Int32] });
 
-    SET latents = array_axpy(latents, sigma_next - sigma, noise_pred);
+    -- Ancestral split of the sigma_next gap into a deterministic part
+    -- (sigma_down) and a renoising part (sigma_up).
+    DECLARE sigma_up Float32 = sqrt(
+      sigma_next * sigma_next * (sigma * sigma - sigma_next * sigma_next)
+        / (sigma * sigma));
+    DECLARE sigma_down Float32 = sqrt(
+      sigma_next * sigma_next - sigma_up * sigma_up);
+
+    -- Deterministic Euler move to sigma_down, then re-inject ancestral noise.
+    -- On the final step sigma_next = 0 => sigma_up = 0, so the second line is
+    -- a no-op and this collapses to the one-shot x0 prediction.
+    SET latents = array_axpy(latents, sigma_down - sigma, noise_pred);
+    SET latents = array_axpy(
+      latents, sigma_up, sample_normal(4 * latent_dim * latent_dim));
     SET i = i + 1
   END;
 

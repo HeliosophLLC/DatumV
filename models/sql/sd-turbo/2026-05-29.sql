@@ -17,22 +17,23 @@
 -- Latent shape (4 x 64 x 64 -> 512 x 512 output) and VAE scale (0.18215,
 -- shared with SD 2.x) are otherwise the same as the SD 1.5 family.
 --
--- The denoising schedule, CLIP tokenization, sample_normal noise, Euler
--- update, and tensor->image conversion are shared with the SD 1.x bodies.
+-- The denoising schedule, CLIP tokenization, sample_normal noise, and
+-- tensor->image conversion are shared with the SD 1.x bodies. The Euler
+-- update is NOT: as an ADD/Turbo model this body uses ancestral Euler
+-- (renoising each step), where the deterministic SD 1.x Hyper/Lightning
+-- bodies use plain Euler.
 -- ============================================================================
 
 CREATE OR REPLACE MODEL sd_turbo(
   prompt String,
   steps  Int32 = 4
     CHECK (steps BETWEEN 1 AND 8)
-    COMMENT 'Number of Euler denoising steps. SD Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot, beyond 4 returns diminishing gains.',
+    COMMENT 'Number of ancestral-Euler denoising steps. SD Turbo was distilled via ADD for 1-4 steps; 1 is the design point for fastest output, 4 is the quality sweet spot, beyond 4 returns diminishing gains. (ADD models need the ancestral renoising this body performs each step — plain deterministic Euler degrades past 1 step.)',
   size   Int32 = 512
     CHECK (size BETWEEN 256 AND 1024 AND size % 8 = 0)
     STEP 8
     UNIT 'pixels'
-    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.',
-  seed   Int64 = NULL
-    COMMENT 'Optional RNG seed for the initial latent noise. Leave unset (NULL) for a fresh random image on every call; pass a fixed integer to reproduce the same image for a given prompt, steps, and size. Seeds the initial noise only, so output is not bit-identical to other diffusion tools and GPU runs may still vary slightly.'
+    COMMENT 'Output image side length in pixels. Must be a multiple of 8 (the VAE downsample factor; latent side = size / 8). 512 is the distillation target — fastest and highest fidelity to the ADD training. The underlying SD 2.1 UNet supports 64-aligned alternates (576, 640, 768, ...) with roughly quadratic VRAM cost and quality drift away from the 512 sweet spot.'
 ) RETURNS Image
 IMPLEMENTS TextToImage
 USING 'sd-turbo/2026-05-29/text_encoder/model.onnx' AS text_encoder,
@@ -52,8 +53,13 @@ AS BEGIN
   DECLARE timesteps Float32[] = schedule['timesteps'];
 
   DECLARE latents Float32[] = array_scale(
-    sample_normal(4 * latent_dim * latent_dim, seed), sigmas[1]);
+    sample_normal(4 * latent_dim * latent_dim), sigmas[1]);
 
+  -- Ancestral Euler denoising loop. SD Turbo is ADD-distilled and its
+  -- reference sampler is EulerAncestralDiscreteScheduler: each intermediate
+  -- step moves deterministically only as far as sigma_down, then re-injects
+  -- fresh noise of magnitude sigma_up. Plain (non-ancestral) Euler drifts off
+  -- the distillation trajectory and degrades progressively past 1 step.
   DECLARE i Int32 = 1;
   WHILE i <= steps
   BEGIN
@@ -71,7 +77,18 @@ AS BEGIN
       { sample: [1::Int32, 4::Int32, latent_dim, latent_dim],
         encoder_hidden_states: [1::Int32, 77::Int32, 1024::Int32] });
 
-    SET latents = array_axpy(latents, sigma_next - sigma, noise_pred);
+    -- Ancestral split: deterministic part (sigma_down) + renoising (sigma_up).
+    -- On the final step sigma_next = 0 => sigma_up = 0, so the renoising line is
+    -- a no-op and this collapses to the one-shot x0 prediction.
+    DECLARE sigma_up Float32 = sqrt(
+      sigma_next * sigma_next * (sigma * sigma - sigma_next * sigma_next)
+        / (sigma * sigma));
+    DECLARE sigma_down Float32 = sqrt(
+      sigma_next * sigma_next - sigma_up * sigma_up);
+
+    SET latents = array_axpy(latents, sigma_down - sigma, noise_pred);
+    SET latents = array_axpy(
+      latents, sigma_up, sample_normal(4 * latent_dim * latent_dim));
     SET i = i + 1
   END;
 
