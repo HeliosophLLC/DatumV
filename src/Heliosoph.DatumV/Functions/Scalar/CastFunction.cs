@@ -67,15 +67,23 @@ public sealed class CastFunction : IFunction, IScalarFunction
     {
         ReadOnlySpan<ValueRef> args = arguments.Span;
         ValueRef input = args[0];
-        (DataKind targetKind, bool targetIsArray) = ResolveTarget(args[1]);
+        (DataKind targetKind, bool targetIsArray, int[]? targetShape) = ResolveTargetWithShape(args[1]);
 
         // Array-typed casts are intentionally restrictive: source must already
         // be an array of the same element kind. Parsing a string into an array
         // belongs in helpers like string_split + array_map + cast on elements,
-        // not in cast() itself. CAST(multi_dim AS T[]) flattens — the target
-        // annotation `Array<T>` carries no shape, so dropping the multi-dim
-        // shape is the only consistent reading and gives bodies a clean
-        // surface for "give me the flat row-major buffer."
+        // not in cast() itself.
+        //
+        // Shape handling splits on whether the target annotation carried a
+        // rank-≥2 fixed shape:
+        //   • Bare `Array<T>` (no shape) → flatten. The annotation carries no
+        //     shape, so dropping any multi-dim shape is the only consistent
+        //     reading; this is the `array_flatten` replacement.
+        //   • Shaped `Array<T>(d₁, …, dₙ)`, n ≥ 2 → reshape the flat row-major
+        //     buffer onto the declared shape. This is the inverse of the
+        //     flatten above and the surface shape-consuming functions
+        //     (array_resize_2d, array_get with (y, x)) require — it also gives
+        //     bodies a runtime reshape via `CAST(flat AS Array<T>(h, w))`.
         if (targetIsArray)
         {
             if (input.IsNull)
@@ -84,7 +92,10 @@ public sealed class CastFunction : IFunction, IScalarFunction
             }
             if (input.IsArray && input.Kind == targetKind)
             {
-                return new ValueTask<ValueRef>(input.AsFlatArray());
+                return new ValueTask<ValueRef>(
+                    targetShape is { Length: >= 2 }
+                        ? input.AsMultiDimArray(targetShape)
+                        : input.AsFlatArray());
             }
             throw new InvalidOperationException(
                 $"cast() to Array<{targetKind}> requires the source to already be Array<{targetKind}>; "
@@ -138,15 +149,32 @@ public sealed class CastFunction : IFunction, IScalarFunction
     /// </summary>
     internal static (DataKind Kind, bool IsArray) ResolveTarget(ValueRef target)
     {
+        (DataKind kind, bool isArray, _) = ResolveTargetWithShape(target);
+        return (kind, isArray);
+    }
+
+    /// <summary>
+    /// Shape-aware sibling of <see cref="ResolveTarget"/>: also surfaces the
+    /// declared fixed dimensionality of an array annotation
+    /// (<c>Array&lt;Float32&gt;(h, w)</c> → <c>[h, w]</c>). <see langword="null"/>
+    /// for a scalar target, a bare (unshaped) array annotation, or a
+    /// <see cref="DataKind.Type"/> literal. The array branch of
+    /// <see cref="ExecuteAsync"/> uses it to reshape rather than flatten when
+    /// the caller declared a rank-≥2 target shape.
+    /// </summary>
+    internal static (DataKind Kind, bool IsArray, int[]? FixedShape) ResolveTargetWithShape(ValueRef target)
+    {
         if (target.Kind == DataKind.Type)
         {
-            return (target.AsType(), false);
+            return (target.AsType(), false, null);
         }
 
         string annotation = target.AsString();
-        if (TypeAnnotationResolver.TryParse(annotation, out DataKind kind, out bool isArray))
+        if (TypeAnnotationResolver.TryParse(
+                annotation, types: null, out DataKind kind, out bool isArray,
+                out _, out _, out int[]? fixedShape))
         {
-            return (kind, isArray);
+            return (kind, isArray, fixedShape);
         }
 
         throw new ArgumentException($"Unknown target kind '{annotation}'.");

@@ -563,10 +563,42 @@ public sealed class ProceduralModelFunction : IScalarFunction
                 ValueRef[] inner = await EvaluateColumnAsync(
                     cast.Expression, columns, rowCount, frame, cancellationToken)
                     .ConfigureAwait(false);
-                if (!TypeAnnotationResolver.TryParse(cast.TargetType, out DataKind targetKind, out bool targetIsArray))
+                if (!TypeAnnotationResolver.TryParse(
+                        cast.TargetType, types: null, out DataKind targetKind, out bool targetIsArray,
+                        out _, out _, out int[]? targetShape))
                 {
                     return await EvaluatePerRowAsync(cast, columns, rowCount, frame, cancellationToken)
                         .ConfigureAwait(false);
+                }
+                // Shaped array target (`Array<Float32>(h, w)`, rank ≥ 2): reshape
+                // each row's value onto the declared shape so the batched and
+                // per-row paths agree — both honour the DECLARE'd shape rather
+                // than the batched path silently passing the value's native
+                // shape through. Mirrors CastFunction's shaped-array branch
+                // (same AsMultiDimArray call), so a mismatched element count
+                // raises the identical error here and per-row. Rows that aren't
+                // a same-kind array (null aside) fall back to the per-row cast
+                // so its precise error surfaces.
+                if (targetIsArray && targetShape is { Length: >= 2 })
+                {
+                    bool allReshapable = true;
+                    for (int i = 0; i < rowCount; i++)
+                    {
+                        ValueRef v = inner[i];
+                        if (v.IsNull) continue;
+                        if (!v.IsArray || v.ArrayElementKind != targetKind) { allReshapable = false; break; }
+                    }
+                    if (!allReshapable)
+                    {
+                        return await EvaluatePerRowAsync(cast, columns, rowCount, frame, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    ValueRef[] reshaped = new ValueRef[rowCount];
+                    for (int i = 0; i < rowCount; i++)
+                    {
+                        reshaped[i] = inner[i].IsNull ? inner[i] : inner[i].AsMultiDimArray(targetShape);
+                    }
+                    return reshaped;
                 }
                 bool anyNeedsCoercion = false;
                 for (int i = 0; i < rowCount; i++)

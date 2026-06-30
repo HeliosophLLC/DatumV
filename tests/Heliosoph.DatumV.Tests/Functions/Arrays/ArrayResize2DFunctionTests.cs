@@ -111,4 +111,36 @@ public sealed class ArrayResize2DFunctionTests : ServiceTestBase, IAsyncLifetime
         });
         Assert.Contains("2-D", ex.Message);
     }
+
+    [Fact]
+    public async Task ShapedDeclare_ReshapesFlatBody_FeedsResize2D()
+    {
+        // Regression for the typed-DECLARE flatten. A shaped DECLARE
+        // (`Array<Float32>(h, w)`) must reshape its flat initializer into a
+        // shape-aware array at runtime so array_resize_2d accepts it. Before
+        // the shaped-cast fix the DECLARE flattened (CAST-as-flatten), and the
+        // single-row (per-row) path threw "input array must be ... multi-dim".
+        // Exercised over a 1-row table to hit the per-row body evaluator — the
+        // path that was broken.
+        using TableCatalog catalog = NewFileCatalog();
+        catalog.Plan("CREATE TABLE t (id INT32)");
+        catalog.Plan("INSERT INTO t VALUES (1)");
+        catalog.Plan(
+            "CREATE FUNCTION reshape_probe() RETURNS Array<Float32> BEGIN " +
+            "DECLARE m Array<Float32>(2, 3) = " +
+            "[1.0::Float32, 2.0::Float32, 3.0::Float32, 4.0::Float32, 5.0::Float32, 6.0::Float32]; " +
+            "RETURN array_resize_2d(m, 2, 3) END");
+
+        using Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT reshape_probe() AS r FROM t", catalog, store: arena);
+
+        DataValue r = rows[0]["r"];
+        Assert.True(r.IsMultiDim);
+        Assert.Equal([2, 3], r.GetShape(arena, catalog.SidecarRegistry).ToArray());
+        Assert.Equal(
+            [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f],
+            r.AsArraySpan<float>(arena, catalog.SidecarRegistry).ToArray());
+    }
 }

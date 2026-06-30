@@ -335,6 +335,65 @@ public sealed class CastFunctionTests
         Assert.Equal(3, result.GetArrayLength());
     }
 
+    [Fact]
+    public async Task Cast_FlatArrayToShapedArrayAnnotation_AttachesShape()
+    {
+        // CAST(flat AS Array<T>(h, w)) reshapes a flat row-major buffer into a
+        // shape-aware rank-2 array — the inverse of the bare-annotation flatten
+        // above, and what a shaped typed-DECLARE
+        // (`DECLARE m Array<Float32>(2, 3) = …`) compiles to. This is the
+        // runtime reshape that shape-consuming functions (array_resize_2d,
+        // multi-index array_get) require.
+        float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
+        ValueRef flat = ValueRef.FromPrimitiveArray(data, DataKind.Float32);
+        Assert.False(flat.IsMultiDim, "fixture precondition: source is flat");
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { flat, ValueRef.FromString("Array<Float32>(2, 3)") },
+            Frame, default);
+
+        Assert.True(result.IsArray);
+        Assert.True(result.IsMultiDim,
+            "a shaped (rank-≥2) array annotation must attach the declared shape, "
+            + "not flatten — only the bare Array<T> annotation flattens.");
+        Assert.Equal(2, result.Ndim);
+        Assert.Equal(6, result.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Cast_MultiDimArrayToShapedArrayAnnotation_ReshapesDroppingLeadingOne()
+    {
+        // A model's infer() output arrives multi-dim with a leading batch dim
+        // (e.g. [1, 2, 3]). A shaped DECLARE `Array<Float32>(2, 3)` reshapes it
+        // to a clean rank-2 [2, 3] — replacing the prior shape, not flattening.
+        float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
+        ValueRef multi = ValueRef.FromPrimitiveMultiDimArray(data, [1, 2, 3], DataKind.Float32);
+        Assert.Equal(3, multi.Ndim);
+
+        ValueRef result = await new CastFunction().ExecuteAsync(
+            new[] { multi, ValueRef.FromString("Array<Float32>(2, 3)") },
+            Frame, default);
+
+        Assert.True(result.IsMultiDim);
+        Assert.Equal(2, result.Ndim);
+        Assert.Equal(6, result.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Cast_ShapedArrayAnnotation_ElementCountMismatch_Throws()
+    {
+        // The declared shape's product must equal the element count. A mismatch
+        // is a body bug (wrong native dims) and surfaces eagerly rather than
+        // silently truncating or padding.
+        float[] data = [1f, 2f, 3f, 4f, 5f, 6f];
+        ValueRef flat = ValueRef.FromPrimitiveArray(data, DataKind.Float32);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await new CastFunction().ExecuteAsync(
+                new[] { flat, ValueRef.FromString("Array<Float32>(2, 2)") },
+                Frame, default));
+    }
+
     // ─── byte-array → encoded-media-blob (zero-copy tag flip) ────────────────
 
     // PNG magic bytes — first 8 bytes of any conforming PNG file. The CAST

@@ -228,6 +228,69 @@ public readonly struct ValueRef
         return new(_inline, _materialized, shape: null);
     }
 
+    /// <summary>
+    /// Returns a shape-aware multi-dim view of this array value carrying the
+    /// row-major <paramref name="shape"/>, reusing the existing flat element
+    /// buffer with no copy. The inverse of <see cref="AsFlatArray"/>: where
+    /// that drops the shape, this attaches one. The element count must equal
+    /// <c>product(shape)</c>; a rank-&lt;2 <paramref name="shape"/> collapses to
+    /// a flat array (a 1-D array carries no shape attachment). Any prior shape
+    /// is replaced — e.g. an <c>infer()</c> output of shape <c>[1, h, w]</c>
+    /// reshapes cleanly to <c>[h, w]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Backs the shaped-array branch of <c>cast()</c> (and therefore the
+    /// shaped typed-DECLARE, <c>DECLARE x Array&lt;Float32&gt;(h, w) = …</c>),
+    /// giving SQL bodies a runtime reshape that downstream shape-consuming
+    /// functions (<c>array_resize_2d</c>, multi-index <c>array_get</c>) read.
+    /// </remarks>
+    public ValueRef AsMultiDimArray(int[] shape)
+    {
+        if (!_inline.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"AsMultiDimArray called on a {_inline.Kind} value (expected an array).");
+        }
+        // A null array has no elements to reshape — pass it through unchanged
+        // so a typed-null DECLARE stays a typed null.
+        if (IsNull) return this;
+        // Rank-0/1 target → flat. A 1-D array never carries a shape attachment,
+        // so this is the symmetric no-op-or-flatten of AsFlatArray.
+        if (shape.Length < 2) return AsFlatArray();
+
+        long product = 1;
+        for (int i = 0; i < shape.Length; i++) product *= shape[i];
+
+        if (_materialized is not null)
+        {
+            int len = GetArrayLength();
+            if (product != len)
+            {
+                throw new ArgumentException(
+                    $"Cannot reshape an array of {len} element(s) to shape "
+                    + $"[{string.Join(", ", shape)}] (product {product}).",
+                    nameof(shape));
+            }
+            // ValueRef[] backing (array literal / constructed): keep the array
+            // tag and attach the shape; ToDataValue's ValueRef[]+shape arm
+            // packs the scalar elements into a multi-dim array.
+            if (_materialized is ValueRef[])
+            {
+                return new(_inline, _materialized, shape);
+            }
+            // Primitive T[] backing (infer() / image_to_tensor): reuse the flat
+            // buffer with a fresh null-array carrier — mirrors AsFlatArray so no
+            // stale inline multi-dim flag leaks — and attach the new shape, which
+            // ToDataValue's bulk primitive path materialises.
+            return new(DataValue.NullArrayOf(ArrayElementKind), _materialized, shape);
+        }
+
+        // Arena-backed payload (uncommon at the cast boundary): attach the
+        // wrapper shape; ToDataValue → AsArraySpan validates the element count
+        // against the shape prefix when the value materialises.
+        return new(_inline, _materialized, shape);
+    }
+
     /// <summary>Boolean inline value.</summary>
     public static ValueRef FromBoolean(bool value) =>
         new(DataValue.FromBoolean(value), null);
@@ -1174,6 +1237,12 @@ public readonly struct ValueRef
             // Slice form (json_query subdocument): copy only the slice's bytes into the arena.
             ArraySegment<byte> slice when _inline.Kind == DataKind.Json && !_inline.IsArray =>
                 DataValue.FromJson((ReadOnlySpan<byte>)slice, targetStore),
+            // Constructed / array-literal payload (ValueRef[]) carrying a shape
+            // attachment from AsMultiDimArray: pack the scalar elements into a
+            // shape-aware multi-dim array. Must precede the flat ValueRef[] arm
+            // below, which would otherwise drop the shape.
+            ValueRef[] elements when _inline.IsArray && _shape is not null =>
+                BuildMultiDimFromValueRefs(_inline.Kind, elements, _shape, targetStore),
             ValueRef[] elements when _inline.IsArray =>
                 BuildTypedArray(_inline.Kind, elements, targetStore, typeId, types),
             // typeId stamped here so model outputs and other top-level struct ValueRefs
@@ -1585,6 +1654,35 @@ public readonly struct ValueRef
     /// <paramref name="target"/>. Element-kind dispatch mirrors the flat
     /// primitive array path one-for-one so the supported kinds stay aligned.
     /// </summary>
+    /// <summary>
+    /// Multi-dim counterpart to <see cref="BuildFixedWidthArray"/>: packs the
+    /// scalar <paramref name="elements"/> into a flat row-major byte buffer and
+    /// materialises it as a shape-aware multi-dim arena array. Used when a
+    /// constructed / array-literal value (<c>ValueRef[]</c> backing) carries a
+    /// <see cref="_shape"/> attachment from <see cref="AsMultiDimArray"/>; the
+    /// <c>infer()</c>-style primitive-<c>T[]</c> backing takes the
+    /// <see cref="BuildMultiDimPrimitiveArray"/> path instead.
+    /// </summary>
+    private static DataValue BuildMultiDimFromValueRefs(
+        DataKind elementKind, ValueRef[] elements, int[] shape, IValueStore target)
+    {
+        int elementSize = DataValue.ScalarByteSize(elementKind);
+        byte[] buffer = new byte[elements.Length * elementSize];
+        Span<byte> span = buffer;
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ThrowIfNullElement(elements[i], i, elementKind);
+            DataValue inline = elements[i].InlineDataValue;
+            if (inline.Kind != elementKind)
+            {
+                throw new InvalidOperationException(
+                    $"Array element [{i}] has kind {inline.Kind}; expected {elementKind}.");
+            }
+            inline.CopyInlineScalarBytes(span.Slice(i * elementSize, elementSize));
+        }
+        return DataValue.FromArenaMultiDimArrayBytes(span, shape, elementKind, target);
+    }
+
     private static DataValue BuildMultiDimPrimitiveArray(DataKind elementKind, Array elements, int[] shape, IValueStore target)
     {
         ReadOnlySpan<byte> bytes = elementKind switch
