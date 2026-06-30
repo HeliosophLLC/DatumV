@@ -949,6 +949,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ResizeImageFunction>();
         registry.RegisterScalar<Scalar.Image.GrayscaleImageFunction>();
         registry.RegisterScalar<Scalar.Image.RotateImageFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageTransposeFunction>();
         registry.RegisterScalar<Scalar.Image.BlurImageFunction>();
         registry.RegisterScalar<Scalar.Image.BrightenImageFunction>();
         registry.RegisterScalar<Scalar.Image.DarkenImageFunction>();

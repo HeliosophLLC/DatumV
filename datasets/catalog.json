@@ -725,6 +725,242 @@
       ]
     },
     {
+      "name": "EMNIST",
+      "summary": "Handwritten letters and digits in the MNIST mould — 28×28 grayscale glyphs drawn from NIST Special Database 19, paired with integer class labels. The drop-in extension that swaps MNIST's ten digits for the full alphanumeric character set.",
+      "description": "Released in 2017 by Cohen, Afshar, Tapson, and van Schaik (Western Sydney University), EMNIST re-derives the MNIST pipeline from the complete NIST Special Database 19 — the same handwriting corpus MNIST sampled, but covering uppercase + lowercase letters as well as digits. Every split ships in the identical MNIST IDX layout (one rank-3 ubyte image file + one rank-1 ubyte label file), so any recipe / model / training loop written for MNIST runs on EMNIST unchanged. The one wrinkle: EMNIST stores its glyphs transposed (a 90° rotation + mirror baked into the source pixels by the NIST conversion), so the install recipe applies image_transpose() to upright each character before it lands in the table. Splits trade class count against balance: 'balanced' (47 merged classes, equal samples per class) is the reach-for default; 'byclass' is the full unbalanced 62-class set (10 digits + 26 uppercase + 26 lowercase); 'letters' is the 26-class A–Z cut with case merged. Benchmarks report ~88–91% test accuracy on balanced vs. ~99.7% on MNIST — a meaningfully harder smoke test with the same shape.",
+      "cardFile": "cards/emnist/index.md",
+      "modalities": ["Image"],
+      "licenseIds": ["cc-by-4.0"],
+      "heroImageFile": "cards/emnist/hero.jpg",
+      "attributions": [
+        "Gregory Cohen, Saeed Afshar, Jonathan Tapson, André van Schaik (EMNIST, 2017)",
+        "NIST (Special Database 19, source handwriting samples)"
+      ],
+      "suitableForTasks": [
+        "ImageClassifier",
+        "LabeledImageClassifier",
+        "ImageEmbedder"
+      ],
+      "variants": [
+        {
+          "id": "emnist_balanced_train",
+          "displayName": "balanced — train (112.8k)",
+          "summary": "112,800 training glyphs across 47 class-balanced categories (10 digits + 37 merged letter classes, where visually identical upper/lowercase pairs like C/c are collapsed). The reach-for EMNIST training cut — equal samples per class, so plain accuracy is a sensible headline metric. Each row: upright 28×28 grayscale PNG plus integer class label (0–46).",
+          "approxArchiveBytes": 28288358,
+          "approxIngestedBytes": 111002217,
+          "expectedRowCounts": { "images": 112800 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-balanced-train-images-idx3-ubyte.gz",
+                    "emnist-balanced-train-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-balanced-train-images-idx3-ubyte.gz",
+                    "labels": "emnist-balanced-train-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "emnist_balanced_test",
+          "displayName": "balanced — test (18.8k)",
+          "summary": "18,800 test glyphs across the same 47 class-balanced categories. Held-out evaluation slice paired with the balanced train split — the standard cut for reporting EMNIST accuracy.",
+          "approxArchiveBytes": 4728211,
+          "approxIngestedBytes": 18552304,
+          "expectedRowCounts": { "images": 18800 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-balanced-test-images-idx3-ubyte.gz",
+                    "emnist-balanced-test-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-balanced-test-images-idx3-ubyte.gz",
+                    "labels": "emnist-balanced-test-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "emnist_letters_train",
+          "displayName": "letters — train (124.8k)",
+          "summary": "124,800 training glyphs across 26 classes — the A–Z alphabet with upper/lowercase merged. Labels are 1-indexed (1=A … 26=Z), not 0-indexed; subtract 1 when mapping to a zero-based class array. The pure-alphabet cut for letter-only recognizers.",
+          "approxArchiveBytes": 30884147,
+          "approxIngestedBytes": 121061372,
+          "expectedRowCounts": { "images": 124800 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-letters-train-images-idx3-ubyte.gz",
+                    "emnist-letters-train-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-letters-train-images-idx3-ubyte.gz",
+                    "labels": "emnist-letters-train-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "emnist_letters_test",
+          "displayName": "letters — test (20.8k)",
+          "summary": "20,800 test glyphs across the same 26 merged-case letter classes (labels 1..26). Held-out evaluation slice paired with the letters train split.",
+          "approxArchiveBytes": 5039301,
+          "approxIngestedBytes": 20182265,
+          "expectedRowCounts": { "images": 20800 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-letters-test-images-idx3-ubyte.gz",
+                    "emnist-letters-test-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-letters-test-images-idx3-ubyte.gz",
+                    "labels": "emnist-letters-test-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "emnist_byclass_train",
+          "displayName": "byclass — train (697.9k)",
+          "summary": "697,932 training glyphs across the full unbalanced 62-class set: 10 digits + 26 uppercase + 26 lowercase, each as its own class (0–61). The largest EMNIST cut — class frequencies follow natural handwriting distribution, so report macro-F1 alongside accuracy. ~115 MB on the wire; by far the heaviest variant in the family.",
+          "approxArchiveBytes": 173858916,
+          "approxIngestedBytes": 685763189,
+          "expectedRowCounts": { "images": 697932 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-byclass-train-images-idx3-ubyte.gz",
+                    "emnist-byclass-train-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-byclass-train-images-idx3-ubyte.gz",
+                    "labels": "emnist-byclass-train-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "emnist_byclass_test",
+          "displayName": "byclass — test (116.3k)",
+          "summary": "116,323 test glyphs across the same 62 unbalanced classes (10 digits + 26 uppercase + 26 lowercase). Held-out evaluation slice paired with the byclass train split.",
+          "approxArchiveBytes": 28990161,
+          "approxIngestedBytes": 114379965,
+          "expectedRowCounts": { "images": 116323 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/EMNIST",
+                  "revision": "e1ce0ec731a6482d8a708c641c2030d6a6cc1f31",
+                  "include": [
+                    "emnist-byclass-test-images-idx3-ubyte.gz",
+                    "emnist-byclass-test-labels-idx1-ubyte.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "images",
+                  "sqlFile": "emnist/split.sql",
+                  "artifacts": {
+                    "images": "emnist-byclass-test-images-idx3-ubyte.gz",
+                    "labels": "emnist-byclass-test-labels-idx1-ubyte.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "MedNIST",
       "summary": "58,954 64×64 grayscale medical thumbnails labelled with one of six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). The medical-imaging counterpart to MNIST.",
       "description": "Compiled by Bradley Erickson (Mayo Clinic) from CT, MRI, and X-ray slices drawn from the Cancer Imaging Archive (TCIA), the RSNA Bone Age Challenge, and the NIH ChestX-ray14 release, then packaged by the MONAI team as a small drop-in benchmark for medical image classification. ~10,000 thumbnails per class (BreastMRI is slightly smaller at 8,954), all rendered to uniform 64×64 grayscale JPEG. Plays the same role for medical imaging that MNIST plays for handwritten digits — small enough to ingest in under a minute, easy enough that a tiny CNN converges to ~99% test accuracy in a few epochs, but realistic enough that the modality boundaries actually correspond to clinical categories. Folder layout is one class per directory under a top-level `MedNIST/` prefix; the class label is the folder name verbatim.",
