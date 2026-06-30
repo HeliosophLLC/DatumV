@@ -311,4 +311,77 @@ public class ProceduralParsingTests : ServiceTestBase
         BlockStatement block = Assert.IsType<BlockStatement>(stmts[0]);
         Assert.Equal(3, block.Statements.Count);
     }
+
+    // ───────────────────── List<T> annotation ─────────────────────
+
+    [Fact]
+    public void Declare_ListType_ParsesViaGenericWrapper()
+    {
+        // List<T> rides the same generic `Name<inner>` wrapper as Array<T>;
+        // no dedicated grammar arm is needed at the parse layer. Resolution +
+        // body-only enforcement live at execution time.
+        DeclareStatement decl = Parse<DeclareStatement>("DECLARE acc List<Float32>");
+        Assert.Equal("acc", decl.VariableName);
+        Assert.Equal("List<Float32>", decl.TypeName);
+        Assert.Null(decl.Initializer);
+    }
+
+    // ───────────────────── APPEND ─────────────────────
+
+    [Fact]
+    public void Append_ScalarToList_CapturesValueAndTarget()
+    {
+        AppendStatement append = Parse<AppendStatement>("APPEND 1.5 TO acc");
+        Assert.Equal("acc", append.TargetVariable);
+        LiteralExpression lit = Assert.IsType<LiteralExpression>(append.Value);
+        Assert.Equal(1.5, Convert.ToDouble(lit.Value!));
+    }
+
+    [Fact]
+    public void Append_ExpressionValue_ParsedAsFullExpression()
+    {
+        // The value slot is a full expression, not just an atom — a peer array
+        // (e.g. another variable or an array literal) is a valid append source.
+        AppendStatement append = Parse<AppendStatement>("APPEND plane TO acc_planes");
+        Assert.Equal("acc_planes", append.TargetVariable);
+        ColumnReference col = Assert.IsType<ColumnReference>(append.Value);
+        Assert.Equal("plane", col.ColumnName);
+    }
+
+    [Fact]
+    public void Append_InsideWhileBody_ParsesAsBlockMember()
+    {
+        // The motivating shape: APPEND inside a grid-sweep loop body.
+        WhileStatement loop = Parse<WhileStatement>(
+            "WHILE i < n BEGIN APPEND score TO acc; SET i = i + 1 END");
+        BlockStatement body = Assert.IsType<BlockStatement>(loop.Body);
+        Assert.IsType<AppendStatement>(body.Statements[0]);
+        Assert.IsType<SetStatement>(body.Statements[1]);
+    }
+
+    // ───────────────────── RESERVE ─────────────────────
+
+    [Fact]
+    public void Reserve_LiteralCapacity_CapturesCountAndTarget()
+    {
+        ReserveStatement reserve = Parse<ReserveStatement>("RESERVE 16384 FOR acc");
+        Assert.Equal("acc", reserve.TargetVariable);
+        LiteralExpression lit = Assert.IsType<LiteralExpression>(reserve.Capacity);
+        Assert.Equal(16384L, Convert.ToInt64(lit.Value!));
+    }
+
+    [Fact]
+    public void Reserve_ExpressionCapacity_ParsedAsFullExpression()
+    {
+        ReserveStatement reserve = Parse<ReserveStatement>("RESERVE grid_size * grid_size FOR acc");
+        Assert.Equal("acc", reserve.TargetVariable);
+        Assert.IsType<BinaryExpression>(reserve.Capacity);
+    }
+
+    [Fact]
+    public void AppendAndReserve_DispatchDistinctly()
+    {
+        Assert.IsType<AppendStatement>(SqlParser.ParseStatement("APPEND 1 TO acc"));
+        Assert.IsType<ReserveStatement>(SqlParser.ParseStatement("RESERVE 8 FOR acc"));
+    }
 }

@@ -438,6 +438,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("BREAK"), SqlToken.Break, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CONTINUE"), SqlToken.Continue, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PRINT"), SqlToken.Print, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("APPEND"), SqlToken.Append, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RESERVE"), SqlToken.Reserve, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("TRY"), SqlToken.Try, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CATCH"), SqlToken.Catch, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FINALLY"), SqlToken.Finally, requireDelimiters: true)

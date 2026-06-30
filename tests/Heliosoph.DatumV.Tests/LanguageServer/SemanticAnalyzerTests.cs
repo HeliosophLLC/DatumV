@@ -222,6 +222,50 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_DeclaredListVariableInSelect_NoUnknownColumnWarning()
+    {
+        // A bare reference to a DECLAREd List<T> accumulator resolves to the
+        // variable at run time, so it must not be flagged as an unknown column.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DECLARE squares List<Int32>; SELECT squares", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'squares'"));
+    }
+
+    [Fact]
+    public void Analyze_DeclaredScalarVariableInSelect_NoUnknownColumnWarning()
+    {
+        // Not List-specific — any DECLAREd variable referenced bare is valid.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DECLARE total Int64 = 0; SELECT total", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'total'"));
+    }
+
+    [Fact]
+    public void Analyze_DeclaredVariablePlusRealUnknown_StillWarnsOnUnknown()
+    {
+        // The variable suppression must not blanket-silence genuine typos.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DECLARE acc List<Int32>; SELECT typo_col FROM users", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("typo_col"));
+    }
+
+    [Fact]
     public void Analyze_UnknownQualifiedColumn_ReturnsWarning()
     {
         LanguageServerManifest manifest = CreateManifest(

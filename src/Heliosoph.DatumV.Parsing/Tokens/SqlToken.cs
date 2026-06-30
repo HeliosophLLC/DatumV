@@ -373,6 +373,18 @@ public enum SqlToken
     /// <summary>The PRINT keyword (emits a string value to the batch event stream).</summary>
     Print,
 
+    /// <summary>
+    /// The APPEND keyword (procedural in-place list mutation:
+    /// <c>APPEND expr TO list</c> grows a <c>List&lt;T&gt;</c> accumulator).
+    /// </summary>
+    Append,
+
+    /// <summary>
+    /// The RESERVE keyword (procedural list capacity hint:
+    /// <c>RESERVE n FOR list</c> pre-sizes a <c>List&lt;T&gt;</c> accumulator).
+    /// </summary>
+    Reserve,
+
     /// <summary>The TRY keyword (procedural exception-handling guard).</summary>
     Try,
 

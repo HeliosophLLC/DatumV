@@ -53,6 +53,41 @@ public enum DataKind : byte
     /// </remarks>
     Lambda = 2,
 
+    /// <summary>
+    /// A growable, in-place-mutable list of primitive elements used as an
+    /// accumulator inside a procedural body. Backs the <c>List&lt;T&gt;</c> type
+    /// annotation and the <c>APPEND</c> / <c>RESERVE</c> statements, giving
+    /// loop-and-accumulate bodies amortised O(1) append instead of the O(K²)
+    /// copy churn of <c>array_append</c> / <c>array_concat</c> on an immutable
+    /// <c>T[]</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sits in the meta/sentinel block alongside <see cref="Lambda"/> because it
+    /// is the same shape of kind: <strong>row-scoped, not storable</strong>, with
+    /// a managed carrier rather than a domain value. The carrier is a managed
+    /// <see cref="Heliosoph.DatumV.Functions.ListBuilderValue"/> object held in
+    /// the <see cref="Heliosoph.DatumV.Functions.ValueRef"/>'s materialised slot;
+    /// the <see cref="DataValue"/> form is a null carrier of kind
+    /// <c>ListBuilder</c> with no inline metadata. The element kind travels on
+    /// the payload object, not inline.
+    /// </para>
+    /// <para>
+    /// <strong>Auto-freezes; not stored as a list.</strong> The moment it
+    /// crosses an outbound boundary — a scalar-function argument that doesn't opt
+    /// in, a <c>RETURN</c>, or a type-annotated <c>DECLARE</c> / <c>SET</c> — it
+    /// freezes to a flat <c>Array&lt;T&gt;</c>. It never reaches a column, a
+    /// <c>.datum</c> file, a result row, or a remote-execution boundary <em>as a
+    /// list</em>: <see cref="Heliosoph.DatumV.Functions.ValueRef.ToDataValue"/>
+    /// auto-freezes a <see cref="Heliosoph.DatumV.Functions.ListBuilderValue"/>
+    /// to its array and materialises that. (Unlike <see cref="Lambda"/> /
+    /// <see cref="Drawing"/>, which refuse persistence, a list always has a
+    /// correct storable form — its array — so freezing rather than throwing is
+    /// the SQL-natural promotion.)
+    /// </para>
+    /// </remarks>
+    ListBuilder = 3,
+
     // ───────────────────────── Boolean (8–15) ─────────────────────────
 
     /// <summary>A boolean value (true or false).</summary>

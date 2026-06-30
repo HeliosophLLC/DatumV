@@ -78,6 +78,15 @@ internal static class ProceduralBodyArityGate
 
     private static ColumnInfo BuildColumnInfoFromTypeName(string name, string? typeName)
     {
+        // A List<T> accumulator's *static* type is its frozen form Array<T>:
+        // every read of the variable crosses a promotion boundary that freezes
+        // it, so signature checks (and any downstream type resolution) must see
+        // it as an array of the element kind, not as the un-storable List<T>.
+        if (typeName is not null
+            && TypeAnnotationResolver.TryParseListBuilder(typeName, out DataKind elementKind))
+        {
+            return new ColumnInfo(name, elementKind, nullable: true) { IsArray = true };
+        }
         // Unparseable / null types degrade to Unknown so references resolve
         // to *some* kind. ResolveType will treat the column as the fallback
         // kind, which usually means ValidateArguments won't fire (kind
@@ -131,6 +140,12 @@ internal static class ProceduralBodyArityGate
                 break;
             case SetStatement set:
                 ValidateExpression(set.Value, scope, functions, routineLabel);
+                break;
+            case AppendStatement append:
+                ValidateExpression(append.Value, scope, functions, routineLabel);
+                break;
+            case ReserveStatement reserve:
+                ValidateExpression(reserve.Capacity, scope, functions, routineLabel);
                 break;
             case ReturnStatement ret:
                 ValidateExpression(ret.Value, scope, functions, routineLabel);

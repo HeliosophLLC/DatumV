@@ -45,6 +45,10 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Color,
         DataKind.Drawing,
         DataKind.Lambda,
+        // Body-local accumulator: the ListBuilderValue carrier refuses arena
+        // writes (it freezes to Array<T> before any boundary), so it is never
+        // indexable.
+        DataKind.ListBuilder,
     ];
 
     /// <summary>
@@ -200,6 +204,7 @@ public sealed class IndexWriterRoundTripTests : ServiceTestBase
         DataKind.Drawing  => DataValue.Null(DataKind.Drawing),
         DataKind.Lambda   => DataValue.Null(DataKind.Lambda),
         DataKind.Color    => DataValue.Null(DataKind.Color),
+        DataKind.ListBuilder => DataValue.Null(DataKind.ListBuilder),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
             $"No sample value defined for DataKind.{kind}. Update CreateSampleValue."),
     };

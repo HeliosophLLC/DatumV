@@ -2932,4 +2932,28 @@ public sealed class CompletionProviderTests : ServiceTestBase
         Assert.Contains(items, i => i.Label == "x" && i.Kind == CompletionItemKind.Property);
         Assert.Contains(items, i => i.Label == "y" && i.Kind == CompletionItemKind.Property);
     }
+
+    // ───────────────────── List<T> target completion ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterAppendTo_OffersListVariable()
+    {
+        CompletionProvider provider = CreateProvider();
+        string sql = "DECLARE acc List<Int32>; APPEND 1 TO ";
+
+        CompletionItem[] items = provider.GetCompletions(sql, sql.Length);
+
+        Assert.Contains(items, i => i.Label == "acc" && i.Kind == CompletionItemKind.Variable);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterReserveFor_OffersListVariable()
+    {
+        CompletionProvider provider = CreateProvider();
+        string sql = "DECLARE buf List<Float32>; RESERVE 16 FOR ";
+
+        CompletionItem[] items = provider.GetCompletions(sql, sql.Length);
+
+        Assert.Contains(items, i => i.Label == "buf" && i.Kind == CompletionItemKind.Variable);
+    }
 }

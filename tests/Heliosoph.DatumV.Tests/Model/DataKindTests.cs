@@ -54,7 +54,7 @@ public class DataKindTests : ServiceTestBase
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsThirtySix()
+    public void TotalEnumMemberCountIsFortyOne()
     {
         // Tally: Unknown, Type, Boolean,
         // UInt8/16/32/64/128, Int8/16/32/64/128 (10),
@@ -63,9 +63,10 @@ public class DataKindTests : ServiceTestBase
         // String, Uuid (2),
         // Image, Audio, AudioSlice, Video, VideoFrame, VideoSlice, Json (7 media + lazy handles),
         // Struct (1),
-        // Point2D, Point3D, PointCloud, Mesh (4 spatial) → 40 total.
+        // Point2D, Point3D, PointCloud, Mesh (4 spatial),
+        // Color, Drawing (2 visual), Lambda, ListBuilder (2 row-scoped runtime) → 41 total.
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(40, allValues.Length);
+        Assert.Equal(41, allValues.Length);
     }
 
     [Fact]

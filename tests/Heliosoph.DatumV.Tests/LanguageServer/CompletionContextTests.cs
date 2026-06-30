@@ -1111,4 +1111,68 @@ public sealed class CompletionContextTests : ServiceTestBase
 
         Assert.Equal(CompletionZoneKind.AfterUpdateSet, zone.Kind);
     }
+
+    // ───────────────────── List<T> accumulator (APPEND / RESERVE) ─────────────────────
+
+    [Fact]
+    public void Classify_AfterAppendTo_ReturnsListTargetZoneWithListVars()
+    {
+        string sql = "DECLARE acc List<Int32>; APPEND 1 TO ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterListAppendTarget, zone.Kind);
+        Assert.NotNull(zone.ListVariablesInScope);
+        Assert.Contains("acc", zone.ListVariablesInScope!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Classify_AfterReserveFor_ReturnsListTargetZone()
+    {
+        string sql = "DECLARE buf List<Float32>; RESERVE 16 FOR ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.AfterListAppendTarget, zone.Kind);
+        Assert.Contains("buf", zone.ListVariablesInScope!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Classify_AppendValuePosition_IsProceduralExpression()
+    {
+        // `APPEND ⌷ TO list` — the value being appended is an expression.
+        string sql = "DECLARE acc List<Int32>; APPEND ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Equal(CompletionZoneKind.ProceduralExpression, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_ForCounterTo_IsNotListTargetZone()
+    {
+        // The FOR-loop counter `TO` must not be mistaken for an APPEND target.
+        string sql = "FOR i = 1 TO ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.AfterListAppendTarget, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_CopyTo_IsNotListTargetZone()
+    {
+        // COPY (q) TO 'path' must keep its own zone, not the list target.
+        string sql = "COPY (SELECT 1) TO ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.NotEqual(CompletionZoneKind.AfterListAppendTarget, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_ListVarsExcludeNonListDeclares()
+    {
+        // Only List<T> declarations populate ListVariablesInScope.
+        string sql = "DECLARE n Int32 = 0; DECLARE acc List<Int32>; APPEND 1 TO ";
+        CompletionZone zone = CompletionContext.Classify(sql, sql.Length);
+
+        Assert.Contains("acc", zone.ListVariablesInScope!, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("n", zone.ListVariablesInScope!, StringComparer.OrdinalIgnoreCase);
+    }
 }
