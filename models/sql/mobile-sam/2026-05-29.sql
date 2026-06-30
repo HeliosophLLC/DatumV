@@ -129,8 +129,8 @@ AS BEGIN
           orig_im_size:     [2::Int32] });
       -- masks comes back rank-4 [1, M, H, W]; iou_predictions rank-2 [1, M].
       -- Flatten both so 1-based bracket access (iou[c]) + array_slice work.
-      DECLARE masks Float32[] = CAST(dec['masks']           AS Float32[]);
-      DECLARE iou   Float32[] = CAST(dec['iou_predictions'] AS Float32[]);
+      DECLARE masks Float32[] = array_flatten(dec['masks']);
+      DECLARE iou   Float32[] = array_flatten(dec['iou_predictions']);
       DECLARE c Int32 = 1;
       WHILE c <= 4
       BEGIN
@@ -235,8 +235,8 @@ AS BEGIN
       orig_im_size:     [2::Int32] });
 
   -- masks [1, 4, H, W] -> flat; iou [1, 4] -> flat.
-  DECLARE masks Float32[] = CAST(dec['masks']           AS Float32[]);
-  DECLARE iou   Float32[] = CAST(dec['iou_predictions'] AS Float32[]);
+  DECLARE masks Float32[] = array_flatten(dec['masks']);
+  DECLARE iou   Float32[] = array_flatten(dec['iou_predictions']);
 
   -- 3. Most-confident candidate, then threshold its plane at logit > 0.
   DECLARE best Int32 = argmax(iou);

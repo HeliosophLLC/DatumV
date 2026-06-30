@@ -64,13 +64,15 @@ CREATE OR REPLACE MODEL glpn_nyu_meters(img Image)
 IMPLEMENTS DepthEstimatorMetric
 USING 'glpn-nyu/2026-05-29/onnx/model.onnx'
 AS BEGIN
-  DECLARE tensor Float32[] = image_to_tensor_chw(
+  DECLARE tensor Array<Float32> = image_to_tensor_chw(
     img,
     [480, 480],
     imagenet_mean(),
     imagenet_std());
+    
   DECLARE depth_native Array<Float32> = infer(
     tensor,
     [1::Int32, 3::Int32, 480::Int32, 480::Int32]);
+
   RETURN array_resize_2d(depth_native, image_height(img), image_width(img))
 END

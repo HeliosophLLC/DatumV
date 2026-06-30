@@ -74,16 +74,15 @@ public sealed class CastFunction : IFunction, IScalarFunction
         // belongs in helpers like string_split + array_map + cast on elements,
         // not in cast() itself.
         //
-        // Shape handling splits on whether the target annotation carried a
-        // rank-≥2 fixed shape:
-        //   • Bare `Array<T>` (no shape) → flatten. The annotation carries no
-        //     shape, so dropping any multi-dim shape is the only consistent
-        //     reading; this is the `array_flatten` replacement.
-        //   • Shaped `Array<T>(d₁, …, dₙ)`, n ≥ 2 → reshape the flat row-major
-        //     buffer onto the declared shape. This is the inverse of the
-        //     flatten above and the surface shape-consuming functions
-        //     (array_resize_2d, array_get with (y, x)) require — it also gives
-        //     bodies a runtime reshape via `CAST(flat AS Array<T>(h, w))`.
+        // Shape is a property of the value, not the annotation, so a cast never
+        // silently reshapes:
+        //   • Bare `Array<T>` (no shape) → PRESERVE the source shape verbatim;
+        //     a same-type cast is a no-op. Multi-dim stays multi-dim. To get a
+        //     flat row-major view, call array_flatten(x) explicitly.
+        //   • Shaped `Array<T>(d₁, …, dₙ)`, n ≥ 2 → reshape onto the declared
+        //     shape (element count must match). This is the explicit reshape
+        //     surface that shape-consuming functions (array_resize_2d, multi-
+        //     index array_get) read — also usable as `CAST(flat AS Array<T>(h, w))`.
         if (targetIsArray)
         {
             if (input.IsNull)
@@ -95,7 +94,7 @@ public sealed class CastFunction : IFunction, IScalarFunction
                 return new ValueTask<ValueRef>(
                     targetShape is { Length: >= 2 }
                         ? input.AsMultiDimArray(targetShape)
-                        : input.AsFlatArray());
+                        : input);
             }
             throw new InvalidOperationException(
                 $"cast() to Array<{targetKind}> requires the source to already be Array<{targetKind}>; "

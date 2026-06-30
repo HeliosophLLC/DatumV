@@ -28,7 +28,7 @@ IMPLEMENTS LabeledImageClassifier
 USING 'mobilenetv2/2026-05-29/mobilenetv2-12.onnx'
 AS BEGIN
   DECLARE tensor Float32[] = image_to_tensor_chw(img, [224, 224], imagenet_mean(), imagenet_std());
-  DECLARE logits Float32[] = infer(tensor);
+  DECLARE logits Float32[] = array_flatten(infer(tensor));
   DECLARE probs  Float32[] = softmax(logits);
   DECLARE top    Int32     = argmax(probs);
   DECLARE labels Array<String> = read_string_list('imagenet-classes.json');
