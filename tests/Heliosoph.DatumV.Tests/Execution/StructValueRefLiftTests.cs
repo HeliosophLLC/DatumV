@@ -201,4 +201,56 @@ public class StructValueRefLiftTests : ServiceTestBase
         }
         finally { pool.Backing.TryReturn(arena); }
     }
+
+    [Fact]
+    public async Task StructFieldAccess_ManagedStruct_DoesNotMaterialiseSiblings()
+    {
+        // The model-output shape: a managed struct { big: Float32[~1M], small:
+        // Float32 }. Reading one field must NOT drag the ~4MB sibling into the
+        // arena. Before the ValueRef-native fast path, `s['small']` ToDataValue'd
+        // the whole struct — the dominant arena cost in a per-cell loop.
+        Pool pool = GetService<Pool>();
+        Arena arena = pool.Backing.RentArena();
+        try
+        {
+            TypeRegistry registry = new();
+            int structTypeId = registry.InternStructType(
+            [
+                new StructFieldDescriptor("big", registry.InternArrayType(DataKind.Float32)),
+                new StructFieldDescriptor("small", registry.InternScalarType(DataKind.Float32)),
+            ]);
+
+            ValueRef structRef = ValueRef.FromStruct(
+            [
+                ValueRef.FromPrimitiveArray(new float[1_000_000], DataKind.Float32), // ~4 MB, managed
+                ValueRef.FromFloat32(42f),
+            ], (ushort)structTypeId);
+
+            using Heliosoph.DatumV.Execution.ExecutionContext context =
+                CreateExecutionContext(store: arena, typeRegistry: registry);
+            ExpressionEvaluator evaluator = context.CreateEvaluator();
+            EvaluationFrame frame = evaluator.CreateFrame(Row.Empty, arena);
+            context.VariableScope.Declare("s", structRef);
+
+            long before = arena.BytesWritten;
+
+            ValueRef small = await evaluator.EvaluateAsValueRefAsync(
+                new IndexAccessExpression(new ColumnReference(null, "s"), [new LiteralExpression("small")]),
+                frame);
+
+            long delta = arena.BytesWritten - before;
+
+            Assert.Equal(42f, small.AsFloat32());
+            Assert.True(delta < 4096,
+                $"reading 's[small]' grew the arena by {delta:N0} bytes — the ~4 MB 'big' sibling was materialised.");
+
+            // The large field still resolves correctly (returned managed, not copied).
+            ValueRef bigRead = await evaluator.EvaluateAsValueRefAsync(
+                new IndexAccessExpression(new ColumnReference(null, "s"), [new LiteralExpression("big")]),
+                frame);
+            Assert.True(bigRead.IsArray);
+            Assert.Equal(DataKind.Float32, bigRead.Kind);
+        }
+        finally { pool.Backing.TryReturn(arena); }
+    }
 }

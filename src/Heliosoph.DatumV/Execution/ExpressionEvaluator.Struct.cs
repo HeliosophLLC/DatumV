@@ -1,4 +1,5 @@
 using Heliosoph.DatumV.DatumFile.Sidecar;
+using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Functions.Image;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Parsing.Ast;
@@ -55,7 +56,74 @@ public sealed partial class ExpressionEvaluator
         IndexAccessExpression indexAccess, EvaluationFrame frame, CancellationToken cancellationToken)
     {
         DataValue source = await EvaluateAsync(indexAccess.Source, frame, cancellationToken).ConfigureAwait(false);
+        return await EvaluateIndexAccessCoreAsync(source, indexAccess, frame, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// ValueRef-native index access. The point of this path is the managed-
+    /// struct named-field fast path: pull a field's <see cref="ValueRef"/>
+    /// straight out of the struct's <c>ValueRef[]</c> payload, leaving every
+    /// sibling field untouched. Lowering to the DataValue path instead
+    /// <c>ToDataValue</c>'s the WHOLE struct into the arena just to read one
+    /// field — so reading a 16-byte scalar off a struct that also carries a
+    /// multi-MB array copies the array too, every time. In a loop that reads
+    /// two fields off a model-output struct per iteration, that redundant
+    /// copying is the dominant arena cost.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately narrow: single string index, non-null <em>managed</em>
+    /// struct (its payload is a <c>ValueRef[]</c>), and a field name resolvable
+    /// via the per-query <see cref="TypeRegistry"/>. Positional access, arrays,
+    /// arena/sidecar-backed structs, and untyped structs fall through to the
+    /// DataValue dispatch — the source is evaluated once and reused, so the
+    /// fallback never re-runs the source expression.
+    /// </remarks>
+    private async ValueTask<ValueRef> EvaluateIndexAccessAsValueRefAsync(
+        IndexAccessExpression indexAccess, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
+        ValueRef sourceRef = await EvaluateAsValueRefAsync(indexAccess.Source, frame, cancellationToken).ConfigureAwait(false);
+
+        if (!sourceRef.IsNull
+            && sourceRef.Kind == DataKind.Struct
+            && sourceRef.Materialized is ValueRef[]
+            && indexAccess.Indices.Count == 1
+            && _typeRegistry is not null
+            && sourceRef.TypeId != 0)
+        {
+            ValueRef indexRef = await EvaluateAsValueRefAsync(indexAccess.Indices[0], frame, cancellationToken).ConfigureAwait(false);
+            if (indexRef.Kind == DataKind.String && !indexRef.IsNull)
+            {
+                int idx = _typeRegistry.GetDescriptor(sourceRef.TypeId)?.FindFieldIndex(indexRef.AsString()) ?? -1;
+                if (idx >= 0)
+                {
+                    ReadOnlySpan<ValueRef> fields = sourceRef.GetStructFields();
+                    if (idx < fields.Length)
+                    {
+                        return fields[idx];
+                    }
+                }
+            }
+            // Field not resolvable via the registry (or out of range) — fall
+            // through to the authoritative DataValue dispatch below.
+        }
+
+        // Fallback: materialise the already-evaluated source once and run the
+        // full dispatch (arrays, positional access, arena structs, untyped
+        // structs, LET/schema field resolution).
+        DataValue source = sourceRef.ToDataValue(frame.Source, sourceRef.TypeId, frame.Types);
+        DataValue raw = await EvaluateIndexAccessCoreAsync(source, indexAccess, frame, cancellationToken).ConfigureAwait(false);
+        return ToValueRef(raw, frame);
+    }
+
+    /// <summary>
+    /// Index-access dispatch given an already-evaluated <paramref name="source"/>
+    /// (array element / struct field). Split out from
+    /// <see cref="EvaluateIndexAccessAsync"/> so the ValueRef-native fast path
+    /// can reuse the full dispatch without re-evaluating the source expression.
+    /// </summary>
+    private async ValueTask<DataValue> EvaluateIndexAccessCoreAsync(
+        DataValue source, IndexAccessExpression indexAccess, EvaluationFrame frame, CancellationToken cancellationToken)
+    {
         if (source.IsNull)
         {
             return source;

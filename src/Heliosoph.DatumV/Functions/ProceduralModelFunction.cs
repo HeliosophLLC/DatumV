@@ -943,13 +943,57 @@ public sealed class ProceduralModelFunction : IScalarFunction
         EvaluationFrame frame,
         CancellationToken cancellationToken)
     {
+        // Body-arena attribution diagnostic. The MemoryAccountant is blind here
+        // — it probes the root context's store, not this body's frame.Source —
+        // so we read the bump pointer directly. Gated on the dedicated Memory
+        // source having a listener: when arena tracing is off (the norm) the
+        // per-statement BytesWritten reads are skipped entirely.
+        Arena? bodyArena = DatumActivity.Memory.HasListeners() ? frame.Source as Arena : null;
+
         foreach (Statement stmt in statements)
         {
+            long arenaBefore = bodyArena?.BytesWritten ?? 0;
+
             ReturnSignal? signal = await ExecuteStatementAsync(stmt, scope, evaluator, frame, cancellationToken).ConfigureAwait(false);
+
+            if (bodyArena is not null && IsLeafStatement(stmt))
+            {
+                long delta = bodyArena.BytesWritten - arenaBefore;
+                if (delta > 0)
+                {
+                    DatumActivity.Memory.Trace(
+                        $"[arena] {DescribeLeaf(stmt)} +{delta:N0} total={bodyArena.BytesWritten:N0}");
+                }
+            }
+
             if (signal is not null) return signal;
         }
         return null;
     }
+
+    /// <summary>
+    /// Leaf statements run an expression (and so can allocate); container
+    /// statements (block / branch / loop) only recurse, and their arena delta
+    /// is the sum of their leaves — which are traced individually. Filtering to
+    /// leaves keeps the arena trace one-line-per-allocation-site.
+    /// </summary>
+    private static bool IsLeafStatement(Statement statement) => statement switch
+    {
+        DeclareStatement or SetStatement or AppendStatement or ReserveStatement
+            or ReturnStatement or PrintStatement or AssertStatement or RaiseStatement => true,
+        _ => false,
+    };
+
+    /// <summary>Short label for the arena trace — statement kind + its target/variable.</summary>
+    private static string DescribeLeaf(Statement statement) => statement switch
+    {
+        DeclareStatement decl => $"DECLARE {decl.VariableName}{(decl.TypeName is { } t ? $" {t}" : "")}",
+        SetStatement set => $"SET {set.VariableName}",
+        AppendStatement append => $"APPEND->{append.TargetVariable}",
+        ReserveStatement reserve => $"RESERVE->{reserve.TargetVariable}",
+        ReturnStatement => "RETURN",
+        _ => statement.GetType().Name,
+    };
 
     private static async ValueTask<ReturnSignal?> ExecuteStatementAsync(
         Statement statement,
