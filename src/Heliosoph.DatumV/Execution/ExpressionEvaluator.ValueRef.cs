@@ -68,6 +68,8 @@ public sealed partial class ExpressionEvaluator
                 return EvaluateUnaryAsValueRefAsync(unary, frame, cancellationToken);
             case IsNullExpression isNull:
                 return EvaluateIsNullAsValueRefAsync(isNull, frame, cancellationToken);
+            case IndexAccessExpression indexAccess:
+                return EvaluateIndexAccessAsValueRefAsync(indexAccess, frame, cancellationToken);
         }
 
         // Fallback for every other expression kind: lower through the DataValue

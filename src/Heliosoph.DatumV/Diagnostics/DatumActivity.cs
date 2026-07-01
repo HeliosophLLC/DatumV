@@ -49,6 +49,15 @@ public static class DatumActivity
     public static readonly ActivitySource Calibration = new("Heliosoph.DatumV.Calibration");
 
     /// <summary>
+    /// Spans for memory / arena diagnostics — e.g. per-statement body-arena
+    /// growth inside a procedural body. Kept on its own source (rather than
+    /// <see cref="Scalars"/>) so it can be toggled independently: arena
+    /// attribution is verbose and only wanted while chasing a memory issue,
+    /// so it stays dark unless a listener explicitly subscribes to it.
+    /// </summary>
+    public static readonly ActivitySource Memory = new("Heliosoph.DatumV.Memory");
+
+    /// <summary>
     /// Formats a byte count as a human-readable string (B / KB / MB / GB).
     /// Convenience helper for trace messages that report memory budgets.
     /// </summary>
