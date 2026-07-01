@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useTranslation } from 'react-i18next';
 import {
   type TraceState,
@@ -36,6 +37,12 @@ const SPARKLINE_BUCKET_MS = 100; // events-per-bucket for the rate sparkline
 const TRACE_GRID_TEMPLATE =
   '5.5rem 3.5rem minmax(0, 2fr) minmax(0, 1fr) 5.5rem';
 
+// Fixed row height for the virtualised event table. Every row is a
+// single truncated line, so a constant estimate needs no per-row
+// measurement round-trip — the row wrapper is pinned to this height
+// (overflow-hidden) so its rendered box always matches the estimate.
+const TRACE_ROW_HEIGHT = 20;
+
 export interface TraceChipProps {
   tabId: string;
   trace: TraceState;
@@ -44,10 +51,14 @@ export interface TraceChipProps {
 export function TraceChip({ tabId, trace }: TraceChipProps) {
   const { t } = useTranslation('query');
 
-  const eventCount = trace.events.length;
+  // `trace.events` is ref()'d in state, so its array identity is stable
+  // across appends — `eventCount` is the reactivity signal that bumps on
+  // each coalesced flush. Memoise on it (not the array reference, which
+  // never changes) so the sparkline recomputes when new events land.
+  const eventCount = trace.eventCount;
   const sparkBuckets = useMemo(
     () => bucketEventsPerInterval(trace.events, SPARKLINE_BUCKET_MS),
-    [trace.events],
+    [trace.events, eventCount],
   );
 
   // The checkbox is rendered as a stand-alone control so clicking the
@@ -136,7 +147,9 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
       || (e.parent !== null && e.parent.toLowerCase().includes(needle))
       || e.source.toLowerCase().includes(needle),
     );
-  }, [trace.events, filter]);
+    // `trace.events` is ref()'d (stable identity); depend on eventCount
+    // so the filter re-runs as new events stream in.
+  }, [trace.events, trace.eventCount, filter]);
 
   function onScalarsToggle(e: React.ChangeEvent<HTMLInputElement>) {
     setTraceScalars(tabId, e.target.checked);
@@ -217,47 +230,21 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
       {/* CSS-grid table. Fixed-width gutter columns (ts/src/duration)
           keep numbers and the source tag aligned; name/parent share
           the remaining horizontal space with `minmax(0, 1fr)` so they
-          can `truncate` instead of pushing the layout wide. The header
-          row uses `sticky top-0` so it stays visible while the body
-          scrolls — the outer container is the scroll context. */}
-      <div className="border-border bg-muted/40 max-h-80 min-h-32 overflow-auto rounded-xs border font-mono text-[11px]">
-        {filtered.length === 0 ? (
-          <div className="text-muted-foreground p-2">
-            {trace.events.length === 0 && !trace.completed
-              ? t('traceWaiting')
-              : t('traceEmpty')}
-          </div>
-        ) : (
-          <div className="grid" style={{ gridTemplateColumns: TRACE_GRID_TEMPLATE }}>
-            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
-              {t('traceColTs')}
-            </div>
-            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
-              {t('traceColSource')}
-            </div>
-            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
-              {t('traceColName')}
-            </div>
-            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
-              {t('traceColParent')}
-            </div>
-            <div className="bg-muted text-muted-foreground border-border sticky top-0 z-10 border-b px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
-              {t('traceColDuration')}
-            </div>
-            {filtered.map((e) => (
-              <TraceRow key={`${e.cellId}:${e.sequence}`} entry={e} />
-            ))}
-          </div>
-        )}
-      </div>
+          can `truncate` instead of pushing the layout wide. The rows are
+          virtualised — with the popover open on a large trace, rebuilding
+          every row per coalesced flush was the remaining O(rows) cost. */}
+      <TraceTable
+        rows={filtered}
+        waiting={trace.eventCount === 0 && !trace.completed}
+      />
 
       <div className="text-muted-foreground flex flex-row items-center gap-3 text-[11px] select-none">
-        <span>{t('traceFooter', { count: trace.events.length })}</span>
+        <span>{t('traceFooter', { count: trace.eventCount })}</span>
         <button
           type="button"
           onClick={copyAsText}
           className="hover:text-foreground cursor-pointer"
-          disabled={trace.events.length === 0}
+          disabled={trace.eventCount === 0}
         >
           {t('traceCopy')}
         </button>
@@ -265,7 +252,7 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
           type="button"
           onClick={downloadAsNdjson}
           className="hover:text-foreground cursor-pointer"
-          disabled={trace.events.length === 0}
+          disabled={trace.eventCount === 0}
         >
           {t('traceDownload')}
         </button>
@@ -273,7 +260,7 @@ function TracePopoverBody({ tabId, trace }: TracePopoverBodyProps) {
           type="button"
           onClick={() => clearTrace(tabId)}
           className="hover:text-foreground ml-auto cursor-pointer"
-          disabled={trace.events.length === 0}
+          disabled={trace.eventCount === 0}
         >
           {t('traceClear')}
         </button>
@@ -348,16 +335,107 @@ function formatTraceLine(e: TraceEntry): string {
   return `${e.tsMs.toFixed(2)}ms [${e.source}] ${e.name}${parent}  ${e.durationMs.toFixed(2)}ms`;
 }
 
-// One row in the trace table. Renders five grid cells (matching
-// TRACE_GRID_TEMPLATE) inside the parent grid via React fragments —
-// the outer grid container owns the column layout, so each cell
-// becomes a direct child cell rather than this component owning its
-// own layout. `title` on each cell carries the full formatted line so
-// truncated values stay inspectable on hover.
-function TraceRow({ entry }: { entry: TraceEntry }) {
+// Virtualised event table. The scroll container is the virtualiser's
+// scroll element; a sticky header sits above a spacer sized to the full
+// event count, and only the rows in view (plus overscan) are rendered.
+// Header and rows use the same TRACE_GRID_TEMPLATE — every column is
+// either a fixed rem width or `minmax(0, Nfr)` (content never sizes a
+// track), so each row's independent grid resolves the same widths as
+// the header and the columns stay aligned without a shared grid.
+interface TraceTableProps {
+  rows: readonly TraceEntry[];
+  // True before any events have arrived and the run is still live —
+  // distinguishes "waiting for the first sample" from "ran, nothing
+  // matched (or nothing captured)".
+  waiting: boolean;
+}
+
+function TraceTable({ rows, waiting }: TraceTableProps) {
+  const { t } = useTranslation('query');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => TRACE_ROW_HEIGHT,
+    overscan: 16,
+  });
+
+  return (
+    <div
+      ref={scrollRef}
+      className="border-border bg-muted/40 max-h-80 min-h-32 overflow-auto rounded-xs border font-mono text-[11px]"
+    >
+      {rows.length === 0 ? (
+        <div className="text-muted-foreground p-2">
+          {waiting ? t('traceWaiting') : t('traceEmpty')}
+        </div>
+      ) : (
+        <>
+          {/* Sticky header row. Opaque bg + z so the virtual rows scroll
+              beneath it; its own grid keeps the column rule aligned with
+              each data row's grid. */}
+          <div
+            className="bg-muted text-muted-foreground border-border sticky top-0 z-10 grid border-b"
+            style={{ gridTemplateColumns: TRACE_GRID_TEMPLATE }}
+          >
+            <div className="px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColTs')}
+            </div>
+            <div className="px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColSource')}
+            </div>
+            <div className="px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColName')}
+            </div>
+            <div className="px-2 py-1 text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColParent')}
+            </div>
+            <div className="px-2 py-1 text-right text-[10px] font-medium tracking-wide uppercase">
+              {t('traceColDuration')}
+            </div>
+          </div>
+          {/* Spacer sized to the full list; rows are absolutely
+              positioned within it by the virtualiser. */}
+          <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((v) => (
+              <TraceRow
+                key={v.key}
+                entry={rows[v.index]}
+                size={v.size}
+                start={v.start}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// One row in the virtualised trace table. Owns its own grid (matching
+// TRACE_GRID_TEMPLATE) and is absolutely positioned at the virtualiser's
+// offset. Pinned to `size` with overflow-hidden so its box always equals
+// the fixed row-height estimate. `title` on each cell carries the full
+// formatted line so truncated values stay inspectable on hover.
+function TraceRow({
+  entry,
+  size,
+  start,
+}: {
+  entry: TraceEntry;
+  size: number;
+  start: number;
+}) {
   const tooltip = formatTraceLine(entry);
   return (
-    <>
+    <div
+      className="absolute top-0 left-0 grid w-full overflow-hidden"
+      style={{
+        gridTemplateColumns: TRACE_GRID_TEMPLATE,
+        height: size,
+        transform: `translateY(${start}px)`,
+      }}
+    >
       <div
         className="border-border/40 text-muted-foreground border-b px-2 py-0.5 text-right tabular-nums"
         title={tooltip}
@@ -388,6 +466,6 @@ function TraceRow({ entry }: { entry: TraceEntry }) {
       >
         {entry.durationMs.toFixed(2)}ms
       </div>
-    </>
+    </div>
   );
 }

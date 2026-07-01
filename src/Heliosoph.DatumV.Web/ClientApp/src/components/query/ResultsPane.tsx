@@ -247,6 +247,7 @@ const EMPTY_TRACE_STATE: TraceState = {
   enabledOperators: false,
   enabledScalars: false,
   events: [],
+  eventCount: 0,
   dropped: 0,
   completed: false,
 };

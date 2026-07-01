@@ -171,7 +171,17 @@ export interface TraceEntry {
 export interface TraceState {
   enabledOperators: boolean;
   enabledScalars: boolean;
+  // `events` is wrapped in valtio `ref()` (see freshTraceState) so the
+  // proxy doesn't deep-wrap every appended entry or re-snapshot the
+  // whole growing array on each trace_sample. Without the ref, that
+  // O(events)-per-event snapshot cost made the trace chip freeze the
+  // tab under rapid scalar tracing. The cost: mutations to `events` are
+  // invisible to subscribers — consumers must read `eventCount`
+  // (bumped after each coalesced flush) for reactivity. Reads of
+  // `events[i]` return the live raw entry regardless. Mirrors the
+  // ref()'d `rows` + `rowCount` pattern on CellResult.
   events: TraceEntry[];
+  eventCount: number;
   dropped: number;
   completed: boolean;
 }
@@ -398,6 +408,69 @@ function scheduleRowFlush(tabId: string): void {
   }, pending.coalesceMs);
 }
 
+// Per-tab trace-event coalescing buffer. `trace_sample` events arrive
+// at whatever cadence the server drains its span ring — with scalar
+// tracing on that's often many per frame. Like the row buffer above we
+// accumulate pending entries off-proxy and flush them on a fixed
+// interval, so a rapid trace produces one proxy notification per tick
+// instead of one per event. The events array is ref()'d (see
+// freshTraceState), so the flush's push mutates the raw array silently;
+// the `eventCount` write is the reactivity tap that wakes the chip.
+//
+// A fixed interval (no adaptive backoff like the row buffer) is enough
+// here: trace entries are small flat records, so the cost that hurt was
+// the per-event proxy churn and render count, not per-entry paint.
+const TRACE_COALESCE_MS = 100;
+
+interface PendingTrace {
+  entries: TraceEntry[];
+  dropped: number;
+  timerHandle: number | null;
+}
+const pendingTraceByTab = new Map<string, PendingTrace>();
+
+function getPendingTrace(tabId: string): PendingTrace {
+  let p = pendingTraceByTab.get(tabId);
+  if (!p) {
+    p = { entries: [], dropped: 0, timerHandle: null };
+    pendingTraceByTab.set(tabId, p);
+  }
+  return p;
+}
+
+function flushPendingTrace(tabId: string): void {
+  const pending = pendingTraceByTab.get(tabId);
+  if (!pending) return;
+  if (pending.timerHandle !== null) {
+    window.clearTimeout(pending.timerHandle);
+    pending.timerHandle = null;
+  }
+  if (pending.entries.length === 0 && pending.dropped === 0) return;
+  const exec = executionsState.byTabId[tabId];
+  if (!exec) {
+    pending.entries = [];
+    pending.dropped = 0;
+    return;
+  }
+  // `trace.events` is ref()'d (see CellResult's `rows` for the same
+  // pattern), so this push mutates the raw array without notifying
+  // subscribers. The eventCount write below is the reactivity tap.
+  for (const e of pending.entries) exec.trace.events.push(e);
+  exec.trace.eventCount = exec.trace.events.length;
+  if (pending.dropped > 0) exec.trace.dropped += pending.dropped;
+  pending.entries = [];
+  pending.dropped = 0;
+}
+
+function scheduleTraceFlush(tabId: string): void {
+  const pending = getPendingTrace(tabId);
+  if (pending.timerHandle !== null) return;
+  pending.timerHandle = window.setTimeout(() => {
+    pending.timerHandle = null;
+    flushPendingTrace(tabId);
+  }, TRACE_COALESCE_MS);
+}
+
 interface ExecutionsState {
   byTabId: Record<string, TabExecution>;
 }
@@ -422,7 +495,8 @@ function freshTraceState(): TraceState {
   return {
     enabledOperators: false,
     enabledScalars: false,
-    events: [],
+    events: ref<TraceEntry[]>([]),
+    eventCount: 0,
     dropped: 0,
     completed: false,
   };
@@ -453,7 +527,19 @@ export function setTraceScalars(tabId: string, enabled: boolean): void {
 export function clearTrace(tabId: string): void {
   const exec = executionsState.byTabId[tabId];
   if (!exec) return;
-  exec.trace.events = [];
+  // Drop anything still sitting in the coalescing buffer too, else the
+  // next flush would repopulate the timeline the user just cleared.
+  const pending = pendingTraceByTab.get(tabId);
+  if (pending) {
+    if (pending.timerHandle !== null) {
+      window.clearTimeout(pending.timerHandle);
+      pending.timerHandle = null;
+    }
+    pending.entries = [];
+    pending.dropped = 0;
+  }
+  exec.trace.events = ref<TraceEntry[]>([]);
+  exec.trace.eventCount = 0;
   exec.trace.dropped = 0;
   exec.trace.completed = exec.status !== 'streaming';
 }
@@ -800,7 +886,8 @@ export async function runTab(
     trace: {
       enabledOperators: priorTrace.enabledOperators,
       enabledScalars: priorTrace.enabledScalars,
-      events: [],
+      events: ref<TraceEntry[]>([]),
+      eventCount: 0,
       dropped: 0,
       completed: false,
     },
@@ -846,6 +933,7 @@ export async function runTab(
     // terminal banner pop up with a partial table that's still missing
     // its last frame of streamed rows.
     flushPendingRows(tabId);
+    flushPendingTrace(tabId);
     const exec = executionsState.byTabId[tabId];
     if (exec) {
       if ((err as { name?: string }).name === 'AbortError') {
@@ -860,7 +948,9 @@ export async function runTab(
   } finally {
     abortByTab.delete(tabId);
     flushPendingRows(tabId);
+    flushPendingTrace(tabId);
     pendingByTab.delete(tabId);
+    pendingTraceByTab.delete(tabId);
     const exec = executionsState.byTabId[tabId];
     if (exec) {
       if (!terminated && exec.status === 'streaming') {
@@ -923,6 +1013,11 @@ export function disposeTabExecution(tabId: string): void {
     window.clearTimeout(pending.timerHandle);
   }
   pendingByTab.delete(tabId);
+  const pendingTrace = pendingTraceByTab.get(tabId);
+  if (pendingTrace && pendingTrace.timerHandle !== null) {
+    window.clearTimeout(pendingTrace.timerHandle);
+  }
+  pendingTraceByTab.delete(tabId);
   delete executionsState.byTabId[tabId];
 }
 
@@ -1027,22 +1122,31 @@ function applyEvent(tabId: string, event: StreamEvent): void {
       // Append-only — entries arrive in time order from the server. The
       // sequence field is informational (lets the popover de-dupe in
       // case the server's drain ever returns overlapping windows; today
-      // it doesn't, but the cursor design tolerates it).
-      const incoming = event.entries.map((e) => ({
-        cellId: event.cell,
-        sequence: e.sequence,
-        tsMs: e.tsMs,
-        source: e.source,
-        name: e.name,
-        parent: e.parent,
-        durationMs: e.durationMs,
-      }));
-      exec.trace.events.push(...incoming);
-      exec.trace.dropped += event.dropped;
+      // it doesn't, but the cursor design tolerates it). Buffer into the
+      // per-tab coalescing side store; the timer flush applies all
+      // entries accumulated this tick in a single proxy mutation. See
+      // flushPendingTrace / scheduleTraceFlush above for the rationale.
+      const pending = getPendingTrace(tabId);
+      for (const e of event.entries) {
+        pending.entries.push({
+          cellId: event.cell,
+          sequence: e.sequence,
+          tsMs: e.tsMs,
+          source: e.source,
+          name: e.name,
+          parent: e.parent,
+          durationMs: e.durationMs,
+        });
+      }
+      pending.dropped += event.dropped;
+      scheduleTraceFlush(tabId);
       break;
     }
 
     case 'trace_complete': {
+      // Land any buffered entries before marking the trace final, so the
+      // completed timeline reflects every sample the server sent.
+      flushPendingTrace(tabId);
       // The server's running totals are authoritative — they include
       // sample-time drops we may already have accumulated piecewise, so
       // overwrite rather than add. Marks the popover state as final
