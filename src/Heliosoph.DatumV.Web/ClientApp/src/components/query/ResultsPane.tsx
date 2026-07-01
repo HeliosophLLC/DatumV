@@ -391,14 +391,16 @@ function CellBlock({
   // `cell.rows` is ref()'d in the proxy, so reads through it don't
   // subscribe to length changes. See CellResult in state/execution.ts.
   const hasTable = cell.schema !== null && cell.rowCount > 0;
-  // Single-value detection: 1 row × 1 column, and this is the only
-  // table in the pane (`tableMode === 'fill'`). Function-tab runs that
+  // Single-value detection: 1 row × 1 column. Function-tab runs that
   // return a single SELECT result land here, but the path is generic —
   // a SQL tab that runs `SELECT 'hello'` gets the same treatment.
-  // Multi-row or multi-cell results stay in the data grid below.
+  // Multi-row or multi-cell results stay in the data grid below. Applied
+  // regardless of result-set count so a 1×1 result renders as its
+  // large single-value view (image / scalar / media) whether it's the
+  // only set or one of many — filling the section's area, which is the
+  // whole pane in fill mode or the capped slab when there are two+.
   const isSingleValue =
     hasTable
-    && tableMode === 'fill'
     && cell.rowCount === 1
     && cell.rows[0].length === 1
     && cell.schema!.length === 1;
@@ -617,12 +619,16 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
-  // without zooming.
+  // without zooming. `w-full` + `text-start` aligns the text to the
+  // locale's reading direction (left in LTR, right in RTL) rather than
+  // centering it — the block fills the width so the logical alignment is
+  // actually visible instead of collapsing to a centered shrink-to-fit
+  // box.
   return (
     <pre
       className={cn(
-        'text-foreground max-w-full overflow-auto font-mono text-2xl leading-relaxed',
-        'whitespace-pre-wrap break-words text-center',
+        'text-foreground w-full max-w-full overflow-auto px-4 font-mono leading-relaxed',
+        'whitespace-pre-wrap break-words text-start',
       )}
     >
       {cell.text ?? ''}
