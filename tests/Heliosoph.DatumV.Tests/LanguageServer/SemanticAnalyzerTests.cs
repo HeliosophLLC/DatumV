@@ -2008,6 +2008,55 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void ArrayOfStructLiterals_FlowingIntoArrayStructParameter_DoesNotWarn()
+    {
+        // A chat call like `falcon3_1b_chat([{role:..., content:...}, ...])`
+        // desugars to `array(struct(...), struct(...))`. The analyzer must
+        // infer the first element's kind as `Struct` so the whole literal
+        // resolves to `Array<Struct>` and matches the model's parameter —
+        // otherwise element inference falls through to the manifest
+        // placeholder and warns on every legitimate chat literal.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [],
+            Functions =
+            [
+                new FunctionSignature
+                {
+                    SchemaName = "system",
+                    Name = "array",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "...elements", Kind = "Any", IsOptional = true },
+                    ],
+                    ReturnType = "Array<same as element kind (String when empty)>",
+                },
+                new FunctionSignature
+                {
+                    SchemaName = "models",
+                    Name = "falcon3_1b_chat",
+                    Parameters =
+                    [
+                        new ParameterSignature { Name = "messages", Kind = "Array<Struct>" },
+                    ],
+                    ReturnType = "String",
+                },
+            ],
+            Keywords = [],
+        };
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT models.falcon3_1b_chat([" +
+            "{ role: 'system', content: 'Answer in exactly one sentence.' }, " +
+            "{ role: 'user', content: 'What is a vector database?' }])",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("expects", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void OverloadedFunction_NoShapeMatches_StillWarns()
     {
         // Negative test for the overload-tryout loop: a call that matches

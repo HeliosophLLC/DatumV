@@ -1080,6 +1080,7 @@ internal sealed class SemanticAnalyzer
         return expression switch
         {
             ColumnReference column => TryInferColumnType(column, aliasToTable, opaqueAliases),
+            StructLiteralExpression => "Struct",
             LiteralExpression { Value: string } => "String",
             LiteralExpression { Value: double } => "Float32",
             LiteralExpression { Value: bool } => "Boolean",
