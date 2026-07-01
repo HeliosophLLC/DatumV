@@ -311,6 +311,13 @@ public sealed class QueryPlanner
     /// table references inside the expression can resolve earlier CTEs.
     /// Used when planning non-recursive CTE bodies that may reference sibling CTEs.
     /// </summary>
+    /// <remarks>
+    /// Returns an un-<see cref="Finalize"/>'d tree. The caller
+    /// (<c>planBodyWithCommonTableExpressions</c>) runs Finalize once over the
+    /// whole body — mirroring the first-CTE <c>Plan(body)</c> path — so a
+    /// compound body's trailing ORDER BY/LIMIT is covered and branches aren't
+    /// Finalized twice.
+    /// </remarks>
     private QueryOperator PlanWithSiblingCommonTableExpressions(
         QueryExpression query,
         IReadOnlyDictionary<string, CommonTableExpressionOperator> siblingOperators)
@@ -410,7 +417,12 @@ public sealed class QueryPlanner
                     PlanCore(stmt, externalCommonTableExpressionOperators: ctes),
                 planBodyWithCommonTableExpressions: (body, ctes) =>
                     ctes.Count > 0
-                        ? PlanWithSiblingCommonTableExpressions(body, ctes)
+                        // Finalize the whole sibling body once here — symmetric
+                        // with the Finalize'd Plan(body) path taken by the first
+                        // CTE. Without it, second-and-later CTE bodies skip model
+                        // hoisting / LIMIT pushdown / SORT+LIMIT lift, stranding
+                        // expensive per-row work below LIMIT.
+                        ? Finalize(PlanWithSiblingCommonTableExpressions(body, ctes))
                         : Plan(body));
 
         // Merge externally provided CTE operators (e.g. recursive working table).
