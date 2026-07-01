@@ -811,6 +811,13 @@ public sealed class QueryPlanner
         // these columns so the user-visible output matches their SELECT list.
         // null/empty when no passthroughs were needed.
         List<string>? orderByAggregatePassthroughs = null;
+        // ORDER BY with integer ordinals rewritten to references to the Nth
+        // output column (sorting runs post-projection). Bare aliases need no
+        // rewrite — they already resolve as real output columns there. null when
+        // the query has no ORDER BY.
+        OrderByClause? ordinalResolvedOrderBy = statement.OrderBy is not null
+            ? GroupOrderNameResolver.ResolveOrderBy(statement.OrderBy, statement.Columns)
+            : null;
 
         if (hasGroupBy || hasAggregates)
         {
@@ -849,6 +856,22 @@ public sealed class QueryPlanner
 
                 groupByExpressions = inferred;
             }
+            else if (groupBy is not null)
+            {
+                // Resolve GROUP BY ordinals and output-alias references. An
+                // ambiguous bare name still binds to the input column, so alias
+                // substitution only fires for names that aren't source columns.
+                IReadOnlySet<string>? sourceColumnNames =
+                    GroupOrderNameResolver.TryCollectSourceColumnNames(statement, _catalog, _functionRegistry);
+                groupByExpressions = GroupOrderNameResolver.ResolveGroupBy(
+                    groupByExpressions, statement.Columns, sourceColumnNames);
+            }
+
+            // Grouping-key output columns, used to rewrite repeats of a grouping
+            // expression in SELECT / HAVING / ORDER BY into references to the
+            // precomputed key (their source columns are gone post-aggregation).
+            IReadOnlySet<string>? groupKeyNames =
+                GroupKeyProjectionRewriter.BuildKeyNames(groupByExpressions);
 
             List<AggregateColumn> aggregateColumns = new();
             List<SelectColumn> rewrittenColumns = new();
@@ -863,6 +886,10 @@ public sealed class QueryPlanner
 
                 Expression rewritten = AggregateRewriter.RewriteAggregateExpression(
                     column.Expression, _functionRegistry, aggregateColumns);
+                if (groupKeyNames is not null)
+                {
+                    rewritten = GroupKeyProjectionRewriter.Rewrite(rewritten, groupKeyNames);
+                }
                 rewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
             }
 
@@ -874,6 +901,10 @@ public sealed class QueryPlanner
                 {
                     Expression rewritten = AggregateRewriter.RewriteAggregateExpression(
                         binding.Expression, _functionRegistry, aggregateColumns);
+                    if (groupKeyNames is not null)
+                    {
+                        rewritten = GroupKeyProjectionRewriter.Rewrite(rewritten, groupKeyNames);
+                    }
                     rewrittenLetBindings.Add(binding with { Expression = rewritten });
                 }
                 letBindings = rewrittenLetBindings;
@@ -891,6 +922,13 @@ public sealed class QueryPlanner
                         ? AggregateRewriter.RewriteAggregateExpression(
                             assertClause.Message, _functionRegistry, aggregateColumns)
                         : null;
+                    if (groupKeyNames is not null)
+                    {
+                        rewrittenPredicate = GroupKeyProjectionRewriter.Rewrite(rewrittenPredicate, groupKeyNames);
+                        rewrittenMessage = rewrittenMessage is not null
+                            ? GroupKeyProjectionRewriter.Rewrite(rewrittenMessage, groupKeyNames)
+                            : null;
+                    }
                     rewrittenAssertions.Add(assertClause with
                     {
                         Predicate = rewrittenPredicate,
@@ -909,13 +947,17 @@ public sealed class QueryPlanner
             // decision below — so an ORDER BY-only aggregate (no SELECT/LET
             // counterpart) still populates aggregateColumns and routes the
             // query through the real GroupByOperator path.
-            if (statement.OrderBy is not null)
+            if (ordinalResolvedOrderBy is not null)
             {
-                List<OrderByItem> rewrittenOrderBy = new(statement.OrderBy.Items.Count);
-                foreach (OrderByItem item in statement.OrderBy.Items)
+                List<OrderByItem> rewrittenOrderBy = new(ordinalResolvedOrderBy.Items.Count);
+                foreach (OrderByItem item in ordinalResolvedOrderBy.Items)
                 {
                     Expression rewritten = AggregateRewriter.RewriteAggregateExpression(
                         item.Expression, _functionRegistry, aggregateColumns);
+                    if (groupKeyNames is not null)
+                    {
+                        rewritten = GroupKeyProjectionRewriter.Rewrite(rewritten, groupKeyNames);
+                    }
                     rewrittenOrderBy.Add(ReferenceEquals(rewritten, item.Expression)
                         ? item
                         : item with { Expression = rewritten });
@@ -936,6 +978,17 @@ public sealed class QueryPlanner
                 AggregateRewriter.AppendOrderByAggregatePassthroughs(
                     rewrittenOrderBy, aggregateColumns, rewrittenColumns,
                     ref orderByAggregatePassthroughs);
+
+                // ORDER BY may reference a grouping expression the SELECT list
+                // doesn't emit (e.g. `SELECT COUNT(*) … GROUP BY upper(a)
+                // ORDER BY upper(a)`). Pass the key column through so it survives
+                // to the sort, then the trim Project drops it.
+                if (groupKeyNames is not null)
+                {
+                    GroupKeyProjectionRewriter.AppendOrderByGroupKeyPassthroughs(
+                        rewrittenOrderBy, groupKeyNames, rewrittenColumns,
+                        ref orderByAggregatePassthroughs);
+                }
             }
 
             if (hasGroupBy && aggregateColumns.Count == 0 && statement.Having is null)
@@ -981,6 +1034,10 @@ public sealed class QueryPlanner
                 {
                     Expression havingRewritten = AggregateRewriter.RewriteAggregateExpression(
                         statement.Having, _functionRegistry, aggregateColumns);
+                    if (groupKeyNames is not null)
+                    {
+                        havingRewritten = GroupKeyProjectionRewriter.Rewrite(havingRewritten, groupKeyNames);
+                    }
                     source = new FilterOperator(source, havingRewritten);
                 }
             }
@@ -1181,7 +1238,7 @@ public sealed class QueryPlanner
         }
 
         return SelectTrailingClauses.ApplyTrailingClauses(
-            source, statement, rewrittenOrderByClause, orderByAggregatePassthroughs);
+            source, statement, rewrittenOrderByClause ?? ordinalResolvedOrderBy, orderByAggregatePassthroughs);
     }
 
     /// <summary>
