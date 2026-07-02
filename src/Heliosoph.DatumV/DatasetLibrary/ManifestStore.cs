@@ -34,6 +34,10 @@ internal sealed class ManifestStore : IManifestStore
     // variant id -> (entry, variant). Built once at load so the install
     // service doesn't need to scan the entire manifest on every probe.
     private readonly Dictionary<string, (DatasetEntry, DatasetVariant)> _variantsById;
+    // declared recipe sqlFile (relative, forward-slashed) -> resolved
+    // absolute path. Only paths declared by an ingest job land here, so
+    // the recipe endpoint can never be steered at an undeclared file.
+    private readonly Dictionary<string, string> _recipeSqlPaths;
     private readonly ILicenseRegistry _licenses;
     private readonly ILogger<ManifestStore> _logger;
 
@@ -61,6 +65,7 @@ internal sealed class ManifestStore : IManifestStore
         _entryCardPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         _heroImagePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         _variantsById = new Dictionary<string, (DatasetEntry, DatasetVariant)>(StringComparer.Ordinal);
+        _recipeSqlPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (DatasetEntry e in manifest.Datasets)
         {
             if (!string.IsNullOrEmpty(e.CardFile))
@@ -86,6 +91,36 @@ internal sealed class ManifestStore : IManifestStore
             foreach (DatasetVariant v in e.Variants)
             {
                 _variantsById[v.Id] = (e, v);
+                foreach (CatalogDatasetVersion version in v.Versions)
+                {
+                    foreach (CatalogIngestJob job in version.Ingest)
+                    {
+                        if (string.IsNullOrEmpty(job.SqlFile)) continue;
+                        string key = NormalizeRecipeKey(job.SqlFile);
+                        if (_recipeSqlPaths.ContainsKey(key)) continue;
+                        string abs = Path.GetFullPath(Path.Combine(manifestDir, job.SqlFile));
+                        // Declared paths are trusted manifest content, but
+                        // guard against one that escapes the manifest tree so
+                        // the recipe endpoint can only ever serve files that
+                        // ship alongside the catalog.
+                        string root = ManifestDirectory + Path.DirectorySeparatorChar;
+                        if (!abs.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogWarning(
+                                "Dataset variant {Variant} declares sqlFile '{File}' resolving " +
+                                "outside the manifest directory ({Path}); it won't be served.",
+                                v.Id, job.SqlFile, abs);
+                            continue;
+                        }
+                        if (!File.Exists(abs))
+                        {
+                            _logger.LogWarning(
+                                "Dataset variant {Variant} declares sqlFile '{File}' but no file " +
+                                "exists at {Path}.", v.Id, job.SqlFile, abs);
+                        }
+                        _recipeSqlPaths[key] = abs;
+                    }
+                }
             }
         }
 
@@ -138,6 +173,21 @@ internal sealed class ManifestStore : IManifestStore
             ? pair
             : null;
     }
+
+    public string? GetRecipeSql(string relativePath)
+    {
+        if (string.IsNullOrEmpty(relativePath)) return null;
+        return _recipeSqlPaths.TryGetValue(NormalizeRecipeKey(relativePath), out string? abs)
+            && File.Exists(abs)
+                ? File.ReadAllText(abs)
+                : null;
+    }
+
+    // Recipe paths are declared in the manifest with forward slashes;
+    // the route catch-all preserves them. Normalise both sides to
+    // forward slashes so lookups match regardless of the OS separator.
+    private static string NormalizeRecipeKey(string path) =>
+        path.Replace('\\', '/').Trim();
 
     /// <summary>
     /// Cross-field invariants enforced at load so a manifest typo

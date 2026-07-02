@@ -117,6 +117,11 @@ interface DatasetsState {
   // entry name → markdown card body (or null when probed and not
   // present on the server). Populated lazily by `loadEntryCard`.
   entryCards: Readonly<Record<string, string | null>>;
+  // recipe sqlFile path → SQL body (or null when probed and not present
+  // on the server). Populated lazily by `loadRecipeSql`. Keyed by the
+  // manifest's relative `sqlFile` path so variants that share a recipe
+  // (e.g. every LibriSpeech cut) hit the same cache entry.
+  recipeSqls: Readonly<Record<string, string | null>>;
 }
 
 export const datasetsState = proxy<DatasetsState>({
@@ -134,6 +139,7 @@ export const datasetsState = proxy<DatasetsState>({
   selectedEntryName: null,
   selectedVariantId: null,
   entryCards: {},
+  recipeSqls: {},
 });
 
 export async function loadDatasetsCatalog(): Promise<void> {
@@ -463,6 +469,35 @@ export async function loadEntryCard(entryName: string): Promise<string | null> {
     return text;
   } catch (err) {
     console.error('[datasets] loadEntryCard failed', err);
+    return null;
+  }
+}
+
+// Fetch a recipe's SQL body by its manifest `sqlFile` path. Cached
+// after the first call (shared across variants that reuse the recipe).
+// Returns null when the server has no such recipe or the request fails.
+export async function loadRecipeSql(sqlFile: string): Promise<string | null> {
+  if (sqlFile in datasetsState.recipeSqls) {
+    return datasetsState.recipeSqls[sqlFile];
+  }
+  try {
+    const segments = sqlFile.split('/').map(encodeURIComponent).join('/');
+    const response = await window.fetch(
+      `/api/dataset-catalog/recipes/${segments}`,
+      { credentials: 'include' },
+    );
+    if (response.status === 404) {
+      datasetsState.recipeSqls = { ...datasetsState.recipeSqls, [sqlFile]: null };
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`recipe fetch failed: ${response.status}`);
+    }
+    const text = await response.text();
+    datasetsState.recipeSqls = { ...datasetsState.recipeSqls, [sqlFile]: text };
+    return text;
+  } catch (err) {
+    console.error('[datasets] loadRecipeSql failed', err);
     return null;
   }
 }

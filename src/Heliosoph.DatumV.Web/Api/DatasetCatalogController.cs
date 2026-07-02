@@ -46,6 +46,20 @@ public sealed class DatasetCatalogController(
         return Content(text, "text/markdown");
     }
 
+    // GET /api/dataset-catalog/recipes/{**path} — raw SQL body of an
+    // ingest recipe declared as a variant's `sqlFile` (e.g.
+    // `mnist/split.sql`). Powers the "View recipe" section on the detail
+    // card. 404 when the path isn't a declared recipe or the file is
+    // missing; only declared paths are serveable.
+    [HttpGet("recipes/{**path}")]
+    [Produces("text/plain")]
+    public ActionResult<string> GetRecipeSql(string path)
+    {
+        string? sql = store.GetRecipeSql(path);
+        if (sql is null) return NotFound();
+        return Content(sql, "text/plain");
+    }
+
     // GET /api/dataset-catalog/entries/{name}/card/assets/{**path} —
     // serves screenshots / diagrams / sample-image strips referenced
     // from the entry's card markdown. Path resolves against the

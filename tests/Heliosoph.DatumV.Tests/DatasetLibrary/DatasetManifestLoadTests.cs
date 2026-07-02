@@ -106,4 +106,53 @@ public sealed class DatasetManifestLoadTests
         Assert.Equal("COCO 2017", hit.Value.Entry.Name);
         Assert.Equal("coco_test2017", hit.Value.Variant.Id);
     }
+
+    [Fact]
+    public void RealManifest_GetRecipeSql_ReturnsBody_ForDeclaredRecipe()
+    {
+        (_, ManifestStore store) = LoadFromRepoRoot();
+
+        // Every MNIST-family variant declares the mnist/split.sql recipe.
+        Assert.Contains("mnist/split.sql", RecipeSqlFiles(store.Manifest));
+
+        string? sql = store.GetRecipeSql("mnist/split.sql");
+        Assert.NotNull(sql);
+        Assert.Contains("open_idx_images", sql);
+    }
+
+    [Fact]
+    public void RealManifest_GetRecipeSql_NormalisesBackslashSeparators()
+    {
+        (_, ManifestStore store) = LoadFromRepoRoot();
+        // Route input may arrive with either separator; both resolve.
+        Assert.NotNull(store.GetRecipeSql("mnist\\split.sql"));
+    }
+
+    [Fact]
+    public void RealManifest_GetRecipeSql_ReturnsNull_ForUndeclaredPath()
+    {
+        (_, ManifestStore store) = LoadFromRepoRoot();
+        // Only paths declared by an ingest job are serveable — an
+        // arbitrary or traversal path resolves to null, never a file read.
+        Assert.Null(store.GetRecipeSql("catalog.json"));
+        Assert.Null(store.GetRecipeSql("../secrets.txt"));
+        Assert.Null(store.GetRecipeSql("does/not/exist.sql"));
+    }
+
+    private static IEnumerable<string> RecipeSqlFiles(DatasetCatalogManifest manifest)
+    {
+        foreach (DatasetEntry entry in manifest.Datasets)
+        {
+            foreach (DatasetVariant variant in entry.Variants)
+            {
+                foreach (CatalogDatasetVersion version in variant.Versions)
+                {
+                    foreach (CatalogIngestJob job in version.Ingest)
+                    {
+                        if (!string.IsNullOrEmpty(job.SqlFile)) yield return job.SqlFile;
+                    }
+                }
+            }
+        }
+    }
 }

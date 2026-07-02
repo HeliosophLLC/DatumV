@@ -55,5 +55,13 @@
     "accept": "Accept license to install",
     "accepted": "License accepted",
     "viewText": "View full license"
+  },
+  "recipe": {
+    "view": "View recipe",
+    "sources": "Sources",
+    "table": "Table: {table}",
+    "loading": "Loading recipe…",
+    "unavailable": "Recipe unavailable.",
+    "direct": "Ingested directly from {source}."
   }
 }
