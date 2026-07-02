@@ -961,6 +961,96 @@
       ]
     },
     {
+      "name": "DocBank",
+      "summary": "Document pages with token-level OCR ground truth — each full-page image paired with its reading-order text and per-token bounding boxes + semantic labels. Built from arXiv LaTeX by weak supervision, so the transcription is exact rather than hand-annotated. The reach-for permissive benchmark for document (not scene-text) OCR and layout analysis.",
+      "description": "Released in 2020 by Li et al. (Microsoft Research Asia, COLING 2020), DocBank derives 500,000 document pages from LaTeX sources on arXiv: because the source markup is known, every token's text, bounding box, colour, font, and one of twelve semantic roles (title, author, abstract, paragraph, section, list, caption, equation, figure, table, reference, footer) is recovered exactly — no manual OCR, no annotator noise. That makes it the cleanest permissively-licensed corpus for testing document OCR end-to-end: run a recognizer over the page image and diff against the ground-truth text, or evaluate detection against the token boxes. The upstream release is 54 GB with page images split across a ten-part archive; these variants ingest a sampled cut re-hosted as a friendly per-page mirror — one row per page carrying the decoded image, the full-page reading-order `text`, the page dimensions, and a `tokens` array (each `{text, x0, y0, x1, y1, label, font}`, bboxes normalized to 0–1000) for box- and label-level work. Pages are academic-paper renders, so expect two-column layouts, dense equations, and reference lists rather than receipts or forms.",
+      "cardFile": "cards/docbank/index.md",
+      "modalities": ["Document", "Image"],
+      "licenseIds": ["apache-2.0"],
+      "attributions": [
+        "Minghao Li, Yiheng Xu, Lei Cui, Shaohan Huang, Furu Wei, Zhoujun Li, Ming Zhou (DocBank, COLING 2020)",
+        "arXiv.org submitters (source LaTeX documents)"
+      ],
+      "suitableForTasks": [
+        "TextOCR",
+        "TextDetector"
+      ],
+      "variants": [
+        {
+          "id": "docbank_train",
+          "displayName": "train (5k pages)",
+          "summary": "5,000 document pages sampled from the DocBank training split. Each row: the decoded page image, full-page reading-order text, page dimensions, and the per-token array (text + normalized bbox + semantic label + font). ~560 MB on the wire — the images dominate; the annotation JSONL is a fraction of that.",
+          "approxArchiveBytes": 560000000,
+          "approxIngestedBytes": 600000000,
+          "expectedRowCounts": { "pages": 5000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/DocBank",
+                  "revision": "459bfd7eee712fe556503889a52e1c09e73e0dbd",
+                  "include": [
+                    "docbank-train-images.zip",
+                    "docbank-train.jsonl.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "pages",
+                  "sqlFile": "docbank/split.sql",
+                  "artifacts": {
+                    "images": "docbank-train-images.zip",
+                    "annotations": "docbank-train.jsonl.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "docbank_test",
+          "displayName": "test (1k pages)",
+          "summary": "1,000 document pages sampled from the DocBank test split. Same per-page schema as the train variant — the held-out slice for reporting OCR / layout numbers. ~112 MB on the wire; ingests in well under a minute.",
+          "approxArchiveBytes": 112000000,
+          "approxIngestedBytes": 120000000,
+          "expectedRowCounts": { "pages": 1000 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/DocBank",
+                  "revision": "459bfd7eee712fe556503889a52e1c09e73e0dbd",
+                  "include": [
+                    "docbank-test-images.zip",
+                    "docbank-test.jsonl.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "pages",
+                  "sqlFile": "docbank/split.sql",
+                  "artifacts": {
+                    "images": "docbank-test-images.zip",
+                    "annotations": "docbank-test.jsonl.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "MedNIST",
       "summary": "58,954 64×64 grayscale medical thumbnails labelled with one of six imaging modalities (AbdomenCT, BreastMRI, ChestCT, CXR, Hand, HeadCT). The medical-imaging counterpart to MNIST.",
       "description": "Compiled by Bradley Erickson (Mayo Clinic) from CT, MRI, and X-ray slices drawn from the Cancer Imaging Archive (TCIA), the RSNA Bone Age Challenge, and the NIH ChestX-ray14 release, then packaged by the MONAI team as a small drop-in benchmark for medical image classification. ~10,000 thumbnails per class (BreastMRI is slightly smaller at 8,954), all rendered to uniform 64×64 grayscale JPEG. Plays the same role for medical imaging that MNIST plays for handwritten digits — small enough to ingest in under a minute, easy enough that a tiny CNN converges to ~99% test accuracy in a few epochs, but realistic enough that the modality boundaries actually correspond to clinical categories. Folder layout is one class per directory under a top-level `MedNIST/` prefix; the class label is the folder name verbatim.",
