@@ -35,33 +35,35 @@
 --                                         {masks: [1, 4, H, W] Float32 logits,
 --                                          iou_predictions: [1, 4]}.
 --                                      c. Per-candidate filter: drop if
---                                         iou < 0.92 (sure-of-itself) or
---                                         stability_score < 0.97 (crisp boundary).
---                                         Tightened from SAM canonical 0.88/0.95
---                                         while per-procedural-call arena lifetime
---                                         is a follow-up — keeps the accumulator
---                                         small enough to fit the 8GB arena cap.
---                                      d. Accumulate surviving planes + scores.
+--                                         iou < 0.88 (sure-of-itself) or
+--                                         stability_score < 0.95 (crisp boundary).
+--                                         SAM canonical thresholds.
+--                                      d. Accumulate surviving planes + scores
+--                                         into List<Float32> accumulators.
 --   4. mask_nms_planes             — Threshold planes at logit > 0, sort by
 --                                    score desc, NMS at mask-IoU 0.7, materialize
 --                                    survivors as Array<Image> (binary RGBA,
 --                                    same shape as u2net masks).
 --
--- **Cost.** Encoder runs once; decoder runs grid_size² times. At the
--- default grid_size=16 that's 256 decoder dispatches per row — ~0.5-1 s on
--- CPU. SAM's canonical 32 yields 1024 dispatches (~3-5s) but currently
--- exhausts the 8GB arena cap on busy COCO-class imagery because
--- array_concat into the surviving-candidate accumulator is O(N^2) in arena
--- bytes (no in-row reclamation). Per-procedural-call arena lifetime is a
--- filed follow-up; once it lands, raising the default back to 32 is a
--- one-line edit.
+-- **Cost.** Encoder runs once; decoder runs grid_size² times. At the default
+-- grid_size=16 that's 256 decoder dispatches per row (~0.5-1s on CPU); SAM
+-- canonical 32 yields 1024 (~3-5s). Survivor planes accumulate into a
+-- List<Float32> that grows off-arena with amortised O(1) APPEND, so the
+-- O(N^2) array_concat churn that used to dominate is gone. The remaining
+-- arena ceiling is the per-cell decoder output: line ~131 flattens each
+-- cell's [1, M, H, W] mask tensor into the per-row arena and nothing is
+-- reclaimed until the row completes, so arena use grows ~grid_size^2 *
+-- mask_bytes and overflows the 8GB cap above ~grid_size=20 at full image
+-- resolution. Lifting grid_size back to the canonical 32 needs per-iteration
+-- arena reclamation (a filed follow-up); the off-arena accumulator makes that
+-- reset clean.
 -- ============================================================================
 
 CREATE OR REPLACE MODEL mobilesam(
   img       Image,
   grid_size Int32 = 16
     CHECK (grid_size BETWEEN 4 AND 128)
-    COMMENT 'Side length of the foreground-prompt grid (the model runs grid_size * grid_size decoder dispatches per row). Default 16 (SAM canonical was 32; lowered here because per-row Float32-plane accumulation through array_concat is currently O(N^2) in arena bytes — a follow-up per-procedural-call arena lifts the cap). 16 finds typical object set on COCO-class images; bump to 32 once that follow-up ships. Range 4-128.'
+    COMMENT 'Side length of the foreground-prompt grid (the model runs grid_size * grid_size decoder dispatches per row). Default 16 (SAM canonical is 32). The cap is the per-cell decoder output: each cell flattens an [1, M, H, W] mask tensor into the body arena and nothing is reclaimed until the row finishes, so the arena grows ~grid_size^2 * mask_bytes. At full image resolution that overflows the 8GB arena above ~grid_size=20. Raising the default to 32 waits on per-iteration arena reclamation (the List<Float32> accumulator already grows off-arena, so that reset is clean). Range 4-128.'
 ) RETURNS Array<Image>
 USING 'mobile-sam/2026-05-29/mobile_sam_image_encoder.onnx' AS encoder,
       'mobile-sam/2026-05-29/sam_mask_decoder_multi.onnx'   AS decoder
@@ -90,11 +92,13 @@ AS BEGIN
   DECLARE orig_im_size Float32[] = [
     CAST(orig_h AS Float32), CAST(orig_w AS Float32)];
 
-  -- Accumulators for surviving candidates pre-NMS. Concatenated as one flat
-  -- Float32[] of N*plane_size floats + parallel Float32[] of N scores —
-  -- mask_nms_planes derives N from cardinality(scores) and slices.
-  DECLARE acc_planes Float32[] = array_repeat(CAST(0.0 AS Float32), 0);
-  DECLARE acc_scores Float32[] = array_repeat(CAST(0.0 AS Float32), 0);
+  -- Accumulators for surviving candidates pre-NMS. List<Float32> grows in
+  -- place with amortised O(1) APPEND (no copy-on-modify), then freezes to a
+  -- flat Float32[] when handed to mask_nms_planes at RETURN: N*plane_size
+  -- mask floats + a parallel Float32[] of N scores. mask_nms_planes derives N
+  -- from cardinality(scores) and slices.
+  DECLARE acc_planes List<Float32>;
+  DECLARE acc_scores List<Float32>;
 
   -- 3. Grid sweep with inline iou + stability filtering. The IF guards keep
   -- the accumulator small — without them, gridSize²×4 candidates at full
@@ -135,9 +139,11 @@ AS BEGIN
       WHILE c <= 4
       BEGIN
         DECLARE iou_c Float32 = iou[c];
-        -- Tightened from SAM canonical (0.88, 0.95) to keep N small while
-        -- per-call arena lifetime is a follow-up. Survivors per row drop
-        -- to a few dozen on COCO-class imagery, well within the 8GB arena cap.
+        -- Tightened from SAM canonical (0.88, 0.95) to keep survivor count down.
+        -- The List<Float32> accumulator already removed the O(N^2) array_concat
+        -- churn, but the dominant arena cost is the per-cell mask flatten above,
+        -- not the accumulator — relax these (and raise grid_size) once
+        -- per-iteration arena reclamation lands.
         IF iou_c >= CAST(0.92 AS Float32)
         BEGIN
           -- 1-based array_slice: candidate c lives at [(c-1)*plane_size + 1, plane_size].
@@ -146,8 +152,8 @@ AS BEGIN
           DECLARE stability Float32 = sam_stability_score(plane, orig_h, orig_w, CAST(1.0 AS Float32));
           IF stability >= CAST(0.97 AS Float32)
           BEGIN
-            SET acc_planes = array_concat(acc_planes, plane);
-            SET acc_scores = array_concat(acc_scores, [iou_c])
+            APPEND plane TO acc_planes;
+            APPEND iou_c TO acc_scores
           END
         END
         SET c = c + 1

@@ -69,18 +69,16 @@ internal static class ProceduralListOps
         {
             // Peer-array concatenation requires the element kinds to match
             // exactly (per-element coercion is out of scope; the caller can
-            // CAST the array). Materialise once into the store, then append the
-            // contiguous element bytes — the array must be read with its real
-            // element type, since the inline-array path reports length in
-            // elements (reading a small Int32[2] as bytes would yield 2, not 8).
+            // CAST the array). The element bytes are read with the real element
+            // type — the inline-array path reports length in elements, so reading
+            // a small Int32[2] as bytes would yield 2, not 8.
             if (value.Kind != list.ElementKind)
             {
                 throw new ExecutionException(
                     $"APPEND TO @{target}: array element kind {value.Kind} does not match the list "
                     + $"element kind {list.ElementKind}. CAST the array to {list.ElementKind}[] first.");
             }
-            DataValue dv = value.ToDataValue(store);
-            AppendArrayElements(list, dv, store);
+            AppendArrayElements(list, value, store);
         }
         else
         {
@@ -103,51 +101,43 @@ internal static class ProceduralListOps
         }
     }
 
-    // Reads a primitive array as its declared element type and appends the raw
-    // bytes. The kind→T mapping mirrors ValueRef.FreezeToArray; both cover the
-    // fixed-width numeric / temporal element kinds a List<T> supports.
-    private static void AppendArrayElements(ListBuilderValue list, DataValue dv, IValueStore store)
+    // Appends a peer array's element bytes to the list. The element kind picks
+    // the typed span; the span itself comes from the array's managed payload
+    // when it has one (array_slice / array_flatten / literals are off-arena) —
+    // avoiding a per-append ToDataValue copy into the body arena — and falls
+    // back to materialising arena/sidecar/inline-backed arrays. The kind→T
+    // mapping mirrors ValueRef.FreezeToArray.
+    private static void AppendArrayElements(ListBuilderValue list, ValueRef value, IValueStore store)
     {
         switch (list.ElementKind)
         {
-            case DataKind.UInt8:
-                list.AppendBytes(dv.AsArraySpan<byte>(store));
-                break;
-            case DataKind.Int8:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<sbyte>(store)));
-                break;
-            case DataKind.Boolean:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<bool>(store)));
-                break;
-            case DataKind.UInt16:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<ushort>(store)));
-                break;
-            case DataKind.Int16:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<short>(store)));
-                break;
-            case DataKind.UInt32:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<uint>(store)));
-                break;
-            case DataKind.Int32 or DataKind.Date:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<int>(store)));
-                break;
-            case DataKind.Float32:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<float>(store)));
-                break;
-            case DataKind.UInt64:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<ulong>(store)));
-                break;
+            case DataKind.UInt8: AppendTyped<byte>(list, value, store); break;
+            case DataKind.Int8: AppendTyped<sbyte>(list, value, store); break;
+            case DataKind.Boolean: AppendTyped<bool>(list, value, store); break;
+            case DataKind.UInt16: AppendTyped<ushort>(list, value, store); break;
+            case DataKind.Int16: AppendTyped<short>(list, value, store); break;
+            case DataKind.UInt32: AppendTyped<uint>(list, value, store); break;
+            case DataKind.Int32 or DataKind.Date: AppendTyped<int>(list, value, store); break;
+            case DataKind.Float32: AppendTyped<float>(list, value, store); break;
+            case DataKind.UInt64: AppendTyped<ulong>(list, value, store); break;
             case DataKind.Int64 or DataKind.Timestamp or DataKind.TimestampTz
-                or DataKind.Time or DataKind.Duration:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<long>(store)));
-                break;
-            case DataKind.Float64:
-                list.AppendBytes(MemoryMarshal.AsBytes(dv.AsArraySpan<double>(store)));
-                break;
+                or DataKind.Time or DataKind.Duration: AppendTyped<long>(list, value, store); break;
+            case DataKind.Float64: AppendTyped<double>(list, value, store); break;
             default:
                 throw new ExecutionException(
                     $"APPEND: appending an array to a List<{list.ElementKind}> is not supported.");
         }
+    }
+
+    // Reads the element span from the managed payload directly when present (no
+    // arena write), otherwise materialises the arena/sidecar/inline array once.
+    private static void AppendTyped<T>(ListBuilderValue list, ValueRef value, IValueStore store)
+        where T : unmanaged
+    {
+        ReadOnlySpan<T> span = value.Materialized is T[] managed
+            ? managed
+            : value.ToDataValue(store).AsArraySpan<T>(store);
+        list.AppendBytes(MemoryMarshal.AsBytes(span));
     }
 
     /// <summary>
