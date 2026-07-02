@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 
+using Heliosoph.DatumV.Execution;
 using Heliosoph.DatumV.Functions;
 using Heliosoph.DatumV.Model;
 using Heliosoph.DatumV.Pooling;
@@ -197,6 +198,33 @@ public sealed class ListBuilderValueTests : ServiceTestBase
             Assert.Equal(DataKind.Float32, dv.Kind);
             Assert.True(dv.IsArray);
             Assert.True(dv.AsArraySpan<float>(arena).SequenceEqual([1.5f, 2.5f]));
+        }
+        finally { ReturnArena(arena); }
+    }
+
+    // ─── APPEND of a managed array does not round-trip through the arena ────
+
+    [Fact]
+    public void Append_ManagedArray_ReadsBytesWithoutGrowingArena()
+    {
+        // array_slice / array_flatten results are managed (off-arena); APPEND
+        // must copy their bytes straight into the list buffer, not materialise
+        // them into the body arena first.
+        Arena arena = RentArena();
+        try
+        {
+            VariableScope scope = new(new MemoryAccountant());
+            scope.Declare("acc", ValueRef.FromListBuilder(new ListBuilderValue(DataKind.Float32)));
+
+            ValueRef managedArray = ValueRef.FromPrimitiveArray(new float[100_000], DataKind.Float32); // ~400 KB, managed
+
+            long before = arena.BytesWritten;
+            ProceduralListOps.Append("acc", managedArray, scope, arena);
+            long delta = arena.BytesWritten - before;
+
+            Assert.True(delta < 4096,
+                $"APPEND of a managed array grew the arena by {delta:N0} bytes — it round-tripped through ToDataValue.");
+            Assert.Equal(100_000, scope.Get("acc").AsListBuilder().Count);
         }
         finally { ReturnArena(arena); }
     }
