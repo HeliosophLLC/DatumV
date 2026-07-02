@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { Loader2 } from 'lucide-react';
+import { ChevronRight, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -12,6 +12,7 @@ import {
   heroImageUrl,
   installVariant,
   loadEntryCard,
+  loadRecipeSql,
   resolveActiveVariant,
   setSelectedVariantId,
   uninstallVariant,
@@ -136,6 +137,8 @@ export function DatasetDetail({ entry }: { entry: DatasetEntrySnapshot }) {
           inFlight={inFlight !== null}
           error={error}
         />
+
+        <RecipeSection variant={variant} />
 
         {entryCard ? (
           <EntryCardBody markdown={entryCard} entryName={entry.name} />
@@ -427,6 +430,200 @@ function InFlightProgress({ variantId }: { variantId: string }) {
       <span className="truncate">{label}</span>
     </div>
   );
+}
+
+// Snapshot shapes derived from the variant so the recipe helpers stay
+// assignable from the deep-readonly `useSnapshot` value.
+type RecipeVersion = NonNullable<DatasetVariantSnapshot['versions']>[number];
+type RecipeJobT = NonNullable<RecipeVersion['ingest']>[number];
+type RecipeSourceT = NonNullable<RecipeVersion['sources']>[number];
+
+// Expandable "View recipe" section. Surfaces exactly how the active
+// variant turns its raw download into the installed table(s): the
+// download sources, then per ingest job either the SQL recipe script
+// (fetched lazily + syntax-highlighted) or a note that the archive is
+// ingested directly. Sits between the variant card and the entry card
+// body so the reader flows "what is this / what will I install → how is
+// it built → the long-form writeup."
+function RecipeSection({ variant }: { variant: DatasetVariantSnapshot }) {
+  const { t } = useTranslation('datasets');
+  const [open, setOpen] = useState(false);
+
+  // versions[0] is the recommended cut the installer runs; the manifest
+  // validator guarantees it carries non-empty sources + ingest.
+  const version = variant.versions?.[0];
+  const jobs = version?.ingest ?? [];
+  const sources = version?.sources ?? [];
+  if (jobs.length === 0) return null;
+
+  return (
+    <section className="border-border rounded-xs border">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center gap-1.5 px-4 py-2.5 text-left text-sm font-medium"
+      >
+        <ChevronRight
+          className={cn('size-4 transition-transform', open && 'rotate-90')}
+        />
+        {t('recipe.view')}
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-4 border-t px-4 py-3">
+          {sources.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                {t('recipe.sources')}
+              </h3>
+              <ul className="flex flex-col gap-0.5 text-xs">
+                {sources.map((s, i) => {
+                  const d = describeSource(s);
+                  return (
+                    <li key={i} className="flex flex-wrap items-baseline gap-1.5">
+                      <span className="text-muted-foreground">{d.kind}</span>
+                      {d.locator && (
+                        <span className="font-mono break-all">{d.locator}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {jobs.map((job, i) => (
+            <RecipeJob key={job.tableName ?? i} job={job} open={open} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// One ingest job inside the recipe section. SQL jobs lazily fetch and
+// render their script (only once the section is opened); direct jobs
+// state that the source archive is ingested as-is.
+function RecipeJob({ job, open }: { job: RecipeJobT; open: boolean }) {
+  const { t } = useTranslation('datasets');
+  const [sql, setSql] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const sqlFile = job.sqlFile ?? null;
+
+  useEffect(() => {
+    if (!open || !sqlFile) return;
+    let cancelled = false;
+    setLoading(true);
+    void loadRecipeSql(sqlFile).then((text) => {
+      if (cancelled) return;
+      setSql(text);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sqlFile]);
+
+  const artifacts = recipeArtifacts(job);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        {t('recipe.table', { table: job.tableName ?? '' })}
+      </h3>
+
+      {sqlFile ? (
+        <>
+          {artifacts.length > 0 && (
+            <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-xs">
+              {artifacts.map((a) => (
+                <div key={a.name} className="contents">
+                  <span className="text-muted-foreground font-mono">${a.name}</span>
+                  <span className="font-mono break-all">{a.path}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {loading ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Loader2 className="size-3.5 animate-spin" />
+              {t('recipe.loading')}
+            </div>
+          ) : sql ? (
+            <SqlBlock sql={sql} />
+          ) : (
+            <p className="text-muted-foreground text-xs">{t('recipe.unavailable')}</p>
+          )}
+        </>
+      ) : (
+        <p className="text-foreground text-xs">
+          {t('recipe.direct', { source: job.sourcePath ?? '' })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Renders a SQL recipe through the same markdown pipeline the entry card
+// uses, so the code block picks up highlight.js theming + the shared
+// Copy affordance. Wrapping the raw SQL in a fenced ```sql block is the
+// least-code way to reuse that pipeline.
+function SqlBlock({ sql }: { sql: string }) {
+  const markdown = '```sql\n' + sql.replace(/\s+$/, '') + '\n```';
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+        components={{
+          pre: ({ children, ...rest }) => <CodeBlock {...rest}>{children}</CodeBlock>,
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// Compact human label for a download source. Reads the polymorphic
+// `type` discriminator and surfaces the primary locator (repo, tag, or
+// URL list). Subtype fields aren't on the readonly base snapshot, so
+// widen to read them.
+function describeSource(source: RecipeSourceT): { kind: string; locator: string } {
+  const s = source as {
+    type?: string;
+    repo?: string;
+    tag?: string;
+    urls?: ReadonlyArray<{ url?: string }>;
+  };
+  switch (s.type) {
+    case 'huggingface':
+      return { kind: 'HuggingFace', locator: s.repo ?? '' };
+    case 'github-release':
+      return { kind: 'GitHub', locator: [s.repo, s.tag].filter(Boolean).join(' @ ') };
+    case 'https':
+      return {
+        kind: 'HTTPS',
+        locator: (s.urls ?? [])
+          .map((u) => u.url ?? '')
+          .filter(Boolean)
+          .join(', '),
+      };
+    default:
+      return { kind: s.type ?? 'source', locator: '' };
+  }
+}
+
+// The raw-cache files a SQL recipe binds as `$name` parameters. Exactly
+// one of `artifact` (single, bound as $artifact) or `artifacts` (named
+// map) is set on a SQL job.
+function recipeArtifacts(job: RecipeJobT): Array<{ name: string; path: string }> {
+  if (job.artifact) return [{ name: 'artifact', path: job.artifact }];
+  if (job.artifacts) {
+    return Object.entries(job.artifacts).map(([name, path]) => ({ name, path }));
+  }
+  return [];
 }
 
 function EntryCardBody({

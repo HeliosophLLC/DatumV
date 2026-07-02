@@ -387,6 +387,7 @@ public sealed class DatasetDownloadServicePipelineTests : ServiceTestBase, IDisp
         public string? GetEntryCardMarkdown(string entryName) => null;
         public string? ResolveEntryAssetPath(string entryName, string relativePath) => null;
         public string? ResolveHeroImagePath(string entryName) => null;
+        public string? GetRecipeSql(string relativePath) => null;
         public (DatasetEntry Entry, DatasetVariant Variant)? FindVariant(string variantId)
         {
             foreach (DatasetEntry e in Manifest.Datasets)

@@ -148,6 +148,7 @@ public sealed class DatasetManifestIntegrationTests : ServiceTestBase, IDisposab
         public string? GetEntryCardMarkdown(string entryName) => null;
         public string? ResolveEntryAssetPath(string entryName, string relativePath) => null;
         public string? ResolveHeroImagePath(string entryName) => null;
+        public string? GetRecipeSql(string relativePath) => null;
         public (Heliosoph.DatumV.DatasetLibrary.DatasetEntry Entry, DatasetVariant Variant)? FindVariant(string variantId) => null;
     }
 

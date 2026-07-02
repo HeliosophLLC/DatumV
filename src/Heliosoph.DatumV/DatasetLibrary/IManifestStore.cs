@@ -45,4 +45,11 @@ public interface IManifestStore
     // service to resolve the parent entry for license checks while
     // staying keyed on the variant for everything else.
     (DatasetEntry Entry, DatasetVariant Variant)? FindVariant(string variantId);
+
+    // Raw text of an ingest recipe SQL script, keyed by the relative
+    // path a variant's ingest job declares in its `sqlFile` field (e.g.
+    // "mnist/split.sql"). Null when the path isn't a declared recipe or
+    // the file is missing on disk. Only declared paths are serveable, so
+    // this can't be used to read arbitrary files under the manifest tree.
+    string? GetRecipeSql(string relativePath);
 }
