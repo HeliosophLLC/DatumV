@@ -30,9 +30,9 @@ conditions, or a published WER benchmark.
 Probe the first few clips:
 
 ```sql
-SELECT file_name, file_duration_ms / 1000.0 AS seconds
+SELECT utt_id, clip, audio_duration(clip) AS seconds
 FROM datasets.ljspeech_audio
-ORDER BY file_name
+ORDER BY utt_id
 LIMIT 5;
 ```
 
@@ -40,7 +40,7 @@ Histogram of clip durations:
 
 ```sql
 SELECT
-  (file_duration_ms / 1000)::Int32 AS duration_sec,
+  CAST(audio_duration(clip) AS Int32) AS duration_sec,
   COUNT(*) AS clips
 FROM datasets.ljspeech_audio
 GROUP BY duration_sec
@@ -50,7 +50,7 @@ ORDER BY duration_sec;
 Transcribe a sample with a pretrained ASR model:
 
 ```sql
-SELECT file_name, models.whisper_tiny(file) AS transcript
+SELECT utt_id, clip, models.whisper_tiny(clip) AS transcript
 FROM datasets.ljspeech_audio
 LIMIT 20;
 ```
@@ -58,20 +58,21 @@ LIMIT 20;
 ## Output schema
 
 ```
-file_name:          String      -- entry path inside the source tar
-file:               Audio       -- decoded WAV, sidecar-backed
-file_sample_rate:   Int32       -- 22050 for every clip
-file_channels:      UInt8       -- 1 (mono)
-file_bit_depth:     UInt8       -- 16
-file_duration_ms:   Int64       -- millisecond duration parsed from the WAV header
-file_byte_length:   Int64       -- uncompressed byte size of the WAV
+utt_id:      String      -- utterance id (e.g. 'LJ001-0001'), from the WAV filename stem
+clip:        Audio       -- decoded WAV, sidecar-backed
+file_bytes:  Int64       -- WAV payload size in the source archive
+modified:    Timestamp   -- archive entry mtime
 ```
+
+The source WAVs are 22.05 kHz mono 16-bit; use `audio_duration(clip)`
+(seconds) for length rather than a stored column. Audio decodes to 16 kHz
+mono inside model bodies that need it (e.g. Whisper, Silero VAD).
 
 ## Tips
 
-- **Sidecar-backed audio** — the `file` column carries a handle into a
+- **Sidecar-backed audio** — the `clip` column carries a handle into a
   `.datum-blob` companion; the WAV bytes are not inlined. Most metadata
-  queries (counts, duration histograms) never touch the blob store.
+  queries (counts by id, byte-size stats) never touch the blob store.
 - **No transcripts in this variant** — LJSpeech's archive includes a
   `metadata.csv` mapping clip id → original / normalized text. The current
   variant skips it; adding a transcript-paired variant is a follow-up once

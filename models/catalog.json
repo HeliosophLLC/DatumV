@@ -45,7 +45,7 @@
         "sentence-transformers — Reimers & Gurevych (UKP Lab, TU Darmstadt)",
         "HuggingFace optimum (ONNX export)"
       ],
-      "cardFile": "cards/minilm-l6.md",
+      "cardFile": "cards/minilm-l6/index.md",
       "variants": [
         {
           "id": "all-minilm-l6-v2",
@@ -102,7 +102,7 @@
       "attributions": [
         "BAAI — Beijing Academy of Artificial Intelligence"
       ],
-      "cardFile": "cards/bge-small-en.md",
+      "cardFile": "cards/bge-small-en/index.md",
       "variants": [
         {
           "id": "bge-small-en-v1.5",
@@ -158,7 +158,7 @@
       "attributions": [
         "Jina AI"
       ],
-      "cardFile": "cards/jina-embeddings-v2.md",
+      "cardFile": "cards/jina-embeddings-v2/index.md",
       "variants": [
         {
           "id": "jina-embeddings-v2-base-en",
@@ -215,7 +215,7 @@
         "BAAI — Beijing Academy of Artificial Intelligence",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
-      "cardFile": "cards/bge-reranker-base.md",
+      "cardFile": "cards/bge-reranker-base/index.md",
       "variants": [
         {
           "id": "bge-reranker-base",
@@ -272,7 +272,7 @@
         "Cardiff NLP — Cardiff University",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
-      "cardFile": "cards/twitter-roberta-sentiment.md",
+      "cardFile": "cards/twitter-roberta-sentiment/index.md",
       "variants": [
         {
           "id": "twitter-roberta-sentiment",
@@ -329,7 +329,7 @@
         "Unitary",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
-      "cardFile": "cards/toxic-bert.md",
+      "cardFile": "cards/toxic-bert/index.md",
       "variants": [
         {
           "id": "toxic-bert",
@@ -389,6 +389,7 @@
       "attributions": [
         "Microsoft Research"
       ],
+      "cardFile": "cards/florence2/index.md",
       "variants": [
         {
           "id": "florence-2-base-ft-fp16",
@@ -500,6 +501,7 @@
       "licenseIds": [
         "apache-2.0"
       ],
+      "cardFile": "cards/vit-gpt2/index.md",
       "attributions": [
         "nlpconnect — Ankur Singh et al."
       ],
@@ -799,7 +801,7 @@
           ]
         }
       ],
-      "cardFile": "cards/yolox.md"
+      "cardFile": "cards/yolox/index.md"
     },
     {
       "name": "RT-DETR-R18",
@@ -820,6 +822,7 @@
         "PekingU (HuggingFace mirror)",
         "onnx-community (ONNX export)"
       ],
+      "cardFile": "cards/rtdetr-r18/index.md",
       "variants": [
         {
           "id": "rtdetr-r18",
@@ -996,12 +999,13 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/mobile-sam/index.md"
     },
     {
-      "name": "U²-Net Lite / u2netp (Salient Object Segmentation)",
-      "summary": "Cut the main subject of a photo out of its background. Lightweight default (~5 MB) — use for product shots, profile pictures, anywhere you want a transparent background.",
-      "description": "Distilled U²-Net for binary salient-object (foreground) segmentation. 4.7M params, ~4.7 MB, 320×320 input. Output is a single-channel mask separating subject from background — pair with image_cutout() for background removal. Recommended default; full u2net is only worth the disk hit on tricky fine-edge cases (hair, fur).",
+      "name": "U²-Net (Salient Object Segmentation)",
+      "summary": "Separate a subject from its background. Binary salient-object segmentation — pick Lite (u2netp, ~5 MB) for speed, or Full (u2net, ~170 MB) for sharper edges on hair, fur, and thin structures.",
+      "description": "All variants share the architecture, the BackgroundRemover task, and 320×320 I/O — they differ only in size. Lite is ~35× smaller and ~10× faster; Full sharpens fine boundaries. Output is a single-channel foreground mask; pair with image_cutout().",
       "tasks": [
         "BackgroundRemover"
       ],
@@ -1018,10 +1022,11 @@
       "attributions": [
         "Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"
       ],
+      "cardFile": "cards/u2net/index.md",
       "variants": [
         {
           "id": "u2netp",
-          "displayName": "U²-Net Lite / u2netp (Salient Object Segmentation)",
+          "displayName": "Lite (u2netp)",
           "summary": "Cut the main subject of a photo out of its background. Lightweight default (~5 MB) — use for product shots, profile pictures, anywhere you want a transparent background.",
           "tags": [],
           "hardware": {
@@ -1051,32 +1056,10 @@
               ]
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "U²-Net Full (Salient Object Segmentation)",
-      "summary": "Full-size salient-object cutout. Same job as the Lite variant but with cleaner edges around hair, fur, lace, and other thin structures.",
-      "description": "Full U²-Net (176M params, ~170 MB, 320×320 input). Same task as u2netp but with sharper edges on hair / fur / lace / thin structures. Pick this over u2netp only when fine-detail boundaries matter and disk + latency aren't constrained.",
-      "tasks": [
-        "BackgroundRemover"
-      ],
-      "tags": [
-        "segmentation",
-        "salient-object",
-        "background-removal",
-        "u2net"
-      ],
-      "licenseIds": [
-        "apache-2.0"
-      ],
-      "attributions": [
-        "Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"
-      ],
-      "variants": [
+        },
         {
           "id": "u2net",
-          "displayName": "U²-Net Full (Salient Object Segmentation)",
+          "displayName": "Full (u2net)",
           "summary": "Full-size salient-object cutout. Same job as the Lite variant but with cleaner edges around hair, fur, lace, and other thin structures.",
           "tags": [],
           "hardware": {
@@ -1127,6 +1110,7 @@
       "attributions": [
         "Intel ISL — Ranftl, Bochkovskiy, Koltun (DPT / MiDaS)"
       ],
+      "cardFile": "cards/dpt-large/index.md",
       "variants": [
         {
           "id": "dpt-large",
@@ -1181,6 +1165,7 @@
       "attributions": [
         "Intel ISL — Ranftl, Lasinger, Hafner, Schindler, Koltun (MiDaS)"
       ],
+      "cardFile": "cards/midas-small/index.md",
       "variants": [
         {
           "id": "midas-small",
@@ -1218,9 +1203,9 @@
       ]
     },
     {
-      "name": "Depth Anything V2 Small (Monocular Depth)",
-      "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS. Recommended modern default for monocular depth — best quality-per-MB in this catalog.",
-      "description": "Current SOTA permissive-license general-purpose monocular depth. DINOv2 ViT-S encoder + DPT-style decoder, ~24M params. Faster than DPT-Large, often sharper boundaries. Relative depth (not metric). Recommended modern default — best quality-per-MB in this catalog.",
+      "name": "Depth Anything V2 (Monocular Depth)",
+      "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS — the recommended modern default for monocular depth. Pick a size: Small for fast CPU depth at SOTA-level quality, Base for sharper fine detail.",
+      "description": "Current SOTA permissive-license general-purpose monocular depth. DINOv2 ViT encoder + DPT-style decoder producing relative (not metric) depth. Both sizes share the same architecture, preprocessing, and SQL contract — they differ only in encoder size (ViT-S ~24M params vs ViT-B ~97M) and therefore quality vs cost. Swap variant ids in a query and the only things that change are detail and latency.",
       "tasks": [
         "DepthEstimator"
       ],
@@ -1238,10 +1223,11 @@
         "Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)",
         "onnx-community (ONNX export)"
       ],
+      "cardFile": "cards/depth-anything-v2/index.md",
       "variants": [
         {
           "id": "depth-anything-v2-small",
-          "displayName": "Depth Anything V2 Small (Monocular Depth)",
+          "displayName": "Small (recommended)",
           "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS. Recommended modern default for monocular depth — best quality-per-MB in this catalog.",
           "tags": [],
           "hardware": {
@@ -1273,33 +1259,10 @@
               ]
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "Depth Anything V2 Base (Monocular Depth)",
-      "summary": "Mid-size Depth Anything V2 — better detail on fine boundaries than the Small variant. Pick on CPU when accuracy beats throughput.",
-      "description": "Mid-size variant of Depth Anything V2 — DINOv2 ViT-B encoder, ~97M params. Quality close to the V2-Large variant without V2-Large's CC-BY-NC-4.0 license issue (V2-Large is non-commercial; V2-Base is Apache-2.0). Pick over the Small variant when accuracy on fine detail matters more than CPU throughput.",
-      "tasks": [
-        "DepthEstimator"
-      ],
-      "tags": [
-        "depth",
-        "depth-anything",
-        "dinov2",
-        "transformer"
-      ],
-      "licenseIds": [
-        "apache-2.0"
-      ],
-      "attributions": [
-        "Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao, Xiaogang Xu, Jiashi Feng, Hengshuang Zhao — Depth Anything V2 (TikTok / HKU)",
-        "onnx-community (ONNX export)"
-      ],
-      "variants": [
+        },
         {
           "id": "depth-anything-v2-base",
-          "displayName": "Depth Anything V2 Base (Monocular Depth)",
+          "displayName": "Base",
           "summary": "Mid-size Depth Anything V2 — better detail on fine boundaries than the Small variant. Pick on CPU when accuracy beats throughput.",
           "tags": [],
           "hardware": {
@@ -1401,7 +1364,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/depth-anything-v3-large/index.md"
     },
     {
       "name": "Metric3D V2 (Metric Depth + Normals)",
@@ -1689,7 +1653,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/metric3d-v2/index.md"
     },
     {
       "name": "ZoeDepth (NYU+KITTI, Metric Depth)",
@@ -1790,7 +1755,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/zoedepth-nyu-kitti/index.md"
     },
     {
       "name": "TripoSR (Single-Image to 3D Mesh)",
@@ -1850,7 +1816,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/triposr/index.md"
     },
     {
       "name": "GLPN-NYU (Lightweight Depth)",
@@ -1871,6 +1838,7 @@
         "Doyeon Kim, Woonghyun Ka, Pyungwhan Ahn, Donggyu Joo, Sehwan Chun, Junmo Kim — GLPN (KAIST)",
         "Joshua Lochner / Xenova (ONNX export)"
       ],
+      "cardFile": "cards/glpn-nyu/index.md",
       "variants": [
         {
           "id": "glpn-nyu",
@@ -2003,7 +1971,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/mediapipe-face/index.md"
     },
     {
       "name": "PaddleOCR PP-OCRv4 Detection",
@@ -2058,7 +2027,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/paddleocr-v4-det/index.md"
     },
     {
       "name": "TrOCR Base Printed",
@@ -2167,7 +2137,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/trocr-base-printed/index.md"
     },
     {
       "name": "Real-ESRGAN x4v3 (4x Upscaler)",
@@ -2221,7 +2192,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/realesrgan-x4v3/index.md"
     },
     {
       "name": "SwinIR Real-World SR (4×)",
@@ -2277,7 +2249,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/swinir-realsr-x4/index.md"
     },
     {
       "name": "SwinIR Color Denoising (σ=25)",
@@ -2332,7 +2305,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/swinir-denoising-color-25/index.md"
     },
     {
       "name": "SCUNet (Image Denoising)",
@@ -2567,7 +2541,6 @@
             "preferred": "cpu"
           },
           "approxSizeMb": 73,
-          "placeholder": true,
           "versions": [
             {
               "version": "2026-05-29",
@@ -2602,7 +2575,6 @@
             "preferred": "cpu"
           },
           "approxSizeMb": 73,
-          "placeholder": true,
           "versions": [
             {
               "version": "2026-05-29",
@@ -2626,7 +2598,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/scunet/index.md"
     },
     {
       "name": "MobileNetV2 (ImageNet Classification)",
@@ -2648,6 +2621,7 @@
         "Google AI Research — MobileNetV2 (Sandler, Howard, Zhu, Zhmoginov, Chen)",
         "ONNX Model Zoo (ONNX export)"
       ],
+      "cardFile": "cards/mobilenetv2/index.md",
       "variants": [
         {
           "id": "mobilenetv2",
@@ -2871,6 +2845,7 @@
         "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
+      "cardFile": "cards/absolute-reality-hyper/index.md",
       "variants": [
         {
           "id": "absolute-reality-hyper",
@@ -2879,7 +2854,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -2929,6 +2904,7 @@
         "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
+      "cardFile": "cards/dreamshaper-hyper/index.md",
       "variants": [
         {
           "id": "dreamshaper-hyper",
@@ -2937,7 +2913,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -2987,6 +2963,7 @@
         "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
+      "cardFile": "cards/epicrealism-hyper/index.md",
       "variants": [
         {
           "id": "epicrealism-hyper",
@@ -2995,7 +2972,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -3045,6 +3022,7 @@
         "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
+      "cardFile": "cards/mo-di-hyper/index.md",
       "variants": [
         {
           "id": "mo-di-hyper",
@@ -3053,7 +3031,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -3110,7 +3088,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -3161,6 +3139,7 @@
         "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
+      "cardFile": "cards/realistic-vision-hyper/index.md",
       "variants": [
         {
           "id": "realistic-vision-hyper",
@@ -3169,7 +3148,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 4096,
@@ -3199,7 +3178,7 @@
     },
     {
       "name": "JuggernautXL Lightning (4-step SDXL)",
-      "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for GPU + ~8 GB VRAM.",
+      "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for a 24 GB GPU — peaks past 20 GB VRAM.",
       "description": "SDXL fine-tune + Lightning distillation. 1024×1024, 4 steps, photorealistic + fantasy.",
       "tasks": [
         "TextToImage"
@@ -3219,15 +3198,16 @@
         "Stability AI — Stable Diffusion XL base",
         "ByteDance — SDXL Lightning method (Lin, Wang, Yang)"
       ],
+      "cardFile": "cards/juggernaut-xl-lightning/index.md",
       "variants": [
         {
           "id": "juggernaut-xl-lightning",
           "displayName": "JuggernautXL Lightning (4-step SDXL)",
-          "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for GPU + ~8 GB VRAM.",
+          "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for a 24 GB GPU — peaks past 20 GB VRAM.",
           "tags": [],
           "hardware": {
             "minRamMb": 4096,
-            "minVramMb": 8192,
+            "minVramMb": 16384,
             "preferred": "cuda"
           },
           "approxSizeMb": 13312,
@@ -3275,6 +3255,7 @@
       "attributions": [
         "Stability AI — SD Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion 2.1."
       ],
+      "cardFile": "cards/sd-turbo/index.md",
       "variants": [
         {
           "id": "sd-turbo",
@@ -3283,7 +3264,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 2048,
-            "minVramMb": 4096,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 2500,
@@ -3331,6 +3312,7 @@
       "attributions": [
         "Stability AI — SDXL Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion XL."
       ],
+      "cardFile": "cards/sdxl-turbo/index.md",
       "variants": [
         {
           "id": "sdxl-turbo",
@@ -3339,7 +3321,7 @@
           "tags": [],
           "hardware": {
             "minRamMb": 4096,
-            "minVramMb": 8192,
+            "minVramMb": 10240,
             "preferred": "cuda"
           },
           "approxSizeMb": 13312,
@@ -3495,7 +3477,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/qwen2.5-coder/index.md"
     },
     {
       "name": "TinyLlama 1.1B Chat v1.0 (GGUF Q4_K_M)",
@@ -3554,7 +3537,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/tinyllama/index.md"
     },
     {
       "name": "IBM Granite 3.1 1B A400M Instruct (GGUF Q4_K_M)",
@@ -3614,7 +3598,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/granite-3.1-1b/index.md"
     },
     {
       "name": "Falcon3 1B Instruct (GGUF Q4_K_M)",
@@ -3672,7 +3657,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/falcon3-1b/index.md"
     },
     {
       "name": "Mistral 7B Instruct v0.3 (GGUF Q5_K_M)",
@@ -3731,7 +3717,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/mistral-7b/index.md"
     },
     {
       "name": "Llama 3.1 8B Instruct (GGUF Q4_K_M)",
@@ -3792,7 +3779,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/llama-3.1-8b/index.md"
     },
     {
       "name": "Silero VAD (Voice Activity Detection)",
@@ -3882,7 +3870,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/silero-vad/index.md"
     },
     {
       "name": "Whisper",
@@ -3902,6 +3891,7 @@
         "OpenAI — Whisper (Radford, Kim, Xu et al.)",
         "onnx-community (ONNX export)"
       ],
+      "cardFile": "cards/whisper/index.md",
       "variants": [
         {
           "id": "whisper-tiny",
@@ -4108,7 +4098,8 @@
             }
           ]
         }
-      ]
+      ],
+      "cardFile": "cards/clip-vit-base-patch32/index.md"
     },
     {
       "name": "BiomedCLIP",
@@ -4131,7 +4122,7 @@
         "Microsoft Research — BiomedCLIP (Zhang, Xu, Usuyama et al., 2023)",
         "Heliosoph (open_clip + torch.onnx export from the upstream open_clip checkpoint)"
       ],
-      "cardFile": "cards/biomedclip.md",
+      "cardFile": "cards/biomedclip/index.md",
       "variants": [
         {
           "id": "biomedclip-vit-base-patch16-224",
