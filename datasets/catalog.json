@@ -967,6 +967,7 @@
       "cardFile": "cards/docbank/index.md",
       "modalities": ["Document", "Image"],
       "licenseIds": ["apache-2.0"],
+      "heroImageFile": "cards/docbank/hero.jpg",
       "attributions": [
         "Minghao Li, Yiheng Xu, Lei Cui, Shaohan Huang, Furu Wei, Zhoujun Li, Ming Zhou (DocBank, COLING 2020)",
         "arXiv.org submitters (source LaTeX documents)"
@@ -1042,6 +1043,133 @@
                   "artifacts": {
                     "images": "docbank-test-images.zip",
                     "annotations": "docbank-test.jsonl.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CORD",
+      "summary": "1,000 photographed restaurant receipts with dual ground truth — word-level OCR (text + quad boxes) and a structured parse of menu lines, subtotals, and totals. The reach-for permissive benchmark for receipt OCR and post-OCR key-information extraction.",
+      "description": "The Consolidated Receipt Dataset, released in 2019 by Park et al. (NAVER Clova, Document Intelligence Workshop @ NeurIPS 2019), pairs 1,000 Indonesian restaurant-receipt photos with rich human annotations. Each receipt carries two complementary ground-truth views: `valid_line` gives word-level OCR — every word's transcription, quadrilateral box, and semantic category — while `gt_parse` gives the receipt distilled into a structured object (menu items with name/count/price, sub-totals, and totals). That makes CORD equally suited to OCR text detection/recognition and to post-OCR parsing / key-information extraction, the task it was built to benchmark. These variants ingest the CC-BY-4.0 release re-hosted as a per-receipt mirror (the upstream image column is a HuggingFace Image feature, a bytes/path struct DatumV's parquet reader doesn't decode); full-resolution PNGs are re-encoded to JPEG for a compact download. One row per receipt: the decoded image, its dimensions, and the complete `ground_truth` bundle as a Json cell. Unlike SROIE — the other well-known receipt set, whose licensing is ambiguous — CORD is cleanly permissive.",
+      "cardFile": "cards/cord/index.md",
+      "modalities": ["Document", "Image"],
+      "licenseIds": ["cc-by-4.0"],
+      "heroImageFile": "cards/cord/hero.jpg",
+      "attributions": [
+        "Seunghyun Park, Seung Shin, Bado Lee, Junyeop Lee, Jaeheung Surh, Minjoon Seo, Hwalsuk Lee (CORD, NeurIPS 2019 Document Intelligence Workshop)",
+        "NAVER Clova"
+      ],
+      "suitableForTasks": [
+        "TextOCR",
+        "TextDetector"
+      ],
+      "variants": [
+        {
+          "id": "cord_train",
+          "displayName": "train (800)",
+          "summary": "800 receipt photos with full OCR + parse ground truth. Each row: the decoded image, its dimensions, and the `ground_truth` bundle (gt_parse + valid_line + meta). ~168 MB on the wire (JPEG-re-encoded from the upstream PNGs).",
+          "approxArchiveBytes": 176000000,
+          "approxIngestedBytes": 200000000,
+          "expectedRowCounts": { "receipts": 800 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/CORD",
+                  "revision": "51b7e932f2a07a883d77487b34aa5a33f76fa713",
+                  "include": [
+                    "cord-train-images.zip",
+                    "cord-train.jsonl.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "receipts",
+                  "sqlFile": "cord/split.sql",
+                  "artifacts": {
+                    "images": "cord-train-images.zip",
+                    "annotations": "cord-train.jsonl.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cord_validation",
+          "displayName": "validation (100)",
+          "summary": "100 receipts held out for tuning. Same per-receipt schema as the train split.",
+          "approxArchiveBytes": 22200000,
+          "approxIngestedBytes": 26000000,
+          "expectedRowCounts": { "receipts": 100 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/CORD",
+                  "revision": "51b7e932f2a07a883d77487b34aa5a33f76fa713",
+                  "include": [
+                    "cord-validation-images.zip",
+                    "cord-validation.jsonl.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "receipts",
+                  "sqlFile": "cord/split.sql",
+                  "artifacts": {
+                    "images": "cord-validation-images.zip",
+                    "annotations": "cord-validation.jsonl.gz"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cord_test",
+          "displayName": "test (100)",
+          "summary": "100 receipts for held-out evaluation — the standard slice for reporting CORD OCR / parsing numbers. Ingests in seconds. Same per-receipt schema as the other splits.",
+          "approxArchiveBytes": 21100000,
+          "approxIngestedBytes": 25000000,
+          "expectedRowCounts": { "receipts": 100 },
+          "requiresHfLogin": false,
+          "versions": [
+            {
+              "version": "1",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repoType": "dataset",
+                  "repo": "Heliosoph/CORD",
+                  "revision": "51b7e932f2a07a883d77487b34aa5a33f76fa713",
+                  "include": [
+                    "cord-test-images.zip",
+                    "cord-test.jsonl.gz"
+                  ]
+                }
+              ],
+              "ingest": [
+                {
+                  "tableName": "receipts",
+                  "sqlFile": "cord/split.sql",
+                  "artifacts": {
+                    "images": "cord-test-images.zip",
+                    "annotations": "cord-test.jsonl.gz"
                   }
                 }
               ]
