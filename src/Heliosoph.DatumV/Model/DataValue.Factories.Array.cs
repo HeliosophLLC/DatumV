@@ -780,7 +780,8 @@ public readonly partial struct DataValue
     {
         DataKind.UInt8 or DataKind.Int8 or DataKind.Boolean => 1,
         DataKind.UInt16 or DataKind.Int16 or DataKind.Float16 => 2,
-        DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date => 4,
+        DataKind.UInt32 or DataKind.Int32 or DataKind.Float32 or DataKind.Date
+            or DataKind.Color => 4,
         DataKind.UInt64 or DataKind.Int64 or DataKind.Float64
             or DataKind.Timestamp or DataKind.TimestampTz
             or DataKind.Time or DataKind.Duration

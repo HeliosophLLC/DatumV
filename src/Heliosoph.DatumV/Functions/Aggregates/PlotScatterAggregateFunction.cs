@@ -19,7 +19,11 @@ namespace Heliosoph.DatumV.Functions.Aggregates;
 /// (int, default 1200), <c>height</c> (int, default 630), <c>background</c>
 /// (Color, default transparent), <c>point_size</c> (float radius in pixels,
 /// default 4), <c>padding</c> (float fraction of the data range added on each
-/// side, default 0.05). Unrecognized fields are ignored. Options are captured
+/// side, default 0.05), <c>glow</c> (float halo-radius multiplier, default 0 =
+/// off — each point gains an additive radial halo of radius
+/// <c>point_size * glow</c> plus a white-lifted core, the star-field look for
+/// dark backgrounds), <c>palette</c> (Array&lt;Color&gt; replacing the built-in
+/// categorical palette). Unrecognized fields are ignored. Options are captured
 /// from the first row and must be constant across the group.
 /// </para>
 /// <para>
@@ -176,6 +180,8 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
         private SKColor? _background;
         private float _pointSize = DefaultPointSize;
         private float _padding = DefaultPadding;
+        private float _glow;
+        private SKColor[]? _palette;
         private bool _optionsCaptured;
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments, in InvocationFrame frame)
@@ -271,6 +277,38 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
                         }
                         _padding = padding;
                         break;
+                    case "glow":
+                        if (!fields[i].TryToFloat(out float glow) || glow < 0)
+                        {
+                            throw new FunctionArgumentException(Name,
+                                "options.glow must be a non-negative halo-radius multiplier (0 disables glow).");
+                        }
+                        _glow = glow;
+                        break;
+                    case "palette":
+                        if (!fields[i].IsArray || fields[i].Kind != DataKind.Color)
+                        {
+                            throw new FunctionArgumentException(Name,
+                                $"options.palette must be an array of Color values "
+                                + $"(use [color_hex('#...'), ...]), got {fields[i].Kind}.");
+                        }
+                        ReadOnlySpan<uint> packed = fields[i].AsArraySpan<uint>(frame.Source, frame.SidecarRegistry);
+                        if (packed.Length == 0)
+                        {
+                            throw new FunctionArgumentException(Name,
+                                "options.palette must contain at least one color.");
+                        }
+                        SKColor[] palette = new SKColor[packed.Length];
+                        for (int c = 0; c < packed.Length; c++)
+                        {
+                            palette[c] = new SKColor(
+                                (byte)(packed[c] & 0xFF),
+                                (byte)((packed[c] >> 8) & 0xFF),
+                                (byte)((packed[c] >> 16) & 0xFF),
+                                (byte)((packed[c] >> 24) & 0xFF));
+                        }
+                        _palette = palette;
+                        break;
                 }
             }
         }
@@ -302,6 +340,8 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
                 _background = o._background;
                 _pointSize = o._pointSize;
                 _padding = o._padding;
+                _glow = o._glow;
+                _palette = o._palette;
                 _optionsCaptured = true;
             }
             _points.AddRange(o._points);
@@ -323,16 +363,45 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
             using (SKCanvas canvas = new(bitmap))
             {
                 canvas.Clear(_background ?? SKColors.Transparent);
-                using SKPaint paint = new();
-                paint.IsAntialias = true;
-                paint.Style = SKPaintStyle.Fill;
+                SKColor[] palette = _palette ?? Palette;
+
+                using SKPaint corePaint = new();
+                corePaint.IsAntialias = true;
+                corePaint.Style = SKPaintStyle.Fill;
+
+                using SKPaint haloPaint = new();
+                haloPaint.IsAntialias = true;
+                haloPaint.Style = SKPaintStyle.Fill;
+                // Additive halos: overlapping glows brighten instead of
+                // occluding — the "dense cluster reads as a bright nebula"
+                // effect that makes dark-background scatters pop.
+                haloPaint.BlendMode = SKBlendMode.Plus;
 
                 foreach ((double x, double y, int cls) in _points)
                 {
                     float px = (float)((x - x0) / (x1 - x0) * (_width - 1));
                     float py = (float)((_height - 1) - (y - y0) / (y1 - y0) * (_height - 1));
-                    paint.Color = Palette[((cls % Palette.Length) + Palette.Length) % Palette.Length];
-                    canvas.DrawCircle(px, py, _pointSize, paint);
+                    SKColor color = palette[((cls % palette.Length) + palette.Length) % palette.Length];
+
+                    if (_glow > 0)
+                    {
+                        float haloRadius = _pointSize * System.Math.Max(1f, _glow);
+                        using SKShader halo = SKShader.CreateRadialGradient(
+                            new SKPoint(px, py), haloRadius,
+                            [color.WithAlpha(140), color.WithAlpha(0)],
+                            SKShaderTileMode.Clamp);
+                        haloPaint.Shader = halo;
+                        canvas.DrawCircle(px, py, haloRadius, haloPaint);
+                        haloPaint.Shader = null;
+
+                        // Brightened core so points read as light sources.
+                        corePaint.Color = LerpTowardWhite(color, 0.35f);
+                    }
+                    else
+                    {
+                        corePaint.Color = color;
+                    }
+                    canvas.DrawCircle(px, py, _pointSize, corePaint);
                 }
             }
 
@@ -354,6 +423,13 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
             return (min - _padding * range, max + _padding * range);
         }
 
+        /// <summary>Blends <paramref name="color"/> toward white by <paramref name="amount"/> (0..1).</summary>
+        private static SKColor LerpTowardWhite(SKColor color, float amount) => new(
+            (byte)(color.Red + (255 - color.Red) * amount),
+            (byte)(color.Green + (255 - color.Green) * amount),
+            (byte)(color.Blue + (255 - color.Blue) * amount),
+            color.Alpha);
+
         /// <inheritdoc />
         public void Reset()
         {
@@ -363,6 +439,8 @@ public sealed class PlotScatterAggregateFunction : IAggregateFunction, IAggregat
             _background = null;
             _pointSize = DefaultPointSize;
             _padding = DefaultPadding;
+            _glow = 0;
+            _palette = null;
             _optionsCaptured = false;
         }
     }
