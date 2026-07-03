@@ -213,6 +213,17 @@ SELECT dot_product(query_vec, doc_vec) AS score FROM search_results
 
 Hamming distance between two strings.
 
+### nearest_centroid
+
+`nearest_centroid(centroids, vec)` → Int32
+
+1-based index of the centroid row nearest to `vec` by Euclidean distance. Ties resolve to the lowest index. The centroid argument is a bare k×d Float32 matrix (multi-dim or flat row-major), not a model struct, so it works with a [kmeans_fit_agg](aggregate.md#kmeans_fit_agg) model's `centroids` field, stored anchor sets, or literals. 1-based indices compose with array subscripting: `centroids[nearest_centroid(centroids, v)]` retrieves the winning centroid. Null inputs return null; a centroid matrix whose element count is not a multiple of the vector dimensionality raises.
+
+```sql
+SELECT id, nearest_centroid(m['centroids'], embedding) AS cluster
+FROM (SELECT id, embedding, kmeans_fit_agg(embedding, 4) OVER () AS m FROM docs) s
+```
+
 ## Dimensionality Reduction
 
 ### pca_project

@@ -152,6 +152,22 @@ SELECT model['variance_ratio']
 FROM (SELECT pca_fit_agg(embedding, 2) AS model FROM docs) s
 ```
 
+### kmeans_fit_agg
+
+`kmeans_fit_agg(vec, k [, options])` -> Struct
+
+Fits k-means clusters over the group's Float32 vectors using k-means++ seeding and Lloyd's algorithm. Returns `Struct{centroids Float32[k, d], inertia Float32, iterations Int32}` — the cluster centers as rows of a k×d matrix, the sum of squared distances from each vector to its assigned center, and the iteration count. Label rows with [nearest_centroid](vector.md#nearest_centroid).
+
+The optional `options` struct accepts `seed` (int, default 42), `max_iter` (int, default 100), and `tol` (float, default 1e-4 — convergence threshold on the largest per-iteration centroid shift). Results are deterministic for a given seed and input order; centroid order is a seeding artifact, so treat cluster ids as opaque labels.
+
+Null vectors are skipped; the first non-null vector pins the dimensionality and later mismatches raise. Groups with no vectors return null; fewer vectors than `k` raises. The accumulator retains the group's vectors in memory (O(n·d)).
+
+```sql
+-- Cluster embeddings and label every row with its cluster id
+SELECT id, nearest_centroid(m['centroids'], embedding) AS cluster
+FROM (SELECT id, embedding, kmeans_fit_agg(embedding, 4, {seed: 7}) OVER () AS m FROM docs) s
+```
+
 ### STRING_AGG
 
 `STRING_AGG(expr, separator [ORDER BY ...])` -> String

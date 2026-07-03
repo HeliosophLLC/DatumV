@@ -1140,6 +1140,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Vector.EuclideanDistanceFunction>();
         registry.RegisterScalar<Scalar.Vector.ManhattanDistanceFunction>();
         registry.RegisterScalar<Scalar.Vector.HammingDistanceFunction>();
+        registry.RegisterScalar<Scalar.Vector.NearestCentroidFunction>();
         registry.RegisterScalar<Scalar.Vector.PcaProjectFunction>();
         registry.RegisterScalar<Scalar.Vector.VecSumFunction>();
         registry.RegisterScalar<Scalar.Vector.VecMeanFunction>();
@@ -1335,6 +1336,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate<Aggregates.ImageTileAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcFuseAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcaFitAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.KmeansFitAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcVoxelConsensusAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ArgMaxFunction>();
         registry.RegisterAggregate<Aggregates.ArgMinFunction>();
