@@ -202,7 +202,68 @@ public sealed class PoseComposeFunctionTests : ServiceTestBase
         {
             await fn.ExecuteAsync(new ValueRef[] { good, bad }, CreateEvaluationFrame(), default);
         });
-        Assert.Contains("16 Float32 values", ex.Message);
+        Assert.Contains("16 float values", ex.Message);
+    }
+
+    [Fact]
+    public async Task Compose_Float64Pose_NarrowsAndComposes()
+    {
+        // A Float64[] pose (what AVG-window trajectory smoothing produces)
+        // composes with a Float32[] pose; the result is Float32[].
+        double[] translated =
+        [
+            1, 0, 0, 1,
+            0, 1, 0, 2,
+            0, 0, 1, 3,
+            0, 0, 0, 1,
+        ];
+        ValueRef a = ValueRef.FromPrimitiveArray(translated, DataKind.Float64);
+        ValueRef b = await Translate(10f, 20f, 30f);
+
+        ValueRef result = await Compose(a, b);
+
+        float[] expected =
+        [
+            1, 0, 0, 11,
+            0, 1, 0, 22,
+            0, 0, 1, 33,
+            0, 0, 0,  1,
+        ];
+        AssertPoseEquals(expected, result, tol: 1e-6f);
+    }
+
+    [Fact]
+    public async Task Compose_TwoFloat64Poses_Works()
+    {
+        double[] xShift = [1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        double[] yShift = [1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1, 0, 0, 0, 0, 1];
+        ValueRef a = ValueRef.FromPrimitiveArray(xShift, DataKind.Float64);
+        ValueRef b = ValueRef.FromPrimitiveArray(yShift, DataKind.Float64);
+
+        ValueRef result = await Compose(a, b);
+
+        float[] expected =
+        [
+            1, 0, 0, 1,
+            0, 1, 0, 2,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+        AssertPoseEquals(expected, result, tol: 1e-6f);
+    }
+
+    [Fact]
+    public async Task Compose_WrongLengthFloat64_Throws()
+    {
+        PoseComposeFunction fn = new();
+        ValueRef good = await Identity();
+        ValueRef bad = ValueRef.FromPrimitiveArray(new double[] { 1, 0, 0, 0 }, DataKind.Float64);
+
+        FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(async () =>
+        {
+            await fn.ExecuteAsync(new ValueRef[] { good, bad }, CreateEvaluationFrame(), default);
+        });
+        Assert.Contains("16 float values", ex.Message);
     }
 
     // ─────────────────────── Helpers ───────────────────────

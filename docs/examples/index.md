@@ -14,6 +14,7 @@ The examples here lean toward showing how the engine composes: model invocation 
 
 ## Media
 
+- [Reconstruct a 3D world from a video](video-to-world.md) — depth, camera poses, fused point cloud, and a movie of the world building out, in one query.
 - [Video frames as a queryable column](video-frames.md) — lazy frame extraction, per-frame inference.
 - [Transcribing audio with Whisper](transcription.md) — speech-to-text over an audio dataset in one column.
 

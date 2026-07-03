@@ -57,7 +57,7 @@ public sealed class PcTransformFunction : IFunction, IScalarFunction
             Parameters:
             [
                 new ParameterSpec("pc", DataKindMatcher.Exact(DataKind.PointCloud)),
-                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("pose", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.PointCloud)),
@@ -81,16 +81,7 @@ public sealed class PcTransformFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.PointCloud));
         }
 
-        DataValue poseValue = poseArg.ToDataValue(frame.Source);
-        ReadOnlySpan<float> pose =
-            poseValue.AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        if (pose.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"pose array must be exactly 16 Float32 values (a 4x4 row-major matrix); "
-                + $"got {pose.Length}.");
-        }
+        float[] pose = PoseMatrixArgument.Read16(poseArg, frame, Name, "pose");
 
         byte[] srcBlob = pcArg.AsPointCloud();
         PointCloudHeader header = PointCloudHeader.Read(srcBlob);
@@ -292,11 +283,65 @@ public sealed class PoseIdentityFunction : IFunction, IScalarFunction
 }
 
 /// <summary>
-/// <c>pose_compose(a Float32[], b Float32[]) → Float32[]</c>. Multiplies two
-/// 4×4 row-major pose matrices: <c>result = a · b</c>. Use to accumulate
-/// frame-to-frame poses recovered by <see cref="PoseFromRgbdFunction"/>
+/// Reads a 16-element pose-matrix argument as <see cref="float"/> values,
+/// accepting <c>Float32[]</c> (the pose family's native kind) or
+/// <c>Float64[]</c> — the kind window aggregates like <c>AVG</c> produce
+/// when smoothing a pose trajectory. Float64 input is narrowed elementwise.
+/// </summary>
+internal static class PoseMatrixArgument
+{
+    public static float[] Read16(
+        ValueRef arg, EvaluationFrame frame, string functionName, string paramName)
+        => Read16(arg.ToDataValue(frame.Source), frame.Source, frame.SidecarRegistry, functionName, paramName);
+
+    public static float[] Read16(
+        DataValue value,
+        IValueStore source,
+        DatumFile.Sidecar.SidecarRegistry? registry,
+        string functionName,
+        string paramName)
+    {
+        if (value.Kind == DataKind.Float32)
+        {
+            ReadOnlySpan<float> span = value.AsArraySpan<float>(source, registry);
+            EnsureLength(span.Length, functionName, paramName);
+            return span.ToArray();
+        }
+        if (value.Kind == DataKind.Float64)
+        {
+            ReadOnlySpan<double> span = value.AsArraySpan<double>(source, registry);
+            EnsureLength(span.Length, functionName, paramName);
+            float[] narrowed = new float[16];
+            for (int i = 0; i < 16; i++)
+            {
+                narrowed[i] = (float)span[i];
+            }
+            return narrowed;
+        }
+        throw new FunctionArgumentException(
+            functionName,
+            $"{paramName} must be a Float32[] or Float64[] pose matrix; got {value.Kind}[].");
+    }
+
+    private static void EnsureLength(int length, string functionName, string paramName)
+    {
+        if (length != 16)
+        {
+            throw new FunctionArgumentException(
+                functionName,
+                $"{paramName} must be exactly 16 float values (a 4x4 row-major matrix); got {length}.");
+        }
+    }
+}
+
+/// <summary>
+/// <c>pose_compose(a Float32[]|Float64[], b Float32[]|Float64[]) → Float32[]</c>.
+/// Multiplies two 4×4 row-major pose matrices: <c>result = a · b</c>. Use to
+/// accumulate frame-to-frame poses recovered by <see cref="PoseFromRgbdFunction"/>
 /// into a single transform that lands a later frame's cloud in an earlier
-/// frame's coordinate system.
+/// frame's coordinate system. Float64 inputs (e.g. a pose trajectory smoothed
+/// with <c>AVG(…) OVER (…)</c> window aggregates) are narrowed elementwise;
+/// the result is always <c>Float32[]</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -329,13 +374,14 @@ public sealed class PoseComposeFunction : IFunction, IScalarFunction
 
     /// <inheritdoc />
     public static string Description =>
-        "Multiplies two 4x4 row-major pose matrices (16-element Float32 "
-        + "arrays): result = a * b. Use to accumulate per-frame poses from "
-        + "pose_from_rgbd into a cumulative transform for chained "
+        "Multiplies two 4x4 row-major pose matrices (16-element Float32 or "
+        + "Float64 arrays): result = a * b. Use to accumulate per-frame poses "
+        + "from pose_from_rgbd into a cumulative transform for chained "
         + "reconstruction. Order is significant: for accumulated_N = "
         + "accumulated_(N-1) * step_N, the cumulative pose goes on the left "
-        + "and the new single-step pose on the right. Affine-only — bottom "
-        + "row is set to [0,0,0,1].";
+        + "and the new single-step pose on the right. Float64 inputs (e.g. "
+        + "AVG-smoothed trajectories) are narrowed; output is always "
+        + "Float32[]. Affine-only — bottom row is set to [0,0,0,1].";
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -343,8 +389,8 @@ public sealed class PoseComposeFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("a", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
-                new ParameterSpec("b", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("a", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
+                new ParameterSpec("b", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
@@ -367,20 +413,8 @@ public sealed class PoseComposeFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
         }
 
-        ReadOnlySpan<float> a = aArg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        ReadOnlySpan<float> b = bArg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        if (a.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"a must be exactly 16 Float32 values (a 4x4 row-major matrix); got {a.Length}.");
-        }
-        if (b.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"b must be exactly 16 Float32 values (a 4x4 row-major matrix); got {b.Length}.");
-        }
+        float[] a = PoseMatrixArgument.Read16(aArg, frame, Name, "a");
+        float[] b = PoseMatrixArgument.Read16(bArg, frame, Name, "b");
 
         // Affine-only: read 3x4 from each, fix bottom row to [0,0,0,1].
         // Hoist a's rows to locals so the inner accumulation stays in registers.
@@ -469,7 +503,7 @@ public sealed class PoseInverseFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("pose", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
@@ -491,14 +525,7 @@ public sealed class PoseInverseFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
         }
 
-        ReadOnlySpan<float> pose =
-            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        if (pose.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
-        }
+        float[] pose = PoseMatrixArgument.Read16(arg, frame, Name, "pose");
 
         // Row-major layout. pose[0..4] = [r00 r01 r02 tx], etc.
         float r00 = pose[0],  r01 = pose[1],  r02 = pose[2],  tx = pose[3];
@@ -568,7 +595,7 @@ public sealed class PoseToWorldPositionFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("pose", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.Constant(DataKind.Point3D)),
@@ -590,14 +617,7 @@ public sealed class PoseToWorldPositionFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.Null(DataKind.Point3D));
         }
 
-        ReadOnlySpan<float> pose =
-            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        if (pose.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
-        }
+        float[] pose = PoseMatrixArgument.Read16(arg, frame, Name, "pose");
 
         // Row-major translation triplet: m03, m13, m23.
         return new ValueTask<ValueRef>(
@@ -656,7 +676,7 @@ public sealed class PoseToEulerDegreesFunction : IFunction, IScalarFunction
         new FunctionSignatureVariant(
             Parameters:
             [
-                new ParameterSpec("pose", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("pose", DataKindMatcher.Family(DataKindFamily.FloatFamily), IsArray: ArrayMatch.Array),
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
@@ -678,14 +698,7 @@ public sealed class PoseToEulerDegreesFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
         }
 
-        ReadOnlySpan<float> pose =
-            arg.ToDataValue(frame.Source).AsArraySpan<float>(frame.Source, frame.SidecarRegistry);
-        if (pose.Length != 16)
-        {
-            throw new FunctionArgumentException(
-                Name,
-                $"pose must be exactly 16 Float32 values (a 4x4 row-major matrix); got {pose.Length}.");
-        }
+        float[] pose = PoseMatrixArgument.Read16(arg, frame, Name, "pose");
 
         // Row-major rotation block. Y-X-Z intrinsic extraction:
         //   yaw   = atan2(r02, r22)

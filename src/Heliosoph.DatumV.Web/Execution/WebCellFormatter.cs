@@ -439,12 +439,12 @@ internal static class WebCellFormatter
 
     /// <summary>
     /// Maximum uncompressed PointCloud blob size accepted by the inline transport.
-    /// A 50 MB cap covers a 1920×1080 colored cloud (~33 MB) with headroom, and
+    /// A 150 MB cap covers a 1920×1080 colored cloud (~33 MB) with headroom, and
     /// guards against streaming a multi-gigabyte cell that would crash the
     /// browser's JSON parser. Above this threshold, callers should decimate or
     /// project to a smaller depth resolution before requesting display.
     /// </summary>
-    private const int PointCloudInlineCapBytes = 50 * 1024 * 1024;
+    private const int PointCloudInlineCapBytes = 150 * 1024 * 1024;
 
     /// <summary>
     /// Formats a single PointCloud value for the wire: parses the header for
