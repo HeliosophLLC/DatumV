@@ -1368,6 +1368,116 @@
       "cardFile": "cards/depth-anything-v3-large/index.md"
     },
     {
+      "name": "Depth Anything 3 Metric Large (Metric Depth + Sky)",
+      "summary": "Metric depth in meters from a single image, plus a sky mask from the same forward pass. The modern generalist metric estimator — DA3's Apache-licensed metric monocular variant. Needs the camera FOV (default 60°) to set absolute scale.",
+      "description": "DINOv2 ViT-L encoder + single-channel DPT head + sky-segmentation head. Emits canonical depth (reference 300-px focal camera); the _meters/_full bodies convert to real meters from a fov_deg argument. Trained on far more data than the NYU+KITTI specialists, so it holds up on arbitrary photographs. fp16 build halves disk with fp32 kept at the I/O boundary.",
+      "tasks": [
+        "DepthEstimator",
+        "DepthEstimatorMetric"
+      ],
+      "tags": [
+        "depth",
+        "metric",
+        "depth-anything",
+        "dinov2",
+        "sky-segmentation"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "Haotong Lin, Sili Chen, Jun Hao Liew, Donny Y. Chen, Zhenyu Li, Guang Shi, Jiashi Feng, Bingyi Kang — Depth Anything 3 (ByteDance Seed)",
+        "Heliosoph (torch.onnx.export from depth-anything/DA3METRIC-LARGE safetensors)"
+      ],
+      "variants": [
+        {
+          "id": "da3metric-large",
+          "displayName": "fp32",
+          "summary": "Monocular depth in **real-world meters** given the camera FOV, plus a sky mask for outdoor reconstruction. Full precision — matches the PyTorch upstream.",
+          "tags": [
+            "fp32"
+          ],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 1340,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3metric-large-onnx",
+                  "revision": "159aa982e543db46b672e196d3658f1d39a258b6",
+                  "include": [
+                    "model.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3metric-large/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3metric_large"
+                },
+                {
+                  "identifier": "da3metric_large_meters"
+                },
+                {
+                  "identifier": "da3metric_large_full"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "da3metric-large-fp16",
+          "displayName": "fp16",
+          "summary": "Same meters + sky output as the fp32 build, half the disk. I/O stays fp32, so it's a drop-in swap with ~0.15% depth difference.",
+          "tags": [
+            "fp16"
+          ],
+          "hardware": {
+            "minRamMb": 1024,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 670,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3metric-large-onnx",
+                  "revision": "159aa982e543db46b672e196d3658f1d39a258b6",
+                  "include": [
+                    "model_fp16.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3metric-large-fp16/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3metric_large_fp16"
+                },
+                {
+                  "identifier": "da3metric_large_fp16_meters"
+                },
+                {
+                  "identifier": "da3metric_large_fp16_full"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "cardFile": "cards/da3metric-large/index.md"
+    },
+    {
       "name": "Metric3D V2 (Metric Depth + Normals)",
       "summary": "Estimate per-pixel metric depth (real-world meters) + surface normals from a single image. Three model sizes × fp32 and fp16 precision.",
       "description": "All variants share the same metric depth + normals output. Size axis trades accuracy for speed; precision axis trades disk footprint for GPU native fp16 throughput.",
