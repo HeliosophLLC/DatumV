@@ -10,6 +10,7 @@ The examples here lean toward showing how the engine composes: model invocation 
 
 - [Person crops with YOLOX](yolox-person-crops.md) — object detection inside `SELECT`, cropping by detection bounding box.
 - [Same input, four depth models](depth-comparison.md) — Depth Anything v2 and v3, MiDaS, and DPT side by side.
+- [Five text-to-image models, one prompt](compare-images.md) — one prompt across five diffusion models with `UNION ALL`.
 - [Depth maps and 3D point clouds](depth-maps-and-point-clouds.md) — a full pipeline from photos to renderable meshes.
 
 ## Media

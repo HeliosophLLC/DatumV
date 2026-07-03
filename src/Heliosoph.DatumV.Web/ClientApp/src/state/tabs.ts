@@ -475,6 +475,14 @@ function createDefaultState(): PanesState {
     savedSql: DEPTH_COMPARE_EXAMPLE_SQL,
     dirty: false,
   };
+  const compareImages: Tab = {
+    id: newTabId(),
+    title: 'compare_images',
+    kind: 'sql',
+    sql: COMPARE_IMAGES_EXAMPLE_SQL,
+    savedSql: COMPARE_IMAGES_EXAMPLE_SQL,
+    dirty: false,
+  };
   const leaf: LeafPane = {
     kind: 'leaf',
     id: newLeafId(),
@@ -485,6 +493,7 @@ function createDefaultState(): PanesState {
       createPinnedTab('datasets'),
       searchPerson,
       depthCompare,
+      compareImages,
     ],
     activeTabId: searchPerson.id,
   };
@@ -508,6 +517,18 @@ const DEPTH_COMPARE_EXAMPLE_SQL = `SELECT
     file_name
 FROM datasets.coco_val2017
 LIMIT 32`;
+
+const COMPARE_IMAGES_EXAMPLE_SQL = `-- This will take a little while your first time as the models calibrate, expect 10-13GB of VRAM
+DECLARE prompt String = 'A grand stone castle, blue skys, natural light, realistic'
+
+SELECT
+    g.value
+    ,models.sd_turbo(prompt) "sd"
+    ,models.sdxl_turbo(prompt) "sdxl"
+    ,models.epicrealism_hyper(prompt) "epicrealism"
+    ,models.absolute_reality_hyper(prompt) "absolute_reality"
+    ,models.dreamshaper_hyper(prompt) "dreamshaper"
+FROM generate_series(1, 10) g`;
 
 function createInitialState(): PanesState {
   const seed = readSeedFromHash();
