@@ -8,5 +8,6 @@
   "copy": {
     "button": "Copy",
     "copied": "Copied"
-  }
+  },
+  "openInNewTab": "Open in new tab"
 }

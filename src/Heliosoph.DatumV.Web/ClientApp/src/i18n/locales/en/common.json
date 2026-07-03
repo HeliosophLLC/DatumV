@@ -42,6 +42,10 @@
     "elapsed": "{duration} elapsed",
     "remaining": "~{duration} remaining"
   },
+  "image": {
+    "expand": "Expand image",
+    "close": "Close image preview"
+  },
   "catalog": {
     "openTitle": "Open Catalog",
     "openButtonLabel": "Open",

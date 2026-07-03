@@ -20,6 +20,7 @@ import {
 } from '@/state/models';
 import { buildTaskFamilyMap } from '@/components/shared/taskStyles';
 import { TaskChipLabel } from '@/components/shared/TaskChip';
+import { LightboxImage } from '@/components/shared/LightboxImage';
 import { cn } from '@/lib/utils';
 import {
   activateVersion,
@@ -268,6 +269,13 @@ export function ModelDetail({
                 pre: ({ children, ...rest }) => (
                   <CodeBlock {...rest}>{children}</CodeBlock>
                 ),
+                img: ({ src, alt, ...rest }) => (
+                  <LightboxImage
+                    {...rest}
+                    src={typeof src === 'string' ? src : undefined}
+                    alt={alt ?? ''}
+                  />
+                ),
                 a: ({ href, children, ...rest }) => {
                   const targetEntry = href
                     ? resolveCardEntryLink(entry.cardFile, href)
@@ -333,7 +341,7 @@ function ModelHeroBand({ entryName }: { entryName: string }) {
   if (!visible) return null;
   return (
     <div className="relative w-full overflow-hidden">
-      <img
+      <LightboxImage
         src={`/api/model-catalog/entries/${encodeURIComponent(entryName)}/hero`}
         alt=""
         className="object-cover h-60 m-auto"

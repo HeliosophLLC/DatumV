@@ -23,6 +23,7 @@ import {
   type DocPath,
 } from '@/state/docs';
 import { CodeBlock } from '@/components/markdown/CodeBlock';
+import { LightboxImage } from '@/components/shared/LightboxImage';
 import { cn } from '@/lib/utils';
 
 // Pinned Documentation tab. Two-pane layout: collapsible folder tree on
@@ -196,7 +197,7 @@ function DocArticle({ path, content }: { path: DocPath; content: string }) {
             <span className="text-muted-foreground text-xs italic">{alt}</span>
           ) : null;
         }
-        return <img {...rest} src={resolved} alt={alt ?? ''} />;
+        return <LightboxImage {...rest} src={resolved} alt={alt ?? ''} />;
       },
       pre: ({ children, ...rest }) => <CodeBlock {...rest}>{children}</CodeBlock>,
     }),
