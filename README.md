@@ -1,4 +1,4 @@
-# DatumV™
+# DatumV
 
 [![CI](https://github.com/HeliosophLLC/DatumV/actions/workflows/ci.yml/badge.svg)]
 [![Release](https://img.shields.io/github/v/release/HeliosophLLC/DatumV)]

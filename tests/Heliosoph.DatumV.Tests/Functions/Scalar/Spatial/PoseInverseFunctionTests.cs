@@ -144,6 +144,27 @@ public sealed class PoseInverseFunctionTests : ServiceTestBase
         Assert.True(result.IsNull);
     }
 
+    [Fact]
+    public async Task Float64Pose_InvertsTranslation()
+    {
+        double[] pose =
+        [
+            1, 0, 0, 5,
+            0, 1, 0, -3,
+            0, 0, 1, 2,
+            0, 0, 0, 1,
+        ];
+        EvaluationFrame f = CreateEvaluationFrame();
+
+        ValueRef result = await new PoseInverseFunction().ExecuteAsync(
+            new[] { ValueRef.FromPrimitiveArray(pose, DataKind.Float64) }, f, default);
+
+        ReadOnlySpan<float> r = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
+        Assert.Equal(-5f, r[3], precision: 4);
+        Assert.Equal(3f, r[7], precision: 4);
+        Assert.Equal(-2f, r[11], precision: 4);
+    }
+
     private static void AssertMatrixApproxEqual(float[] expected, ReadOnlySpan<float> actual)
     {
         Assert.Equal(16, actual.Length);

@@ -1042,6 +1042,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthOrthographicWithConfidenceFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeIntrinsicsFunction>();
         registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeWithConfidenceFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PointCloudFromDepthPinholeIntrinsicsWithConfidenceFunction>();
         // Point-map constructor (MoGe-2 / VGGT / DUSt3R) — bypasses the
         // depth-then-unproject pipeline since these models emit camera-space
         // xyz per pixel directly.
@@ -1051,6 +1052,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PcEmptyFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcFuseFunction>();
         registry.RegisterScalar<Scalar.Spatial.PcTransformFunction>();
+        registry.RegisterScalar<Scalar.Spatial.PcRenderFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseTranslateFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseIdentityFunction>();
         registry.RegisterScalar<Scalar.Spatial.PoseComposeFunction>();
@@ -1339,6 +1341,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate<Aggregates.KmeansFitAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PlotScatterAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcVoxelConsensusAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.PcFuseRenderAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ArgMaxFunction>();
         registry.RegisterAggregate<Aggregates.ArgMinFunction>();
 

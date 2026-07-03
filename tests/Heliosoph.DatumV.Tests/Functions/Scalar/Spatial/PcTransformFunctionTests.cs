@@ -38,6 +38,31 @@ public sealed class PcTransformFunctionTests : ServiceTestBase
     }
 
     [Fact]
+    public async Task Float64Pose_TranslatesPoints()
+    {
+        // Float64[] poses (e.g. AVG-smoothed trajectories) are narrowed
+        // elementwise — same result as the Float32 equivalent.
+        ValueRef pc = BuildColoredCloud(new[]
+        {
+            (new Vector3(1, 2, 3), (byte)10, (byte)20, (byte)30),
+        });
+        double[] pose =
+        [
+            1, 0, 0, 10,
+            0, 1, 0, 20,
+            0, 0, 1, 30,
+            0, 0, 0, 1,
+        ];
+
+        ValueRef result = await new PcTransformFunction().ExecuteAsync(
+            new[] { pc, ValueRef.FromPrimitiveArray(pose, DataKind.Float64) },
+            CreateEvaluationFrame(), default);
+
+        ReadPoints(result, out Vector3[] positions, out _);
+        Assert.Equal(new Vector3(11, 22, 33), positions[0]);
+    }
+
+    [Fact]
     public async Task TransformPreservesColorBytes()
     {
         ValueRef pc = BuildColoredCloud(new[]

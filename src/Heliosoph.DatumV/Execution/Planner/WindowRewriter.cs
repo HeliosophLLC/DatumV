@@ -194,8 +194,50 @@ internal static class WindowRewriter
                 RewriteWindowExpression(cast.Expression, functionRegistry, windowColumns),
                 cast.TargetType),
             CaseExpression caseExpr => RewriteCaseWindowExpression(caseExpr, functionRegistry, windowColumns),
+            FunctionCallExpression func => RewriteFunctionCallArguments(func, functionRegistry, windowColumns),
             _ => expression,
         };
+    }
+
+    /// <summary>
+    /// Rewrites window function calls nested inside a scalar function's argument
+    /// list — covers array literals (which lower to the <c>array</c> function),
+    /// <c>abs(avg(x) OVER (…))</c>, and any other composition. Aggregate calls
+    /// are deliberately left untouched: a window value doesn't exist at
+    /// aggregation time, so hoisting one into a column an aggregate references
+    /// would silently mis-plan — the evaluator's "was not rewritten" guard
+    /// reports those instead.
+    /// </summary>
+    private static Expression RewriteFunctionCallArguments(
+        FunctionCallExpression functionCall,
+        FunctionRegistry functionRegistry,
+        List<WindowColumn> windowColumns)
+    {
+        if (functionRegistry.TryGetAggregate(functionCall.CallName) is not null)
+        {
+            return functionCall;
+        }
+
+        bool anyNested = false;
+        foreach (Expression argument in functionCall.Arguments)
+        {
+            if (ExpressionContainsWindowFunction(argument))
+            {
+                anyNested = true;
+                break;
+            }
+        }
+        if (!anyNested)
+        {
+            return functionCall;
+        }
+
+        Expression[] rewritten = new Expression[functionCall.Arguments.Count];
+        for (int i = 0; i < functionCall.Arguments.Count; i++)
+        {
+            rewritten[i] = RewriteWindowExpression(functionCall.Arguments[i], functionRegistry, windowColumns);
+        }
+        return functionCall with { Arguments = rewritten };
     }
 
     /// <summary>

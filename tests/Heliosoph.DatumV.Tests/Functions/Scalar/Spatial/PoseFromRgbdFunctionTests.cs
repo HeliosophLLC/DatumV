@@ -222,6 +222,113 @@ public sealed class PoseFromRgbdFunctionTests : ServiceTestBase
         Assert.Equal(1f, pose[15]);
     }
 
+    [Fact]
+    public async Task UnmatchableFrames_DefaultMode_ThrowsWithGuidance()
+    {
+        // Solid-color frames have no ORB features — both ladder attempts
+        // fail deterministically. Default on_failure is 'error'.
+        const int w = 64;
+        const int h = 64;
+        using SKBitmap prev = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        using SKBitmap curr = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        ValueRef depth = MakeConstantDepth(w, h, 1.5f);
+        ValueRef intrinsics = MakeIntrinsics(500f, 500f, w / 2f, h / 2f);
+
+        FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
+            async () => await new PoseFromRgbdFunction().ExecuteAsync(
+                new ValueRef[]
+                {
+                    ValueRef.FromImage(prev), depth,
+                    ValueRef.FromImage(curr), depth,
+                    intrinsics,
+                },
+                CreateEvaluationFrame(), default));
+        Assert.Contains("on_failure", ex.Message);
+    }
+
+    [Fact]
+    public async Task UnmatchableFrames_OnFailureNull_ReturnsNullArray()
+    {
+        const int w = 64;
+        const int h = 64;
+        using SKBitmap prev = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        using SKBitmap curr = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        ValueRef depth = MakeConstantDepth(w, h, 1.5f);
+        ValueRef intrinsics = MakeIntrinsics(500f, 500f, w / 2f, h / 2f);
+
+        ValueRef result = await new PoseFromRgbdFunction().ExecuteAsync(
+            new ValueRef[]
+            {
+                ValueRef.FromImage(prev), depth,
+                ValueRef.FromImage(curr), depth,
+                intrinsics,
+                ValueRef.FromString("null"),
+            },
+            CreateEvaluationFrame(), default);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Float32, result.Kind);
+    }
+
+    [Fact]
+    public async Task UnmatchableFrames_OnFailureIdentity_ReturnsIdentityPose()
+    {
+        const int w = 64;
+        const int h = 64;
+        using SKBitmap prev = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        using SKBitmap curr = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        ValueRef depth = MakeConstantDepth(w, h, 1.5f);
+        ValueRef intrinsics = MakeIntrinsics(500f, 500f, w / 2f, h / 2f);
+
+        ValueRef result = await new PoseFromRgbdFunction().ExecuteAsync(
+            new ValueRef[]
+            {
+                ValueRef.FromImage(prev), depth,
+                ValueRef.FromImage(curr), depth,
+                intrinsics,
+                ValueRef.FromString("identity"),
+            },
+            CreateEvaluationFrame(), default);
+
+        Assert.False(result.IsNull);
+        EvaluationFrame f = CreateEvaluationFrame();
+        ReadOnlySpan<float> pose = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
+        float[] identity =
+        [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+        Assert.Equal(16, pose.Length);
+        for (int i = 0; i < 16; i++)
+        {
+            Assert.Equal(identity[i], pose[i]);
+        }
+    }
+
+    [Fact]
+    public async Task UnknownOnFailureMode_Throws()
+    {
+        const int w = 64;
+        const int h = 64;
+        using SKBitmap prev = MakeSolidColor(w, h, new SKColor(90, 90, 90, 255));
+        ValueRef depth = MakeConstantDepth(w, h, 1.5f);
+        ValueRef intrinsics = MakeIntrinsics(500f, 500f, w / 2f, h / 2f);
+
+        FunctionArgumentException ex = await Assert.ThrowsAsync<FunctionArgumentException>(
+            async () => await new PoseFromRgbdFunction().ExecuteAsync(
+                new ValueRef[]
+                {
+                    ValueRef.FromImage(prev), depth,
+                    ValueRef.FromImage(prev), depth,
+                    intrinsics,
+                    ValueRef.FromString("shrug"),
+                },
+                CreateEvaluationFrame(), default));
+        Assert.Contains("on_failure", ex.Message);
+    }
+
     // ─────────────────────── Helpers ───────────────────────
 
     private static SKBitmap MakeSolidColor(int width, int height, SKColor color)

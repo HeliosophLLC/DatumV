@@ -135,4 +135,25 @@ public sealed class PoseToEulerDegreesFunctionTests : ServiceTestBase
             CreateEvaluationFrame(), default);
         Assert.True(result.IsNull);
     }
+
+    [Fact]
+    public async Task Float64Pose_ExtractsAngles()
+    {
+        double[] identity =
+        [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
+        EvaluationFrame f = CreateEvaluationFrame();
+
+        ValueRef result = await new PoseToEulerDegreesFunction().ExecuteAsync(
+            new[] { ValueRef.FromPrimitiveArray(identity, DataKind.Float64) }, f, default);
+
+        ReadOnlySpan<float> angles = result.ToDataValue(f.Source).AsArraySpan<float>(f.Source, f.SidecarRegistry);
+        Assert.Equal(0f, angles[0], precision: 3);
+        Assert.Equal(0f, angles[1], precision: 3);
+        Assert.Equal(0f, angles[2], precision: 3);
+    }
 }

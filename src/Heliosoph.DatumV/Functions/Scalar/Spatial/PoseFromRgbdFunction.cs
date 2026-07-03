@@ -51,13 +51,21 @@ namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 /// treated as missing and skip the feature point.
 /// </para>
 /// <para>
-/// <strong>Failure modes.</strong> Throws <see cref="FunctionArgumentException"/>
-/// when (a) intrinsics, depth shape, or image dimensions disagree;
-/// (b) fewer than 12 ORB matches survive the lift-to-3D filter (too few
-/// features with valid depth in both frames); (c) RANSAC fails to find
-/// a consensus set of ≥ 12 inliers (frames too different / depth too
-/// noisy). The exception message names the failure so the caller can
-/// react in SQL or skip the frame.
+/// <strong>Failure modes.</strong> Hard pairs automatically retry with a
+/// relaxed parameter set (more ORB features, looser ratio test, more RANSAC
+/// draws, doubled inlier band) before giving up — only pairs that fail the
+/// strict pass pay the retry cost. When both attempts fail — (a) fewer than
+/// 12 ORB matches survive the lift-to-3D filter, or (b) RANSAC finds no
+/// consensus set of ≥ 12 inliers — the optional <c>on_failure</c> argument
+/// decides the outcome: <c>'error'</c> (default) throws
+/// <see cref="FunctionArgumentException"/> with the stage-specific reason,
+/// <c>'null'</c> returns a null Float32 array, and <c>'identity'</c> returns
+/// the 4×4 identity — treating the pair as stationary, which lets a
+/// composed reconstruction chain absorb an occasional unmatchable pair with
+/// a small local error instead of dying. Argument-shape violations
+/// (mismatched intrinsics, depth shape, or image dimensions) always throw
+/// regardless of <c>on_failure</c> — those are caller bugs, not data
+/// quality.
 /// </para>
 /// </remarks>
 public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
@@ -79,8 +87,14 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         + "K matrix (same convention as point_cloud_from_depth_orthographic_"
         + "intrinsics). Depth: 2-D Float32 array in metres matching image "
         + "dimensions; non-positive / NaN / Inf entries skip that pixel. "
-        + "Throws if fewer than 12 matched features have valid depth in both "
-        + "frames or if RANSAC finds no consensus.";
+        + "Hard frame pairs automatically retry with relaxed matching (more "
+        + "ORB features, looser ratio test, wider inlier threshold). When both "
+        + "attempts fail, on_failure controls the outcome: 'error' (default) "
+        + "throws, 'null' returns a null array, 'identity' returns the 4x4 "
+        + "identity — treating the pair as no motion so a reconstruction "
+        + "chain survives the occasional unmatchable pair.";
+
+    private static readonly string[] FailureModeValues = ["error", "null", "identity"];
 
     /// <inheritdoc />
     public static IReadOnlyList<FunctionSignatureVariant> Signatures { get; } =
@@ -96,25 +110,61 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
             ],
             VariadicTrailing: null,
             ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
+        new FunctionSignatureVariant(
+            Parameters:
+            [
+                new ParameterSpec("prev_image", DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("prev_depth", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("curr_image", DataKindMatcher.Exact(DataKind.Image)),
+                new ParameterSpec("curr_depth", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("intrinsics", DataKindMatcher.Exact(DataKind.Float32), IsArray: ArrayMatch.Array),
+                new ParameterSpec("on_failure", DataKindMatcher.StringEnum(FailureModeValues)),
+            ],
+            VariadicTrailing: null,
+            ReturnType: ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Float32))),
     ];
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds) =>
         FunctionMetadata.Validate<PoseFromRgbdFunction>(argumentKinds);
 
-    // Tunables. These are picked to be reasonable defaults for indoor
-    // RGB-D video at ~30 FPS — feature counts well above the minimum
-    // inlier requirement, threshold scaled to the scene's depth range
-    // so the function works across both close-up (tabletop) and large
-    // (room-scale) scenes without re-tuning. If callers need to control
-    // these, future overloads can accept a `params` struct.
-    private const int OrbMaxFeatures = 1500;
-    private const float LoweRatio = 0.75f;
-    private const int RansacIterations = 500;
-    private const float RansacInlierRelative = 0.01f;   // 1% of median depth
-    private const float RansacInlierMinAbs = 0.03f;     // floor: 3 cm
+    // Quality floors. 12 is the minimum for a trustworthy 3D-3D rigid fit —
+    // relaxing BELOW this produces plausible-looking garbage poses that
+    // silently wreck a composed trajectory, so the ladder never lowers it.
     private const int MinFeaturesAfterDepthFilter = 12;
     private const int MinInliers = 12;
+
+    /// <summary>Per-attempt matching / RANSAC tunables.</summary>
+    private readonly record struct EstimationAttempt(
+        int OrbFeatures,
+        float LoweRatio,
+        int RansacIterations,
+        float InlierRelative,
+        float InlierMinAbs);
+
+    // Attempt ladder. The first entry is tuned for indoor RGB-D video at
+    // ~30 FPS — feature counts well above the minimum inlier requirement,
+    // threshold scaled to the scene's depth range so the function works
+    // across both close-up (tabletop) and large (room-scale) scenes without
+    // re-tuning. The second entry trades precision and CPU for coverage on
+    // hard pairs (low texture, motion blur, wide frame gaps): more features,
+    // a looser ratio test, more RANSAC draws, and a doubled inlier band.
+    // Only pairs that fail the strict pass pay for the retry.
+    private static readonly EstimationAttempt[] EstimationLadder =
+    [
+        new(OrbFeatures: 1500, LoweRatio: 0.75f, RansacIterations: 500,
+            InlierRelative: 0.01f, InlierMinAbs: 0.03f),
+        new(OrbFeatures: 4000, LoweRatio: 0.85f, RansacIterations: 2000,
+            InlierRelative: 0.02f, InlierMinAbs: 0.06f),
+    ];
+
+    /// <summary>What to do when every estimation attempt fails.</summary>
+    private enum FailureMode
+    {
+        Error,
+        Null,
+        Identity,
+    }
 
     /// <inheritdoc />
     public ValueTask<ValueRef> ExecuteAsync(
@@ -135,6 +185,8 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         {
             return new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32));
         }
+
+        FailureMode onFailure = ParseFailureMode(args);
 
         // ─── Intrinsics ─────────────────────────────────────────────────
         DataValue intrinsicsValue = intrinsicsArg.ToDataValue(frame.Source);
@@ -189,13 +241,62 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // ─── ORB detect + compute on both frames ────────────────────────
-        // Allocations: each grayscale conversion is held only for the
-        // detect-and-compute call; descriptors are uint8 byte matrices
-        // sized [N × 32] (BRIEF-256 in ORB).
+        // Grayscale conversion is shared across ladder attempts — only the
+        // ORB detection itself depends on per-attempt parameters.
         using Mat prevGray = ToGrayMat(prevSrc);
         using Mat currGray = ToGrayMat(currSrc);
-        using ORB orb = ORB.Create(nFeatures: OrbMaxFeatures);
+
+        string failure = "no estimation attempt ran.";
+        foreach (EstimationAttempt attempt in EstimationLadder)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            float[]? pose = TryEstimatePose(
+                prevGray, currGray, prevDepth, currDepth, width, height,
+                fx, fy, cx, cy, attempt, cancellationToken, ref failure);
+            if (pose is not null)
+            {
+                return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(pose, DataKind.Float32));
+            }
+        }
+
+        return onFailure switch
+        {
+            FailureMode.Null => new ValueTask<ValueRef>(ValueRef.NullArray(DataKind.Float32)),
+            FailureMode.Identity => new ValueTask<ValueRef>(
+                ValueRef.FromPrimitiveArray(IdentityPoseMatrix(), DataKind.Float32)),
+            _ => throw new FunctionArgumentException(
+                Name,
+                failure + " A relaxed retry (more features, looser matching, wider inlier "
+                + "threshold) also failed. Pass on_failure => 'identity' (treat the pair as "
+                + "no motion) or on_failure => 'null' to make unmatchable pairs non-fatal, "
+                + "or sample frames closer together (smaller stride)."),
+        };
+    }
+
+    /// <summary>
+    /// One full ORB → ratio-test → depth-lift → RANSAC → Kabsch-refine pass
+    /// with the supplied attempt parameters. Returns the packed row-major
+    /// 4×4 pose on success; on failure returns <see langword="null"/> and
+    /// writes the stage-specific reason to <paramref name="failure"/>.
+    /// </summary>
+    private static float[]? TryEstimatePose(
+        Mat prevGray,
+        Mat currGray,
+        float[] prevDepth,
+        float[] currDepth,
+        int width,
+        int height,
+        float fx,
+        float fy,
+        float cx,
+        float cy,
+        EstimationAttempt attempt,
+        CancellationToken cancellationToken,
+        ref string failure)
+    {
+        // ─── ORB detect + compute on both frames ────────────────────────
+        // Descriptors are uint8 byte matrices sized [N × 32] (BRIEF-256).
+        using ORB orb = ORB.Create(nFeatures: attempt.OrbFeatures);
         using Mat prevDescs = new();
         using Mat currDescs = new();
         orb.DetectAndCompute(prevGray, null, out KeyPoint[] prevKps, prevDescs);
@@ -205,11 +306,11 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
             || currKps.Length < MinFeaturesAfterDepthFilter
             || prevDescs.Empty() || currDescs.Empty())
         {
-            throw new FunctionArgumentException(
-                Name,
+            failure =
                 $"too few ORB features detected (prev={prevKps.Length}, curr={currKps.Length}); "
                 + $"need at least {MinFeaturesAfterDepthFilter} in each frame. Frames may be "
-                + "too blurry, low-texture, or low-resolution.");
+                + "too blurry, low-texture, or low-resolution.";
+            return null;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -227,7 +328,7 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         {
             DMatch[] pair = knn[i];
             if (pair.Length < 2) continue;
-            if (pair[0].Distance < LoweRatio * pair[1].Distance)
+            if (pair[0].Distance < attempt.LoweRatio * pair[1].Distance)
             {
                 goodMatches.Add((prevIdx: pair[0].TrainIdx, currIdx: pair[0].QueryIdx));
             }
@@ -235,11 +336,11 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
 
         if (goodMatches.Count < MinFeaturesAfterDepthFilter)
         {
-            throw new FunctionArgumentException(
-                Name,
+            failure =
                 $"too few descriptor matches survived Lowe's ratio test ({goodMatches.Count}); "
                 + $"need at least {MinFeaturesAfterDepthFilter}. Frames may have too little visual "
-                + "overlap or too much appearance change between them.");
+                + "overlap or too much appearance change between them.";
+            return null;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -281,18 +382,18 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
 
         if (pairs.Count < MinFeaturesAfterDepthFilter)
         {
-            throw new FunctionArgumentException(
-                Name,
+            failure =
                 $"only {pairs.Count} matched features had valid metric depth in both frames; "
                 + $"need at least {MinFeaturesAfterDepthFilter}. Check that the depth maps "
-                + "cover the scene at the matched feature locations (no large holes / zeros).");
+                + "cover the scene at the matched feature locations (no large holes / zeros).";
+            return null;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
 
         // ─── RANSAC over 3D-3D rigid alignment ──────────────────────────
         double medianDepth = MedianForwardDepth(pairs);
-        double inlierThreshold = System.Math.Max(RansacInlierMinAbs, medianDepth * RansacInlierRelative);
+        double inlierThreshold = System.Math.Max(attempt.InlierMinAbs, medianDepth * attempt.InlierRelative);
         double inlierThresholdSq = inlierThreshold * inlierThreshold;
 
         Random rng = new(0xC0FFEE);   // deterministic seed; reproducible pose for a given input
@@ -300,7 +401,7 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
         bool[] bestInlierMask = new bool[pairs.Count];
         bool[] candidateMask = new bool[pairs.Count];
 
-        for (int iter = 0; iter < RansacIterations; iter++)
+        for (int iter = 0; iter < attempt.RansacIterations; iter++)
         {
             if ((iter & 31) == 0)
             {
@@ -329,33 +430,57 @@ public sealed class PoseFromRgbdFunction : IFunction, IScalarFunction
 
         if (bestInlierCount < MinInliers)
         {
-            throw new FunctionArgumentException(
-                Name,
+            failure =
                 $"RANSAC failed: best consensus set had {bestInlierCount} inliers, need {MinInliers}. "
                 + $"Inlier threshold was {inlierThreshold:F4} m (median depth {medianDepth:F3} m). "
-                + "Frames may share too little geometry or depth may be too noisy.");
+                + "Frames may share too little geometry or depth may be too noisy.";
+            return null;
         }
 
         // ─── Refine on all inliers ──────────────────────────────────────
         if (!TryKabschAll(pairs, bestInlierMask, out double[] R, out double[] t))
         {
-            throw new FunctionArgumentException(
-                Name,
+            failure =
                 $"Kabsch refinement on {bestInlierCount} inliers produced a degenerate matrix "
-                + "(SVD did not converge). This is rare — inputs may be co-linear in 3D.");
+                + "(SVD did not converge). This is rare — inputs may be co-linear in 3D.";
+            return null;
         }
 
         // ─── Pack to row-major 4×4 Float32 ──────────────────────────────
-        float[] pose =
+        return
         [
             (float)R[0], (float)R[1], (float)R[2], (float)t[0],
             (float)R[3], (float)R[4], (float)R[5], (float)t[1],
             (float)R[6], (float)R[7], (float)R[8], (float)t[2],
             0f,          0f,          0f,          1f,
         ];
-
-        return new ValueTask<ValueRef>(ValueRef.FromPrimitiveArray(pose, DataKind.Float32));
     }
+
+    private static FailureMode ParseFailureMode(ReadOnlySpan<ValueRef> args)
+    {
+        if (args.Length < 6 || args[5].IsNull)
+        {
+            return FailureMode.Error;
+        }
+        string raw = args[5].AsString();
+        return raw.ToLowerInvariant() switch
+        {
+            "error" => FailureMode.Error,
+            "null" => FailureMode.Null,
+            "identity" => FailureMode.Identity,
+            _ => throw new FunctionArgumentException(
+                Name,
+                $"unknown on_failure mode '{raw}'. Supported: error, null, identity."),
+        };
+    }
+
+    private static float[] IdentityPoseMatrix() =>
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
 
     // ─────────────────────── Helpers ───────────────────────
 
