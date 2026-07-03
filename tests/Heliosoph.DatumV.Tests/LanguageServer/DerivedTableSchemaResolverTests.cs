@@ -297,6 +297,89 @@ public sealed class DerivedTableSchemaResolverTests : ServiceTestBase
     }
 
     [Fact]
+    public void Resolve_LetOfArrayOfStructModel_WrapsElementStructInArray()
+    {
+        // A detector-style model (`ModelEntry` with OutputStructFields AND
+        // OutputIsArray) returns one Array<Struct<…>> per row. The resolver
+        // must surface the LET's kind WITH the `Array<…>` wrapper — without
+        // it, `unnest(classes)` can't strip a level to reach the element
+        // struct, and `c.value` stays unknown. This is the built-in-detector
+        // shape the ReturnType-string tests don't exercise.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions = [],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "yolox_s",
+                    // Built-in detector: OutputKind label carries only the bare
+                    // struct (array-ness lives in OutputIsArray, not the label).
+                    OutputKind = "Struct<bbox: Array<Float32>, label: String, score: Float32>",
+                    OutputIsArray = true,
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "bbox", Kind = "Array<Float32>" },
+                        new StructFieldSignature { Name = "label", Kind = "String" },
+                        new StructFieldSignature { Name = "score", Kind = "Float32" },
+                    ],
+                },
+            ],
+        };
+
+        const string sql =
+            "SELECT LET classes = models.yolox_s(file), classes AS c FROM items";
+
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, manifest);
+
+        Assert.True(result.LetBindingKinds.TryGetValue("classes", out string? classesKind));
+        Assert.Equal(
+            "Array<Struct<bbox: Array<Float32>, label: String, score: Float32>>",
+            classesKind);
+    }
+
+    [Fact]
+    public void Resolve_LetOfScalarStructModel_DoesNotWrapInArray()
+    {
+        // Regression guard for the array-wrap change: a scalar struct-returning
+        // model (OutputIsArray defaults false) must keep its bare `Struct<…>`
+        // kind so `curr_depth.depth` field access still resolves.
+        LanguageServerManifest manifest = new()
+        {
+            Tables = [new TableSchemaEntry { Name = "items", Columns =
+                [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+            Functions = [],
+            Keywords = [],
+            Models =
+            [
+                new ModelEntry
+                {
+                    Name = "depth_full",
+                    OutputKind = "Struct<depth: Array<Float32>, intrinsics: Array<Float32>>",
+                    Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                    OutputStructFields =
+                    [
+                        new StructFieldSignature { Name = "depth", Kind = "Array<Float32>" },
+                        new StructFieldSignature { Name = "intrinsics", Kind = "Array<Float32>" },
+                    ],
+                },
+            ],
+        };
+
+        const string sql =
+            "SELECT LET d = models.depth_full(file), d AS c FROM items";
+
+        DerivedTableSchemaResult result = DerivedTableSchemaResolver.Resolve(sql, manifest);
+
+        Assert.True(result.LetBindingKinds.TryGetValue("d", out string? dKind));
+        Assert.Equal("Struct<depth: Array<Float32>, intrinsics: Array<Float32>>", dKind);
+    }
+
+    [Fact]
     public void Resolve_FromAliasOfCte_RecordedInAliasMap()
     {
         const string sql =

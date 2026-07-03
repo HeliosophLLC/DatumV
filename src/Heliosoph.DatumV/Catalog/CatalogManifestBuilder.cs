@@ -241,6 +241,7 @@ public static class CatalogManifestBuilder
                     DisplayName = entry.Value.DisplayName,
                     Parameters = BuildModelParameters(entry.Value),
                     OutputStructFields = structFields,
+                    OutputIsArray = entry.Value.OutputIsArray,
                     Tasks = tasks,
                     CatalogEntryId = catalogEntryId,
                     ActiveVersion = activeVersion,
@@ -865,7 +866,8 @@ public static class CatalogManifestBuilder
             // non-struct models.
             if (ReferenceEquals(parameters, sig.Parameters)
                 && ReferenceEquals(outputFields, sig.OutputStructFields)
-                && string.Equals(returnType, sig.ReturnType, StringComparison.Ordinal))
+                && string.Equals(returnType, sig.ReturnType, StringComparison.Ordinal)
+                && model.OutputIsArray == sig.OutputIsArray)
             {
                 continue;
             }
@@ -882,6 +884,10 @@ public static class CatalogManifestBuilder
                 OutputColumns = sig.OutputColumns,
                 AdditionalParameterShapes = sig.AdditionalParameterShapes,
                 OutputStructFields = outputFields,
+                // Carry the array-of-struct bit so the LS can expand
+                // `unnest(models.X(...))` to the element struct even when the
+                // model is called through its scalar-function registration.
+                OutputIsArray = model.OutputIsArray,
                 IsAggregate = sig.IsAggregate,
                 IsWindowFunction = sig.IsWindowFunction,
             };

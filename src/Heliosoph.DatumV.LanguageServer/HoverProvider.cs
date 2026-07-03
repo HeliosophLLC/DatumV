@@ -542,6 +542,14 @@ public sealed class HoverProvider
             return FormatDerivedTableHover(name, boundColumns);
         }
 
+        // TVF-source alias: hover on the `c` in `FROM unnest(classes) c` (or
+        // any FROM/JOIN table-valued function source). Surface the output
+        // column list — the same treatment CTE / subquery aliases get above —
+        // so a bare hover on the alias shows what it exposes (e.g. unnest's
+        // synthesized `value: Struct<…>`) instead of coming back empty.
+        string? tvfSourceHover = GetTvfSourceHover(name, tvfAliases, tvfAliasSources, derivedSchemas);
+        if (tvfSourceHover is not null) return tvfSourceHover;
+
         // Unqualified column referenced from a TVF source. Walk every TVF
         // alias in the SQL — first match wins. Same-name collisions across
         // different TVFs in one statement are rare and best resolved by
@@ -1020,6 +1028,61 @@ public sealed class HoverProvider
         return null;
     }
 
+    /// <summary>
+    /// Renders a schema card for a table-valued function source referenced by
+    /// <paramref name="alias"/> (hover on the alias token itself, not a
+    /// column). Uses the signature's static <see cref="FunctionSignature.OutputColumns"/>
+    /// when present, else falls back to per-call synthesis for dynamic-output
+    /// TVFs (today: <c>unnest</c>, whose single <c>value</c> column follows the
+    /// argument's element kind). Returns <see langword="null"/> when the alias
+    /// isn't a known TVF source or its columns can't be resolved.
+    /// </summary>
+    private string? GetTvfSourceHover(
+        string alias,
+        Dictionary<string, FunctionSignature> tvfAliases,
+        Dictionary<string, FunctionSource> tvfAliasSources,
+        DerivedTableSchemaResult derivedSchemas)
+    {
+        if (!tvfAliases.TryGetValue(alias, out FunctionSignature? signature)) return null;
+
+        List<TableColumnEntry> columns = new();
+        if (signature.OutputColumns is { Count: > 0 } outputColumns)
+        {
+            columns.AddRange(outputColumns);
+        }
+        else if (tvfAliasSources.TryGetValue(alias, out FunctionSource? source))
+        {
+            // Dynamic-output TVF: synthesize the per-call `value` column so the
+            // alias card mirrors what a `c.value` hover already resolves.
+            string? valueKind = TryGetTvfSynthesizedColumnKind(source, "value", _manifest, derivedSchemas);
+            if (valueKind is not null)
+            {
+                columns.Add(new TableColumnEntry { Name = "value", Kind = valueKind, Nullable = true });
+            }
+        }
+
+        if (columns.Count == 0) return null;
+        return FormatTvfSourceHover(alias, signature, columns);
+    }
+
+    private static string FormatTvfSourceHover(
+        string alias, FunctionSignature signature, IReadOnlyList<TableColumnEntry> columns)
+    {
+        string qualifiedFn = string.IsNullOrEmpty(signature.SchemaName)
+            || string.Equals(signature.SchemaName, "system", StringComparison.OrdinalIgnoreCase)
+            ? signature.Name
+            : $"{signature.SchemaName}.{signature.Name}";
+        string columnWord = columns.Count == 1 ? "column" : "columns";
+        string header =
+            $"**{alias}**: `{qualifiedFn}(...)` *(table-valued)* ({columns.Count} {columnWord})\n\n";
+        string body = string.Join("\n", columns.Select(column =>
+        {
+            string nullable = column.Nullable ? " *(nullable)*" : "";
+            return $"- `{column.Name}`: `{column.Kind}`{nullable}";
+        }));
+        return header + body;
+    }
+
     private static string FormatTvfColumnHover(string alias, FunctionSignature signature, TableColumnEntry column)
     {
         string nullable = column.Nullable ? " *(nullable)*" : "";
@@ -1113,6 +1176,22 @@ public sealed class HoverProvider
                 return null;
 
             case FunctionCallExpression fnCall:
+                // `models.X(...)` — a detector-style array-of-struct return
+                // (`Array<Struct<…>>`) lives on the model entry, not the
+                // function list. Build the wrapped element shape so the
+                // caller's array-strip surfaces the element struct.
+                if (fnCall.SchemaName is not null
+                    && string.Equals(fnCall.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
+                    && manifest.Models is { } models)
+                {
+                    foreach (ModelEntry model in models)
+                    {
+                        if (!string.Equals(model.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;
+                        return BuildStructArrayKind(model.OutputStructFields, model.OutputIsArray) ?? model.OutputKind;
+                    }
+                    return null;
+                }
+
                 foreach (FunctionSignature sig in manifest.Functions)
                 {
                     if (!string.Equals(sig.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;
@@ -1121,6 +1200,12 @@ public sealed class HoverProvider
                     {
                         continue;
                     }
+                    // Prefer the reconstructed `Array<Struct<…>>` shape over the
+                    // raw ReturnType — a back-filled model signature stores its
+                    // named-type identity (`Array<LabeledDetection>`) in
+                    // ReturnType, which can't be cracked into fields downstream.
+                    string? structKind = BuildStructArrayKind(sig.OutputStructFields, sig.OutputIsArray);
+                    if (structKind is not null) return structKind;
                     if (!string.IsNullOrEmpty(sig.ReturnType)) return sig.ReturnType;
                 }
                 return null;
@@ -1128,6 +1213,27 @@ public sealed class HoverProvider
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Builds a canonical <c>Struct&lt;…&gt;</c> (or <c>Array&lt;Struct&lt;…&gt;&gt;</c>
+    /// when <paramref name="isArray"/>) annotation from a model / function's
+    /// declared output field shape, so downstream
+    /// <see cref="StructTypeAnnotation.TryParse"/> and array-strip can resolve
+    /// element fields. Returns <see langword="null"/> when no field shape is
+    /// declared — the caller falls back to the raw return-type string.
+    /// </summary>
+    private static string? BuildStructArrayKind(
+        IReadOnlyList<StructFieldSignature>? fields, bool isArray)
+    {
+        if (fields is not { Count: > 0 }) return null;
+        StructFieldShape[] shapes = new StructFieldShape[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            shapes[i] = new StructFieldShape(fields[i].Name, fields[i].Kind);
+        }
+        string structLabel = StructTypeAnnotation.Format(shapes);
+        return isArray ? $"Array<{structLabel}>" : structLabel;
     }
 
     /// <summary>

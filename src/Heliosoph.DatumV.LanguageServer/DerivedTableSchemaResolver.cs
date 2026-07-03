@@ -637,7 +637,8 @@ internal static class DerivedTableSchemaResolver
                 {
                     if (string.Equals(model.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
                     {
-                        return StructKindFromSignatures(model.OutputStructFields) ?? model.OutputKind;
+                        return StructKindFromSignatures(model.OutputStructFields, model.OutputIsArray)
+                            ?? model.OutputKind;
                     }
                 }
             }
@@ -647,7 +648,7 @@ internal static class DerivedTableSchemaResolver
                 if (string.Equals(f.SchemaName, call.SchemaName, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
+                    return StructKindFromSignatures(f.OutputStructFields, f.OutputIsArray) ?? f.ReturnType;
                 }
             }
             return null;
@@ -661,7 +662,7 @@ internal static class DerivedTableSchemaResolver
                 if (string.Equals(f.SchemaName, schema, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
+                    return StructKindFromSignatures(f.OutputStructFields, f.OutputIsArray) ?? f.ReturnType;
                 }
             }
         }
@@ -669,7 +670,7 @@ internal static class DerivedTableSchemaResolver
         {
             if (string.Equals(f.Name, call.FunctionName, StringComparison.OrdinalIgnoreCase))
             {
-                return StructKindFromSignatures(f.OutputStructFields) ?? f.ReturnType;
+                return StructKindFromSignatures(f.OutputStructFields, f.OutputIsArray) ?? f.ReturnType;
             }
         }
         return null;
@@ -682,7 +683,8 @@ internal static class DerivedTableSchemaResolver
     /// through <see cref="StructTypeAnnotation.TryParse"/>, so a column carrying
     /// it expands to its fields in hover and dot completion.
     /// </summary>
-    private static string? StructKindFromSignatures(IReadOnlyList<StructFieldSignature>? fields)
+    private static string? StructKindFromSignatures(
+        IReadOnlyList<StructFieldSignature>? fields, bool isArray)
     {
         if (fields is not { Count: > 0 }) return null;
         List<StructFieldShape> shapes = new(fields.Count);
@@ -690,7 +692,13 @@ internal static class DerivedTableSchemaResolver
         {
             shapes.Add(new StructFieldShape(field.Name, field.Kind));
         }
-        return StructTypeAnnotation.Format(shapes);
+        string structLabel = StructTypeAnnotation.Format(shapes);
+        // Array-of-struct returns (detectors like `models.yolox_s`) wrap the
+        // element shape so hover shows `Array<Struct<…>>` and `unnest(...)`
+        // can strip one array level back to the element struct. Without the
+        // wrapper the array-ness is lost and `unnest`'s element synthesis
+        // (which strips an `Array<…>` prefix) can't resolve the `value` column.
+        return isArray ? $"Array<{structLabel}>" : structLabel;
     }
 
     /// <summary>

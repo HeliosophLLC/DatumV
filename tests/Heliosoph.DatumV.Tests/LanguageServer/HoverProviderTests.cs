@@ -1412,6 +1412,107 @@ public sealed class HoverProviderTests : ServiceTestBase
         Assert.Contains("LabeledDetection", result.Contents);
     }
 
+    // The tests above model the detector as a FunctionSignature whose
+    // ReturnType string already carries `Array<…>`. A built-in detector,
+    // though, ships as a ModelEntry whose array-ness lives only in the
+    // OutputIsArray flag while OutputStructFields holds the element shape —
+    // exactly the case that previously left `c.value` unknown because the LS
+    // dropped the array wrapper. These two tests lock the ModelEntry path.
+
+    private static LanguageServerManifest DetectorModelEntryManifest() => new()
+    {
+        Tables = [new TableSchemaEntry { Name = "items", Columns =
+            [new TableColumnEntry { Name = "file", Kind = "Image", Nullable = false }] }],
+        Functions =
+        [
+            new FunctionSignature
+            {
+                SchemaName = "system",
+                Name = "unnest",
+                Parameters = [new ParameterSignature { Name = "array", Kind = "Any" }],
+                IsTableValued = true,
+            },
+        ],
+        Models =
+        [
+            new ModelEntry
+            {
+                Name = "yolox_s",
+                OutputKind = "Struct<bbox: Array<Float32>, label: String, score: Float32>",
+                OutputIsArray = true,
+                Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
+                OutputStructFields =
+                [
+                    new StructFieldSignature { Name = "bbox", Kind = "Array<Float32>" },
+                    new StructFieldSignature { Name = "label", Kind = "String" },
+                    new StructFieldSignature { Name = "score", Kind = "Float32" },
+                ],
+            },
+        ],
+        Keywords = [],
+    };
+
+    [Fact]
+    public void GetHover_UnnestValue_OfDetectorModelEntry_SynthesisesElementStruct()
+    {
+        // Direct form: `unnest(models.yolox_s(a.file)) c`. Hover on `c.value`
+        // must strip the (flag-derived) Array<…> wrapper back to the element
+        // struct rather than coming back unknown.
+        HoverProvider provider = new(DetectorModelEntryManifest());
+
+        const string sql =
+            "SELECT c.value FROM items a CROSS JOIN unnest(models.yolox_s(a.file)) c";
+        int offset = sql.IndexOf("c.value", StringComparison.Ordinal) + "c.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("Struct<bbox", result.Contents);
+        Assert.Contains("label: String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StructFieldChain_ThroughUnnestOfDetectorLetBinding_ResolvesField()
+    {
+        // The user's reported shape: `LET classes = models.yolox_s(a.file)`
+        // then `CROSS JOIN unnest(classes) c`, hovering `c.value.label`.
+        // Before the OutputIsArray fix the LET kind lost its array wrapper,
+        // so the unnest element synthesis failed and the field was unknown.
+        HoverProvider provider = new(DetectorModelEntryManifest());
+
+        const string sql =
+            "SELECT LET classes = models.yolox_s(a.file), c.value.label "
+            + "FROM items a CROSS JOIN unnest(classes) c";
+        int offset = sql.IndexOf("c.value.label", StringComparison.Ordinal) + "c.value.".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("c.value.label", result.Contents);
+        Assert.Contains("String", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_TvfSourceAlias_OfUnnestDetector_ShowsSynthesizedValueColumn()
+    {
+        // Hover on the alias token `c` itself (not `c.value`). Previously this
+        // fell through to nothing because TVF-source aliases weren't given the
+        // schema-card treatment CTE / subquery aliases get. It should now list
+        // the synthesized `value` column carrying the element struct.
+        HoverProvider provider = new(DetectorModelEntryManifest());
+
+        const string sql =
+            "SELECT LET classes = models.yolox_s(a.file), c.value "
+            + "FROM items a CROSS JOIN unnest(classes) c";
+        // Target the alias in the FROM clause: `unnest(classes) c`.
+        int offset = sql.IndexOf("unnest(classes) c", StringComparison.Ordinal)
+            + "unnest(classes) ".Length;
+        HoverResult? result = provider.GetHover(sql, offset);
+
+        Assert.NotNull(result);
+        Assert.Contains("table-valued", result.Contents);
+        Assert.Contains("value", result.Contents);
+        Assert.Contains("Struct<bbox", result.Contents);
+    }
+
     // ───────────────────── Markdown-safe kind rendering ─────────────────────
 
     [Fact]

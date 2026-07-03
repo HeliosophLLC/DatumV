@@ -1063,22 +1063,22 @@ public sealed class CompletionProvider
 
             case FunctionCallExpression fnCall:
                 // `models.X(...)` — registered models live in their own list,
-                // not the function list. The model's OutputKind label already
-                // carries any `Array<…>` wrapper, so an UNNEST over a
-                // detector's array-of-struct output (e.g.
-                // `UNNEST(models.rtdetr_r18(file)) AS d`) strips back to the
-                // element struct and `d.value.` then completes its fields.
+                // not the function list. Reconstruct the element shape from the
+                // model's field list + array bit rather than trusting
+                // OutputKind: a detector's OutputKind is either a bare
+                // `Struct<…>` (array-ness dropped) or a named `Array<Label>`
+                // (unparseable), neither of which lets the UNNEST array-strip
+                // reach the element struct. `BuildStructArrayKind` yields
+                // `Array<Struct<…>>`, so `UNNEST(models.rtdetr_r18(file)) AS d`
+                // strips to the element struct and `d.value.` completes fields.
                 if (fnCall.SchemaName is not null
                     && string.Equals(fnCall.SchemaName, "models", StringComparison.OrdinalIgnoreCase)
                     && _manifest.Models is { } modelsInScope)
                 {
                     foreach (ModelEntry model in modelsInScope)
                     {
-                        if (string.Equals(model.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)
-                            && !string.IsNullOrEmpty(model.OutputKind))
-                        {
-                            return model.OutputKind;
-                        }
+                        if (!string.Equals(model.Name, fnCall.FunctionName, StringComparison.OrdinalIgnoreCase)) continue;
+                        return BuildStructArrayKind(model.OutputStructFields, model.OutputIsArray) ?? model.OutputKind;
                     }
                 }
                 foreach (FunctionSignature sig in _manifest.Functions)
@@ -1089,6 +1089,8 @@ public sealed class CompletionProvider
                     {
                         continue;
                     }
+                    string? structKind = BuildStructArrayKind(sig.OutputStructFields, sig.OutputIsArray);
+                    if (structKind is not null) return structKind;
                     if (!string.IsNullOrEmpty(sig.ReturnType)) return sig.ReturnType;
                 }
                 return null;
@@ -1096,6 +1098,26 @@ public sealed class CompletionProvider
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Builds a canonical <c>Struct&lt;…&gt;</c> (or <c>Array&lt;Struct&lt;…&gt;&gt;</c>
+    /// when <paramref name="isArray"/>) annotation from a model / function's
+    /// declared output field shape, so the UNNEST array-strip and dot
+    /// completion can resolve the element struct's fields. Returns
+    /// <see langword="null"/> when no field shape is declared.
+    /// </summary>
+    private static string? BuildStructArrayKind(
+        IReadOnlyList<StructFieldSignature>? fields, bool isArray)
+    {
+        if (fields is not { Count: > 0 }) return null;
+        StructFieldShape[] shapes = new StructFieldShape[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            shapes[i] = new StructFieldShape(fields[i].Name, fields[i].Kind);
+        }
+        string structLabel = StructTypeAnnotation.Format(shapes);
+        return isArray ? $"Array<{structLabel}>" : structLabel;
     }
 
     /// <summary>
