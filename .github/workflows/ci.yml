@@ -94,6 +94,12 @@ jobs:
       - name: Commit regenerated lock files (dependabot only)
         if: github.actor == 'dependabot[bot]'
         run: |
+          # The workspace is a host-mounted volume owned by the runner's host
+          # uid, but this container step runs as root, so git's ownership guard
+          # refuses the repo ("fatal: not in a git directory"). checkout@ marks
+          # it safe under /github/home/.gitconfig, which this run step's HOME
+          # doesn't resolve to — so re-assert it here before any git command.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           if git diff --quiet -- '**/packages.lock.json'; then
             echo "Lock files already in sync; nothing to commit."
           else
