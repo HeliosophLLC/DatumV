@@ -744,10 +744,16 @@ public sealed class InMemoryTableProvider : ITableProvider
         // Each typed array is extracted to a stable CLR array (decoupled from the
         // source arena/sidecar) so MaterializeCell can round-trip it through its
         // typed-array branches. Kept symmetric with MaterializeCell's reverse
-        // mapping — every element kind handled there is handled here. Byte arrays
-        // use the dedicated AsUInt8Array (shape-prefix aware); String uses the
-        // sidecar-aware AsStringArray; the rest reinterpret their element bytes
-        // via the generic AsArraySpan<T>.
+        // mapping — every element kind handled there is handled here.
+        //   • Byte arrays use the dedicated AsUInt8Array (shape-prefix aware).
+        //   • String uses the sidecar-aware AsStringArray.
+        //   • Blittable kinds (numeric / Uuid / Decimal / Int128) reinterpret
+        //     their element bytes via the generic AsArraySpan<T>.
+        //   • Temporal kinds store a fixed int/long representation per element
+        //     (Date = int32 day-number; Time/Timestamp/TimestampTz/Duration =
+        //     int64 ticks), so they are read as that primitive and mapped to the
+        //     matching CLR struct array — the CLR array type is what lets
+        //     MaterializeCell tell a Timestamp[] apart from a plain Int64[].
         if (value.IsArray)
         {
             return value.Kind switch
@@ -761,8 +767,17 @@ public sealed class InMemoryTableProvider : ITableProvider
                 DataKind.UInt16 => value.AsArraySpan<ushort>(arena, registry).ToArray(),
                 DataKind.UInt32 => value.AsArraySpan<uint>(arena, registry).ToArray(),
                 DataKind.UInt64 => value.AsArraySpan<ulong>(arena, registry).ToArray(),
+                DataKind.Int128 => value.AsArraySpan<Int128>(arena, registry).ToArray(),
+                DataKind.UInt128 => value.AsArraySpan<UInt128>(arena, registry).ToArray(),
                 DataKind.Float32 => value.AsArraySpan<float>(arena, registry).ToArray(),
                 DataKind.Float64 => value.AsArraySpan<double>(arena, registry).ToArray(),
+                DataKind.Decimal => value.AsArraySpan<decimal>(arena, registry).ToArray(),
+                DataKind.Uuid => value.AsArraySpan<Guid>(arena, registry).ToArray(),
+                DataKind.Date => ReadDateArray(value, arena, registry),
+                DataKind.Time => ReadTimeArray(value, arena, registry),
+                DataKind.Timestamp => ReadTimestampArray(value, arena, registry),
+                DataKind.TimestampTz => ReadTimestampTzArray(value, arena, registry),
+                DataKind.Duration => ReadDurationArray(value, arena, registry),
                 DataKind.String => value.AsStringArray(arena, registry),
                 _ => throw new NotSupportedException(
                     $"InMemoryTableProvider.AppendRowsAsync does not yet support arrays of DataKind.{value.Kind}. " +
@@ -802,6 +817,96 @@ public sealed class InMemoryTableProvider : ITableProvider
                 $"InMemoryTableProvider.AppendRowsAsync does not yet support DataKind.{value.Kind}" +
                 (value.IsArray ? " (array)" : "") + ". Extend ConvertDataValueToCell with a stable extraction path."),
         };
+    }
+
+    // ─────────────── Temporal array readers (forward path) ────────────────
+    // Each temporal array stores a primitive per element; map it to the CLR
+    // struct array whose runtime type MaterializeCell dispatches on. The
+    // encodings mirror the scalar factories/accessors (FromDate/AsDate, etc.).
+
+    /// <summary>Date array: int32 day-number per element → <see cref="DateOnly"/>[].</summary>
+    private static DateOnly[] ReadDateArray(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        ReadOnlySpan<int> days = value.AsArraySpan<int>(arena, registry);
+        DateOnly[] result = new DateOnly[days.Length];
+        for (int i = 0; i < days.Length; i++) result[i] = DateOnly.FromDayNumber(days[i]);
+        return result;
+    }
+
+    /// <summary>Time array: int64 ticks per element → <see cref="TimeOnly"/>[].</summary>
+    private static TimeOnly[] ReadTimeArray(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        ReadOnlySpan<long> ticks = value.AsArraySpan<long>(arena, registry);
+        TimeOnly[] result = new TimeOnly[ticks.Length];
+        for (int i = 0; i < ticks.Length; i++) result[i] = new TimeOnly(ticks[i]);
+        return result;
+    }
+
+    /// <summary>Timestamp array: int64 naive ticks per element → <see cref="DateTime"/>[] (Unspecified).</summary>
+    private static DateTime[] ReadTimestampArray(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        ReadOnlySpan<long> ticks = value.AsArraySpan<long>(arena, registry);
+        DateTime[] result = new DateTime[ticks.Length];
+        for (int i = 0; i < ticks.Length; i++) result[i] = new DateTime(ticks[i], DateTimeKind.Unspecified);
+        return result;
+    }
+
+    /// <summary>TimestampTz array: int64 UTC ticks per element → <see cref="DateTimeOffset"/>[] (offset zero).</summary>
+    private static DateTimeOffset[] ReadTimestampTzArray(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        ReadOnlySpan<long> ticks = value.AsArraySpan<long>(arena, registry);
+        DateTimeOffset[] result = new DateTimeOffset[ticks.Length];
+        for (int i = 0; i < ticks.Length; i++) result[i] = new DateTimeOffset(ticks[i], TimeSpan.Zero);
+        return result;
+    }
+
+    /// <summary>Duration array: int64 ticks per element → <see cref="TimeSpan"/>[].</summary>
+    private static TimeSpan[] ReadDurationArray(DataValue value, Arena arena, SidecarRegistry? registry)
+    {
+        ReadOnlySpan<long> ticks = value.AsArraySpan<long>(arena, registry);
+        TimeSpan[] result = new TimeSpan[ticks.Length];
+        for (int i = 0; i < ticks.Length; i++) result[i] = new TimeSpan(ticks[i]);
+        return result;
+    }
+
+    // ─────────────── Temporal array encoders (reverse path) ───────────────
+    // Re-encode a stored CLR temporal array to the primitive representation the
+    // matching scalar factory uses, so MaterializeCell can hand it to
+    // FromArenaArray. Inverse of the ReadXxxArray readers above.
+
+    private static int[] ToDayNumbers(DateOnly[] dates)
+    {
+        int[] result = new int[dates.Length];
+        for (int i = 0; i < dates.Length; i++) result[i] = dates[i].DayNumber;
+        return result;
+    }
+
+    private static long[] ToTicks(TimeOnly[] times)
+    {
+        long[] result = new long[times.Length];
+        for (int i = 0; i < times.Length; i++) result[i] = times[i].Ticks;
+        return result;
+    }
+
+    private static long[] ToTicks(DateTime[] timestamps)
+    {
+        long[] result = new long[timestamps.Length];
+        for (int i = 0; i < timestamps.Length; i++) result[i] = timestamps[i].Ticks;
+        return result;
+    }
+
+    private static long[] ToUtcTicks(DateTimeOffset[] timestampTzs)
+    {
+        long[] result = new long[timestampTzs.Length];
+        for (int i = 0; i < timestampTzs.Length; i++) result[i] = timestampTzs[i].UtcTicks;
+        return result;
+    }
+
+    private static long[] ToTicks(TimeSpan[] durations)
+    {
+        long[] result = new long[durations.Length];
+        for (int i = 0; i < durations.Length; i++) result[i] = durations[i].Ticks;
+        return result;
     }
 
     /// <summary>
@@ -1042,6 +1147,18 @@ public sealed class InMemoryTableProvider : ITableProvider
             float[] floats => DataValue.FromArenaArray(floats, DataKind.Float32, arena),
             double[] doubles => DataValue.FromArenaArray(doubles, DataKind.Float64, arena),
             bool[] bools => DataValue.FromArenaArray(bools, DataKind.Boolean, arena),
+            // Blittable 16-byte kinds: the element bytes round-trip verbatim.
+            Int128[] i128s => DataValue.FromArenaArray(i128s, DataKind.Int128, arena),
+            UInt128[] u128s => DataValue.FromArenaArray(u128s, DataKind.UInt128, arena),
+            decimal[] decimals => DataValue.FromArenaArray(decimals, DataKind.Decimal, arena),
+            Guid[] guids => DataValue.FromArenaArray(guids, DataKind.Uuid, arena),
+            // Temporal arrays re-encode to the fixed int/long representation the
+            // matching scalar factory uses (mirrors ConvertDataValueToCell's readers).
+            DateOnly[] dates => DataValue.FromArenaArray(ToDayNumbers(dates), DataKind.Date, arena),
+            TimeOnly[] times => DataValue.FromArenaArray(ToTicks(times), DataKind.Time, arena),
+            DateTime[] timestamps => DataValue.FromArenaArray(ToTicks(timestamps), DataKind.Timestamp, arena),
+            DateTimeOffset[] timestampTzs => DataValue.FromArenaArray(ToUtcTicks(timestampTzs), DataKind.TimestampTz, arena),
+            TimeSpan[] durations => DataValue.FromArenaArray(ToTicks(durations), DataKind.Duration, arena),
             string[] strings => DataValue.FromStringArray(strings, arena),
             _ => throw new ArgumentException(
                 $"InMemoryTableProvider cannot materialize cell of type {cell.GetType().FullName}. " +
