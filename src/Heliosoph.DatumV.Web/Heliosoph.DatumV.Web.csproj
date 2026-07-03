@@ -207,9 +207,19 @@
 
   <!--
     Frontend bundle: ClientApp/src/* is built by Vite into wwwroot/.
-    Two staged targets so npm install only runs when package.json /
+    Two staged targets so the install only runs when package.json /
     lockfile changes. Set SkipClientApp=true to opt out (e.g. when
     iterating with `npm run dev` from the ClientApp/ directory).
+
+    `npm ci` (not `npm install`) is deliberate: it installs strictly from
+    package-lock.json and never WRITES to it. `npm install` on Windows
+    silently prunes the Linux-only optional deps (the @emnapi wasm-fallback
+    nodes pulled in by Rolldown/Tailwind) out of the lock, which then breaks
+    `npm ci` on the Linux release runner. Building through `npm ci` keeps the
+    committed lock stable across every dev's platform. Tradeoff: adding a dep
+    now means running `npm install` in ClientApp/ explicitly (and, per repo
+    convention, regenerating the lock on Linux) rather than letting a stray
+    build mutate it.
   -->
   <PropertyGroup>
     <SkipClientApp Condition="'$(SkipClientApp)' == ''">false</SkipClientApp>
@@ -219,7 +229,7 @@
           Condition="'$(SkipClientApp)' != 'true'"
           Inputs="ClientApp/package.json;ClientApp/package-lock.json"
           Outputs="ClientApp/node_modules/.install-stamp">
-    <Exec Command="npm install" WorkingDirectory="ClientApp" />
+    <Exec Command="npm ci" WorkingDirectory="ClientApp" />
     <Touch Files="ClientApp/node_modules/.install-stamp" AlwaysCreate="true" />
   </Target>
 
