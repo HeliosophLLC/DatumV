@@ -350,6 +350,24 @@ public sealed class PcaFitAggregateFunctionTests : ServiceTestBase, IAsyncLifeti
         AssertComponentEquals([1f, 0f], components.AsSpan(0, 2));
     }
 
+    /// <summary>
+    /// Registration-only <see cref="Heliosoph.DatumV.Inference.IInferenceDispatcher"/>:
+    /// satisfies the CREATE MODEL wiring requirement for SQL-bodied models whose
+    /// bodies never call <c>infer()</c>.
+    /// </summary>
+    private sealed class NoInferenceDispatcher : Heliosoph.DatumV.Inference.IInferenceDispatcher
+    {
+        public IReadOnlyList<Heliosoph.DatumV.Inference.IInferenceBackend> Backends =>
+            Array.Empty<Heliosoph.DatumV.Inference.IInferenceBackend>();
+
+        public ValueTask<IReadOnlyDictionary<string, Heliosoph.DatumV.Inference.IModelSession>> LoadBundleAsync(
+            Heliosoph.DatumV.Inference.BundleManifest bundle,
+            Heliosoph.DatumV.Inference.InferencePreferences preferences,
+            CancellationToken cancellationToken)
+            => throw new InvalidOperationException(
+                "NoInferenceDispatcher: test model bodies must not call infer().");
+    }
+
     // ───────────────────────── end-to-end SQL ─────────────────────────
 
     [Fact]
@@ -380,6 +398,55 @@ public sealed class PcaFitAggregateFunctionTests : ServiceTestBase, IAsyncLifeti
         AssertComponentEquals([0f, 0f], mean);
         Assert.Equal(0.9f, ratio[0], 3);
         Assert.Equal(0.1f, ratio[1], 3);
+    }
+
+    [Fact]
+    public async Task Sql_WindowOverCtasArrayColumn()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE src (id Int32)");
+        catalog.Plan("INSERT INTO src VALUES (1), (2), (3), (4)");
+        // The embeddings-pipeline shape: the vector column comes from CTAS over
+        // a function result, not from a DDL-typed Array<Float32> column.
+        catalog.Plan("CREATE TABLE emb_t AS " +
+            "SELECT id, vec(cast(id as Float32), cast(id * 2 as Float32)) AS emb FROM src");
+
+        Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT m IS NOT NULL AS ok FROM (SELECT pca_fit_agg(emb, 1) OVER () AS m FROM emb_t) s",
+            catalog, store: arena);
+
+        Assert.Equal(4, rows.Count);
+        Assert.All(rows, r => Assert.True(r["ok"].AsBoolean()));
+    }
+
+    [Fact]
+    public async Task Sql_WindowOverModelCtasColumn()
+    {
+        // The full embeddings-pipeline provenance: the vector column comes from
+        // CTAS over a declared model's output (SQL-bodied stand-in for a real
+        // embedder), then feeds a window-form pca_fit_agg.
+        string modelFile = Path.Combine(_tempDir, "fake-embedder.onnx");
+        File.WriteAllBytes(modelFile, [0]);
+
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.InferenceDispatcher = new NoInferenceDispatcher();
+        catalog.Plan(
+            $"CREATE MODEL embed2(t String) RETURNS Float32[] USING 'file://{modelFile}' " +
+            "AS BEGIN RETURN [cast(length(t) as Float32), cast(1.0 as Float32)] END");
+        catalog.Plan("CREATE TABLE src (t String)");
+        catalog.Plan("INSERT INTO src VALUES ('a'), ('bb'), ('ccc'), ('dddd')");
+        catalog.Plan("CREATE TABLE emb_t AS SELECT t, models.embed2(t) AS emb FROM src");
+
+        Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT m IS NOT NULL AS ok FROM (SELECT pca_fit_agg(emb, 2) OVER () AS m FROM emb_t) s",
+            catalog, store: arena);
+
+        Assert.Equal(4, rows.Count);
+        Assert.All(rows, r => Assert.True(r["ok"].AsBoolean()));
     }
 
     [Fact]
