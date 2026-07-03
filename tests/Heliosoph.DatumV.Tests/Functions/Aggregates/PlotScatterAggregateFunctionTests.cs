@@ -208,6 +208,100 @@ public sealed class PlotScatterAggregateFunctionTests : ServiceTestBase, IAsyncL
         AssertPixel(bitmap, 49, 49, P0R, P0G, P0B, tol: 8);
     }
 
+    // ───────────────────────── glow + palette ─────────────────────────
+
+    private static DataValue BuildStyleOptions(
+        Arena arena, TypeRegistry types, int width, int height, float pointSize,
+        float? glow = null, (byte R, byte G, byte B)[]? palette = null)
+    {
+        List<StructFieldDescriptor> descriptors = [];
+        List<DataValue> fields = [];
+        int int32Type = types.InternScalarType(DataKind.Int32);
+        int floatType = types.InternScalarType(DataKind.Float32);
+        descriptors.Add(new StructFieldDescriptor("width", int32Type));
+        fields.Add(DataValue.FromInt32(width));
+        descriptors.Add(new StructFieldDescriptor("height", int32Type));
+        fields.Add(DataValue.FromInt32(height));
+        descriptors.Add(new StructFieldDescriptor("point_size", floatType));
+        fields.Add(DataValue.FromFloat32(pointSize));
+        if (glow is { } g)
+        {
+            descriptors.Add(new StructFieldDescriptor("glow", floatType));
+            fields.Add(DataValue.FromFloat32(g));
+        }
+        if (palette is { } p)
+        {
+            uint[] packed = new uint[p.Length];
+            for (int i = 0; i < p.Length; i++)
+            {
+                packed[i] = p[i].R | ((uint)p[i].G << 8) | ((uint)p[i].B << 16) | (0xFFu << 24);
+            }
+            descriptors.Add(new StructFieldDescriptor("palette", types.InternArrayType(DataKind.Color)));
+            fields.Add(DataValue.FromArenaArray<uint>(packed, DataKind.Color, arena));
+        }
+        ushort typeId = (ushort)types.InternStructType(descriptors.ToArray());
+        return DataValue.FromStruct(fields.ToArray(), arena, typeId);
+    }
+
+    [Fact]
+    public async Task Palette_Option_OverridesBuiltInColors()
+    {
+        var (arena, types, frame) = CreateContext();
+        IAggregateAccumulator acc = new PlotScatterAggregateFunction().CreateAccumulator();
+        DataValue options = BuildStyleOptions(arena, types, width: 100, height: 100, pointSize: 4f,
+            palette: [((byte)255, (byte)0, (byte)0), ((byte)0, (byte)255, (byte)0)]);
+
+        acc.Accumulate([DataValue.FromFloat32(0f), DataValue.FromFloat32(0f), DataValue.FromInt32(0), options], frame);
+        acc.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1f), DataValue.FromInt32(1), options], frame);
+
+        using SKBitmap bitmap = DecodeResult(await acc.ResultAsync(frame), arena);
+        AssertPixel(bitmap, 4, 94, 255, 0, 0);
+        AssertPixel(bitmap, 94, 4, 0, 255, 0);
+    }
+
+    [Fact]
+    public async Task Glow_BrightensCoreAndExtendsHalo()
+    {
+        var (arena, types, frame) = CreateContext();
+        PlotScatterAggregateFunction fn = new();
+
+        IAggregateAccumulator plain = fn.CreateAccumulator();
+        DataValue plainOptions = BuildStyleOptions(arena, types, width: 100, height: 100, pointSize: 4f);
+        plain.Accumulate([DataValue.FromFloat32(0f), DataValue.FromFloat32(0f), plainOptions], frame);
+        plain.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1f), plainOptions], frame);
+
+        IAggregateAccumulator glowing = fn.CreateAccumulator();
+        DataValue glowOptions = BuildStyleOptions(arena, types, width: 100, height: 100, pointSize: 4f, glow: 3f);
+        glowing.Accumulate([DataValue.FromFloat32(0f), DataValue.FromFloat32(0f), glowOptions], frame);
+        glowing.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1f), glowOptions], frame);
+
+        using SKBitmap plainBitmap = DecodeResult(await plain.ResultAsync(frame), arena);
+        using SKBitmap glowBitmap = DecodeResult(await glowing.ResultAsync(frame), arena);
+
+        // Core pixel: glow lightens the point center toward white.
+        SKColor plainCore = plainBitmap.GetPixel(4, 94);
+        SKColor glowCore = glowBitmap.GetPixel(4, 94);
+        Assert.True(glowCore.Red > plainCore.Red && glowCore.Green > plainCore.Green,
+            $"glow core #{glowCore} should be brighter than plain core #{plainCore}");
+
+        // Halo pixel (~8 px out — beyond the 4 px core, inside the 12 px halo):
+        // visible with glow, fully transparent without.
+        Assert.Equal(0, plainBitmap.GetPixel(12, 94).Alpha);
+        Assert.True(glowBitmap.GetPixel(12, 94).Alpha > 0, "halo should extend beyond the core");
+    }
+
+    [Fact]
+    public void Palette_EmptyArray_Throws()
+    {
+        var (arena, types, frame) = CreateContext();
+        IAggregateAccumulator acc = new PlotScatterAggregateFunction().CreateAccumulator();
+        DataValue options = BuildStyleOptions(arena, types, width: 100, height: 100, pointSize: 4f,
+            palette: []);
+
+        Assert.Throws<FunctionArgumentException>(
+            () => acc.Accumulate([DataValue.FromFloat32(0f), DataValue.FromFloat32(0f), options], frame));
+    }
+
     // ───────────────────────── null / error handling ─────────────────────────
 
     [Fact]
@@ -306,6 +400,36 @@ public sealed class PlotScatterAggregateFunctionTests : ServiceTestBase, IAsyncL
     }
 
     // ───────────────────────── end-to-end SQL ─────────────────────────
+
+    [Fact]
+    public async Task Sql_PaletteAndGlow_ViaStructLiteral()
+    {
+        // The documented syntax end-to-end: the palette arrives as a SQL array
+        // literal of color_hex() values inside the options struct literal —
+        // exercising Array<Color> materialization, not a pre-packed test array.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE pts (x Float32, y Float32, c Int32)");
+        catalog.Plan("INSERT INTO pts VALUES " +
+            "(cast(0.0 as Float32), cast(0.0 as Float32), 0)," +
+            "(cast(1.0 as Float32), cast(1.0 as Float32), 1)");
+
+        Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT plot_scatter_agg(x, y, c, " +
+            "  {width: 100, height: 100, point_size: 4.0, glow: 3.0, " +
+            "   palette: [color_hex('#ff0000'), color_hex('#00ff00')]}) AS img FROM pts",
+            catalog, store: arena);
+
+        using SKBitmap bitmap = DecodeResult(rows[0]["img"], arena);
+        // Glow lifts the core toward white, so assert dominant channel only.
+        SKColor first = bitmap.GetPixel(4, 94);
+        SKColor second = bitmap.GetPixel(94, 4);
+        Assert.True(first.Red > 200 && first.Red > first.Blue,
+            $"class-0 core should be red-dominant, got #{first}");
+        Assert.True(second.Green > 200 && second.Green > second.Blue,
+            $"class-1 core should be green-dominant, got #{second}");
+    }
 
     [Fact]
     public async Task Sql_FullEmbeddingsPipeline_PcaKmeansScatter()
