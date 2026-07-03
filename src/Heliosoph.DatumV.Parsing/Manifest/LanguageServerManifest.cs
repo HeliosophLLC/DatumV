@@ -320,6 +320,19 @@ public sealed class ModelEntry
     public IReadOnlyList<StructFieldSignature>? OutputStructFields { get; init; }
 
     /// <summary>
+    /// True when the model produces one <c>Array&lt;T&gt;</c> per row
+    /// whose element kind is <see cref="OutputKind"/> / <see cref="OutputStructFields"/>
+    /// — the shape a detector like <c>models.yolox_s</c> returns
+    /// (<c>Array&lt;Struct&lt;bbox, label, score&gt;&gt;</c>). The language
+    /// server needs this bit because <see cref="OutputStructFields"/> alone
+    /// can't tell an array-of-struct return from a scalar struct return, and
+    /// the distinction drives whether <c>unnest(model_call)</c> resolves its
+    /// <c>value</c> column to the element struct. <see langword="false"/> for
+    /// scalar returns (the common case).
+    /// </summary>
+    public bool OutputIsArray { get; init; }
+
+    /// <summary>
     /// TaskTypeRegistry contract names the owning catalog entry declares
     /// it implements (e.g. <c>"TextEmbedder"</c>, <c>"DepthEstimatorMetric"</c>).
     /// Sourced from the catalog vocabulary, so engine-only builtins without
@@ -461,6 +474,18 @@ public sealed class FunctionSignature
     /// <see langword="null"/> for non-struct returns.
     /// </summary>
     public IReadOnlyList<StructFieldSignature>? OutputStructFields { get; init; }
+
+    /// <summary>
+    /// True when this function returns one <c>Array&lt;T&gt;</c> per
+    /// row whose element shape is described by <see cref="OutputStructFields"/>.
+    /// Mirrors <see cref="ModelEntry.OutputIsArray"/> for the scalar-function
+    /// view of an array-of-struct-returning model (SQL-defined models are
+    /// dual-registered here). Lets the language server expand
+    /// <c>unnest(fn(...))</c> to the element struct. <see langword="false"/>
+    /// for scalar returns; array-returning non-struct functions already
+    /// encode the array in <see cref="ReturnType"/> (<c>Array&lt;Float32&gt;</c>).
+    /// </summary>
+    public bool OutputIsArray { get; init; }
 
     /// <summary>Whether this is an aggregate function (used in SELECT with GROUP BY).</summary>
     public bool IsAggregate { get; init; }
