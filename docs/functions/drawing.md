@@ -442,6 +442,31 @@ draw_text('HELLO', point2d(8, 8), 14, color(255, 200, 50), 'left', 'top')
 -- 14pt text with the top-left of the rendered glyphs at (8, 8)
 ```
 
+### draw_text_block
+
+`draw_text_block(text, at Point2D, size, fill Color, max_width)` → Drawing
+`draw_text_block(text, at Point2D, size, fill Color, max_width, line_height)` → Drawing
+`draw_text_block(text, at Point2D, size, fill Color, max_width, line_height, font_family String)` → Drawing
+
+Word-wraps `text` into lines no wider than `max_width` pixels and lays them out top-to-bottom. The anchor is the **block's top-left** — unlike `draw_text`'s baseline anchor — and each line advances by `size * line_height` (default 1.3). Wrapping is greedy word wrap measured with the same font the renderer uses; explicit `\n` characters force breaks (blank lines are preserved), and a single word wider than `max_width` hard-breaks at the character level. Null arguments return a null Drawing; `size`, `max_width`, and `line_height` must be positive.
+
+```sql
+-- A terminal-style card: measure the block, size the backing panel, draw both
+SELECT render(draw_group([
+    draw_rect(point2d(0, 0), point2d(m['width'] + 24, m['height'] + 24), color_hex('#0d1117')),
+    draw_text_block(txt, point2d(12, 12), 14, color_hex('#e2e8f0'), 400, 1.4, 'monospace')
+  ]), point2d(m['width'] + 24, m['height'] + 24)) AS card
+FROM (SELECT txt, text_measure(txt, 14, 400, 1.4, 'monospace') AS m FROM prompts) s
+```
+
+### text_measure
+
+`text_measure(text, size, max_width)` → Struct
+`text_measure(text, size, max_width, line_height)` → Struct
+`text_measure(text, size, max_width, line_height, font_family String)` → Struct
+
+Measures the block `draw_text_block` would draw for the same arguments, returning `Struct{width Float32, height Float32, lines Int32}` — the widest wrapped line, the total block height (`lines * size * line_height`), and the line count. Runs the identical wrap engine as `draw_text_block`, so a card sized from this struct always fits the drawn text.
+
 ### draw_image
 
 `draw_image(image Image, at Point2D)` → Drawing — stamps an Image at the supplied position, anchored at the top-left.
