@@ -48,6 +48,19 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     private CountingBlobSink? _countingSidecar;
     private bool _ownsSidecar;
 
+    // Foreign-sidecar import (CTAS / INSERT … SELECT). Incoming batches can
+    // carry sidecar-backed DataValues whose (offset, length) reference a
+    // DIFFERENT table's .datum-blob — the page encoder's sidecar pass-through
+    // persists those coordinates verbatim, which only mean anything against
+    // THIS table's own blob file. When a registry is configured, WriteRowBatch
+    // resolves each sidecar value's store id: values backed by _ownSidecarSource
+    // keep the zero-copy pass-through; everything else has its payload bytes
+    // copied into _sidecar and the value re-pointed before encoding. Writers
+    // fed only values they own (file ingest, rewrites) leave this null and
+    // skip the check entirely.
+    private SidecarRegistry? _importRegistry;
+    private IBlobSource? _ownSidecarSource;
+
     private ColumnDescriptorV2[]? _columns;
     private IPageEncoderV2[]? _encoders;
     private List<PageDescriptorV2>[]? _pageDirectory;
@@ -397,6 +410,14 @@ public sealed partial class DatumFileWriterV2 : IDisposable
                     ? DataValue.Null(_columns[colIndex].Kind)
                     : row[batchColIndex++];
 
+                // Values scanned out of another table's sidecar must have
+                // their payload bytes copied into this writer's own sidecar
+                // before the encoder persists the (offset, length) pair.
+                if (value.IsInSidecar && !value.IsNull && _importRegistry is not null)
+                {
+                    value = ImportSidecarValue(value);
+                }
+
                 // Capture the homogeneous shape for non-array Struct columns.
                 // Array<Struct> columns carry per-element TypeIds in slot
                 // bytes — the encoder's allocator path picks those up; no
@@ -428,6 +449,108 @@ public sealed partial class DatumFileWriterV2 : IDisposable
         // already produced them — making `ls -l` and ingest progress
         // invisible to the user, and losing all in-flight data on cancel.
         _stream.Flush();
+    }
+
+    /// <summary>
+    /// Enables foreign-sidecar import for this writer: <paramref name="registry"/>
+    /// resolves incoming sidecar-backed values' store ids, and
+    /// <paramref name="ownSidecar"/> identifies this table's own blob source
+    /// so same-file values keep the zero-copy pass-through. Call before the
+    /// first <see cref="WriteRowBatch"/> when batches may carry values
+    /// scanned from other tables (CTAS, INSERT … SELECT).
+    /// </summary>
+    public void ConfigureSidecarImport(SidecarRegistry registry, IBlobSource? ownSidecar)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        _importRegistry = registry;
+        _ownSidecarSource = ownSidecar;
+    }
+
+    /// <summary>
+    /// Relocates a sidecar-backed value into this writer's own sidecar when
+    /// its store id resolves to a different table's blob source. Values
+    /// already backed by <see cref="_ownSidecarSource"/> return unchanged —
+    /// the blob file only ever grows, so their offsets stay valid.
+    /// </summary>
+    private DataValue ImportSidecarValue(DataValue value)
+    {
+        IBlobSource? source = _importRegistry!.Resolve(value.SidecarStoreId);
+        if (ReferenceEquals(source, _ownSidecarSource))
+        {
+            return value;
+        }
+        if (source is null)
+        {
+            throw new InvalidOperationException(
+                $"Sidecar-backed value (kind={value.Kind}) carries store id {value.SidecarStoreId} " +
+                "with no registered blob source; cannot copy its payload into the target sidecar.");
+        }
+        if (_sidecar is null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot import a sidecar-backed value (kind={value.Kind}): this writer has no sidecar attached.");
+        }
+
+        if (IsReferenceElementArray(value))
+        {
+            return ImportReferenceArray(value, source);
+        }
+
+        // Scalars (String / Image / Json / …), fixed-width typed arrays, and
+        // scalar structs: the payload is one contiguous, self-contained byte
+        // run (multi-dim shape prefixes ride inside it), so a raw copy
+        // relocates it.
+        ReadOnlySpan<byte> bytes = source.Read(value.SidecarOffset, value.SidecarLength);
+        (long offset, long length) = _sidecar.Append(bytes);
+        return value.WithSidecarLocation(offset, length, storeId: 0);
+    }
+
+    /// <summary>
+    /// Element-wise import for sidecar-backed reference-type arrays. The
+    /// slot block references per-element byte runs in the source sidecar —
+    /// a raw block copy would leave those element pointers dangling — so
+    /// each element's bytes are copied first, then the block is rebuilt
+    /// (preserving any multi-dim shape prefix) against the new offsets.
+    /// </summary>
+    private DataValue ImportReferenceArray(DataValue value, IBlobSource source)
+    {
+        if (value.Kind == DataKind.Struct)
+        {
+            // Array<Struct> slot blocks embed the source file's on-disk type
+            // ids, which have no meaning in this file's type table. Importing
+            // them needs a type-id translation pass that doesn't exist yet.
+            throw new NotSupportedException(
+                "Copying a sidecar-backed Array<Struct> value between tables is not supported yet. " +
+                "Rebuild the array in the query so the value materialises in memory before the write.");
+        }
+
+        byte[] rebuilt = source.Read(value.SidecarOffset, value.SidecarLength).ToArray();
+        int prefixBytes = value.Ndim * sizeof(int);
+        for (int pos = prefixBytes; pos + ArraySlot.SizeBytes <= rebuilt.Length; pos += ArraySlot.SizeBytes)
+        {
+            ArraySlot.Read(
+                rebuilt.AsSpan(pos, ArraySlot.SizeBytes),
+                out long elementOffset, out long elementLength, out ushort typeId, out byte codec);
+            ReadOnlySpan<byte> elementBytes = source.Read(elementOffset, elementLength);
+            (long newOffset, long newLength) = _sidecar!.Append(elementBytes);
+            ArraySlot.Write(rebuilt.AsSpan(pos, ArraySlot.SizeBytes), newOffset, newLength, typeId, codec);
+        }
+        (long blockOffset, long blockLength) = _sidecar!.Append(rebuilt);
+        return value.WithSidecarLocation(blockOffset, blockLength, storeId: 0);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> is an array whose elements are
+    /// variable-length payloads referenced through a slot block (mirrors
+    /// <c>VariableSlotPageEncoderV2.IsReferenceTypeArray</c>), as opposed to
+    /// a fixed-width typed array whose payload is one contiguous byte run.
+    /// </summary>
+    private static bool IsReferenceElementArray(DataValue value)
+    {
+        if (!value.IsArray) return false;
+        return value.Kind is DataKind.String or DataKind.Image or DataKind.Struct
+            or DataKind.Audio or DataKind.Video or DataKind.Json or DataKind.PointCloud
+            or DataKind.Mesh;
     }
 
 

@@ -244,7 +244,18 @@ public sealed partial class DatumFileTableProviderV2
     private DatumFileWriterV2 OpenAppendWriter()
     {
         string sidecarPath = Path.ChangeExtension(_descriptor.FilePath, SidecarConstants.FileExtension);
-        return DatumFileWriterV2.OpenForAppend(_descriptor.FilePath, sidecarPath);
+        DatumFileWriterV2 writer = DatumFileWriterV2.OpenForAppend(_descriptor.FilePath, sidecarPath);
+
+        // Append batches can carry sidecar-backed values scanned from OTHER
+        // tables (CTAS, INSERT … SELECT). Hand the writer the catalog-wide
+        // registry plus this table's own blob source so it copies foreign
+        // payload bytes into this table's sidecar instead of persisting
+        // dangling foreign (offset, length) pairs.
+        if (SidecarRegistry is not null)
+        {
+            writer.ConfigureSidecarImport(SidecarRegistry, Sidecar);
+        }
+        return writer;
     }
 
     /// <inheritdoc/>
