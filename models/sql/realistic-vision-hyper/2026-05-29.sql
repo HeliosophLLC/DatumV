@@ -13,7 +13,7 @@
 -- Pipeline shape is identical to every other SD 1.x variant — the body
 -- below is the canonical SD-1.x diffusion implementation; sibling
 -- variants (dreamshaper-hyper, epicrealism-hyper, mo-di-hyper,
--- openjourney-hyper, absolute-reality-hyper) differ only in the
+-- absolute-reality-hyper) differ only in the
 -- USING paths.
 --
 -- **Pipeline (one image per row, ~1-2s on a consumer GPU):**

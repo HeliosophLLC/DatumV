@@ -63,7 +63,6 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     [InlineData("dreamshaper-hyper")]
     [InlineData("epicrealism-hyper")]
     [InlineData("mo-di-hyper")]
-    [InlineData("openjourney-hyper")]
     [InlineData("realistic-vision-hyper")]
     [InlineData("sd-turbo")]
     [InlineData("sdxl-turbo")]

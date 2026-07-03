@@ -27,7 +27,16 @@
       "sourceFolder": "${DATUMV_MODELS}/absolute-reality-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-absolute-reality-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "Lykon/AbsoluteReality (SD 1.5 fine-tune, bundled VAE)",
         "lora": "ByteDance/Hyper-SD (Hyper-SD-15 4-step LoRA, fused into UNet)",
@@ -43,8 +52,14 @@
         "notes": "Inherits CreativeML OpenRAIL-M from base SD 1.5 + Lykon's AbsoluteReality terms. Hyper-SD LoRA is OpenRAIL-M (ByteDance). Preserve both."
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
+        {
+          "name": "LICENSE-creativeml-openrail-m.md",
+          "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE"
+        },
+        {
+          "name": "LICENSE-hyper-sd.md",
+          "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -52,7 +67,16 @@
       "sourceFolder": "${DATUMV_MODELS}/dreamshaper-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-dreamshaper-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "Lykon/DreamShaper (SD 1.5 fine-tune)",
         "lora": "ByteDance/Hyper-SD (Hyper-SD-15 4-step LoRA, fused into UNet)",
@@ -67,8 +91,14 @@
         "requiresAcceptance": true
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
+        {
+          "name": "LICENSE-creativeml-openrail-m.md",
+          "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE"
+        },
+        {
+          "name": "LICENSE-hyper-sd.md",
+          "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -76,7 +106,16 @@
       "sourceFolder": "${DATUMV_MODELS}/epicrealism-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-epicrealism-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "emilianJR/epiCRealism (SD 1.5 fine-tune)",
         "lora": "ByteDance/Hyper-SD (Hyper-SD-15 4-step LoRA, fused into UNet)",
@@ -92,8 +131,14 @@
         "notes": "Verify the model card on HF — epiCRealism's terms are inherited from SD 1.5 but the upstream repo sometimes lacks an explicit LICENSE file."
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
+        {
+          "name": "LICENSE-creativeml-openrail-m.md",
+          "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE"
+        },
+        {
+          "name": "LICENSE-hyper-sd.md",
+          "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -101,7 +146,16 @@
       "sourceFolder": "${DATUMV_MODELS}/mo-di-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-mo-di-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "nitrosocke/mo-di-diffusion (SD 1.5 fine-tune, Disney style)",
         "lora": "ByteDance/Hyper-SD (Hyper-SD-15 4-step LoRA, fused into UNet)",
@@ -117,32 +171,14 @@
         "notes": "Nitrosocke models predate the OpenRAIL-M standard but are typically tagged as such. Verify."
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
-      ]
-    },
-    {
-      "repoSuffix": "openjourney-hyper-onnx",
-      "sourceFolder": "${DATUMV_MODELS}/openjourney-hyper-onnx",
-      "expectedSizeMb": 4096,
-      "exportedBy": "scripts/export-openjourney-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
-      "provenance": {
-        "baseModel": "prompthero/openjourney (SD 1.5 fine-tune, Midjourney-style)",
-        "lora": "ByteDance/Hyper-SD (Hyper-SD-15 4-step LoRA, fused into UNet)",
-        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124)",
-        "precision": "fp32",
-        "schedulerHint": "Euler, 4 steps, CFG=1; activator token 'mdjrny-v4 style'"
-      },
-      "license": {
-        "spdx": "CreativeML-OpenRAIL-M",
-        "url": "https://huggingface.co/prompthero/openjourney",
-        "confidence": "high",
-        "requiresAcceptance": true
-      },
-      "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
+        {
+          "name": "LICENSE-creativeml-openrail-m.md",
+          "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE"
+        },
+        {
+          "name": "LICENSE-hyper-sd.md",
+          "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -150,7 +186,16 @@
       "sourceFolder": "${DATUMV_MODELS}/realistic-vision-hyper-onnx",
       "expectedSizeMb": 4096,
       "exportedBy": "scripts/export-realistic-vision-hyper.ps1",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "SG161222/Realistic_Vision_V6.0_B1_noVAE (SD 1.5 fine-tune)",
         "vae": "stabilityai/sd-vae-ft-mse (paired in during export — RV6 ships without VAE)",
@@ -167,8 +212,14 @@
         "notes": "Realistic Vision is more NSFW-permissive than the other Hyper variants. Consider noting that on the model card."
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-m.md", "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE" },
-        { "name": "LICENSE-hyper-sd.md", "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE" }
+        {
+          "name": "LICENSE-creativeml-openrail-m.md",
+          "source": "https://huggingface.co/CompVis/stable-diffusion-v1-4/raw/main/LICENSE"
+        },
+        {
+          "name": "LICENSE-hyper-sd.md",
+          "source": "https://huggingface.co/ByteDance/Hyper-SD/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -176,7 +227,17 @@
       "sourceFolder": "${DATUMV_MODELS}/juggernaut-xl-lightning-onnx",
       "expectedSizeMb": 13312,
       "exportedBy": "scripts/export-batch-onnx.ps1 -Models juggernaut-xl-lightning",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "text_encoder_2/", "tokenizer/", "tokenizer_2/", "unet/", "vae_decoder/", "vae_encoder/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "text_encoder_2/",
+        "tokenizer/",
+        "tokenizer_2/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/"
+      ],
       "provenance": {
         "baseModel": "RunDiffusion/Juggernaut-XL-Lightning (SDXL fine-tune + Lightning distillation)",
         "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124)",
@@ -191,7 +252,10 @@
         "notes": "Inherits SDXL CreativeML OpenRAIL++-M from stabilityai/stable-diffusion-xl-base-1.0."
       },
       "licenseFiles": [
-        { "name": "LICENSE-creativeml-openrail-pp-m.md", "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/raw/main/LICENSE.md" }
+        {
+          "name": "LICENSE-creativeml-openrail-pp-m.md",
+          "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/raw/main/LICENSE.md"
+        }
       ]
     },
     {
@@ -199,7 +263,19 @@
       "sourceFolder": "${DATUMV_MODELS}/florence-2-base-ft-fp16",
       "expectedSizeMb": 523,
       "exportedBy": "manual optimum-cli export (Florence-2 uses custom modeling code; not in export-batch-onnx.ps1)",
-      "expectedContents": ["config.json", "decoder_model_fp16.onnx", "embed_tokens_fp16.onnx", "encoder_model_fp16.onnx", "vision_encoder_fp16.onnx", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json"],
+      "expectedContents": [
+        "config.json",
+        "decoder_model_fp16.onnx",
+        "embed_tokens_fp16.onnx",
+        "encoder_model_fp16.onnx",
+        "vision_encoder_fp16.onnx",
+        "generation_config.json",
+        "preprocessor_config.json",
+        "tokenizer.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json"
+      ],
       "provenance": {
         "baseModel": "microsoft/Florence-2-base-ft",
         "exportToolchain": "optimum-cli export onnx --task image-to-text --dtype fp16",
@@ -213,7 +289,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/microsoft/Florence-2-base-ft/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/microsoft/Florence-2-base-ft/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -221,7 +300,19 @@
       "sourceFolder": "${DATUMV_MODELS}/florence-2-base-ft-quantized",
       "expectedSizeMb": 266,
       "exportedBy": "manual optimum-cli export + onnxruntime.quantization.quantize_dynamic",
-      "expectedContents": ["config.json", "decoder_model_quantized.onnx", "embed_tokens_quantized.onnx", "encoder_model_quantized.onnx", "vision_encoder_quantized.onnx", "generation_config.json", "preprocessor_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json"],
+      "expectedContents": [
+        "config.json",
+        "decoder_model_quantized.onnx",
+        "embed_tokens_quantized.onnx",
+        "encoder_model_quantized.onnx",
+        "vision_encoder_quantized.onnx",
+        "generation_config.json",
+        "preprocessor_config.json",
+        "tokenizer.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json"
+      ],
       "provenance": {
         "baseModel": "microsoft/Florence-2-base-ft",
         "exportToolchain": "optimum-cli export onnx + post-export dynamic INT8 quantization",
@@ -235,7 +326,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/microsoft/Florence-2-base-ft/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/microsoft/Florence-2-base-ft/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -243,7 +337,17 @@
       "sourceFolder": "${DATUMV_MODELS}/vit-gpt2-image-captioning",
       "expectedSizeMb": 1100,
       "exportedBy": "scripts/export-vit-gpt-image-captioning.ps1",
-      "expectedContents": ["config.json", "decoder_model.onnx", "encoder_model.onnx", "generation_config.json", "tokenizer.json", "vocab.json", "merges.txt", "special_tokens_map.json", "tokenizer_config.json"],
+      "expectedContents": [
+        "config.json",
+        "decoder_model.onnx",
+        "encoder_model.onnx",
+        "generation_config.json",
+        "tokenizer.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json",
+        "tokenizer_config.json"
+      ],
       "provenance": {
         "baseModel": "nlpconnect/vit-gpt2-image-captioning",
         "exportToolchain": "optimum-cli export onnx --task image-to-text",
@@ -256,7 +360,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://www.apache.org/licenses/LICENSE-2.0.txt" }
+        {
+          "name": "LICENSE",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
       ]
     },
     {
@@ -264,7 +371,10 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 320,
       "exportedBy": "downloaded from upstream Kokoro release; not converted locally",
-      "expectedContents": ["kokoro-v1.0.onnx", "kokoro-voices/*.bin"],
+      "expectedContents": [
+        "kokoro-v1.0.onnx",
+        "kokoro-voices/*.bin"
+      ],
       "uploadStaging": "Stage to a temp folder before upload: copy kokoro-v1.0.onnx + the entire kokoro-voices/ subfolder under one parent, then upload that parent.",
       "provenance": {
         "baseModel": "hexgrad/Kokoro-82M (text-to-speech, 11 bundled voices)",
@@ -279,7 +389,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://www.apache.org/licenses/LICENSE-2.0.txt" }
+        {
+          "name": "LICENSE",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
       ]
     },
     {
@@ -287,7 +400,15 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 985,
       "exportedBy": "downloaded from Megvii's release; not converted locally",
-      "expectedContents": ["yolox_nano.onnx", "yolox_tiny.onnx", "yolox_s.onnx", "yolox_m.onnx", "yolox_l.onnx", "yolox_x.onnx", "yolox_darknet.onnx"],
+      "expectedContents": [
+        "yolox_nano.onnx",
+        "yolox_tiny.onnx",
+        "yolox_s.onnx",
+        "yolox_m.onnx",
+        "yolox_l.onnx",
+        "yolox_x.onnx",
+        "yolox_darknet.onnx"
+      ],
       "uploadStaging": "Stage to a temp folder: copy the 7 yolox_*.onnx files into one folder, then upload. Bundled into one repo so users get the full size ladder in one download.",
       "provenance": {
         "baseModel": "Megvii-BaseDetection/YOLOX (Apache-2.0 alternative to Ultralytics YOLOv8)",
@@ -302,7 +423,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/main/LICENSE"
+        }
       ]
     },
     {
@@ -310,7 +434,11 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 60,
       "exportedBy": "downloaded — Meta SAM mask decoders + ChaoningZhang/MobileSAM image encoder",
-      "expectedContents": ["sam_mask_decoder_single.onnx", "sam_mask_decoder_multi.onnx", "mobile_sam_image_encoder.onnx"],
+      "expectedContents": [
+        "sam_mask_decoder_single.onnx",
+        "sam_mask_decoder_multi.onnx",
+        "mobile_sam_image_encoder.onnx"
+      ],
       "uploadStaging": "Stage to a temp folder: copy the 3 SAM files into one folder, then upload.",
       "provenance": {
         "baseModel": "Meta SAM (mask decoders) + ChaoningZhang/MobileSAM (ViT-T image encoder)",
@@ -325,7 +453,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/master/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/master/LICENSE"
+        }
       ]
     },
     {
@@ -333,7 +464,10 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 175,
       "exportedBy": "downloaded — Qin et al. U²-Net ONNX weights via danielgatis/rembg release",
-      "expectedContents": ["u2net.onnx", "u2netp.onnx"],
+      "expectedContents": [
+        "u2net.onnx",
+        "u2netp.onnx"
+      ],
       "uploadStaging": "Fetch both: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx (~170 MB) and https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx (~4.7 MB). Place both files + README.md + LICENSE into a single staging folder, then upload. Bundled into one repo so users get the small/large pair in a single download.",
       "provenance": {
         "baseModel": "xuebinqin/U-2-Net — Apache-2.0 academic release (Qin et al., Pattern Recognition 2020)",
@@ -349,7 +483,10 @@
         "notes": "Original Apache-2.0 from xuebinqin/U-2-Net is the authoritative license. The danielgatis/rembg release just bundles those weights — no relicensing. Excluding u2net_portrait keeps the bundle commercially clean (its APDrawing training data has non-commercial restrictions)."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/xuebinqin/U-2-Net/master/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/xuebinqin/U-2-Net/master/LICENSE"
+        }
       ]
     },
     {
@@ -357,7 +494,9 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 1300,
       "exportedBy": "downloaded — Intel ISL DPT-Large monocular depth estimator",
-      "expectedContents": ["dpt_large_384.onnx"],
+      "expectedContents": [
+        "dpt_large_384.onnx"
+      ],
       "uploadStaging": "Stage to a temp folder: copy dpt_large_384.onnx into one folder, then upload.",
       "provenance": {
         "baseModel": "Intel/dpt-large (originally isl-org/MiDaS DPT-Large)",
@@ -372,7 +511,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/Intel/dpt-large/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/Intel/dpt-large/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -380,7 +522,9 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 80,
       "exportedBy": "downloaded — Intel ISL MiDaS v2.1 small (GitHub release v2_1)",
-      "expectedContents": ["midas_v21_small_256.onnx"],
+      "expectedContents": [
+        "midas_v21_small_256.onnx"
+      ],
       "uploadStaging": "Fetch from https://github.com/isl-org/MiDaS/releases/download/v2_1/midas_v21_small_256.onnx . Place into a single staging folder with README.md + LICENSE, then upload.",
       "provenance": {
         "baseModel": "isl-org/MiDaS v2.1 small (EfficientNet-Lite3 encoder + lightweight depth decoder)",
@@ -396,16 +540,20 @@
         "notes": "isl-org/MiDaS GitHub repo is MIT. Distinct from Intel/dpt-large on HuggingFace which Intel re-released under Apache-2.0 — same family, different distribution path, different licenses. The v2_1 GitHub release inherits MIT from the upstream repo."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/isl-org/MiDaS/master/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/isl-org/MiDaS/master/LICENSE"
+        }
       ]
     },
-
     {
       "repoSuffix": "paddleocr-v4-det-onnx",
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 5,
       "exportedBy": "downloaded — PaddleOCR PP-OCRv4 text-region detector",
-      "expectedContents": ["ch_PP-OCRv4_det.onnx"],
+      "expectedContents": [
+        "ch_PP-OCRv4_det.onnx"
+      ],
       "uploadStaging": "Stage to a temp folder: copy ch_PP-OCRv4_det.onnx into one folder, then upload.",
       "provenance": {
         "baseModel": "PaddlePaddle PP-OCRv4 detection model (Chinese-tuned, also works on English)",
@@ -421,7 +569,10 @@
         "notes": "Baidu / Chinese-affiliated source — Heliosoph mirror is a trade-stability hedge."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE"
+        }
       ]
     },
     {
@@ -429,7 +580,9 @@
       "sourceFolder": "${DATUMV_MODELS}",
       "expectedSizeMb": 5,
       "exportedBy": "downloaded — xinntao Real-ESRGAN general 4× upscaler",
-      "expectedContents": ["realesr-general-x4v3.onnx"],
+      "expectedContents": [
+        "realesr-general-x4v3.onnx"
+      ],
       "uploadStaging": "Stage to a temp folder: copy realesr-general-x4v3.onnx into one folder, then upload.",
       "provenance": {
         "baseModel": "xinntao/Real-ESRGAN — general-purpose 4× super-resolution",
@@ -445,7 +598,10 @@
         "notes": "Chinese-affiliated author — Heliosoph mirror is a trade-stability hedge."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/xinntao/Real-ESRGAN/master/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/xinntao/Real-ESRGAN/master/LICENSE"
+        }
       ]
     },
     {
@@ -454,11 +610,15 @@
       "expectedSizeMb": 6,
       "exportedBy": "downloaded — Qualcomm AI Hub release of MediaPipe Face (Apache-2.0 ONNX via zmurez/MediaPipePyTorch)",
       "expectedContents": [
-        "float/face_detector.onnx", "float/face_detector.data",
-        "float/face_landmark_detector.onnx", "float/face_landmark_detector.data",
+        "float/face_detector.onnx",
+        "float/face_detector.data",
+        "float/face_landmark_detector.onnx",
+        "float/face_landmark_detector.data",
         "float/metadata.json",
-        "int8/face_detector.onnx", "int8/face_detector.data",
-        "int8/face_landmark_detector.onnx", "int8/face_landmark_detector.data",
+        "int8/face_detector.onnx",
+        "int8/face_detector.data",
+        "int8/face_landmark_detector.onnx",
+        "int8/face_landmark_detector.data",
         "int8/metadata.json"
       ],
       "uploadStaging": "Two-step staging. (1) Download both zips: float = https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/mediapipe_face/releases/v0.53.1/mediapipe_face-onnx-float.zip ; int8 = https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/mediapipe_face/releases/v0.53.1/mediapipe_face-onnx-w8a8.zip . (2) Unzip each. Rename the extracted directories to float/ and int8/, place both inside a single staging folder. (3) Drop README.md + LICENSE in the staging root. (4) Upload that staging folder.",
@@ -476,7 +636,10 @@
         "notes": "License chain: Google MediaPipe (Apache-2.0) → zmurez/MediaPipePyTorch port (Apache-2.0) → Qualcomm AI Hub ONNX export (Apache-2.0). Google trained on commercial-friendly data; clean for any use."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/google/mediapipe/master/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/google/mediapipe/master/LICENSE"
+        }
       ]
     },
     {
@@ -484,7 +647,10 @@
       "sourceFolder": "${DATUMV_MODELS}/mobilenetv2-staging",
       "expectedSizeMb": 14,
       "exportedBy": "downloaded — ONNX Model Zoo published checkpoint (opset 12) + curated ImageNet-1K class file",
-      "expectedContents": ["mobilenetv2-12.onnx", "imagenet-classes.json"],
+      "expectedContents": [
+        "mobilenetv2-12.onnx",
+        "imagenet-classes.json"
+      ],
       "uploadStaging": "Two-step staging. (1) Fetch the ONNX from https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx . (2) Drop a matching imagenet-classes.json (1000-entry array, index = argmax class, value = human-readable label — see imagenet_classes.txt / clsidx_to_labels mappings in PyTorch / Keras docs). (3) Place both files + README.md + LICENSE in one staging folder, then upload.",
       "provenance": {
         "baseModel": "Google MobileNetV2 — ImageNet-1K trained, 224x224 input, ~3.5M params",
@@ -500,7 +666,10 @@
         "notes": "ONNX Model Zoo is Apache-2.0. The underlying MobileNetV2 architecture and weights originate from Google Research and are also Apache-2.0 (TensorFlow Slim release)."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/onnx/models/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/onnx/models/main/LICENSE"
+        }
       ]
     },
     {
@@ -508,7 +677,10 @@
       "sourceFolder": "${DATUMV_MODELS}/swinir-staging",
       "expectedSizeMb": 155,
       "exportedBy": "scripts/export-swinir.ps1",
-      "expectedContents": ["swinir_realsr_x4.onnx", "swinir_denoising_color_25.onnx"],
+      "expectedContents": [
+        "swinir_realsr_x4.onnx",
+        "swinir_denoising_color_25.onnx"
+      ],
       "uploadStaging": "Run scripts/export-swinir.ps1. The script clones JingyunLiang/SwinIR, downloads the two pinned .pth checkpoints from the v0.0 GitHub release, builds the SwinIR PyTorch model with the matching configs, and writes the two .onnx files into $env:DATUMV_MODELS/swinir-staging/. Drop README.md + LICENSE in the staging folder before upload.",
       "provenance": {
         "baseModel": "JingyunLiang/SwinIR — Apache-2.0 (Liang et al., ICCV 2021)",
@@ -524,7 +696,10 @@
         "notes": "Apache-2.0 from the authoritative upstream (JingyunLiang/SwinIR). We re-export from upstream weights rather than mirror the personal wuminghao/swinir HF account — personal accounts can vanish or change without notice."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/JingyunLiang/SwinIR/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/JingyunLiang/SwinIR/main/LICENSE"
+        }
       ]
     },
     {
@@ -533,14 +708,22 @@
       "expectedSizeMb": 615,
       "exportedBy": "scripts/export-kair.ps1 -Model scunet-color|scunet-gray (looped per checkpoint)",
       "expectedContents": [
-        "scunet_color_real_psnr.onnx", "scunet_color_real_psnr.onnx.data",
-        "scunet_color_real_gan.onnx",  "scunet_color_real_gan.onnx.data",
-        "scunet_color_15.onnx",        "scunet_color_15.onnx.data",
-        "scunet_color_25.onnx",        "scunet_color_25.onnx.data",
-        "scunet_color_50.onnx",        "scunet_color_50.onnx.data",
-        "scunet_gray_15.onnx",         "scunet_gray_15.onnx.data",
-        "scunet_gray_25.onnx",         "scunet_gray_25.onnx.data",
-        "scunet_gray_50.onnx",         "scunet_gray_50.onnx.data"
+        "scunet_color_real_psnr.onnx",
+        "scunet_color_real_psnr.onnx.data",
+        "scunet_color_real_gan.onnx",
+        "scunet_color_real_gan.onnx.data",
+        "scunet_color_15.onnx",
+        "scunet_color_15.onnx.data",
+        "scunet_color_25.onnx",
+        "scunet_color_25.onnx.data",
+        "scunet_color_50.onnx",
+        "scunet_color_50.onnx.data",
+        "scunet_gray_15.onnx",
+        "scunet_gray_15.onnx.data",
+        "scunet_gray_25.onnx",
+        "scunet_gray_25.onnx.data",
+        "scunet_gray_50.onnx",
+        "scunet_gray_50.onnx.data"
       ],
       "uploadStaging": "Run scripts/export-kair.ps1 in a loop over all 8 .pth checkpoints in the local cszn/SCUNet repo's model_zoo/ folder (5 color variants with -Model scunet-color, 3 gray variants with -Model scunet-gray). The script writes each ONNX as an .onnx + .onnx.data sibling pair (torch externalizes weights at this opset/size). All 16 files land in $env:DATUMV_MODELS/kair-staging/. Drop README.md + LICENSE in the staging folder before upload — both files for every variant MUST travel together (the .onnx references the .data by relative filename).",
       "provenance": {
@@ -556,7 +739,10 @@
         "requiresAcceptance": false
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://raw.githubusercontent.com/cszn/SCUNet/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://raw.githubusercontent.com/cszn/SCUNet/main/LICENSE"
+        }
       ]
     },
     {
@@ -590,7 +776,10 @@
         "notes": "Apache-2.0 inherited from the authoritative upstream vikhyatk/moondream2 PyTorch weights. ONNX-export step doesn't change licensing — same model, different serialization."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/vikhyatk/moondream2/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/vikhyatk/moondream2/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -619,7 +808,10 @@
         "notes": "MIT inherited from upstream Intel/zoedepth-nyu-kitti. The fp16 conversion is a numerical transformation only — no relicensing implication."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/Intel/zoedepth-nyu-kitti/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/Intel/zoedepth-nyu-kitti/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -656,7 +848,10 @@
         "notes": "MIT inherited from upstream microsoft/trocr-base-printed. Optimum ONNX export + fp16 conversion are numerical transformations only — no relicensing implication."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/microsoft/trocr-base-printed/raw/main/LICENSE" }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/microsoft/trocr-base-printed/raw/main/LICENSE"
+        }
       ]
     },
     {
@@ -689,7 +884,11 @@
         "notes": "MIT per the upstream model card's YAML frontmatter (`license: mit`). The stabilityai/TripoSR HF repo is also gated via `extra_gated_fields` requiring a user to provide name/email/affiliation + opt-in to Stability marketing — that's HF's access-gate mechanism, NOT a license-binding click-through. The MIT license alone governs what users can do with the bytes once obtained. Heliosoph re-host: distribute under MIT freely; downstream users get standard MIT terms (no $1M threshold, no AUP propagation requirements). Upstream ships no LICENSE file in the repo, so the Heliosoph mirror should include a freshly-written one with proper MIT copyright attribution to Stability AI + Tripo AI."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://opensource.org/license/mit", "notes": "Use canonical MIT template — Stability didn't ship a LICENSE file at the upstream repo, just the `license: mit` declaration in the model card YAML. Author the LICENSE locally with `Copyright (c) 2024 Stability AI and Tripo AI / VAST-AI-Research` as the holders before upload." }
+        {
+          "name": "LICENSE",
+          "source": "https://opensource.org/license/mit",
+          "notes": "Use canonical MIT template — Stability didn't ship a LICENSE file at the upstream repo, just the `license: mit` declaration in the model card YAML. Author the LICENSE locally with `Copyright (c) 2024 Stability AI and Tripo AI / VAST-AI-Research` as the holders before upload."
+        }
       ]
     },
     {
@@ -697,7 +896,16 @@
       "sourceFolder": "${DATUMV_MODELS}/sd-turbo-onnx",
       "expectedSizeMb": 2500,
       "exportedBy": "scripts/export-sd-turbo.ps1 (TBD — clone optimum's SD ONNX export pattern; same flow as the SD 1.5 Hyper variants minus the Hyper-SD LoRA fuse step)",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/", "unet/", "vae_decoder/", "vae_encoder/", "feature_extractor/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "tokenizer/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/",
+        "feature_extractor/"
+      ],
       "provenance": {
         "baseModel": "stabilityai/sd-turbo (Adversarial Diffusion Distillation of Stable Diffusion 2.1)",
         "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124) — same toolchain as the SD 1.5 Hyper variants",
@@ -713,7 +921,10 @@
         "notes": "Stability AI Community License: free for research, individuals, and commercial use BELOW $1M annual revenue. Above the threshold requires a Stability AI Enterprise License. Must propagate Stability's Acceptable Use Policy. Mirror the upstream LICENSE.md verbatim + include a NOTICE.md flagging the revenue threshold prominently."
       },
       "licenseFiles": [
-        { "name": "LICENSE.md", "source": "https://huggingface.co/stabilityai/sd-turbo/raw/main/LICENSE.md" }
+        {
+          "name": "LICENSE.md",
+          "source": "https://huggingface.co/stabilityai/sd-turbo/raw/main/LICENSE.md"
+        }
       ]
     },
     {
@@ -721,7 +932,17 @@
       "sourceFolder": "${DATUMV_MODELS}/sdxl-turbo-onnx",
       "expectedSizeMb": 13312,
       "exportedBy": "scripts/export-sdxl-turbo.ps1 (TBD — clone optimum's SDXL ONNX export pattern; same flow as juggernaut-xl-lightning minus the Lightning LoRA fuse step)",
-      "expectedContents": ["model_index.json", "scheduler/", "text_encoder/", "text_encoder_2/", "tokenizer/", "tokenizer_2/", "unet/", "vae_decoder/", "vae_encoder/"],
+      "expectedContents": [
+        "model_index.json",
+        "scheduler/",
+        "text_encoder/",
+        "text_encoder_2/",
+        "tokenizer/",
+        "tokenizer_2/",
+        "unet/",
+        "vae_decoder/",
+        "vae_encoder/"
+      ],
       "provenance": {
         "baseModel": "stabilityai/sdxl-turbo (Adversarial Diffusion Distillation of Stable Diffusion XL base)",
         "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124) — same toolchain as juggernaut-xl-lightning",
@@ -737,7 +958,10 @@
         "notes": "Same Stability AI Community License terms as SD Turbo. $1M annual revenue threshold above which commercial use requires a Stability Enterprise License. Propagate the AUP."
       },
       "licenseFiles": [
-        { "name": "LICENSE.md", "source": "https://huggingface.co/stabilityai/sdxl-turbo/raw/main/LICENSE.md" }
+        {
+          "name": "LICENSE.md",
+          "source": "https://huggingface.co/stabilityai/sdxl-turbo/raw/main/LICENSE.md"
+        }
       ]
     },
     {
@@ -770,7 +994,11 @@
         "notes": "MIT per the upstream model card's YAML frontmatter (license: mit). open_clip + torch.onnx export + fp16 conversion are numerical transformations only — no relicensing implication. The PubMedBERT tokenizer files (vocab.txt, tokenizer.json, etc.) are bundled from microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract, also MIT-licensed by Microsoft Research."
       },
       "licenseFiles": [
-        { "name": "LICENSE", "source": "https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224/raw/main/LICENSE", "notes": "Verify the upstream repo actually ships a LICENSE file at this URL before relying on it; if not, author one locally using the canonical MIT template with `Copyright (c) Microsoft Corporation` as the holder (same approach as TripoSR)." }
+        {
+          "name": "LICENSE",
+          "source": "https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224/raw/main/LICENSE",
+          "notes": "Verify the upstream repo actually ships a LICENSE file at this URL before relying on it; if not, author one locally using the canonical MIT template with `Copyright (c) Microsoft Corporation` as the holder (same approach as TripoSR)."
+        }
       ]
     }
   ],
@@ -788,7 +1016,14 @@
       "reason": "Mirroring is legally permitted under OpenRAIL++-M, but JuggernautXL Lightning already covers the 'SDXL distilled to a few steps' slot with a stronger photoreal baseline. Add only if a real user need surfaces for the raw 2-step SDXL Lightning rather than a fine-tune of it."
     },
     {
-      "folders": ["whisper-*-onnx", "clip-vit-base-patch32-onnx", "trocr-base-printed", "moondream2-onnx", "qwen2-vl-2b-onnx", "phi35-vision-onnx"],
+      "folders": [
+        "whisper-*-onnx",
+        "clip-vit-base-patch32-onnx",
+        "trocr-base-printed",
+        "moondream2-onnx",
+        "qwen2-vl-2b-onnx",
+        "phi35-vision-onnx"
+      ],
       "reason": "All have first-party or onnx-community / Xenova mirrors on HF already. Catalog references those instead of mirroring."
     },
     {

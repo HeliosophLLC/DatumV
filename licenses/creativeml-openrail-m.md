@@ -1,6 +1,6 @@
 # CreativeML OpenRAIL-M License
 
-**Applies to:** Stable Diffusion 1.x base models and most SD 1.x community fine-tunes (AbsoluteReality, DreamShaper, epiCRealism, Mo-Di, Openjourney, Realistic Vision, Hyper-SD LoRA, and others).
+**Applies to:** Stable Diffusion 1.x base models and most SD 1.x community fine-tunes (AbsoluteReality, DreamShaper, epiCRealism, Mo-Di, Realistic Vision, Hyper-SD LoRA, and others).
 
 **Authoritative full text:** https://huggingface.co/spaces/CompVis/stable-diffusion-license
 
