@@ -723,7 +723,10 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
     /// last generated token with the previous step's present-* outputs
     /// as past-* inputs and <c>use_cache_branch = true</c>.
     /// </summary>
-    private static async ValueTask<long[]> GenerateWithKvCacheAsync(
+    // internal (not private) so the KV-cache bookkeeping can be regression-
+    // tested against a stub decoder session without downloading a real model —
+    // see TrOcrKvCacheDecodeTests.
+    internal static async ValueTask<long[]> GenerateWithKvCacheAsync(
         IInferenceSession decoder,
         TensorSpec inputIdsSpec,
         TensorSpec encoderHiddenSpec,
@@ -995,11 +998,29 @@ public sealed class DecodeSeq2SeqFunction : IFunction, IScalarFunction
             // with the prefix flipped from `past_key_values.` to `present.`.
             // The output bag is disposed at the end of this scope, so we
             // copy out to managed arrays here.
+            //
+            // Self-attention (decoder) cache grows one position per step —
+            // always rotate it from the fresh present.* outputs.
             for (int l = 0; l < numLayers; l++)
             {
                 decoderKeyCache[l]   = ReadPresentFloats(outputBag, decoderKeyInputs[l].Name);
                 decoderValueCache[l] = ReadPresentFloats(outputBag, decoderValueInputs[l].Name);
-                if (hasCrossCache)
+            }
+
+            // Cross-attention (encoder) cache is computed once from
+            // encoder_hidden_states on the PREFILL pass and is INVARIANT for
+            // the rest of the decode. The merged decoder's with-past branch
+            // (use_cache_branch=true) returns EMPTY present.*.encoder.* tensors
+            // — recomputing cross-attention KV every step would defeat the
+            // cache — so re-reading them on incremental steps wipes the cross
+            // cache to zero length. Cross-attention then attends to nothing and
+            // the decoder free-runs on its language prior: the first one or two
+            // tokens (still covered by the prefill-time cache) come out correct,
+            // then the rest degenerates into garbage. Capture on prefill only,
+            // then hold the cache constant.
+            if (hasCrossCache && !useCacheBranch)
+            {
+                for (int l = 0; l < numLayers; l++)
                 {
                     encoderKeyCache![l]   = ReadPresentFloats(outputBag, encoderKeyInputs[l].Name);
                     encoderValueCache![l] = ReadPresentFloats(outputBag, encoderValueInputs[l].Name);
