@@ -1664,6 +1664,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
                 $"(provider '{qn}').");
         }
 
+        // In-memory (TEMP) providers materialise incoming cells to managed
+        // objects at append/update time; hand them the catalog-wide registry
+        // so sidecar-backed values scanned out of persistent tables resolve
+        // (CREATE TEMP TABLE … AS SELECT, INSERT … SELECT into TEMP).
+        if (tableProvider is Providers.InMemoryTableProvider inMemory)
+        {
+            inMemory.SidecarRegistry ??= SidecarRegistry;
+        }
+
         return backend.Add(tableProvider);
     }
 

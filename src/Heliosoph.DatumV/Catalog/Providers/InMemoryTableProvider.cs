@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Heliosoph.DatumV.DatumFile.Sidecar;
 using Heliosoph.DatumV.Functions.Audio;
 using Heliosoph.DatumV.Functions.Image;
 using Heliosoph.DatumV.Functions.Video;
@@ -50,6 +51,17 @@ public sealed class InMemoryTableProvider : ITableProvider
     private long _identitySeed;
     private long _identityStep;
     private long _identityNextValue;
+
+    /// <summary>
+    /// Catalog-wide sidecar registry, stamped by
+    /// <see cref="TableCatalog.Add(ITableProvider)"/>. Lets append and update
+    /// paths materialise sidecar-backed values scanned out of persistent
+    /// tables (e.g. <c>CREATE TEMP TABLE … AS SELECT</c> from a table whose
+    /// long strings live in a <c>.datum-blob</c>). Null for providers used
+    /// standalone — sidecar-backed inputs then throw the standard
+    /// "no SidecarRegistry" error.
+    /// </summary>
+    public SidecarRegistry? SidecarRegistry { get; set; }
 
     /// <summary>
     /// Serializes mutations and append sessions across async awaits.
@@ -666,7 +678,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                         throw new InvalidOperationException(
                             $"UpdateRows: column '{column.Name}' is NOT NULL but the supplied value is null.");
                     }
-                    row[columnIndex] = ConvertDataValueToCell(newValue, resolveArena);
+                    row[columnIndex] = ConvertDataValueToCell(newValue, resolveArena, SidecarRegistry);
                 }
             }
 
@@ -724,7 +736,7 @@ public sealed class InMemoryTableProvider : ITableProvider
     /// stored cell from the source batch's arena so subsequent scans can
     /// rematerialize against fresh arenas.
     /// </summary>
-    private static object? ConvertDataValueToCell(DataValue value, Arena arena)
+    private static object? ConvertDataValueToCell(DataValue value, Arena arena, SidecarRegistry? registry)
     {
         if (value.IsNull) return null;
 
@@ -735,7 +747,7 @@ public sealed class InMemoryTableProvider : ITableProvider
             DataKind.Int16 => value.AsInt16(),
             DataKind.Int32 => value.AsInt32(),
             DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt8 when value.IsArray => value.AsUInt8Array(arena),
+            DataKind.UInt8 when value.IsArray => value.AsUInt8Array(arena, registry),
             DataKind.UInt8 => value.AsUInt8(),
             DataKind.UInt16 => value.AsUInt16(),
             DataKind.UInt32 => value.AsUInt32(),
@@ -751,12 +763,12 @@ public sealed class InMemoryTableProvider : ITableProvider
             DataKind.TimestampTz => value.AsTimestampTz(),
             DataKind.Duration => value.AsDuration(),
             DataKind.Uuid => value.AsUuid(),
-            DataKind.String => value.AsString(arena),
+            DataKind.String => value.AsString(arena, registry),
             // Blob kinds — extract bytes; the schema's declared kind drives
             // re-materialisation in MaterializeCell so a `byte[]` from an
             // Image column round-trips as Image (not as UInt8[]).
             DataKind.Image or DataKind.Audio or DataKind.Video or DataKind.Json
-                => value.AsByteSpan(arena).ToArray(),
+                => value.AsByteSpan(arena, registry).ToArray(),
             _ => throw new NotSupportedException(
                 $"InMemoryTableProvider.AppendRowsAsync does not yet support DataKind.{value.Kind}" +
                 (value.IsArray ? " (array)" : "") + ". Extend ConvertDataValueToCell with a stable extraction path."),
@@ -1212,7 +1224,7 @@ public sealed class InMemoryTableProvider : ITableProvider
                 object?[] cells = new object?[columnCount];
                 for (int c = 0; c < columnCount; c++)
                 {
-                    cells[c] = ConvertDataValueToCell(row[c], batch.Arena);
+                    cells[c] = ConvertDataValueToCell(row[c], batch.Arena, _provider.SidecarRegistry);
                 }
                 _staged.Add(cells);
             }
