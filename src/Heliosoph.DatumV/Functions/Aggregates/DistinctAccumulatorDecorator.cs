@@ -416,7 +416,8 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
         // accumulator's own stabilisation logic decides where to retain (typically the
         // captured Target). SidecarRegistry threads through unchanged.
         InvocationFrame drainFrame = new(
-            _spiller!.ConsolidatedArena, _capturedFrame.Target, _capturedFrame.SidecarRegistry);
+            _spiller!.ConsolidatedArena, _capturedFrame.Target, _capturedFrame.SidecarRegistry,
+            _capturedFrame.Types);
 
         for (int partition = 0; partition < SpillPartitionCount; partition++)
         {

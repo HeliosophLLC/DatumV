@@ -87,6 +87,15 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
     private readonly TypeRegistry? _typeRegistry;
 
     /// <summary>
+    /// The per-query <see cref="TypeRegistry"/> this evaluator was constructed with,
+    /// or <see langword="null"/>. Exposed alongside <see cref="Store"/> so callers
+    /// building an <see cref="Functions.InvocationFrame"/> off this evaluator (e.g.
+    /// the window-aggregate adapter) can thread the registry through to
+    /// struct-emitting aggregates.
+    /// </summary>
+    public TypeRegistry? Types => _typeRegistry;
+
+    /// <summary>
     /// Per-query video registry that backs <see cref="DataKind.VideoFrame"/>
     /// materialisation. Threaded into every <see cref="EvaluationFrame"/> built
     /// by the convenience overloads. Null when constructed via the field-based

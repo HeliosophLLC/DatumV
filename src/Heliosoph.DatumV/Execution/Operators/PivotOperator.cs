@@ -151,7 +151,7 @@ public sealed class PivotOperator : QueryOperator
     protected override async IAsyncEnumerable<RowBatch> ExecuteAsyncImpl(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = context.CreateEvaluator();
-        InvocationFrame frame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
+        InvocationFrame frame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry, context.Types);
 
         // Pivot column name (used to identify which input columns are "keys").
         string pivotColumnName = _pivotColumnExpression is ColumnReference colRef

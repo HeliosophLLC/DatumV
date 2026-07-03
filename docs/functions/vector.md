@@ -213,8 +213,25 @@ SELECT dot_product(query_vec, doc_vec) AS score FROM search_results
 
 Hamming distance between two strings.
 
+## Dimensionality Reduction
+
+### pca_project
+
+`pca_project(model, vec)` → Float32[]
+
+Projects a vector into the k-dimensional space of a [pca_fit_agg](aggregate.md#pca_fit_agg) model: subtracts the model's `mean`, then dots the centered vector with each row of `components`. Returns the k projection coordinates.
+
+Model fields are resolved by name, so any struct carrying `mean` and `components` works — including models stored in a table and loaded later. The vector's dimensionality must match the model's; mismatches raise. Null model or vector returns null.
+
+```sql
+-- Fit once over the group, project every row to 2-D
+SELECT id, pca_project(m, embedding) AS xy
+FROM (SELECT id, embedding, pca_fit_agg(embedding, 2) OVER () AS m FROM docs) s
+```
+
 ## See Also
 
+- [Aggregate Functions](aggregate.md) -- pca_fit_agg for fitting the PCA model consumed by pca_project
 - [Numeric Functions](numeric.md) -- softmax, l2_normalize, and arithmetic operations applicable to vectors
 - [ML Activation Functions](activation.md) -- element-wise activations for neural-network feature engineering
 - [Image Functions](image.md) -- image_to_tensor_hwc and image_to_tensor_chw for converting images to tensors

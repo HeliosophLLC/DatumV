@@ -189,7 +189,8 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                     InvocationFrame frame = new(
                         inputBatch.Arena,
                         context.Store,
-                        context.SidecarRegistry);
+                        context.SidecarRegistry,
+                        context.Types);
 
                     for (int i = 0; i < inputBatch.Count; i++)
                     {
@@ -228,7 +229,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             if (currentGroup is not null)
             {
                 writer ??= new OutputBatchWriter(_groupByExpressions, _aggregateColumns, context);
-                InvocationFrame trailingFrame = new(context.Store, context.Store, context.SidecarRegistry);
+                InvocationFrame trailingFrame = new(context.Store, context.Store, context.SidecarRegistry, context.Types);
                 FlushOrderedBuffersForGroup(currentGroup, context, in trailingFrame);
                 RowBatch? ready = await writer.AddAsync(currentGroup, isGlobalAggregation: false, trailingFrame).ConfigureAwait(false);
                 pool.Backing.Return(currentGroup);
@@ -370,7 +371,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             // the channel hop, but the worker reads from context.Store after the
             // batch is returned, so we use context.Store for both.
             InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
-                context.Store, context.SidecarRegistry);
+                context.Store, context.SidecarRegistry, context.Types);
 
             GroupStateFactory globalGroupStateFactory = new(
                 pool, context, _aggregateColumns,
@@ -437,7 +438,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                 column => column.OrderBy is not null);
 
             InvocationFrame globalEmitFrame = new(
-                context.Store, context.Store, context.SidecarRegistry);
+                context.Store, context.Store, context.SidecarRegistry, context.Types);
 
             if (globalHasOrderedAggregates)
             {
@@ -486,7 +487,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         // Long-lived frame captured by accumulators that need a stable Target arena
         // (e.g. DistinctAccumulatorDecorator's _capturedFrame for replay merges).
         // context.Store survives the query's lifetime.
-        InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry);
+        InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry, context.Types);
 
         long? memoryBudget = context.MemoryBudgetBytes;
 
@@ -527,7 +528,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                     // arena-backed values resolve), Target = context.Store (long-lived for
                     // anything an accumulator wants to persist across batches).
                     InvocationFrame accumFrame = new(
-                        inputBatch.Arena, context.Store, context.SidecarRegistry);
+                        inputBatch.Arena, context.Store, context.SidecarRegistry, context.Types);
 
                     for (int i = 0; i < inputBatch.Count; i++)
                     {
@@ -561,7 +562,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             // per-query, output bytes and accumulator bytes live in the same arena;
             // downstream operators reading via batch.Arena resolve offsets correctly
             // without depending on any consumer's re-stabilize behaviour.
-            InvocationFrame emitFrame = new(context.Store, context.Store, context.SidecarRegistry);
+            InvocationFrame emitFrame = new(context.Store, context.Store, context.SidecarRegistry, context.Types);
             writer = new OutputBatchWriter(_groupByExpressions, _aggregateColumns, context);
 
             if (isGlobalAggregation)
@@ -595,7 +596,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
                 // consolidated arena (Source). Accumulator state still lives in
                 // context.Store (Target) so it can outlive the replayed batches.
                 InvocationFrame drainFrame = new(
-                    spillCoordinator.ConsolidatedArena, context.Store, context.SidecarRegistry);
+                    spillCoordinator.ConsolidatedArena, context.Store, context.SidecarRegistry, context.Types);
 
                 await foreach (IHashGroupTable partTable in spillCoordinator.DrainPartitionsAsync(
                     hashTable!, binder, drainFrame, groupStateFactory).ConfigureAwait(false))

@@ -49,6 +49,16 @@ public readonly struct InvocationFrame
     public SidecarRegistry? SidecarRegistry { get; }
 
     /// <summary>
+    /// Optional per-query <see cref="TypeRegistry"/> for aggregates whose results
+    /// carry struct shapes: interning a struct type here at <c>ResultAsync</c> time
+    /// gives the emitted value a resolvable <see cref="DataValue.TypeId"/> so
+    /// downstream field access by name works. Null when the call is outside the
+    /// query pipeline; struct-emitting aggregates fall back to the untyped id 0
+    /// (positional access only) in that case.
+    /// </summary>
+    public TypeRegistry? Types { get; }
+
+    /// <summary>
     /// Creates an invocation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g.
     /// numeric-only aggregates). Pass <paramref name="sidecarRegistry"/> when the
@@ -58,17 +68,20 @@ public readonly struct InvocationFrame
     public InvocationFrame(
         IValueStore source,
         IValueStore target,
-        SidecarRegistry? sidecarRegistry = null)
+        SidecarRegistry? sidecarRegistry = null,
+        TypeRegistry? types = null)
     {
         Source = source;
         Target = target;
         SidecarRegistry = sidecarRegistry;
+        Types = types;
     }
 
     /// <summary>
     /// Returns a frame that uses the same store for both reading and writing.
     /// Convenience for call sites that don't care to distinguish source from target.
     /// </summary>
-    public static InvocationFrame Symmetric(IValueStore store, SidecarRegistry? sidecarRegistry = null)
-        => new(store, store, sidecarRegistry);
+    public static InvocationFrame Symmetric(
+        IValueStore store, SidecarRegistry? sidecarRegistry = null, TypeRegistry? types = null)
+        => new(store, store, sidecarRegistry, types);
 }
