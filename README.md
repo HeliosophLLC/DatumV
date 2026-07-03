@@ -38,6 +38,25 @@ LIMIT 32
 
 See [Examples — Depth model comparison](docs/examples/depth-comparison.md) for the full walkthrough.
 
+## Compare text-to-image models
+
+![Compare text-to-image models](docs/figures/compare_images.jpg)
+
+```sql
+DECLARE prompt String = 'A grand stone castle, blue skys, natural light, realistic'
+
+SELECT
+    g.value
+    ,models.sd_turbo(prompt) "sd"
+    ,models.sdxl_turbo(prompt) "sdxl"
+    ,models.epicrealism_hyper(prompt) "epicrealism"
+    ,models.absolute_reality_hyper(prompt) "absolute_reality"
+    ,models.dreamshaper_hyper(prompt) "dreamshaper"
+FROM generate_series(1, 10) g
+```
+
+See [Examples — Five text-to-image models, one prompt](docs/examples/compare-images.md) for the full walkthrough.
+
 ## Installing
 
 Download the [latest release](https://github.com/HeliosophLLC/DatumV/releases/latest) and pick the build that matches your hardware:

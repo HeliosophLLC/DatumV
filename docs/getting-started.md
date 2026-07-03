@@ -4,13 +4,15 @@ title: Getting Started
 
 Welcome to DatumV — a SQL engine that runs ML models on your data, locally. This is the welcome tab; it's pinned, so you can come back to it any time.
 
-Two example queries are already open in tabs alongside this one. Click Run on either to see DatumV in motion.
+Three example queries are already open in tabs alongside this one. Click Run on any of them to see DatumV in motion.
 
-## The two starter tabs
+## The starter tabs
 
 **[Person crops with YOLOX](examples/yolox-person-crops.md)** runs `models.yolox_s` over the COCO val2017 dataset, takes every detection labeled `person`, and crops the original image to the bounding box. It shows model invocation inside `SELECT`, the `Array<Struct>` output shape that detection models return, and filtering / cropping based on what a model produced.
 
 **[Same input, four depth models](examples/depth-comparison.md)** runs one image through Depth Anything v2, Depth Anything v3, MiDaS Small, and DPT Large in a single query. It shows that swapping models is a column-level concern, not a pipeline concern.
+
+**[Five text-to-image models, one prompt](examples/compare-images.md)** runs a single `DECLARE`d prompt through five diffusion models with `UNION ALL`. It shows text-to-image generation, `Image` as a first-class output column, and comparing models as rows rather than a pipeline.
 
 The first time you click Run, DatumV prompts you to download the models and dataset that the query needs:
 
