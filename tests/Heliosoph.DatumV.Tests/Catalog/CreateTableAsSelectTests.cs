@@ -417,6 +417,63 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([first, second], afterDrop);
     }
 
+    [Fact]
+    public async Task Ctas_TempTarget_FromNonByteArrayColumn_MaterialisesArrays()
+    {
+        Pool pool = CreatePool();
+        using TableCatalog catalog = CreateCatalog(pool);
+
+        // A Float32[] column exercises the forward DataValue→CLR-cell path
+        // (ConvertDataValueToCell) for a non-UInt8 array element kind — the
+        // asymmetry where only UInt8 arrays were extracted and every other
+        // element kind fell through to its scalar accessor. A 6-element array
+        // is wider than the 16-byte inline budget, so the TEMP append session
+        // receives arena-backed array DataValues that must be materialised into
+        // stable CLR arrays decoupled from the source scan arena.
+        catalog.Plan("CREATE TEMP TABLE src (id Int32, xs Float32[])");
+        catalog.Plan(
+            "INSERT INTO src VALUES " +
+            "(1, [1.5, 2.5, 3.5, 4.5, 5.5, 6.5]), " +
+            "(2, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0])");
+
+        catalog.Plan("CREATE TEMP TABLE dst AS SELECT id, xs FROM src");
+
+        Schema schema = catalog["dst"].GetSchema();
+        Assert.Equal(DataKind.Float32, schema.Columns[1].Kind);
+        Assert.True(schema.Columns[1].IsArray);
+
+        List<float[]> arrays = await ScanFloatArrayColumn(catalog, "dst", "xs");
+        Assert.Equal(2, arrays.Count);
+        Assert.Equal([1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f], arrays[0]);
+        Assert.Equal([10f, 20f, 30f, 40f, 50f, 60f], arrays[1]);
+    }
+
+    private static async Task<List<float[]>> ScanFloatArrayColumn(
+        TableCatalog catalog, string tableName, string columnName)
+    {
+        ITableProvider provider = catalog[tableName];
+        Schema schema = provider.GetSchema();
+        int columnIndex = -1;
+        for (int i = 0; i < schema.Columns.Count; i++)
+        {
+            if (schema.Columns[i].Name == columnName) { columnIndex = i; break; }
+        }
+        if (columnIndex < 0) throw new InvalidOperationException($"column {columnName} not in schema");
+
+        List<float[]> arrays = new();
+        await foreach (RowBatch batch in provider.ScanAsync(
+            requiredColumns: null, filterHint: null, targetArena: null, cancellationToken: default))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                // Materialise inline — the batch arena recycles across the enumerator.
+                arrays.Add(batch[r][columnIndex].AsArraySpan<float>(batch.Arena, catalog.SidecarRegistry).ToArray());
+            }
+            batch.Dispose();
+        }
+        return arrays;
+    }
+
     private static async Task<List<string>> CollectStrings(TableCatalog catalog, string sql)
     {
         StatementPlan plan = catalog.Plan(sql);
