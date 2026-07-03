@@ -652,5 +652,6 @@ A subtle but important property: `draw_particles` is a pure function of `(t, see
 
 - [Lambda Expressions](../sql/lambda-expressions.md) — the substrate for animation drivers and procedural-component UDFs.
 - [Image Functions](image.md) — what `render(...)` produces, and what subsequent pipelines consume.
+- [Aggregate Functions](aggregate.md) — `plot_scatter_agg` renders a group's (x, y) points straight to an Image without a Drawing recipe.
 - [Audio Functions](audio.md) — the `audio_waveform_*` family produces Drawings via a `waveform` lambda context that inherits from `AnimationContext`.
 - [Functions Reference](string.md) — complete function listing across all categories.

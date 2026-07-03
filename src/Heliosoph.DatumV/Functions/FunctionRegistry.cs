@@ -1337,6 +1337,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate<Aggregates.PcFuseAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcaFitAggregateFunction>();
         registry.RegisterAggregate<Aggregates.KmeansFitAggregateFunction>();
+        registry.RegisterAggregate<Aggregates.PlotScatterAggregateFunction>();
         registry.RegisterAggregate<Aggregates.PcVoxelConsensusAggregateFunction>();
         registry.RegisterAggregate<Aggregates.ArgMaxFunction>();
         registry.RegisterAggregate<Aggregates.ArgMinFunction>();
