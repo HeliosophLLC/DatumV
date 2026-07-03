@@ -74,7 +74,6 @@ function buildEntries(): DocEntry[] {
     const idx = rawKey.indexOf(marker);
     if (idx < 0) continue;
     const path = rawKey.slice(idx + marker.length).replace(/\\/g, '/');
-    if (path === 'technical' || path.startsWith('technical/')) continue;
     const segments = path.split('/');
     const file = segments[segments.length - 1];
     const folders = segments.slice(0, -1);
