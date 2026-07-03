@@ -251,6 +251,26 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
     }
 
     [Fact]
+    public void Analyze_DeclaredVariableInUnionBranch_NoUnknownColumnWarning()
+    {
+        // Regression: the CompoundQueryExpression (set-operation) path recursed
+        // with the single-arg Analyze overload, which reset the declared-
+        // variable set to empty. A DECLAREd variable referenced in a UNION
+        // branch was then flagged as an unknown column in every branch.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("users", "id", "name")],
+            functions: [Function("upper", "value")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "DECLARE prompt String = 'hi'\n" +
+            "SELECT upper(prompt) AS a UNION ALL SELECT upper(prompt)",
+            manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column 'prompt'"));
+    }
+
+    [Fact]
     public void Analyze_DeclaredVariablePlusRealUnknown_StillWarnsOnUnknown()
     {
         // The variable suppression must not blanket-silence genuine typos.

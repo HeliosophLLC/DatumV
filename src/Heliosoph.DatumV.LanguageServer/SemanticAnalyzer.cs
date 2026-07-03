@@ -195,8 +195,13 @@ internal sealed class SemanticAnalyzer
                 break;
 
             case CompoundQueryExpression compound:
-                diagnostics.AddRange(Analyze(compound.Left));
-                diagnostics.AddRange(Analyze(compound.Right));
+                // Thread the declared-variable set through set-operation
+                // branches. The single-arg overload resets it to empty, which
+                // would flag a bare reference to a DECLAREd variable (e.g.
+                // `SELECT models.sd_turbo(prompt) UNION ALL SELECT ...`) as an
+                // unknown column in every branch but the first.
+                diagnostics.AddRange(Analyze(compound.Left, _declaredVariables));
+                diagnostics.AddRange(Analyze(compound.Right, _declaredVariables));
                 break;
         }
 
