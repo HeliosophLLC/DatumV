@@ -3060,63 +3060,6 @@
       ]
     },
     {
-      "name": "Openjourney + Hyper-SD (4-step)",
-      "summary": "Generate images in a Midjourney-v4 look — activator phrase is `mdjrny-v4 style`. 4 sampling steps.",
-      "description": "Midjourney-v4-style fine-tune. Activator: 'mdjrny-v4 style'.",
-      "tasks": [
-        "TextToImage"
-      ],
-      "tags": [
-        "text-to-image",
-        "sd-1.5",
-        "hyper-sd",
-        "midjourney-style"
-      ],
-      "licenseIds": [
-        "creativeml-openrail-m"
-      ],
-      "attributions": [
-        "PromptHero — Openjourney (SD 1.5 fine-tune)",
-        "ByteDance — Hyper-SD LoRA (Ren, Xia, Zhang et al.)",
-        "CompVis / Stability AI — Stable Diffusion 1.5 base"
-      ],
-      "variants": [
-        {
-          "id": "openjourney-hyper",
-          "displayName": "Openjourney + Hyper-SD (4-step)",
-          "summary": "Generate images in a Midjourney-v4 look — activator phrase is `mdjrny-v4 style`. 4 sampling steps.",
-          "tags": [],
-          "hardware": {
-            "minRamMb": 2048,
-            "minVramMb": 10240,
-            "preferred": "cuda"
-          },
-          "approxSizeMb": 4096,
-          "versions": [
-            {
-              "version": "2026-05-29",
-              "sources": [
-                {
-                  "type": "huggingface",
-                  "repo": "Heliosoph/openjourney-hyper-onnx",
-                  "revision": "8dcbd8fcac0a7c79d2c793b08f07843b394f37a4",
-                  "include": [
-                    "**/*"
-                  ]
-                }
-              ],
-              "installSql": "sql/openjourney-hyper/2026-05-29.sql",
-              "models": [
-                {
-                  "identifier": "openjourney_hyper"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "Realistic Vision V6 + Hyper-SD (4-step)",
       "summary": "Generate photoreal portraits — sharper faces and skin texture than the other Hyper variants. More NSFW-permissive base.",
       "description": "Photorealistic portraits. More NSFW-permissive than the other Hyper variants.",
