@@ -51,5 +51,9 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^8.1.0"
+  },
+  "overrides": {
+    "@emnapi/core": "1.11.2",
+    "@emnapi/runtime": "1.11.2"
   }
 }
