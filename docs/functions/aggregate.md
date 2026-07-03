@@ -129,6 +129,29 @@ Approximate median using reservoir sampling. O(1) memory, ~1-5% error for large 
 
 Approximate percentile using reservoir sampling. O(1) memory, ~1-5% error.
 
+### pca_fit_agg
+
+`pca_fit_agg(vec, k)` -> Struct
+
+Fits a k-component PCA model over the group's Float32 vectors. Returns `Struct{mean Float32[d], components Float32[k, d], variance_ratio Float32[k]}` — the centering mean, the principal axes as rows of a k×d matrix, and each axis's share of total variance. Feed the model to [pca_project](vector.md#pca_project) to map vectors into the fitted space.
+
+`k` must be a constant between 1 and the vector dimensionality; it is captured from the first row. Null vectors are skipped; the first non-null vector pins the dimensionality and later mismatches raise. Groups with no vectors return null; a single-vector group raises (covariance is undefined). Memory is O(d²) regardless of group size, with dimensionality capped at 4096. Results are deterministic: each component's sign is pinned so its largest-magnitude entry is positive.
+
+Also works as a window aggregate, which fits and projects in one statement:
+
+```sql
+-- 2-D coordinates for every embedding, fit over the whole table
+SELECT id, pca_project(m, embedding) AS xy
+FROM (SELECT id, embedding, pca_fit_agg(embedding, 2) OVER () AS m FROM docs) s
+```
+
+Access model fields by name when the model itself is the result:
+
+```sql
+SELECT model['variance_ratio']
+FROM (SELECT pca_fit_agg(embedding, 2) AS model FROM docs) s
+```
+
 ### STRING_AGG
 
 `STRING_AGG(expr, separator [ORDER BY ...])` -> String
