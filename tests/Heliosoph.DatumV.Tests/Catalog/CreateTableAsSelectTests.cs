@@ -392,6 +392,31 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([payload], values);
     }
 
+    [Fact]
+    public async Task Ctas_TempTarget_FromPersistentSidecarStrings_MaterialisesValues()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        // Strings longer than the 16-byte on-disk slot are sidecar-resident,
+        // so the TEMP append session receives sidecar-backed DataValues that
+        // need the catalog's SidecarRegistry to materialise.
+        string first = "alpha " + new string('a', 60);
+        string second = "bravo " + new string('b', 90);
+        catalog.Plan("CREATE TABLE src (text String)");
+        catalog.Plan($"INSERT INTO src VALUES ('{first}'), ('{second}')");
+
+        catalog.Plan("CREATE TEMP TABLE tmp AS SELECT text FROM src");
+
+        List<string> values = await CollectStrings(catalog, "SELECT text FROM tmp");
+        Assert.Equal([first, second], values);
+
+        // TEMP cells are materialised managed values — dropping the source
+        // table must not affect them.
+        catalog.Plan("DROP TABLE src");
+        List<string> afterDrop = await CollectStrings(catalog, "SELECT text FROM tmp");
+        Assert.Equal([first, second], afterDrop);
+    }
+
     private static async Task<List<string>> CollectStrings(TableCatalog catalog, string sql)
     {
         StatementPlan plan = catalog.Plan(sql);
