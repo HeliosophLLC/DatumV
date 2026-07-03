@@ -99,6 +99,27 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             // Slot left zero; null bitmap is authoritative.
             _zoneMap.RecordNull();
         }
+        else if (value.IsInSidecar)
+        {
+            // Fast path: the DataValue already points into THIS writer's
+            // sidecar — either the ingest deserializer streamed the bytes
+            // there directly (storeId=0 via SerializationContext.lboStore),
+            // or DatumFileWriterV2's foreign-sidecar import already copied
+            // the payload (and, for reference-type arrays, its per-element
+            // byte runs) in. No re-encode needed — just emit a pointer slot
+            // with the existing (offset, length). Checked BEFORE the
+            // reference-array branch: a sidecar-resident slot block is
+            // already in its final form, and routing it through
+            // EncodeReferenceArrayToSidecar would fail (element accessors
+            // need a SidecarRegistry the encoder doesn't have).
+            EncodePointerSlot(
+                slot,
+                value.SidecarOffset,
+                value.SidecarLength,
+                codec: SidecarBlobCodec.Raw);
+            // inline bit stays 0; inline length stays 0.
+            _zoneMap.Record(value, store);
+        }
         else if (IsReferenceTypeArray(value))
         {
             // Reference-type arrays (Array<String|Image|Struct>) ALWAYS take the
@@ -150,24 +171,6 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
             ReadOnlySpan<byte> bytes = ResolveInlinePayloadForSpill(value);
             (long offset, long length) = sidecar.Append(bytes);
             EncodePointerSlot(slot, offset, length, codec: SidecarBlobCodec.Raw);
-            _zoneMap.Record(value, store);
-        }
-        else if (value.IsInSidecar)
-        {
-            // Fast path: the DataValue already points into a sidecar, and
-            // the ingest pipeline guarantees that's THIS writer's sidecar
-            // (the deserializer received it via SerializationContext.lboStore
-            // and stamped storeId=0 on the value). No re-encode needed —
-            // just emit a pointer slot with the existing (offset, length).
-            // This is the common path for image columns where the
-            // deserializer streams blob bytes directly to the sidecar
-            // rather than landing them in an arena first.
-            EncodePointerSlot(
-                slot,
-                value.SidecarOffset,
-                value.SidecarLength,
-                codec: SidecarBlobCodec.Raw);
-            // inline bit stays 0; inline length stays 0.
             _zoneMap.Record(value, store);
         }
         else

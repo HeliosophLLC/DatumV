@@ -340,6 +340,72 @@ public sealed class CreateTableAsSelectTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([2, 3], values);
     }
 
+    [Fact]
+    public async Task Ctas_PersistentSource_SidecarStrings_CopiesBytesIntoTargetSidecar()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        // Register another sidecar-backed table FIRST so registry slot 0
+        // belongs to a table other than the CTAS source. Writing the source
+        // table's sidecar offsets verbatim into the target then resolves
+        // against the wrong blob file instead of silently landing on the
+        // right bytes by registration-order luck.
+        catalog.Plan("CREATE TABLE decoy (junk String)");
+        catalog.Plan($"INSERT INTO decoy VALUES ('{new string('x', 500)}')");
+
+        // Strings longer than the 16-byte on-disk slot are sidecar-resident.
+        string first = "alpha " + new string('a', 60);
+        string second = "bravo " + new string('b', 90);
+        string third = "charlie " + new string('c', 120);
+        catalog.Plan("CREATE TABLE src (text String)");
+        catalog.Plan($"INSERT INTO src VALUES ('{first}'), ('{second}'), ('{third}')");
+
+        catalog.Plan("CREATE TABLE dst AS SELECT text FROM src");
+
+        List<string> values = await CollectStrings(catalog, "SELECT text FROM dst");
+        Assert.Equal([first, second, third], values);
+
+        // The target must be self-contained: its payload bytes live in its
+        // own sidecar, not referenced out of the source table's blob file.
+        catalog.Plan("DROP TABLE src");
+        List<string> afterDrop = await CollectStrings(catalog, "SELECT text FROM dst");
+        Assert.Equal([first, second, third], afterDrop);
+    }
+
+    [Fact]
+    public async Task InsertSelect_PersistentSource_SidecarStrings_CopiesBytesIntoTargetSidecar()
+    {
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+
+        catalog.Plan("CREATE TABLE decoy (junk String)");
+        catalog.Plan($"INSERT INTO decoy VALUES ('{new string('x', 500)}')");
+
+        string payload = "delta " + new string('d', 80);
+        catalog.Plan("CREATE TABLE src (text String)");
+        catalog.Plan($"INSERT INTO src VALUES ('{payload}')");
+
+        catalog.Plan("CREATE TABLE dst (text String)");
+        catalog.Plan("INSERT INTO dst SELECT text FROM src");
+
+        catalog.Plan("DROP TABLE src");
+        List<string> values = await CollectStrings(catalog, "SELECT text FROM dst");
+        Assert.Equal([payload], values);
+    }
+
+    private static async Task<List<string>> CollectStrings(TableCatalog catalog, string sql)
+    {
+        StatementPlan plan = catalog.Plan(sql);
+        List<string> values = new();
+        await foreach (RowBatch batch in ExecutePlanAsync(plan))
+        {
+            for (int r = 0; r < batch.Count; r++)
+            {
+                values.Add(batch[r][0].AsString(batch.Arena, catalog.SidecarRegistry));
+            }
+        }
+        return values;
+    }
+
     private static async Task<List<int>> ScanIntColumn(ITableProvider provider, string columnName)
     {
         List<int> values = new();

@@ -845,6 +845,38 @@ public readonly partial struct DataValue : IEquatable<DataValue>
         return new(kind, flags: flags, offset: offset, length: length, charCount: storeId);
     }
 
+    /// <summary>
+    /// Returns a copy of this sidecar-backed value re-pointed at
+    /// (<paramref name="offset"/>, <paramref name="length"/>) with
+    /// <paramref name="storeId"/> as its registry store id. Kind, flags,
+    /// kind-specific metadata (<c>_p4</c>/<c>_p5</c>/<c>_p6</c>) and the
+    /// multi-dim ndim byte carry over unchanged. Used when payload bytes
+    /// are copied out of one sidecar into another (e.g. a writer importing
+    /// a value scanned from a different table's blob file).
+    /// </summary>
+    internal DataValue WithSidecarLocation(long offset, long length, byte storeId)
+    {
+        if (!IsInSidecar)
+        {
+            throw new InvalidOperationException(
+                $"WithSidecarLocation requires a sidecar-backed value; got kind={_kind} flags={_flags}.");
+        }
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), offset, "Sidecar offset must be non-negative.");
+        }
+        if (length < 0 || length > SidecarLengthMax)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(length), length,
+                $"Sidecar length must be in [0, {SidecarLengthMax}] (40-bit cap).");
+        }
+
+        ushort charCount = (ushort)((_charCount & 0xFF00) | storeId);
+        return new(_kind, _flags, offset, length, _p4, _p5, _p6, charCount);
+    }
+
 
 
 
