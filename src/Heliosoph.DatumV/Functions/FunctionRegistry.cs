@@ -1001,6 +1001,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Drawing.WobbleFunction>();
         registry.RegisterScalar<Scalar.Drawing.RandomWalkFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawTextFunction>();
+        registry.RegisterScalar<Scalar.Drawing.DrawTextBlockFunction>();
+        registry.RegisterScalar<Scalar.Drawing.TextMeasureFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawImageFunction>();
         registry.RegisterScalar<Scalar.Drawing.DrawPathFunction>();
         registry.RegisterScalar<Scalar.Drawing.FillPathFunction>();
