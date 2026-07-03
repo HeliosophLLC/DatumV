@@ -740,6 +740,36 @@ public sealed class InMemoryTableProvider : ITableProvider
     {
         if (value.IsNull) return null;
 
+        // Array-valued cells fan out by element kind before the scalar switch.
+        // Each typed array is extracted to a stable CLR array (decoupled from the
+        // source arena/sidecar) so MaterializeCell can round-trip it through its
+        // typed-array branches. Kept symmetric with MaterializeCell's reverse
+        // mapping — every element kind handled there is handled here. Byte arrays
+        // use the dedicated AsUInt8Array (shape-prefix aware); String uses the
+        // sidecar-aware AsStringArray; the rest reinterpret their element bytes
+        // via the generic AsArraySpan<T>.
+        if (value.IsArray)
+        {
+            return value.Kind switch
+            {
+                DataKind.Boolean => value.AsArraySpan<bool>(arena, registry).ToArray(),
+                DataKind.Int8 => value.AsArraySpan<sbyte>(arena, registry).ToArray(),
+                DataKind.Int16 => value.AsArraySpan<short>(arena, registry).ToArray(),
+                DataKind.Int32 => value.AsArraySpan<int>(arena, registry).ToArray(),
+                DataKind.Int64 => value.AsArraySpan<long>(arena, registry).ToArray(),
+                DataKind.UInt8 => value.AsUInt8Array(arena, registry),
+                DataKind.UInt16 => value.AsArraySpan<ushort>(arena, registry).ToArray(),
+                DataKind.UInt32 => value.AsArraySpan<uint>(arena, registry).ToArray(),
+                DataKind.UInt64 => value.AsArraySpan<ulong>(arena, registry).ToArray(),
+                DataKind.Float32 => value.AsArraySpan<float>(arena, registry).ToArray(),
+                DataKind.Float64 => value.AsArraySpan<double>(arena, registry).ToArray(),
+                DataKind.String => value.AsStringArray(arena, registry),
+                _ => throw new NotSupportedException(
+                    $"InMemoryTableProvider.AppendRowsAsync does not yet support arrays of DataKind.{value.Kind}. " +
+                    "Extend ConvertDataValueToCell (and MaterializeCell's reverse mapping) with a stable extraction path."),
+            };
+        }
+
         return value.Kind switch
         {
             DataKind.Boolean => value.AsBoolean(),
@@ -747,7 +777,6 @@ public sealed class InMemoryTableProvider : ITableProvider
             DataKind.Int16 => value.AsInt16(),
             DataKind.Int32 => value.AsInt32(),
             DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt8 when value.IsArray => value.AsUInt8Array(arena, registry),
             DataKind.UInt8 => value.AsUInt8(),
             DataKind.UInt16 => value.AsUInt16(),
             DataKind.UInt32 => value.AsUInt32(),
