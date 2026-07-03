@@ -206,7 +206,7 @@ public sealed class AggregateWindowAdapter : IWindowFunction
             IValueStore store = evaluator.Store
                 ?? throw new InvalidOperationException(
                     "AggregateWindowAdapter requires the evaluator to be constructed with an IValueStore.");
-            return InvocationFrame.Symmetric(store, types: evaluator.Types);
+            return InvocationFrame.Symmetric(store, evaluator.Context.SidecarRegistry, evaluator.Types);
         }
     }
 }

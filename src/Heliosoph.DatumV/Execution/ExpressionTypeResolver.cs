@@ -636,7 +636,11 @@ public static class ExpressionTypeResolver
         // return shape is array-typed (see RoutineRegistrar's procedural-UDF path).
         bool isArray = false;
         bool isMultiDim = false;
-        FunctionDescriptor? descriptor = functions.TryGetScalarDescriptor(function.FunctionName);
+        // CallName, not FunctionName: schema-qualified adapters (models.*,
+        // procedural UDFs) register their descriptor under the qualified name,
+        // and looking up the bare name silently strips array-ness from the
+        // resolved shape (CTAS then types the column scalar).
+        FunctionDescriptor? descriptor = functions.TryGetScalarDescriptor(function.CallName);
         if (descriptor is not null)
         {
             FunctionSignatureVariant? matched = FunctionMetadata.MatchVariantWithShape(
