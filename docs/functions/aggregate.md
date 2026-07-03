@@ -168,6 +168,24 @@ SELECT id, nearest_centroid(m['centroids'], embedding) AS cluster
 FROM (SELECT id, embedding, kmeans_fit_agg(embedding, 4, {seed: 7}) OVER () AS m FROM docs) s
 ```
 
+### plot_scatter_agg
+
+`plot_scatter_agg(x, y [, class] [, options])` -> Image
+
+Renders the group's (x, y) points as a PNG scatter plot. Coordinates autoscale to the canvas with symmetric padding; y increases upward. The optional integer `class` picks each point's color from a built-in 10-color categorical palette (indexed modulo 10), so cluster ids from [nearest_centroid](vector.md#nearest_centroid) color the plot directly. Points draw in row order; later rows paint over earlier ones.
+
+The `options` struct accepts `width` (default 1200), `height` (default 630), `background` (Color, default transparent — use `color()` or `color_hex()`), `point_size` (radius in pixels, default 4), and `padding` (fraction of the data range added per side, default 0.05). A zero-range axis expands to ±1 around the value so single points center. Rows with null or non-finite coordinates are skipped; a group with no drawable points returns null.
+
+```sql
+-- Embeddings scatter: PCA to 2-D, k-means cluster colors, one image out
+SELECT plot_scatter_agg(xy[1], xy[2], cluster,
+                        {width: 1200, height: 630, background: color_hex('#0b1020')}) AS hero
+FROM (SELECT pca_project(pca, emb) AS xy,
+             nearest_centroid(km['centroids'], emb) AS cluster
+      FROM (SELECT emb, pca_fit_agg(emb, 2) OVER () AS pca,
+                        kmeans_fit_agg(emb, 4) OVER () AS km FROM corpus) f) p
+```
+
 ### STRING_AGG
 
 `STRING_AGG(expr, separator [ORDER BY ...])` -> String
