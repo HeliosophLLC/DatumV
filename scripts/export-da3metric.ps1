@@ -77,6 +77,18 @@ param(
     [Parameter()]
     [int]$Width = 504,
 
+    # Views per forward pass. 1 = monocular rank-4 input [batch, 3, H, W]
+    # named 'image'. N>=2 = any-view rank-5 input [batch, N, 3, H, W]
+    # named 'images' — required for pose recovery: extrinsics are only
+    # meaningful relative to the other views in the same pass (single-view
+    # extrinsics come back near-identity). The views axis CANNOT be
+    # dynamic — a V=2 trace run at V=4 produces silently wrong numbers
+    # (~5e-1 relative error; the cross-view attention reshapes bake the
+    # count) — so each window size is its own export, and onnxruntime
+    # rejects a mismatched view count at the input.
+    [Parameter()]
+    [int]$Views = 1,
+
     # If set, post-process the fp32 trace into an fp16 sibling
     # (model_fp16.onnx) using onnxconverter-common.float16, keep_io_types
     # so the inference layer still sees fp32 at the wire boundary. Same
@@ -89,6 +101,9 @@ $ErrorActionPreference = 'Stop'
 
 if (($Height % 14) -ne 0 -or ($Width % 14) -ne 0) {
     throw "Height and Width must be divisible by 14 (got ${Height}x${Width})."
+}
+if ($Views -lt 1) {
+    throw "Views must be >= 1 (got $Views)."
 }
 
 $repoRoot   = Resolve-Path "$PSScriptRoot\.."
@@ -154,6 +169,7 @@ $env:DA3_MODEL_ID = $ModelId
 $env:DA3_OUTPUT   = $OutputDirectory
 $env:DA3_HEIGHT   = $Height
 $env:DA3_WIDTH    = $Width
+$env:DA3_VIEWS    = $Views
 
 $exportScript = @'
 import inspect
@@ -168,6 +184,7 @@ model_id   = os.environ['DA3_MODEL_ID']
 output_dir = os.environ['DA3_OUTPUT']
 H          = int(os.environ['DA3_HEIGHT'])
 W          = int(os.environ['DA3_WIDTH'])
+V          = int(os.environ['DA3_VIEWS'])
 
 # Neutralize autocast BEFORE importing depth_anything_3, in case it binds
 # a local reference at import time. Upstream api.py opens
@@ -184,7 +201,40 @@ class _NullAutocast:
 torch.autocast = _NullAutocast
 torch.amp.autocast = _NullAutocast
 
+# aten::cartesian_prod has no ONNX symbolic (any opset). The any-view DA3
+# checkpoints hit it in the DINOv2 RoPE position grid (rope.py); replace
+# with the numerically-identical meshgrid+stack construction, which the
+# exporter lowers fine. Metric/mono checkpoints have RoPE disabled and
+# never call it.
+def _onnx_safe_cartesian_prod(*tensors):
+    if len(tensors) == 1:
+        return tensors[0].reshape(-1)
+    grids = torch.meshgrid(*tensors, indexing='ij')
+    return torch.stack(grids, dim=-1).reshape(-1, len(tensors))
+
+torch.cartesian_prod = _onnx_safe_cartesian_prod
+
 from depth_anything_3.api import DepthAnything3
+
+# aten::mT likewise has no ONNX symbolic. DA3's affine_inverse (the
+# w2c→c2w pose conversion, utils/geometry.py) uses R.mT — and it's
+# @torch.jit.script-compiled, so the operator is baked into TorchScript
+# where no tensor-level monkeypatch can reach. Rebind every by-name
+# import in the forward path to a plain-Python equivalent built on
+# transpose(-2, -1) (the identical operation, which lowers cleanly).
+def _onnx_safe_affine_inverse(A):
+    R = A[..., :3, :3]
+    T = A[..., :3, 3:]
+    P = A[..., 3:, :]
+    Rt = R.transpose(-2, -1)
+    return torch.cat([torch.cat([Rt, -Rt @ T], dim=-1), P], dim=-2)
+
+import depth_anything_3.utils.geometry as _da3_geometry
+import depth_anything_3.model.da3 as _da3_model
+import depth_anything_3.model.cam_enc as _da3_cam_enc
+import depth_anything_3.api as _da3_api
+for _m in (_da3_geometry, _da3_model, _da3_cam_enc, _da3_api):
+    _m.affine_inverse = _onnx_safe_affine_inverse
 
 print(f'Loading {model_id} ...', flush=True)
 model = DepthAnything3.from_pretrained(model_id).to('cpu').eval()
@@ -195,19 +245,24 @@ model = DepthAnything3.from_pretrained(model_id).to('cpu').eval()
 raw_forward = getattr(DepthAnything3.forward, '__wrapped__', DepthAnything3.forward)
 
 def run(image):
-    # DA3 consumes [batch, views, 3, H, W]; the metric mono variant is
-    # single-view, so the wrapper owns the views=1 unsqueeze.
+    # DA3 consumes [batch, views, 3, H, W]. Single-view exports keep the
+    # rank-4 [batch, 3, H, W] contract and the wrapper owns the views=1
+    # unsqueeze; multi-view exports take rank-5 directly.
+    model_in = image.unsqueeze(1) if V == 1 else image
     return raw_forward(
-        model, image.unsqueeze(1),
+        model, model_in,
         extrinsics=None, intrinsics=None,
         export_feat_layers=[], infer_gs=False,
     )
 
+input_name = 'image' if V == 1 else 'images'
+
 # Probe the checkpoint for its actual output dict before committing to
 # ONNX output names. Metric checkpoints emit depth (+ sky, + confidence
-# depending on head config).
-print(f'Probing forward pass at {H}x{W} ...', flush=True)
-dummy = torch.randn(1, 3, H, W)
+# depending on head config); any-view checkpoints add depth_conf +
+# extrinsics + intrinsics.
+print(f'Probing forward pass at {H}x{W}, views={V} ...', flush=True)
+dummy = torch.randn(1, 3, H, W) if V == 1 else torch.randn(1, V, 3, H, W)
 with torch.no_grad():
     probe = run(dummy)
 
@@ -235,9 +290,10 @@ wrapped = Wrapper().eval()
 # Dynamic axes: batch only. Spatial dims stay static — the ViT position-
 # embedding interpolation traces to a constant token count, so a graph
 # traced at HxW is only valid at HxW (confirmed empirically: ORT raises a
-# broadcast error on any other resolution). Batch>1 correctness is
-# validated below.
-dynamic_axes = {'image': {0: 'batch'}}
+# broadcast error on any other resolution). The views dim is likewise
+# static (a mismatched view count runs but is silently wrong, so it must
+# be rejected at the input). Batch>1 correctness is validated below.
+dynamic_axes = {input_name: {0: 'batch'}}
 for k in out_keys:
     dynamic_axes[k] = {0: 'batch'}
 
@@ -253,7 +309,7 @@ torch.onnx.export(
     wrapped,
     (dummy,),
     onnx_path,
-    input_names=['image'],
+    input_names=[input_name],
     output_names=out_keys,
     dynamic_axes=dynamic_axes,
     opset_version=17,
@@ -287,13 +343,13 @@ def check(name, torch_outs, ort_outs, tol=5e-3):
 
 ok = True
 
-ort_outs = sess.run(out_keys, {'image': dummy.numpy()})
+ort_outs = sess.run(out_keys, {input_name: dummy.numpy()})
 with torch.no_grad():
     torch_outs = wrapped(dummy)
-ok &= check(f'parity @ {H}x{W} batch=1', torch_outs, ort_outs)
+ok &= check(f'parity @ {H}x{W} views={V} batch=1', torch_outs, ort_outs)
 
 batched = torch.cat([dummy, dummy], dim=0)
-ort_b2 = sess.run(out_keys, {'image': batched.numpy()})
+ort_b2 = sess.run(out_keys, {input_name: batched.numpy()})
 ok &= check('batch=2 item[0] vs batch=1', torch_outs, [o[0:1] for o in ort_b2])
 ok &= check('batch=2 item[1] vs batch=1', torch_outs, [o[1:2] for o in ort_b2])
 
@@ -371,12 +427,13 @@ onnx.save(m16, r'$fp16Path')
 import onnxruntime as ort
 s32 = ort.InferenceSession(r'$fp32Path', providers=['CPUExecutionProvider'])
 s16 = ort.InferenceSession(r'$fp16Path', providers=['CPUExecutionProvider'])
-shape = [d if isinstance(d, int) else 1 for d in s32.get_inputs()[0].shape]
+inp = s32.get_inputs()[0]
+shape = [d if isinstance(d, int) else 1 for d in inp.shape]
 rng = np.random.default_rng(0)
 x = rng.standard_normal(shape, dtype=np.float32)
 names = [o.name for o in s32.get_outputs()]
-o32 = s32.run(names, {'image': x})
-o16 = s16.run(names, {'image': x})
+o32 = s32.run(names, {inp.name: x})
+o16 = s16.run(names, {inp.name: x})
 ok = True
 for n, a, b in zip(names, o32, o16):
     if not np.all(np.isfinite(b)):

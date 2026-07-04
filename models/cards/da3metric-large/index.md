@@ -46,6 +46,10 @@ FROM datasets.coco_val2017
 LIMIT 16;
 ```
 
+Output:
+
+![Depth-map visualization, false-coloured](query.jpg)
+
 Unproject real meters into a metric point cloud — pass the **same FOV**
 to the model and the unprojection so the metric scale and the ray
 geometry agree:
@@ -60,6 +64,13 @@ FROM datasets.coco_val2017
 LIMIT 8;
 ```
 
+Output:
+
+![Unproject real meters into a metric point cloud](query2.jpg)
+![pass the **same FOV**
+to the model and the unprojection so the metric scale and the ray
+geometry agree](pointcloud.jpg)
+
 Outdoor scenes: mask the sky before reconstruction — monocular depth on
 sky pixels is extrapolation, and a "sky at 40 m" wall ruins a cloud:
 
@@ -67,7 +78,7 @@ sky pixels is extrapolation, and a "sky at 40 m" wall ruins a cloud:
 SELECT
     LET r = models.da3metric_large_full(file, 60.0),
     point_cloud_from_depth_pinhole(file, r.depth, 60) AS cloud,
-    r.sky AS sky_mask,
+    tensor_to_image_chw_gray(r.sky, image_height(file), image_width(file)) AS sky_mask,
     file_name
 FROM datasets.coco_val2017
 LIMIT 8;

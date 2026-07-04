@@ -54,4 +54,43 @@ public sealed class Da3MetricSqlParseTests : ServiceTestBase
         Assert.Equal(2, full.Parameters.Count);
         Assert.NotNull(full.Parameters[1].Default);
     }
+
+    [Theory]
+    [InlineData("da3-base", "da3_base")]
+    [InlineData("da3-base-fp16", "da3_base_fp16")]
+    public void Da3Base_InstallSql_ParsesToTwoCreateModelStatements(string catalogId, string baseName)
+    {
+        string sql = LoadCanonicalSql(catalogId);
+        IReadOnlyList<(Statement Statement, string SourceText)> statements =
+            SqlParser.ParseBatchWithText(sql);
+        Assert.Equal(2, statements.Count);
+
+        CreateModelStatement viz = Assert.IsType<CreateModelStatement>(statements[0].Statement);
+        Assert.Equal(baseName, viz.Name);
+        Assert.Single(viz.Parameters);
+        Assert.Equal("DepthEstimator", viz.ImplementsTaskName);
+
+        CreateModelStatement full = Assert.IsType<CreateModelStatement>(statements[1].Statement);
+        Assert.Equal($"{baseName}_full", full.Name);
+        Assert.Single(full.Parameters);
+        Assert.Null(full.ImplementsTaskName);
+    }
+
+    [Theory]
+    [InlineData("da3-base-4view", "da3_base_4view")]
+    [InlineData("da3-base-4view-fp16", "da3_base_4view_fp16")]
+    public void Da3Base4View_InstallSql_ParsesToOneWindowedModel(string catalogId, string modelName)
+    {
+        string sql = LoadCanonicalSql(catalogId);
+        IReadOnlyList<(Statement Statement, string SourceText)> statements =
+            SqlParser.ParseBatchWithText(sql);
+        Assert.Single(statements);
+
+        CreateModelStatement window = Assert.IsType<CreateModelStatement>(statements[0].Statement);
+        Assert.Equal(modelName, window.Name);
+        // Four Image params — the pinned 4-view window. No task contract.
+        Assert.Equal(4, window.Parameters.Count);
+        Assert.All(window.Parameters, p => Assert.Equal("Image", p.TypeName));
+        Assert.Null(window.ImplementsTaskName);
+    }
 }

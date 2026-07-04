@@ -1478,6 +1478,184 @@
       "cardFile": "cards/da3metric-large/index.md"
     },
     {
+      "name": "Depth Anything 3 Base (Depth + Pose)",
+      "summary": "The any-view DA3: depth + confidence + per-image camera intrinsics from one image, and relative camera pose from a 4-frame window. Depth is up-to-scale — pair with DA3 Metric Large to anchor poses in real meters.",
+      "description": "DINOv2 ViT-B + dual-DPT head + camera heads. Single-view cut estimates depth/confidence/K per image (pose needs company — single-view extrinsics are identity by construction). The 4-view cut runs cross-view attention over a pinned 4-frame window and recovers relative [R|t] per view; the view count is baked into the traced graph, so other window sizes are separate exports. fp16 builds keep fp32 I/O.",
+      "tasks": [
+        "DepthEstimator"
+      ],
+      "tags": [
+        "depth",
+        "pose-estimation",
+        "camera-intrinsics",
+        "multi-view",
+        "depth-anything",
+        "dinov2"
+      ],
+      "licenseIds": [
+        "apache-2.0"
+      ],
+      "attributions": [
+        "Haotong Lin, Sili Chen, Jun Hao Liew, Donny Y. Chen, Zhenyu Li, Guang Shi, Jiashi Feng, Bingyi Kang — Depth Anything 3 (ByteDance Seed)",
+        "Heliosoph (torch.onnx.export from depth-anything/DA3-BASE safetensors)"
+      ],
+      "variants": [
+        {
+          "id": "da3-base",
+          "displayName": "fp32",
+          "summary": "Single image → depth + confidence + camera intrinsics (a per-image focal-length estimate, rescaled to source pixels). Depth is up-to-scale, not meters.",
+          "tags": [
+            "fp32"
+          ],
+          "hardware": {
+            "minRamMb": 1024,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 394,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3-base-onnx",
+                  "revision": "72080d285b91493e7e2f2f197d5e3afdf72ddb95",
+                  "include": [
+                    "model.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3-base/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3_base"
+                },
+                {
+                  "identifier": "da3_base_full"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "da3-base-fp16",
+          "displayName": "fp16",
+          "summary": "Same depth + confidence + intrinsics as the fp32 build, half the disk. I/O stays fp32 — drop-in swap.",
+          "tags": [
+            "fp16"
+          ],
+          "hardware": {
+            "minRamMb": 512,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 198,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3-base-onnx",
+                  "revision": "72080d285b91493e7e2f2f197d5e3afdf72ddb95",
+                  "include": [
+                    "model_fp16.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3-base-fp16/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3_base_fp16"
+                },
+                {
+                  "identifier": "da3_base_fp16_full"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "da3-base-4view",
+          "displayName": "4-view fp32",
+          "summary": "Four frames of one scene → per-view depth, confidence, intrinsics, and **relative camera poses** (first frame is the reference). The pose-recovery build; window size is fixed at 4.",
+          "tags": [
+            "fp32",
+            "4-view"
+          ],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 394,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3-base-4view-onnx",
+                  "revision": "58036ce15ce3510c89d954820f15725a4c896fc8",
+                  "include": [
+                    "model.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3-base-4view/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3_base_4view"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "da3-base-4view-fp16",
+          "displayName": "4-view fp16",
+          "summary": "Same 4-frame pose recovery as the 4-view fp32 build, half the disk. I/O stays fp32 — drop-in swap.",
+          "tags": [
+            "fp16",
+            "4-view"
+          ],
+          "hardware": {
+            "minRamMb": 1024,
+            "minVramMb": 0,
+            "preferred": "cpu"
+          },
+          "approxSizeMb": 198,
+          "versions": [
+            {
+              "version": "2026-07-03",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/da3-base-4view-onnx",
+                  "revision": "58036ce15ce3510c89d954820f15725a4c896fc8",
+                  "include": [
+                    "model_fp16.onnx",
+                    "config.json"
+                  ]
+                }
+              ],
+              "installSql": "sql/da3-base-4view-fp16/2026-07-03.sql",
+              "models": [
+                {
+                  "identifier": "da3_base_4view_fp16"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "cardFile": "cards/da3-base/index.md"
+    },
+    {
       "name": "Metric3D V2 (Metric Depth + Normals)",
       "summary": "Estimate per-pixel metric depth (real-world meters) + surface normals from a single image. Three model sizes × fp32 and fp16 precision.",
       "description": "All variants share the same metric depth + normals output. Size axis trades accuracy for speed; precision axis trades disk footprint for GPU native fp16 throughput.",
