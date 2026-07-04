@@ -223,42 +223,6 @@
       ]
     },
     {
-      "repoSuffix": "juggernaut-xl-lightning-onnx",
-      "sourceFolder": "${DATUMV_MODELS}/juggernaut-xl-lightning-onnx",
-      "expectedSizeMb": 13312,
-      "exportedBy": "scripts/export-batch-onnx.ps1 -Models juggernaut-xl-lightning",
-      "expectedContents": [
-        "model_index.json",
-        "scheduler/",
-        "text_encoder/",
-        "text_encoder_2/",
-        "tokenizer/",
-        "tokenizer_2/",
-        "unet/",
-        "vae_decoder/",
-        "vae_encoder/"
-      ],
-      "provenance": {
-        "baseModel": "RunDiffusion/Juggernaut-XL-Lightning (SDXL fine-tune + Lightning distillation)",
-        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124)",
-        "precision": "fp32 — the optimum 1.24 / torch 2.4 / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models. Revisit fp16 when a confirmed working toolchain exists.",
-        "schedulerHint": "Lightning: 4 steps, CFG=1, epsilon prediction"
-      },
-      "license": {
-        "spdx": "CreativeML-OpenRAIL-Plus-Plus-M",
-        "url": "https://huggingface.co/RunDiffusion/Juggernaut-XL-Lightning",
-        "confidence": "high",
-        "requiresAcceptance": true,
-        "notes": "Inherits SDXL CreativeML OpenRAIL++-M from stabilityai/stable-diffusion-xl-base-1.0."
-      },
-      "licenseFiles": [
-        {
-          "name": "LICENSE-creativeml-openrail-pp-m.md",
-          "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/raw/main/LICENSE.md"
-        }
-      ]
-    },
-    {
       "repoSuffix": "florence-2-base-ft-fp16-onnx",
       "sourceFolder": "${DATUMV_MODELS}/florence-2-base-ft-fp16",
       "expectedSizeMb": 523,
@@ -931,7 +895,7 @@
       "repoSuffix": "sdxl-turbo-onnx",
       "sourceFolder": "${DATUMV_MODELS}/sdxl-turbo-onnx",
       "expectedSizeMb": 13312,
-      "exportedBy": "scripts/export-sdxl-turbo.ps1 (TBD — clone optimum's SDXL ONNX export pattern; same flow as juggernaut-xl-lightning minus the Lightning LoRA fuse step)",
+      "exportedBy": "scripts/export-sdxl-turbo.ps1 (optimum's SDXL ONNX export pattern; no LoRA fuse step — SDXL Turbo is the distilled base, not a fine-tune)",
       "expectedContents": [
         "model_index.json",
         "scheduler/",
@@ -945,8 +909,8 @@
       ],
       "provenance": {
         "baseModel": "stabilityai/sdxl-turbo (Adversarial Diffusion Distillation of Stable Diffusion XL base)",
-        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124) — same toolchain as juggernaut-xl-lightning",
-        "precision": "fp32. The optimum 1.24 / torch 2.4 / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models (same issue noted on juggernaut-xl-lightning); revisit fp16 when a confirmed working toolchain exists.",
+        "exportToolchain": "optimum 1.24 + diffusers 0.31 + torch 2.4 (cu124)",
+        "precision": "fp32. The optimum 1.24 / torch 2.4 / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models; revisit fp16 when a confirmed working toolchain exists.",
         "schedulerHint": "ADD: 1-4 steps (1 = design point, 4 = quality sweet spot), CFG=1, epsilon prediction. 512×512 target (NOT 1024 like full SDXL).",
         "notes": "SDXL architecture: dual text encoders (CLIP-L 768 + OpenCLIP-G 1280, combined to 2048), added_cond_kwargs (text_embeds + time_ids). time_ids must encode [512, 512, 0, 0, 512, 512] — the 512 target distinguishes SDXL Turbo from full SDXL bodies that use 1024."
       },
@@ -1013,7 +977,7 @@
     },
     {
       "folder": "sdxl-lightning-2step-onnx",
-      "reason": "Mirroring is legally permitted under OpenRAIL++-M, but JuggernautXL Lightning already covers the 'SDXL distilled to a few steps' slot with a stronger photoreal baseline. Add only if a real user need surfaces for the raw 2-step SDXL Lightning rather than a fine-tune of it."
+      "reason": "Mirroring is legally permitted under OpenRAIL++-M. Deferred for now; the 'SDXL distilled to a few steps' slot is open since juggernaut-xl-lightning was removed (RunDiffusion layers no-paid-API / commercial-permission terms on top of the RAIL tag), so this is the natural permissive candidate if the slot needs filling."
     },
     {
       "folders": [

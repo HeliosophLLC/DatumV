@@ -47,7 +47,7 @@ LICENSE.md              # Stability AI Community License
 
 Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2.4.x` (CUDA 12.4). Full conversion script: [`scripts/export-sdxl-turbo.ps1`](https://github.com/HeliosophLLC/DatumV/blob/main/scripts/export-sdxl-turbo.ps1) in the Heliosoph repo.
 
-**Precision note:** fp32 only. The `optimum 1.24` / `torch 2.4` / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models (NaN/Inf cascades through attention softmax + group norm). Same situation noted for [JuggernautXL Lightning](https://huggingface.co/Heliosoph/juggernaut-xl-lightning-onnx). Revisit fp16 when a confirmed working toolchain exists.
+**Precision note:** fp32 only. The `optimum 1.24` / `torch 2.4` / opset-14 fp16 path produces a numerically broken UNet for SDXL-class models (NaN/Inf cascades through attention softmax + group norm). Revisit fp16 when a confirmed working toolchain exists.
 
 ## Inference notes
 
@@ -65,14 +65,13 @@ Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2
 
 The 512 `time_ids` is the load-bearing difference from full SDXL bodies — feeding 1024 produces correctly-typed tensors but visibly off-aesthetic outputs (SDXL Turbo was distilled with the 512 conditioning baked in).
 
-## SDXL Turbo vs SD Turbo vs JuggernautXL Lightning
+## SDXL Turbo vs SD Turbo
 
 | Need | Pick |
 |---|---|
 | Fastest 512×512 from a clean Stability baseline | [SD Turbo](https://huggingface.co/Heliosoph/sd-turbo-onnx) (~5× smaller, ~2× less VRAM than SDXL Turbo) |
 | Better prompt adherence + composition at 512×512 | **SDXL Turbo (this)** |
-| 1024×1024 SDXL output with a photoreal fine-tune | [JuggernautXL Lightning](https://huggingface.co/Heliosoph/juggernaut-xl-lightning-onnx) |
-| 1024×1024 SDXL output, clean Stability baseline | `stabilityai/stable-diffusion-xl-base-1.0` (not in catalog — full multi-step pipeline) |
+| 1024×1024 SDXL output | `stabilityai/stable-diffusion-xl-base-1.0` (not in catalog — full multi-step pipeline) |
 
 SDXL Turbo is the right pick when 512 is enough output size and you want SDXL's prompt adherence at Turbo speed.
 

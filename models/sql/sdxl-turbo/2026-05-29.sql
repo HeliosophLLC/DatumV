@@ -10,10 +10,10 @@
 -- distilled for 1-4 step inference. Designed for 512×512 (Stability's model
 -- card recommendation), but the architecture is the full SDXL UNet so
 -- larger sizes (768, 1024) work with roughly quadratic VRAM cost and some
--- quality drift away from the distillation target. See
--- models/sql/juggernaut-xl-lightning/2026-05-29.sql for the canonical
--- annotated SDXL reference — that one locks to 1024×1024 because the
--- Lightning distillation was trained at full SDXL size.
+-- quality drift away from the distillation target. This is the canonical
+-- annotated SDXL body in the catalog: dual text encoders (CLIP-L +
+-- OpenCLIP-G) concatenated to 2048-dim per token, plus the SDXL
+-- micro-conditioning tensor.
 -- ============================================================================
 
 CREATE OR REPLACE MODEL sdxl_turbo(
@@ -60,8 +60,8 @@ AS BEGIN
   DECLARE combined_embeds Float32[] = array_concat_last_dim(
     hidden_1, 768::Int32, hidden_2, 1280::Int32);
 
-  -- 5. Clamp to fp16 representable range (defensive — matches the
-  --    JuggernautXL Lightning body's pattern).
+  -- 5. Clamp to fp16 representable range (defensive — SDXL-class encoder
+  --    outputs can spike past fp16 max on rare prompts).
   SET combined_embeds = array_clamp(
     combined_embeds, CAST(-65504.0 AS Float32), CAST(65504.0 AS Float32));
   SET pooled = array_clamp(

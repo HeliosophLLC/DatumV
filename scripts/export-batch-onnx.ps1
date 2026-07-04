@@ -312,27 +312,6 @@ $KnownModels = @(
         Description  = 'NVIDIA Sana 1.6B - small, fast Apache-2.0 image gen.'
     },
     @{
-        Name        = 'juggernaut-xl-lightning'
-        HF          = 'RunDiffusion/Juggernaut-XL-Lightning'
-        OutputFolder = 'juggernaut-xl-lightning-onnx'
-        ExpectedSize = '~20 GB at fp32'
-        # Community SDXL fine-tune + Lightning distillation. Trained
-        # heavily on photorealistic / fantasy-character datasets; widely
-        # considered one of the best small "fast-quality" generators for
-        # D&D-style portraits and scene art. Architecturally identical
-        # to SDXL-Turbo, so once converted it can drop into the existing
-        # SdxlTurboModel.cs with minor scheduler config changes (4 steps
-        # vs 1, different sigma schedule).
-        #
-        # Exported at fp32: the optimum 1.24 + torch 2.4 + opset-14 fp16
-        # path produces a numerically broken UNet (all-NaN noise_pred from
-        # valid conditioning) for SDXL-class models. Revisit fp16 once
-        # there's a confirmed working fp16 export toolchain.
-        Library      = 'diffusers'
-        Task         = 'text-to-image'
-        Description  = 'JuggernautXL Lightning - SDXL-class fast-quality fantasy generator.'
-    },
-    @{
         Name        = 'hunyuan-dit'
         HF          = 'Tencent-Hunyuan/HunyuanDiT-v1.2-Diffusers'
         OutputFolder = 'hunyuan-dit-onnx'
@@ -423,7 +402,7 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 #   fail at "Cannot instantiate this tokenizer from a slow version" during
 #   pipeline load. Cheap install (~3 MB).
 # accelerate: enables low_cpu_mem_usage path for large models. Required
-#   in practice for FLUX, SD3.5, JuggernautXL.
+#   in practice for FLUX, SD3.5, and other SDXL-class-and-up exports.
 # onnxscript: torch's ONNX exporter dependency on >= 2.5 (kept for
 #   forward-compat; harmless on 2.4).
 

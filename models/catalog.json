@@ -3303,65 +3303,6 @@
       ]
     },
     {
-      "name": "JuggernautXL Lightning (4-step SDXL)",
-      "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for a 24 GB GPU — peaks past 20 GB VRAM.",
-      "description": "SDXL fine-tune + Lightning distillation. 1024×1024, 4 steps, photorealistic + fantasy.",
-      "tasks": [
-        "TextToImage"
-      ],
-      "tags": [
-        "text-to-image",
-        "sdxl",
-        "lightning",
-        "photorealistic",
-        "fantasy"
-      ],
-      "licenseIds": [
-        "creativeml-openrail-pp-m"
-      ],
-      "attributions": [
-        "RunDiffusion — JuggernautXL Lightning (SDXL fine-tune + Lightning distillation)",
-        "Stability AI — Stable Diffusion XL base",
-        "ByteDance — SDXL Lightning method (Lin, Wang, Yang)"
-      ],
-      "cardFile": "cards/juggernaut-xl-lightning/index.md",
-      "variants": [
-        {
-          "id": "juggernaut-xl-lightning",
-          "displayName": "JuggernautXL Lightning (4-step SDXL)",
-          "summary": "High-resolution (1024×1024) text-to-image — SDXL quality in 4 sampling steps. Photoreal and fantasy from a single fine-tune. Plan for a 24 GB GPU — peaks past 20 GB VRAM.",
-          "tags": [],
-          "hardware": {
-            "minRamMb": 4096,
-            "minVramMb": 16384,
-            "preferred": "cuda"
-          },
-          "approxSizeMb": 13312,
-          "versions": [
-            {
-              "version": "2026-05-29",
-              "sources": [
-                {
-                  "type": "huggingface",
-                  "repo": "Heliosoph/juggernaut-xl-lightning-onnx",
-                  "revision": "f05795f9eadf7692c2a16cf6eff57231033410e7",
-                  "include": [
-                    "**/*"
-                  ]
-                }
-              ],
-              "installSql": "sql/juggernaut-xl-lightning/2026-05-29.sql",
-              "models": [
-                {
-                  "identifier": "juggernaut_xl_lightning"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "SD Turbo (1-4 step)",
       "summary": "Stability AI's distilled SD 2.1 — 512x512 text-to-image in just 1-4 steps. The reference small-and-fast diffusion model: faster than the Hyper variants, broadly capable, no fine-tune bias.",
       "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of Stable Diffusion 2.1. Single CLIP-H text encoder (1024-dim), 512×512 latent decode, designed for 1-step inference with 4 steps as the quality sweet spot. Pick over the SD 1.5 Hyper variants when you want the canonical Stability baseline rather than a fine-tune; pick over SDXL Turbo when 512×512 is enough and you want roughly half the VRAM footprint. Subject to the Stability AI Community License — free for individuals and commercial use below $1M annual revenue.",
@@ -3401,7 +3342,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/sd-turbo-onnx",
-                  "revision": "611cbf7fa293601889e84fdd2e4177bc7f4b9fab",
+                  "revision": "af9b98d8953bf466253d7c6f4d3b1ab776bffcd9",
                   "include": [
                     "**/*"
                   ]
@@ -3421,7 +3362,7 @@
     {
       "name": "SDXL Turbo (1-4 step)",
       "summary": "Stability AI's distilled SDXL — 512×512 text-to-image in just 1-4 steps with SDXL's stronger prompt adherence and aesthetic baseline. Heavier than SD Turbo; lighter than full SDXL.",
-      "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of SDXL base. Dual text encoders (CLIP-L 768 + OpenCLIP-G 1280, combined to 2048), 512×512 latent decode (not the 1024 of full SDXL), 1-4 step distillation. Pick over SD Turbo when prompt adherence + compositional quality matter more than throughput; pick over JuggernautXL Lightning when you want the Stability baseline rather than a community fine-tune, and 512×512 is enough output size. Subject to the Stability AI Community License — same $1M-revenue commercial threshold as SD Turbo.",
+      "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of SDXL base. Dual text encoders (CLIP-L 768 + OpenCLIP-G 1280, combined to 2048), 512×512 latent decode (not the 1024 of full SDXL), 1-4 step distillation. Pick over SD Turbo when prompt adherence + compositional quality matter more than throughput. Subject to the Stability AI Community License — same $1M-revenue commercial threshold as SD Turbo.",
       "tasks": [
         "TextToImage"
       ],
@@ -3458,7 +3399,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/sdxl-turbo-onnx",
-                  "revision": "b5182c3d2301755eef59dae6d32d8521f8a6081a",
+                  "revision": "aa996ed4adf42000f38d915a18ff3f6743cc8bab",
                   "include": [
                     "**/*"
                   ]

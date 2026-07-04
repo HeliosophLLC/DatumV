@@ -66,7 +66,6 @@ Toolchain: `optimum 1.24.0`, `diffusers 0.31.0`, `transformers 4.45.2`, `torch 2
 | Fastest 512×512 from a clean Stability baseline | **SD Turbo (this)** |
 | Better prompt adherence + composition at 512×512 | [SDXL Turbo](https://huggingface.co/Heliosoph/sdxl-turbo-onnx) (heavier — ~5× the disk and ~2× the VRAM) |
 | 512×512 with a specific photoreal / fantasy / illustrative fine-tune | SD 1.5 Hyper family (AbsoluteReality / DreamShaper / epiCRealism / RealisticVision / etc.) |
-| 1024×1024 SDXL output | [JuggernautXL Lightning](https://huggingface.co/Heliosoph/juggernaut-xl-lightning-onnx) |
 
 SD Turbo is the right "small baseline" pick when you want Stability's canonical fast model rather than a community fine-tune, and when 512×512 is enough.
 
