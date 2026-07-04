@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "electron:dev": "npm run build && concurrently --kill-others --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "ensure:clientapp": "node ./scripts/ensure-clientapp-deps.mjs",
+    "electron:dev": "npm run build && npm run ensure:clientapp && concurrently --kill-others --names \"vite,electron\" -c \"cyan,green\" \"npm --prefix ../ClientApp run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "build:clientapp": "npm --prefix ../ClientApp run build",
     "clean:backend": "rimraf ./build/backend",
     "publish:dotnet:win:cuda": "npm run clean:backend && dotnet publish ../Heliosoph.DatumV.Web.csproj -c Release -r win-x64 --self-contained true -p:GpuVariant=cuda -o ./build/backend",
