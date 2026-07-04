@@ -87,8 +87,8 @@ public sealed record PreFlightRequirements(
 /// One catalog-model reference the user wrote that isn't ready to execute.
 /// </summary>
 public sealed record PreFlightModelRequirement(
-    // The reference as the user typed it: "depth_anything_v3_large_meters"
-    // or "depth_anything_v3_large_meters@20260529". Used by the UI to
+    // The reference as the user typed it: "da3metric_large_meters"
+    // or "da3metric_large_meters@20260703". Used by the UI to
     // round-trip the install action back to the originating call site.
     string TypedReference,
     // The bare SQL-visible identifier (no @<version> suffix).

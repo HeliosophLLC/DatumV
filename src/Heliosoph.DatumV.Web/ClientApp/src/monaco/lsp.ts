@@ -157,7 +157,7 @@ function registerCompletionProvider(): void {
           return {
             // When the server emits a LabelSuffix, render it as Monaco's
             // structured label so the muted suffix shows inline in the row
-            // (e.g. "depth_anything_v3_large (not installed)") without the
+            // (e.g. "da3metric_large (not installed)") without the
             // user having to highlight the item. Filter matching still
             // targets the bare name — Monaco indexes on the `label.label`
             // field, not the suffix.

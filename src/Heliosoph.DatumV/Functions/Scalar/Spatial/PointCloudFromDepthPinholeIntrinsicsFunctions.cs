@@ -15,7 +15,7 @@ namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 /// Pinhole sibling of <see cref="PointCloudFromDepthOrthographicIntrinsicsFunction"/>.
 /// Takes a 3×3 K matrix and uses per-axis focal lengths + principal point for
 /// geometrically-correct unprojection — pair with metric depth (e.g.
-/// <c>depth_anything_v3_large_meters</c>) for results where flat planes look
+/// <c>da3metric_large_meters</c>) for results where flat planes look
 /// flat instead of curving into hills.
 /// </summary>
 /// <remarks>

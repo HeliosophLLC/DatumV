@@ -20,8 +20,8 @@ contract, different encoder. Both take an `Image` and return a depth-map
 
 Start with **Small** — it already beats the previous generation. Move to
 Base only when fine-boundary quality is the bottleneck. For top quality
-overall, the metric `depth_anything_v3_large` is a further step up (and
-returns real-camera geometry, not just a relative map).
+overall, the metric [`da3metric_large`](../da3metric-large/index.md) is a
+further step up (real metres, not just a relative map).
 
 ## Example SQL
 
@@ -73,7 +73,7 @@ by `depth_map_to_image` inside the model body.
 - **Relative depth is unitless and per-image.** Values order pixels near→
   far *within one frame*; `0.4` is not 0.4 metres, and the same value in
   two different images means nothing comparable. For real-world units use
-  a metric estimator (`zoedepth_nyu_kitti`, `depth_anything_v3_large`).
+  a metric estimator (`zoedepth_nyu_kitti`, `da3metric_large`).
 - **518×518 DINOv2 preprocessing**, ImageNet mean/std, handled inside the
   body — pass the raw `Image` column straight in.
 - **The depth map is aligned to the input.** Output H×W matches the source

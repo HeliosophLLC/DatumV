@@ -510,7 +510,7 @@ LIMIT 100`;
 
 const DEPTH_COMPARE_EXAMPLE_SQL = `SELECT
     LET depth_anything_v2 = models.depth_anything_v2_base(file) AS DAv2,
-    LET depth_anything_v3 = models.depth_anything_v3_large(file) AS DAv3,
+    LET da3_metric = models.da3metric_large(file) AS DA3m,
     LET midas = models.midas_small(file) AS midas,
     LET dpt = models.dpt_large(file) AS dpt,
     file AS baseline,

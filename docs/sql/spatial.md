@@ -352,7 +352,7 @@ classical photogrammetry stack — see "Beyond consensus" below.
 ### Per-frame, no fusion
 
 ```sql
-SELECT mesh_from_depth_pinhole(frame, models.depth_anything_v3_large_meters(frame), 80)
+SELECT mesh_from_depth_pinhole(frame, models.da3metric_large_meters(frame, 80.0), 80)
 FROM video_unnest_frames(video) v
 ```
 

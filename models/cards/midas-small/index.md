@@ -56,7 +56,7 @@ dimensions (`depth_map_to_image` handles this inside the body).
 - **Relative depth is unitless and per-image** — values order pixels
   near→far within a frame, not in metres, and aren't comparable across
   images. For real units use a metric estimator (`zoedepth_nyu_kitti`,
-  `depth_anything_v3_large`).
+  `da3metric_large`).
 - **256×256 BGR input**, ImageNet mean/std — note this model takes **BGR**
   channel order (handled inside the body via `image_to_tensor_chw_bgr`);
   just pass the raw `Image` column in.

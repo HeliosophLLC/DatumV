@@ -31,7 +31,7 @@ Models return ordinary DataValues. The shape depends on the model's task.
 | `Float32[]` | embedders, classifiers (logits / probabilities) | `models.all_minilm_l6_v2(text)` → 384-vec |
 | `String` | speech-to-text, captioning, LLMs | `models.whisper_base(clip)` → transcript |
 | `Array<Struct>` | object detectors, multi-instance models | `models.yolox_s(img)` → bbox + label per detection |
-| `Struct<…>` | depth estimators that expose confidence / pose | `models.depth_anything_v3_large_full(img)` → depth + confidence + extrinsics + intrinsics |
+| `Struct<…>` | depth estimators that expose confidence / camera data | `models.da3_base_full(img)` → depth + confidence + intrinsics |
 
 Struct and array outputs slot into normal SQL: `CROSS JOIN unnest(detections)` expands a detection array into one row per detection; `struct.depth` pulls a single field out. See [Person crops with YOLOX](examples/yolox-person-crops.md) and [Same input, four depth models](examples/depth-comparison.md) for worked examples.
 

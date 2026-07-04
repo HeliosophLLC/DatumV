@@ -24,7 +24,7 @@ namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 /// is intrinsically scale-normalized — a threshold of 0.5 generalizes across
 /// scenes in a way that absolute depth cutoffs (whose meaning depends on
 /// each frame's predicted depth range) never can. Pair with
-/// <c>depth_anything_v3_large_full</c>'s <c>confidence</c> output, or any
+/// <c>da3_base_full</c>'s <c>confidence</c> output, or any
 /// other depth model that emits a confidence map alongside depth.
 /// </para>
 /// <para>
