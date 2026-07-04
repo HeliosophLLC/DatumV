@@ -26,7 +26,7 @@ See [Examples — Person crops with YOLOX](docs/examples/yolox-person-crops.md) 
 
 ```sql
 SELECT
-    LET depth_anything_v2 = models.depth_anything_v2_base(file) AS DAv2,
+    LET depth_anything_v2 = models.depth_anything_v2_small(file) AS DAv2,
     LET da3_metric = models.da3metric_large(file) AS DA3m,
     LET midas = models.midas_small(file) AS midas,
     LET dpt = models.dpt_large(file) AS dpt,

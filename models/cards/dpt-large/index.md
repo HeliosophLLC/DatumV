@@ -36,7 +36,7 @@ Compare DPT against the current-generation model on the same images:
 SELECT
     file AS baseline,
     models.dpt_large(file)               AS dpt,
-    models.depth_anything_v2_base(file)  AS depth_anything
+    models.depth_anything_v2_small(file)  AS depth_anything
 FROM datasets.coco_val2017
 LIMIT 12;
 ```

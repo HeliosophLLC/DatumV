@@ -7,21 +7,14 @@ object boundaries and fewer artifacts than the older
 [MiDaS](../midas-small/index.md) / [DPT](../dpt-large/index.md) generation, and small enough
 to run on CPU.
 
-Two sizes ship under one catalog entry — same architecture, same SQL
-contract, different encoder. Both take an `Image` and return a depth-map
-`Image`, so swapping is a one-line change to the `models.` name.
-
-## When to use which size
-
-| Size      | Model name                | Disk    | Best for                                                     |
-| --------- | ------------------------- | ------- | ----------------------------------------------------------- |
-| **Small** | `depth_anything_v2_small` | ~100 MB | **Default.** Fast CPU depth with SOTA-level quality.        |
-| Base      | `depth_anything_v2_base`  | ~400 MB | Sharper fine detail / thin structures. ~4× the cost.        |
-
-Start with **Small** — it already beats the previous generation. Move to
-Base only when fine-boundary quality is the bottleneck. For top quality
-overall, the metric [`da3metric_large`](../da3metric-large/index.md) is a
-further step up (real metres, not just a relative map).
+One size ships: **Small** (`depth_anything_v2_small`, ~100 MB) — the only
+V2 variant upstream licenses as Apache-2.0 (Base, Large, and Giant are
+CC-BY-NC and not in the catalog). It takes an `Image` and returns a
+depth-map `Image`, and it already beats the previous generation. For a
+quality step up, the metric
+[`da3metric_large`](../da3metric-large/index.md) is the move (real
+metres, not just a relative map), or
+[`da3_base`](../da3-base/index.md) for depth plus camera geometry.
 
 ## Example SQL
 
@@ -32,7 +25,7 @@ Estimate depth for each image alongside the original:
 
 ```sql
 SELECT
-    LET depth = models.depth_anything_v2_base(file) AS depth,
+    LET depth = models.depth_anything_v2_small(file) AS depth,
     file AS baseline,
     file_name
 FROM datasets.coco_val2017
@@ -42,21 +35,6 @@ LIMIT 32;
 Output:
 
 ![Estimate depth for each image alongside the original](query.jpg)
-
-Compare the two sizes side by side on the same images:
-
-```sql
-SELECT
-    file AS baseline,
-    models.depth_anything_v2_small(file) AS small,
-    models.depth_anything_v2_base(file)  AS base
-FROM datasets.coco_val2017
-LIMIT 12;
-```
-
-Output:
-
-![Compare the two sizes side by side on the same images](query2.jpg)
 
 The `LET … AS` form evaluates a model call once per row and names the
 result column — see [LET bindings](../../../docs/sql/let-bindings.md).
@@ -84,8 +62,10 @@ by `depth_map_to_image` inside the model body.
 ## License & attribution
 
 Apache-2.0. Original model by the Depth Anything team; ONNX export by
-onnx-community.
+onnx-community. The license applies to the Small variant specifically —
+upstream's Base/Large/Giant checkpoints are CC-BY-NC 4.0 and are not
+shipped here.
 
-- Upstream: [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) · [-Base](https://huggingface.co/depth-anything/Depth-Anything-V2-Base)
+- Upstream: [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small)
 - Paper: [Depth Anything V2](https://arxiv.org/abs/2406.09414)
 - Encoder: [DINOv2](https://arxiv.org/abs/2304.07193) (Meta AI)
