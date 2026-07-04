@@ -42,8 +42,8 @@
       },
       "Google.Protobuf": {
         "type": "Transitive",
-        "resolved": "3.27.1",
-        "contentHash": "7IVz9TzhYCZ8qY0rPhXUnyJSXYdshUqmmxmTI763XmDDSJJFnyfKH43FFcMJu/CZgBcE98xlFztrKwhzcRkiPg=="
+        "resolved": "3.30.2",
+        "contentHash": "Y2aOVLIt75yeeEWigg9V9YnjsEm53sADtLGq0gLhwaXpk3iu8tYSoauolyhenagA2sWno2TQ2WujI0HQd6s1Vw=="
       },
       "K4os.Compression.LZ4": {
         "type": "Transitive",
@@ -249,7 +249,7 @@
           "LLamaSharp.Backend.Cpu": "[0.27.0, )",
           "LLamaSharp.Backend.Vulkan": "[0.27.0, )",
           "Microsoft.ML.OnnxRuntime.DirectML": "[1.24.4, )",
-          "Microsoft.ML.Tokenizers": "[0.22.0, )",
+          "Microsoft.ML.Tokenizers": "[2.0.0, )",
           "OpenCvSharp4": "[4.13.0.20260302, )",
           "OpenCvSharp4.runtime.win": "[4.13.0.20260302, )",
           "Parquet.Net": "[5.5.0, )",
@@ -338,11 +338,11 @@
       },
       "Microsoft.ML.Tokenizers": {
         "type": "CentralTransitive",
-        "requested": "[0.22.0, )",
-        "resolved": "0.22.0",
-        "contentHash": "a7UXmTZwJt9ph2C0SyREWjIwIQ3srJ/uSXVa3pwV7rgO51geQ/ggwTFXML14GWD7ACAKExlA2sQ/Bmxj2a+OoA==",
+        "requested": "[2.0.0, )",
+        "resolved": "2.0.0",
+        "contentHash": "+b8lT4cLLO/sBR2hjvE/qG6qrZG15h7/PBvnIrzTh4xDaAxdHUY6449rC+1pHzQUsBiCHZVbj+VMn+xS0sL7TA==",
         "dependencies": {
-          "Google.Protobuf": "3.27.1"
+          "Google.Protobuf": "3.30.2"
         }
       },
       "OpenCvSharp4": {
