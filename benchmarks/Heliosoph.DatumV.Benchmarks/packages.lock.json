@@ -337,7 +337,7 @@
           "Microsoft.Extensions.Http": "[10.0.9, )",
           "Microsoft.ML.OnnxRuntime.DirectML": "[1.24.4, )",
           "Microsoft.ML.Tokenizers": "[0.22.0, )",
-          "OpenCvSharp4": "[4.13.0.20260302, )",
+          "OpenCvSharp4": "[4.13.0.20260627, )",
           "OpenCvSharp4.runtime.win": "[4.13.0.20260302, )",
           "Parquet.Net": "[5.5.0, )",
           "PureHDF": "[2.1.1, )",
@@ -465,9 +465,9 @@
       },
       "OpenCvSharp4": {
         "type": "CentralTransitive",
-        "requested": "[4.13.0.20260302, )",
-        "resolved": "4.13.0.20260302",
-        "contentHash": "lfXmyTu2o7szCcgouTeDF26Rn34BIsCyfPKC9lTatbQILrKGaFze2QloYizm5aQZW4m1rrlCH1rBkKwJ5jitiQ=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q=="
       },
       "OpenCvSharp4.runtime.win": {
         "type": "CentralTransitive",
