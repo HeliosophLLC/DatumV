@@ -26,7 +26,7 @@ namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 /// the mismatch surfaces as world warp under camera rotation (floors tilt
 /// when the video pans). This is the constructor that keeps the geometry
 /// consistent when the K comes from a model's intrinsics head (e.g. the
-/// <c>depth_anything_v3_large_full</c> struct) and low-confidence pixels
+/// <c>da3_base_full</c> struct) and low-confidence pixels
 /// still need to be culled.
 /// </para>
 /// <para>

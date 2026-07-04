@@ -342,7 +342,7 @@ public sealed class ModelEntry
     public IReadOnlyList<string>? Tasks { get; init; }
 
     /// <summary>
-    /// Parent catalog entry's kebab-case id (e.g. <c>"depth-anything-v3-large"</c>),
+    /// Parent catalog entry's kebab-case id (e.g. <c>"da3metric-large"</c>),
     /// or <see langword="null"/> for engine-only builtins that have no
     /// catalog entry. Used by the hover drift hint to build a
     /// <c>command:</c> link that opens the Models tab and selects this

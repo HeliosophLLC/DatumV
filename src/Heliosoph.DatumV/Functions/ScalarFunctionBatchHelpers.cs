@@ -24,8 +24,9 @@ internal static class ScalarFunctionBatchHelpers
     /// reserve-once-commit-on-demand so its base pointer is stable across grows —
     /// the original span-dangling AVE that forced sequentialisation is fixed. A
     /// first attempt at re-enabling parallel dispatch (via
-    /// <c>Parallel.ForAsync</c> at threshold 4) crashed depth-anything-v3-large
-    /// calibration with a native-level fault (Windows 0xC0000409). The arena
+    /// <c>Parallel.ForAsync</c> at threshold 4) crashed depth-model calibration
+    /// (the since-replaced depth-anything-v3-large entry) with a native-level
+    /// fault (Windows 0xC0000409). The arena
     /// itself isn't suspect — the basic concurrent-reads-across-grow scenario
     /// passes its unit test cleanly — but something else in the scalar pipeline
     /// or model-body composition is not parallel-safe. Kept sequential while

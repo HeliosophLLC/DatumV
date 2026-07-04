@@ -1820,7 +1820,7 @@ public sealed class HoverProvider
     }
 
     // Returns a markdown line like
-    // `*Active: 2026-04-15* · [Update to 2026-05-29 available](command:datum.openModelInTab?"depth-anything-v3-large")`
+    // `*Active: 2026-04-15* · [Update to 2026-05-29 available](command:datum.openModelInTab?"da3metric-large")`
     // when the schema-qualified call is `models.<name>` and the matching
     // <see cref="ModelEntry"/> has an active on-disk version that trails
     // its catalog-declared latest. Returns null for any other schema, for

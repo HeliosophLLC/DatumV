@@ -12,7 +12,7 @@ namespace Heliosoph.DatumV.Tests.Inference;
 /// </summary>
 /// <remarks>
 /// Multi-dim shape preservation is the diagnostically interesting case:
-/// bodies like depth-anything-v3-large rely on the struct field carrying
+/// bodies like da3metric-large rely on the struct field carrying
 /// a rank-4 shape through to downstream consumers (<c>depth_map_to_image</c>,
 /// <c>array_resize_2d</c>). Any regression that flattens the field at
 /// the struct boundary would surface here first.
@@ -71,7 +71,7 @@ public sealed class InferFunctionReadAllOutputsAsStructTests
         // The diagnostically interesting case: rank-4 [1, 4, 2, 3] output
         // (mask-decoder-style). The struct field must surface as multi-dim
         // so downstream consumers can read the shape; a regression that
-        // flattens it would surface in depth-anything-v3 / SAM bodies.
+        // flattens it would surface in DA3 / SAM bodies.
         int[] shape = [1, 4, 2, 3];
         int total = 1 * 4 * 2 * 3;
         float[] data = new float[total];

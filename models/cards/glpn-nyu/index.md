@@ -69,7 +69,7 @@ LIMIT 8;
 - **480×480 input**, ImageNet mean/std, handled inside the body — pass the
   raw `Image` column straight in.
 - **For metric depth on general scenes**, prefer `zoedepth_nyu_kitti`
-  (indoor + outdoor) or `depth_anything_v3_large`; GLPN's metric range is
+  (indoor + outdoor) or `da3metric_large`; GLPN's metric range is
   NYU-indoor-bound.
 
 ## License & attribution

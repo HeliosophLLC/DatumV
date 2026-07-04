@@ -61,19 +61,19 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     public void BareReference_NotInstalled_EmitsModelNotInstalled()
     {
         CatalogManifest manifest = BuildManifestWithEntry(
-            entryId: "depth-anything-v3-large",
-            identifier: "depth_anything_v3_large_meters",
+            entryId: "da3metric-large",
+            identifier: "da3metric_large_meters",
             versionString: "2026-05-29");
         ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
         FunctionRegistry functions = new();
 
-        QueryExpression q = Parse("SELECT models.depth_anything_v3_large_meters(img) FROM frames");
+        QueryExpression q = Parse("SELECT models.da3metric_large_meters(img) FROM frames");
         PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
 
         PreFlightModelRequirement req = Assert.Single(result.Models);
-        Assert.Equal("models.depth_anything_v3_large_meters", req.TypedReference);
-        Assert.Equal("depth_anything_v3_large_meters", req.Identifier);
-        Assert.Equal("depth-anything-v3-large", req.CatalogEntryId);
+        Assert.Equal("models.da3metric_large_meters", req.TypedReference);
+        Assert.Equal("da3metric_large_meters", req.Identifier);
+        Assert.Equal("da3metric-large", req.CatalogEntryId);
         Assert.Equal("2026-05-29", req.Version);
         Assert.False(req.VersionPinned);
         Assert.Equal(PreFlightReason.ModelNotInstalled, req.Reason);
@@ -208,19 +208,19 @@ public sealed class PreFlightWalkerTests : ServiceTestBase
     public void Cte_BodyReference_EmitsModelNotInstalled()
     {
         CatalogManifest manifest = BuildManifestWithEntry(
-            entryId: "depth-anything-v3-large",
-            identifier: "depth_anything_v3_large_full",
+            entryId: "da3-base",
+            identifier: "da3_base_full",
             versionString: "2026-05-29");
         ICatalogVocabulary vocab = new CatalogVocabulary(manifest);
         FunctionRegistry functions = new();
 
         QueryExpression q = Parse(
-            "WITH frames AS (SELECT models.depth_anything_v3_large_full(img) AS d FROM vid) "
+            "WITH frames AS (SELECT models.da3_base_full(img) AS d FROM vid) "
             + "SELECT d FROM frames");
         PreFlightRequirements result = PreFlightWalker.Walk(q, models: null, vocab, functions);
 
         PreFlightModelRequirement req = Assert.Single(result.Models);
-        Assert.Equal("depth_anything_v3_large_full", req.Identifier);
+        Assert.Equal("da3_base_full", req.Identifier);
         Assert.Equal(PreFlightReason.ModelNotInstalled, req.Reason);
     }
 

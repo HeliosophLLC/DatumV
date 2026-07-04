@@ -1475,7 +1475,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             [
                 new ModelEntry
                 {
-                    Name = "depth_anything_v3_large_meters",
+                    Name = "da3metric_large_meters",
                     OutputKind = "Array<Float32>",
                     Parameters =
                     [
@@ -1486,7 +1486,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
         };
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT models.depth_anything_v3_large_meters(img) FROM t", manifest);
+            "SELECT models.da3metric_large_meters(img) FROM t", manifest);
 
         Assert.DoesNotContain(diagnostics, d =>
             d.Severity == DiagnosticSeverity.Warning &&
@@ -1526,7 +1526,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
                 new FunctionSignature
                 {
                     SchemaName = "models",
-                    Name = "depth_anything_v3_large_meters",
+                    Name = "da3metric_large_meters",
                     Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
                     ReturnType = "Array<Float32>",
                 },
@@ -1536,7 +1536,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
             [
                 new ModelEntry
                 {
-                    Name = "depth_anything_v3_large_meters",
+                    Name = "da3metric_large_meters",
                     OutputKind = "Array<Float32>",
                     Parameters = [new ParameterSignature { Name = "img", Kind = "Image" }],
                 },
@@ -1544,7 +1544,7 @@ public sealed class SemanticAnalyzerTests : ServiceTestBase
         };
 
         Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
-            "SELECT consume_floats(models.depth_anything_v3_large_meters(img)) FROM t",
+            "SELECT consume_floats(models.da3metric_large_meters(img)) FROM t",
             manifest);
 
         Assert.DoesNotContain(diagnostics, d =>

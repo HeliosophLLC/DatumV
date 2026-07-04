@@ -16,7 +16,7 @@ namespace Heliosoph.DatumV.Functions.Scalar.Spatial;
 /// takes a model-predicted 3×3 camera intrinsics matrix directly instead of
 /// computing focal length from a hard-coded vertical FOV. Use when the
 /// depth model also emits an intrinsics head (e.g.
-/// <c>depth_anything_v3_large_full.intrinsics</c>).
+/// <c>da3_base_full.intrinsics</c>).
 /// </summary>
 /// <remarks>
 /// <para>

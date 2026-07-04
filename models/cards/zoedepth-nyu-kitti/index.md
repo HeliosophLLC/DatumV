@@ -4,7 +4,7 @@ Intel ISL's ZoeDepth — a DPT-Large relative-depth backbone fitted with
 **dual metric heads** (NYU indoor + KITTI outdoor calibration) that emit
 depth in **real metres**. The specialist metric estimator: when the scene
 is strictly indoor or driving-style outdoor, its calibrated heads beat the
-more general [Depth Anything V3](../depth-anything-v3-large/index.md).
+more general [DA3 Metric Large](../da3metric-large/index.md).
 MIT-licensed.
 
 Reach for it when absolute scale matters — 3D reconstruction with
@@ -85,7 +85,7 @@ Output:
 - **Stay in-domain.** The two heads are calibrated for NYU-style indoor
   and KITTI-style driving scenes. On out-of-distribution photos (faces,
   mixed lighting) the dual-head router can produce patchy results — for
-  arbitrary scenes prefer [Depth Anything V3](../depth-anything-v3-large/index.md).
+  arbitrary scenes prefer [DA3 Metric Large](../da3metric-large/index.md).
 - **Pinhole, not orthographic.** Real metres → `point_cloud_from_depth_pinhole`
   gives honest geometry; orthographic curves flat planes into hills.
 - **384×384 input**, ImageNet mean/std, handled inside the body — pass

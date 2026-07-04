@@ -56,7 +56,7 @@ dimensions (`depth_map_to_image` handles this inside the body).
 - **Relative depth is unitless and per-image** — values order pixels
   near→far within a frame, but carry no metres and aren't comparable across
   images. For real units use a metric estimator (`zoedepth_nyu_kitti`,
-  `depth_anything_v3_large`).
+  `da3metric_large`).
 - **384×384, ±1 normalization** (mean/std = 0.5), handled inside the body
   — pass the raw `Image` column straight in.
 - **GPU-preferred.** At ~344M params this is the slow, heavy option; on CPU

@@ -179,10 +179,10 @@ same image — useful for spot-checking model quality differences:
 SELECT
     LET midas_depth = models.midas_small(img),
     LET dpt_depth = models.dpt_large(img),
-    LET dav3_struct = models.depth_anything_v3_large_full(img),
-    point_cloud_from_depth_orthographic(img, midas_depth, 50)        AS midas_cloud,
-    point_cloud_from_depth_orthographic(img, dpt_depth, 50)          AS dpt_cloud,
-    point_cloud_from_depth_orthographic(img, dav3_struct.depth, 50)  AS dav3_cloud,
+    LET da3_struct = models.da3_base_full(img),
+    point_cloud_from_depth_orthographic(img, midas_depth, 50)       AS midas_cloud,
+    point_cloud_from_depth_orthographic(img, dpt_depth, 50)         AS dpt_cloud,
+    point_cloud_from_depth_orthographic(img, da3_struct.depth, 50)  AS da3_cloud,
     path
 FROM (
     SELECT file_name as path, file as img
@@ -195,17 +195,17 @@ FROM (
 `models.midas_small` is fast and small (~70 MB); `models.dpt_large` is
 heavier (~1.3 GB) but sharper. Their bboxes differ — DPT typically
 gives a wider Z range because it preserves more dynamic range
-before normalization. `models.depth_anything_v3_large_full` will probably
-return the best looking point cloud nearly every time.
+before normalization. `models.da3_base_full` will probably return the
+best looking point cloud nearly every time.
 
 ### Struct-output models
 
 `models.midas_small` and `models.dpt_large` return a depth `Image`
-directly. `models.depth_anything_v3_large_full` returns a `Struct`
-instead — the depth tensor is one field of the struct, alongside
-confidence, intrinsics, and extrinsics outputs the model produces.
+directly. `models.da3_base_full` returns a `Struct` instead — the depth
+tensor is one field of the struct, alongside the per-pixel confidence
+and the camera-intrinsics matrix the model estimates for the photo.
 The one consequence for the SQL: access the depth tensor via
-`dav3_struct.depth` rather than treating the model call as a direct
+`da3_struct.depth` rather than treating the model call as a direct
 Image. The struct's `depth` field is already aligned to the source
 image dimensions, so it feeds the same `point_cloud_from_depth_*`
 constructors as any other model's output without further reshaping.

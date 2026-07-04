@@ -43,7 +43,7 @@ So `metric3d_v2_small`, `metric3d_v2_small_meters`,
 > exposed. Without the camera's actual focal, the output is correct *up to
 > a per-image scalar*: great for visualization and within-image relative
 > distance, not yet for absolute cross-image measurement. For true metric
-> scale today, prefer [Depth Anything V3](../depth-anything-v3-large/index.md)
+> scale today, prefer [DA3 Metric Large](../da3metric-large/index.md)
 > or [ZoeDepth](../zoedepth-nyu-kitti/index.md).
 
 ## Example SQL
