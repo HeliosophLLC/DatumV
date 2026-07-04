@@ -318,7 +318,7 @@ useful for models like DPT/MiDaS that emit *inverse* depth (nearer =
 larger value) so the output renders with the dark-near / light-far
 convention most viewers expect.
 
-Canonical uses: every model in `models.depth_anything_v2_base`, `models.midas_small`.
+Canonical uses: every model in `models.depth_anything_v2_small`, `models.midas_small`.
 
 ## Diffusion
 

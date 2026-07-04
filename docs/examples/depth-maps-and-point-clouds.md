@@ -27,14 +27,14 @@ With a path-based TVF:
 
 ## 1. Inspect a depth model's output
 
-The depth-estimator models in the catalog (`models.depth_anything_v2_base`,
+The depth-estimator models in the catalog (`models.depth_anything_v2_small`,
 `models.midas_small`, `models.dpt_large`, …) all `IMPLEMENTS DepthEstimator`
 and return a grayscale-as-RGBA Image — one pixel per input pixel, brighter
 intensity = closer surface. Render one to see what you're working with:
 
 ```sql
 SELECT
-    LET depth = models.depth_anything_v2_base(img) AS DAv2,
+    LET depth = models.depth_anything_v2_small(img) AS DAv2,
     img AS baseline,
     path
 FROM (
@@ -58,7 +58,7 @@ palette — depth becomes hue, which the eye reads instantly:
 
 ```sql
 SELECT
-    LET depth = models.depth_anything_v2_base(img) AS DAv2,
+    LET depth = models.depth_anything_v2_small(img) AS DAv2,
     apply_colormap(depth, 'turbo') as color_map,
     img AS baseline,
     path
@@ -89,7 +89,7 @@ cell) without extra metadata.
 -- each pixel's (X, Y) is fixed by its image position; depth only
 -- pushes points forward or back along Z. Reads as a tilted heightfield.
 SELECT
-    LET depth = models.depth_anything_v2_base(img) AS DAv2,
+    LET depth = models.depth_anything_v2_small(img) AS DAv2,
     img AS baseline,
     point_cloud_from_depth_orthographic(img, depth, 50) as point_cloud,
     path
@@ -114,7 +114,7 @@ Don't forget to click on the point cloud to view the 3D representation:
 -- distances; for normalized inverse depth, the perspective effect is
 -- a distortion artifact rather than honest geometry.
 SELECT
-    LET depth = models.depth_anything_v2_base(img) AS DAv2,
+    LET depth = models.depth_anything_v2_small(img) AS DAv2,
     img AS baseline,
     point_cloud_from_depth_pinhole(img, depth, 50) as point_cloud,
     path

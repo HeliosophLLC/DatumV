@@ -1204,8 +1204,8 @@
     },
     {
       "name": "Depth Anything V2 (Monocular Depth)",
-      "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS — the recommended modern default for monocular depth. Pick a size: Small for fast CPU depth at SOTA-level quality, Base for sharper fine detail.",
-      "description": "Current SOTA permissive-license general-purpose monocular depth. DINOv2 ViT encoder + DPT-style decoder producing relative (not metric) depth. Both sizes share the same architecture, preprocessing, and SQL contract — they differ only in encoder size (ViT-S ~24M params vs ViT-B ~97M) and therefore quality vs cost. Swap variant ids in a query and the only things that change are detail and latency.",
+      "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS — fast CPU depth at SOTA-level quality and the best quality-per-MB in the catalog.",
+      "description": "Permissive-license general-purpose monocular depth. DINOv2 ViT-S encoder (~24M params) + DPT-style decoder producing relative (not metric) depth. Small is the only V2 size upstream licenses as Apache-2.0 (Base/Large/Giant are CC-BY-NC); for a quality step up, the Apache DA3 entries cover metric depth (da3metric-large) and camera geometry (da3-base).",
       "tasks": [
         "DepthEstimator"
       ],
@@ -1227,7 +1227,7 @@
       "variants": [
         {
           "id": "depth-anything-v2-small",
-          "displayName": "Small (recommended)",
+          "displayName": "Small",
           "summary": "Sharper relative-depth estimator with a stronger backbone than DPT / MiDaS. Recommended modern default for monocular depth — best quality-per-MB in this catalog.",
           "tags": [],
           "hardware": {
@@ -1255,41 +1255,6 @@
               "models": [
                 {
                   "identifier": "depth_anything_v2_small"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "depth-anything-v2-base",
-          "displayName": "Base",
-          "summary": "Mid-size Depth Anything V2 — better detail on fine boundaries than the Small variant. Pick on CPU when accuracy beats throughput.",
-          "tags": [],
-          "hardware": {
-            "minRamMb": 1024,
-            "minVramMb": 0,
-            "preferred": "cpu"
-          },
-          "approxSizeMb": 400,
-          "versions": [
-            {
-              "version": "2026-05-29",
-              "sources": [
-                {
-                  "type": "huggingface",
-                  "repo": "onnx-community/depth-anything-v2-base",
-                  "revision": "main",
-                  "include": [
-                    "onnx/model.onnx",
-                    "config.json",
-                    "preprocessor_config.json"
-                  ]
-                }
-              ],
-              "installSql": "sql/depth-anything-v2-base/2026-05-29.sql",
-              "models": [
-                {
-                  "identifier": "depth_anything_v2_base"
                 }
               ]
             }

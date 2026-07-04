@@ -80,7 +80,7 @@ Plan-time work in `ExportPlan.PlanAsync`:
 Execute-time work in `ExportPlan.ExecuteImplAsync`:
 
 1. Drain the source plan against a `WithoutStreaming` execution context so the inner `SelectPlan` doesn't open its own cell bracket. The user clicked Export — they want to see the summary cell, not the source's full row stream.
-2. Lazily construct the sink on the first non-empty batch. This is where the schema reconciliation runs: when the static `QuerySchemaResolver` returned `DataKind.String` as a fallback for an unclassifiable expression (notably model invocations), `ReconcileSchemaWithRuntime` walks the first batch and overrides each column's `Kind` from the observed `DataValue.Kind`. Without this, a query like `LET m = models.depth_anything_v2_base(file) AS m` would build a String encoder that then tries `AsString` on a Mesh value at runtime.
+2. Lazily construct the sink on the first non-empty batch. This is where the schema reconciliation runs: when the static `QuerySchemaResolver` returned `DataKind.String` as a fallback for an unclassifiable expression (notably model invocations), `ReconcileSchemaWithRuntime` walks the first batch and overrides each column's `Kind` from the observed `DataValue.Kind`. Without this, a query like `LET m = models.depth_anything_v2_small(file) AS m` would build a String encoder that then tries `AsString` on a Mesh value at runtime.
 3. Per batch: `sink.WriteAsync(batch, ct)`.
 4. After completion: capture `RowsWritten` / `BytesWritten` *before* sink disposal (the sink doesn't promise the properties remain readable after `DisposeAsync`).
 5. Yield the summary `RowBatch` with two `Int64` columns.
