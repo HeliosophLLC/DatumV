@@ -9,10 +9,7 @@ Like SD Turbo it's the Stability baseline, **not a fine-tune** — no style
 bias, no activator phrase.
 
 Pick it over SD Turbo when prompt adherence and compositional quality
-matter more than throughput; pick it over
-[JuggernautXL Lightning](../juggernaut-xl-lightning/index.md) when you want the
-Stability baseline rather than a community fine-tune and 512×512 output
-is enough.
+matter more than throughput.
 
 One SQL-visible model ships: `sdxl_turbo`. It takes a text `prompt`, an
 optional `steps` count, and an optional output `size`, and returns an

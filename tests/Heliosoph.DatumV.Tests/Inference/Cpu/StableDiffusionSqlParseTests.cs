@@ -66,7 +66,6 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     [InlineData("realistic-vision-hyper")]
     [InlineData("sd-turbo")]
     [InlineData("sdxl-turbo")]
-    [InlineData("juggernaut-xl-lightning")]
     public void TextToImage_DeclaresOptionalSeedParameter(string modelId)
     {
         Statement stmt = SqlParser.ParseStatement(LoadCanonicalSql(modelId));
@@ -157,32 +156,4 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
         Assert.Equal(4, descriptor.UsingFiles!.Count);
     }
 
-    [Fact]
-    public void JuggernautXlLightning_CreateModelStatement_ParsesAndRegisters()
-    {
-        if (!BundlePresent("juggernaut-xl-lightning-onnx", "text_encoder/model.onnx")) return;
-
-        TableCatalog catalog = CreateCatalog();
-        catalog.Models = new Heliosoph.DatumV.Models.ModelCatalog(modelDirectory: ModelsDirectory);
-        catalog.InferenceDispatcher = new InferenceDispatcher(
-            [new OnnxRuntimeBackend()],
-            NullLogger<InferenceDispatcher>.Instance);
-
-        catalog.Plan(LoadCanonicalSql("juggernaut-xl-lightning"));
-
-        Assert.True(
-            catalog.DeclaredModels.TryGet(
-                new QualifiedName("models", "juggernaut_xl_lightning"),
-                out ModelDescriptor? descriptor));
-        Assert.NotNull(descriptor);
-        Assert.Equal("TextToImage", descriptor!.ImplementsTaskName);
-        Assert.Equal("Image", descriptor.ReturnTypeName);
-        Assert.NotNull(descriptor.UsingFiles);
-        // Dual text encoders + UNet + VAE decoder = 4 sessions.
-        Assert.Equal(4, descriptor.UsingFiles!.Count);
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "text_encoder_1");
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "text_encoder_2");
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "unet");
-        Assert.Contains(descriptor.UsingFiles, f => f.Alias == "vae_decoder");
-    }
 }

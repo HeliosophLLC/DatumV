@@ -1,6 +1,6 @@
 # CreativeML OpenRAIL++-M License
 
-**Applies to:** Stable Diffusion XL (SDXL) base and community fine-tunes built on SDXL (e.g., JuggernautXL Lightning).
+**Applies to:** Stable Diffusion XL (SDXL) base and community fine-tunes built on SDXL. (Caution: some SDXL fine-tunes carry the RAIL++ tag but layer additional publisher terms on top — e.g. no-paid-API or commercial-permission clauses. Always check the original publisher's card, not just the tag.)
 
 **Authoritative full text:** https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
 
@@ -39,7 +39,7 @@ If you redistribute SDXL or a derivative:
 1. **Include a copy of this license.**
 2. **Inform downstream users** of the use-based restrictions.
 3. **Mark modified files** as changed.
-4. **Preserve copyright notices** of upstream contributors (CompVis, Stability AI, RunDiffusion if Juggernaut-derived, etc).
+4. **Preserve copyright notices** of upstream contributors (CompVis, Stability AI, the fine-tune's publisher, etc).
 
 ---
 
