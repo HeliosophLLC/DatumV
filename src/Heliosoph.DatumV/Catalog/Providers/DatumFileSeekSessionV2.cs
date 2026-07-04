@@ -32,6 +32,11 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
     private readonly int[] _schemaIndices;
     private readonly byte _sidecarStoreId;
     private readonly Arena? _targetArena;
+    // Per-projected-column runtime struct TypeId (0 = none), translated by
+    // the provider at session open from the footer's on-disk StructTypeIds.
+    // Stamped onto eagerly-decoded scalar struct values so they stay
+    // self-describing through seek paths (index scans, seek joins).
+    private readonly ushort[]? _columnRuntimeStructTypeIds;
     private readonly byte[]?[]? _chapterTombstoneBitmaps;
     private DatumFileReaderV2? _reader;
     private SidecarReadStore? _sidecar;
@@ -44,7 +49,8 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
         ColumnLookup columnLookup,
         int[] schemaIndices,
         byte sidecarStoreId,
-        Arena? targetArena = null)
+        Arena? targetArena = null,
+        ushort[]? columnRuntimeStructTypeIds = null)
     {
         _pool = pool;
         _reader = reader;
@@ -53,6 +59,7 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
         _schemaIndices = schemaIndices;
         _sidecarStoreId = sidecarStoreId;
         _targetArena = targetArena;
+        _columnRuntimeStructTypeIds = columnRuntimeStructTypeIds;
         // Load tombstone bitmaps once at session construction so the
         // inner row-iteration loop fast-paths when the file has no
         // soft-deletes (the common case).
@@ -113,7 +120,8 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
                     pageIndex: pageIndex,
                     sidecarStoreId: _sidecarStoreId,
                     sidecarSource: _sidecar,
-                    eagerStore: batch.Arena);
+                    eagerStore: batch.Arena,
+                    columnRuntimeStructTypeId: _columnRuntimeStructTypeIds?[i] ?? 0);
             }
 
             for (int row = sliceStart; row < sliceEnd; row++)
@@ -143,7 +151,8 @@ internal sealed class DatumFileSeekSessionV2 : ISeekSession
                             pageIndex: pageIndex,
                             sidecarStoreId: _sidecarStoreId,
                             sidecarSource: _sidecar,
-                            eagerStore: batch.Arena);
+                            eagerStore: batch.Arena,
+                            columnRuntimeStructTypeId: _columnRuntimeStructTypeIds?[i] ?? 0);
                     }
                 }
 

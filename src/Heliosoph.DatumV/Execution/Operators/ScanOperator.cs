@@ -383,7 +383,7 @@ public sealed class ScanOperator : QueryOperator
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
+        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store, context.TypeIdTranslations);
 
         foreach (long rowPosition in exactPositions)
         {
@@ -460,7 +460,7 @@ public sealed class ScanOperator : QueryOperator
         ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
-        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store);
+        using ISeekSession seekSession = provider.OpenSeekSession(_requiredColumns, context.Store, context.TypeIdTranslations);
 
         foreach ((long start, long end, int activeChunkIndex) in activeRanges)
         {

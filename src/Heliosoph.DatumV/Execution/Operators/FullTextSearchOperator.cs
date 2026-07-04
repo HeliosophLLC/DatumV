@@ -193,7 +193,7 @@ public sealed class FullTextSearchOperator : QueryOperator
 
         // Stream matching rows through a seek session. Mirrors ScanOperator's
         // exact-seek path.
-        using ISeekSession seekSession = _provider.OpenSeekSession(_requiredColumns, context.Store);
+        using ISeekSession seekSession = _provider.OpenSeekSession(_requiredColumns, context.Store, context.TypeIdTranslations);
         RowCopyOutputWriter writer = new(context);
 
         try

@@ -253,7 +253,7 @@ public sealed partial class DatumFileTableProviderV2 : ITableProvider, IDatumFil
         try
         {
             sidecar = TryOpenSidecar(path, reader);
-            (Schema schema, int[] schemaToFooterIndex) = BuildSchema(reader.Footer);
+            (Schema schema, int[] schemaToFooterIndex) = BuildSchema(reader.Footer, sidecar);
             byte[]?[]? bitmaps = reader.LoadChapterTombstoneBitmaps();
             return new Snapshot
             {
@@ -510,8 +510,27 @@ public sealed partial class DatumFileTableProviderV2 : ITableProvider, IDatumFil
     /// Callers use the mapping when consuming page directories / zone
     /// maps directly from the footer.
     /// </returns>
-    private static (Schema Schema, int[] SchemaToFooterIndex) BuildSchema(FooterV2 footer)
+    private static (Schema Schema, int[] SchemaToFooterIndex) BuildSchema(FooterV2 footer, IBlobSource? sidecar)
     {
+        // Struct columns: rebuild their schema-level field lists from the
+        // file's type table (descriptor blobs in the sidecar, on-disk ids in
+        // the column footers). A snapshot-local scratch registry does the
+        // interning; its runtime ids never escape — the schema carries the
+        // shape as ColumnInfo children, and scan-time value translation
+        // still goes through the per-query TypeIdTranslations.
+        TypeRegistry? fileTypes = null;
+        Dictionary<ushort, int>? onDiskToRuntime = null;
+        if (footer.TypeTable.Count > 0 && sidecar is not null)
+        {
+            fileTypes = new TypeRegistry();
+            onDiskToRuntime = new Dictionary<ushort, int>(footer.TypeTable.Count);
+            foreach (TypeTableEntryV5 entry in footer.TypeTable)
+            {
+                ReadOnlySpan<byte> blob = sidecar.Read(entry.SidecarOffset, entry.DescriptorLength);
+                onDiskToRuntime[entry.OnDiskTypeId] =
+                    TypeDescriptorSerializer.DeserializeAndIntern(blob, fileTypes);
+            }
+        }
         // Index DEFAULT entries by footer column index for O(1) lookup
         // during schema construction. Most columns have no default, so a
         // dictionary stays cheap.
@@ -601,17 +620,39 @@ public sealed partial class DatumFileTableProviderV2 : ITableProvider, IDatumFil
             // value. Surfacing Nullable=false on the schema matches what
             // CREATE TABLE-time PK columns report.
             bool effectiveNullable = isPrimaryKey ? false : d.IsNullable;
-            columns.Add(new ColumnInfo(d.Name, d.Kind, effectiveNullable)
+
+            IReadOnlyList<ColumnInfo>? structFields = null;
+            if (d.Kind == DataKind.Struct
+                && footer.Columns[i].StructTypeId is { } onDiskStructId
+                && onDiskToRuntime is not null
+                && onDiskToRuntime.TryGetValue(onDiskStructId, out int runtimeStructId))
             {
-                IsArray = d.IsArray,
-                DefaultExpression = defaultExpression,
-                Identity = i == identityFooterIndex ? identitySpec : null,
-                IsPrimaryKey = isPrimaryKey,
-                ComputedExpression = computedExpression,
-                MaxLength = d.MaxLength,
-                FixedShape = d.FixedShape,
-                IsBlankPadded = d.IsBlankPadded,
-            });
+                structFields = fileTypes!.BuildColumnInfoFields(runtimeStructId);
+            }
+
+            columns.Add(structFields is not null
+                ? new ColumnInfo(d.Name, effectiveNullable, structFields)
+                {
+                    IsArray = d.IsArray,
+                    DefaultExpression = defaultExpression,
+                    Identity = i == identityFooterIndex ? identitySpec : null,
+                    IsPrimaryKey = isPrimaryKey,
+                    ComputedExpression = computedExpression,
+                    MaxLength = d.MaxLength,
+                    FixedShape = d.FixedShape,
+                    IsBlankPadded = d.IsBlankPadded,
+                }
+                : new ColumnInfo(d.Name, d.Kind, effectiveNullable)
+                {
+                    IsArray = d.IsArray,
+                    DefaultExpression = defaultExpression,
+                    Identity = i == identityFooterIndex ? identitySpec : null,
+                    IsPrimaryKey = isPrimaryKey,
+                    ComputedExpression = computedExpression,
+                    MaxLength = d.MaxLength,
+                    FixedShape = d.FixedShape,
+                    IsBlankPadded = d.IsBlankPadded,
+                });
             indices.Add(i);
         }
 

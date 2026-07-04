@@ -43,6 +43,25 @@ public sealed partial class DatumFileWriterV2
     private ushort?[]? _columnStructTypeIds;
 
     /// <summary>
+    /// Append mode: the existing file's TypeTable entries (with their
+    /// descriptor blob bytes, read during rehydrate while the read-side
+    /// sidecar was open). Re-emitted verbatim at finalize so an append
+    /// session never strips the table; the blobs seed the allocator when
+    /// a registry arrives so same-shape values reuse existing on-disk
+    /// ids. Null for fresh writes and files without a type table.
+    /// </summary>
+    private List<(TypeTableEntryV5 Entry, byte[] Blob)>? _existingTypeTableEntries;
+    private bool _allocatorSeededFromExisting;
+
+    /// <summary>
+    /// Append mode: per-column <c>StructTypeId</c>s from the existing
+    /// footer, carried forward so a session that writes no struct values
+    /// (or has no registry) doesn't strip them. Index parallel to
+    /// <see cref="_columns"/>.
+    /// </summary>
+    private ushort?[]? _existingColumnOnDiskStructTypeIds;
+
+    /// <summary>
     /// Sets the per-query <see cref="TypeRegistry"/> the writer uses to
     /// resolve descriptors at finalize. Must be called before the first
     /// <see cref="WriteRowBatch"/> for the file to receive a TypeTable.
@@ -52,6 +71,59 @@ public sealed partial class DatumFileWriterV2
     {
         ArgumentNullException.ThrowIfNull(registry);
         _typeRegistry = registry;
+        SeedAllocatorFromExistingTypeTable();
+    }
+
+    /// <summary>
+    /// Interns the existing file's descriptor blobs into
+    /// <see cref="_typeRegistry"/> and seeds the allocator's
+    /// runtime → on-disk map, so this session's values that match an
+    /// existing shape resolve to the id already on disk instead of
+    /// allocating a duplicate entry. No-op until both the registry and
+    /// the rehydrated entries are present; idempotent thereafter.
+    /// </summary>
+    private void SeedAllocatorFromExistingTypeTable()
+    {
+        if (_allocatorSeededFromExisting) return;
+        if (_typeRegistry is null || _existingTypeTableEntries is null) return;
+
+        foreach ((TypeTableEntryV5 entry, byte[] blob) in _existingTypeTableEntries)
+        {
+            ushort runtimeId = checked((ushort)TypeDescriptorSerializer.DeserializeAndIntern(blob, _typeRegistry));
+            _allocator.SeedExisting(runtimeId, entry.OnDiskTypeId);
+        }
+        _allocatorSeededFromExisting = true;
+    }
+
+    /// <summary>
+    /// Declares a struct column's shape up front from its schema-level
+    /// field list, independent of any row values. Used at CREATE TABLE
+    /// time so the empty file already carries the declared shape in its
+    /// type table and column footer — the first INSERT (and every cold
+    /// reopen) then reads the shape off the file instead of needing the
+    /// original DDL. Requires <see cref="SetTypeRegistry"/> and
+    /// <c>Initialize</c> to have run. Covers scalar Struct and
+    /// Array&lt;Struct&gt; columns alike (for arrays the recorded id is
+    /// the ELEMENT shape).
+    /// </summary>
+    public void DeclareStructColumnShape(int columnIndex, IReadOnlyList<ColumnInfo> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (_typeRegistry is null)
+        {
+            throw new InvalidOperationException(
+                "DeclareStructColumnShape requires SetTypeRegistry to be called first.");
+        }
+        if (_columns is null)
+        {
+            throw new InvalidOperationException(
+                "DeclareStructColumnShape requires Initialize to be called first.");
+        }
+
+        ushort runtimeId = checked((ushort)_typeRegistry.InternStructFromColumnInfoFields(fields));
+        _columnStructTypeIds ??= new ushort?[_columns.Length];
+        _columnStructTypeIds[columnIndex] = runtimeId;
+        _allocator.AllocateOrLookup(runtimeId);
     }
 
     /// <summary>
@@ -99,11 +171,29 @@ public sealed partial class DatumFileWriterV2
     /// </summary>
     private ushort? ResolveColumnStructTypeIdForFooter(int columnIndex)
     {
-        if (_typeRegistry is null) return null;
-        if (_columnStructTypeIds is null) return null;
-        ushort? runtimeId = _columnStructTypeIds[columnIndex];
-        if (runtimeId is null) return null;
-        return _allocator.AllocateOrLookup(runtimeId.Value);
+        // Columns added mid-session (ALTER ADD COLUMN) sit past the end of
+        // the rehydrated array — they have no pre-append id by definition.
+        ushort? existing = _existingColumnOnDiskStructTypeIds is { } ids && columnIndex < ids.Length
+            ? ids[columnIndex]
+            : null;
+
+        if (_typeRegistry is null || _columnStructTypeIds?[columnIndex] is not { } runtimeId)
+        {
+            // Session wrote no struct values into this column (or has no
+            // registry): the pre-append id, if any, carries forward so
+            // existing rows keep resolving.
+            return existing;
+        }
+
+        ushort resolved = _allocator.AllocateOrLookup(runtimeId);
+        if (existing is { } onDisk && onDisk != resolved)
+        {
+            throw new InvalidOperationException(
+                $"Column '{_columns![columnIndex].Name}' stores struct shape id {onDisk} on disk but " +
+                $"this append session wrote values of shape id {resolved}. Struct columns are " +
+                "homogeneous across appends — the incoming values must match the column's shape.");
+        }
+        return resolved;
     }
 
     /// <summary>
@@ -116,21 +206,33 @@ public sealed partial class DatumFileWriterV2
     /// </summary>
     private IReadOnlyList<TypeTableEntryV5> EmitTypeTable()
     {
-        if (_typeRegistry is null) return Array.Empty<TypeTableEntryV5>();
-        IReadOnlyList<(ushort runtimeId, ushort onDiskId)> mappings = _allocator.Snapshot();
-        if (mappings.Count == 0) return Array.Empty<TypeTableEntryV5>();
-        if (_sidecar is null)
+        // Existing entries carry forward verbatim — their descriptor blobs
+        // are already in the sidecar at the recorded offsets. New shapes
+        // allocated this session (Snapshot excludes seeded mappings) get
+        // fresh blobs appended behind them.
+        int existingCount = _existingTypeTableEntries?.Count ?? 0;
+        IReadOnlyList<(ushort runtimeId, ushort onDiskId)> mappings = _typeRegistry is null
+            ? Array.Empty<(ushort, ushort)>()
+            : _allocator.Snapshot();
+        if (existingCount == 0 && mappings.Count == 0) return Array.Empty<TypeTableEntryV5>();
+
+        TypeTableEntryV5[] entries = new TypeTableEntryV5[existingCount + mappings.Count];
+        for (int i = 0; i < existingCount; i++)
+        {
+            entries[i] = _existingTypeTableEntries![i].Entry;
+        }
+
+        if (mappings.Count > 0 && _sidecar is null)
         {
             throw new InvalidOperationException(
                 "DatumFileWriterV2 produced struct values but has no sidecar to hold their " +
                 "TypeDescriptor blobs. Open the writer with a sidecar path or skip the registry.");
         }
 
-        TypeTableEntryV5[] entries = new TypeTableEntryV5[mappings.Count];
         for (int i = 0; i < mappings.Count; i++)
         {
             (ushort runtimeId, ushort onDiskId) = mappings[i];
-            TypeDescriptor? descriptor = _typeRegistry.GetDescriptor(runtimeId);
+            TypeDescriptor? descriptor = _typeRegistry!.GetDescriptor(runtimeId);
             if (descriptor is null)
             {
                 throw new InvalidOperationException(
@@ -139,8 +241,8 @@ public sealed partial class DatumFileWriterV2
                     "registry at finalize time.");
             }
             byte[] blob = TypeDescriptorSerializer.SerializeFromDescriptor(descriptor, _typeRegistry);
-            (long offset, long length) = _sidecar.Append(blob);
-            entries[i] = new TypeTableEntryV5(onDiskId, offset, checked((int)length));
+            (long offset, long length) = _sidecar!.Append(blob);
+            entries[existingCount + i] = new TypeTableEntryV5(onDiskId, offset, checked((int)length));
         }
         return entries;
     }
@@ -172,6 +274,30 @@ public sealed partial class DatumFileWriterV2
             _runtimeToOnDisk[runtimeTypeId] = onDisk;
             _emissionOrder.Add((runtimeTypeId, onDisk));
             return onDisk;
+        }
+
+        /// <summary>
+        /// Records a runtime → on-disk mapping for a shape that ALREADY has
+        /// a TypeTable entry on disk (append mode). Unlike
+        /// <see cref="AllocateOrLookup"/>, seeded mappings don't join the
+        /// emission order — their entries carry forward verbatim at
+        /// finalize rather than re-serializing. First seed wins if the
+        /// existing table happens to carry duplicate shapes.
+        /// </summary>
+        public void SeedExisting(ushort runtimeTypeId, ushort onDiskTypeId)
+        {
+            if (runtimeTypeId == 0 || onDiskTypeId == 0) return;
+            _runtimeToOnDisk.TryAdd(runtimeTypeId, onDiskTypeId);
+            EnsureNextOnDiskIdAtLeast((ushort)(onDiskTypeId + 1));
+        }
+
+        /// <summary>
+        /// Raises the next-id floor so fresh allocations never collide with
+        /// on-disk ids carried forward from the existing file's TypeTable.
+        /// </summary>
+        public void EnsureNextOnDiskIdAtLeast(ushort floor)
+        {
+            if (floor > _nextOnDiskId) _nextOnDiskId = floor;
         }
 
         /// <summary>

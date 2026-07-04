@@ -61,6 +61,10 @@ internal static class ColumnDefinitionResolver
                     "suffixed with [] for typed-array columns.");
             }
 
+            IReadOnlyList<ColumnInfo>? structFields = kind == DataKind.Struct
+                ? ResolveStructFields(d.TypeName)
+                : null;
+
 
             Expression? defaultExpression = null;
             if (d.DefaultValue is not null)
@@ -119,17 +123,29 @@ internal static class ColumnDefinitionResolver
                 }
             }
 
-            columns[i] = new ColumnInfo(d.Name, kind, effectiveNullable)
-            {
-                IsArray = isArray,
-                DefaultExpression = defaultExpression,
-                Identity = identity,
-                IsPrimaryKey = isPrimaryKey,
-                ComputedExpression = d.ComputedExpression,
-                MaxLength = maxLength,
-                FixedShape = fixedShape,
-                IsBlankPadded = isBlankPadded,
-            };
+            columns[i] = structFields is not null
+                ? new ColumnInfo(d.Name, effectiveNullable, structFields)
+                {
+                    IsArray = isArray,
+                    DefaultExpression = defaultExpression,
+                    Identity = identity,
+                    IsPrimaryKey = isPrimaryKey,
+                    ComputedExpression = d.ComputedExpression,
+                    MaxLength = maxLength,
+                    FixedShape = fixedShape,
+                    IsBlankPadded = isBlankPadded,
+                }
+                : new ColumnInfo(d.Name, kind, effectiveNullable)
+                {
+                    IsArray = isArray,
+                    DefaultExpression = defaultExpression,
+                    Identity = identity,
+                    IsPrimaryKey = isPrimaryKey,
+                    ComputedExpression = d.ComputedExpression,
+                    MaxLength = maxLength,
+                    FixedShape = fixedShape,
+                    IsBlankPadded = isBlankPadded,
+                };
         }
 
         // GENERATED expressions cannot reference other GENERATED columns —
@@ -154,6 +170,61 @@ internal static class ColumnDefinitionResolver
         }
 
         return schema;
+    }
+
+    /// <summary>
+    /// Cracks a declared <c>Struct&lt;name: Kind, …&gt;</c> (or
+    /// <c>Array&lt;Struct&lt;…&gt;&gt;</c>) column annotation into the
+    /// ordered <see cref="ColumnInfo"/> field list the schema layer
+    /// carries, recursing into nested struct field types. Returns
+    /// <see langword="null"/> for the bare shapeless <c>Struct</c> form.
+    /// Fields default to nullable — the annotation grammar has no
+    /// per-field NOT NULL.
+    /// </summary>
+    private static IReadOnlyList<ColumnInfo>? ResolveStructFields(string annotation)
+    {
+        string candidate = annotation.Trim();
+        if (candidate.StartsWith("Array<", StringComparison.OrdinalIgnoreCase)
+            && candidate.EndsWith(">", StringComparison.Ordinal))
+        {
+            candidate = candidate["Array<".Length..^1].Trim();
+        }
+        if (!Manifest.StructTypeAnnotation.TryParse(candidate, out IReadOnlyList<Manifest.StructFieldShape> shapes))
+        {
+            return null;
+        }
+
+        ColumnInfo[] fields = new ColumnInfo[shapes.Count];
+        for (int i = 0; i < shapes.Count; i++)
+        {
+            Manifest.StructFieldShape shape = shapes[i];
+            if (!TypeAnnotationResolver.TryParse(
+                    shape.Kind, types: null,
+                    out DataKind fieldKind, out bool fieldIsArray, out _,
+                    out int? fieldMaxLength, out int[]? fieldFixedShape, out bool fieldIsBlankPadded))
+            {
+                throw new InvalidOperationException(
+                    $"Struct field '{shape.Name}': unknown type '{shape.Kind}'.");
+            }
+
+            IReadOnlyList<ColumnInfo>? nested = fieldKind == DataKind.Struct
+                ? ResolveStructFields(shape.Kind)
+                : null;
+
+            fields[i] = nested is not null
+                ? new ColumnInfo(shape.Name, nullable: true, nested)
+                {
+                    IsArray = fieldIsArray,
+                }
+                : new ColumnInfo(shape.Name, fieldKind, nullable: true)
+                {
+                    IsArray = fieldIsArray,
+                    MaxLength = fieldMaxLength,
+                    FixedShape = fieldFixedShape,
+                    IsBlankPadded = fieldIsBlankPadded,
+                };
+        }
+        return fields;
     }
 
     /// <summary>

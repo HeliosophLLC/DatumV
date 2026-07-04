@@ -276,6 +276,17 @@ internal static class ProjectionPushdown
             {
                 required.Add(columnName);
             }
+            else if (schema is not null
+                && schema.FindColumn(tableName) is { Kind: DataKind.Struct })
+            {
+                // Struct-field access: in `col.field` (and `alias.col.field`,
+                // whose alias lands in SchemaName) the "table" part is really
+                // a struct COLUMN of this scan. The scan must emit the struct
+                // column or the evaluator's field-access fallback has nothing
+                // to read. A same-named alias on another table only costs an
+                // extra emitted column, never a wrong result.
+                required.Add(tableName);
+            }
         }
 
         // If no columns matched this alias, the query may reference columns without

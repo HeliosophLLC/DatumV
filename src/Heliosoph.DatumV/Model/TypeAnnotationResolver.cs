@@ -228,6 +228,19 @@ public static class TypeAnnotationResolver
                 return true;
             }
 
+            // Inline struct element — `Array<Struct<label: String, …>>`.
+            // Same opaque-kind contract as the scalar Struct<...> branch
+            // below: the runtime surfaces DataKind.Struct + IsArray; the
+            // field shape is recovered from the annotation text by schema
+            // builders (ColumnDefinitionResolver / StructTypeAnnotation).
+            if (TryStripStructWrapper(inner))
+            {
+                kind = DataKind.Struct;
+                isArray = true;
+                if (args is not null) fixedShape = args;
+                return true;
+            }
+
             // Named-type inside Array<...>. Recognize the name from the
             // static vocabulary; if a per-query registry was supplied,
             // also resolve the element struct's TypeId. The array's own

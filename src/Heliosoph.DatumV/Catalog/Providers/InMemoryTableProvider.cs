@@ -357,7 +357,10 @@ public sealed class InMemoryTableProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
+    public ISeekSession OpenSeekSession(
+        IReadOnlySet<string>? requiredColumns,
+        Arena? targetArena = null,
+        TypeIdTranslationTable? typeIdTranslations = null)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
 

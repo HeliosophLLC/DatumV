@@ -214,6 +214,58 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
             () => registryB.GetDescriptor(runtimeIdA));
     }
 
+    [Fact]
+    public void OpenForAppend_NoRegistry_PreservesTypeTableAndColumnStructTypeId()
+    {
+        // The SQL append path (INSERT / CTAS) opens writers without a
+        // TypeRegistry. Finalizing such a session over a file that already
+        // carries a TypeTable must not drop it — the existing entries,
+        // the HasTypeTable flag, and each column's StructTypeId all carry
+        // forward so pre-append struct rows stay readable.
+        string datumPath = Path.Combine(_tempDir, "append_carry.datum");
+        WriteIntPlusStructFile(datumPath);
+
+        string sidecarPath = SidecarPath(datumPath);
+        using (DatumFileWriterV2 appender = DatumFileWriterV2.OpenForAppend(datumPath, sidecarPath))
+        {
+            Pool pool = CreatePool();
+            ColumnLookup lookup = new(["n", "s"]);
+            Arena arena = CreateArena();
+            RowBatch batch = pool.RentRowBatch(lookup, capacity: 1, arena: arena);
+            DataValue[] row = pool.RentDataValues(2);
+            row[0] = DataValue.FromInt32(3);
+            row[1] = DataValue.Null(DataKind.Struct);
+            batch.Add(row);
+            appender.WriteRowBatch(batch);
+            appender.FinalizeWriter();
+        }
+
+        using DatumFileReaderV2 reader = DatumFileReaderV2.Open(datumPath);
+        Assert.Equal(3, reader.TotalRowCount);
+        Assert.True(
+            (reader.Header.Flags & DatumFileFlagsV2.HasTypeTable) != 0,
+            "append without a registry must not drop HasTypeTable");
+        Assert.NotEmpty(reader.Footer.TypeTable);
+        Assert.NotNull(reader.Footer.Columns[1].StructTypeId);
+
+        // Pre-append rows still resolve field names through a fresh registry.
+        TypeRegistry registry = new();
+        ushort runtimeStructId = LoadTypeTableAndResolveColumn(reader, datumPath, columnIndex: 1, registry);
+        TypeDescriptor descriptor = registry.GetDescriptor(runtimeStructId)!;
+        Assert.Equal("x", descriptor.Fields![0].Name);
+        Assert.Equal("y", descriptor.Fields[1].Name);
+
+        using SidecarReadStore sidecar = SidecarReadStore.OpenWithoutFingerprintCheck(sidecarPath);
+        IPageDecoderV2 decoder = reader.OpenPageDecoder(
+            columnIndex: 1, pageIndex: 0,
+            sidecarStoreId: 0, sidecarSource: sidecar,
+            eagerStore: CreateArena(),
+            columnRuntimeStructTypeId: runtimeStructId);
+        DataValue first = decoder.ReadValue(0);
+        Assert.Equal(DataKind.Struct, first.Kind);
+        Assert.Equal(runtimeStructId, first.TypeId);
+    }
+
     /// <summary>
     /// Builds a single-column Struct table, writes it through the writer
     /// pipeline. Layout: Struct{x: Int32, y: String}. Returns the runtime
@@ -255,6 +307,58 @@ public sealed class TypeTablePersistenceTests : ServiceTestBase, IAsyncLifetime
         using DatumFileWriterV2 writer = new(datumPath, sidecarPath);
         writer.SetTypeRegistry(writerRegistry);
         writer.Initialize([column]);
+        writer.WriteRowBatch(batch);
+        writer.FinalizeWriter();
+    }
+
+    /// <summary>
+    /// Builds a two-column table (n Int32, s nullable Struct{x: Int32, y: String})
+    /// with two rows. The struct column is nullable so append tests can add
+    /// rows without constructing struct values (mirroring a registry-less
+    /// append session).
+    /// </summary>
+    private void WriteIntPlusStructFile(string datumPath)
+    {
+        ColumnDescriptorV2 intColumn = new(
+            Name: "n",
+            Kind: DataKind.Int32,
+            Encoder: EncoderKind.FixedWidth,
+            IsNullable: false);
+        ColumnDescriptorV2 structColumn = new(
+            Name: "s",
+            Kind: DataKind.Struct,
+            Encoder: EncoderKind.VariableSlot,
+            IsNullable: true);
+
+        TypeRegistry writerRegistry = new();
+        int structTypeId = writerRegistry.InternStructType(
+        [
+            new StructFieldDescriptor("x", writerRegistry.InternScalarType(DataKind.Int32)),
+            new StructFieldDescriptor("y", writerRegistry.InternScalarType(DataKind.String)),
+        ]);
+
+        Pool pool = CreatePool();
+        ColumnLookup lookup = new([intColumn.Name, structColumn.Name]);
+        Arena arena = CreateArena();
+
+        RowBatch batch = pool.RentRowBatch(lookup, capacity: 2, arena: arena);
+        DataValue[] r0 = pool.RentDataValues(2);
+        r0[0] = DataValue.FromInt32(1);
+        r0[1] = DataValue.FromStruct(
+            [DataValue.FromInt32(10), DataValue.FromString("alpha", arena)],
+            arena, (ushort)structTypeId);
+        batch.Add(r0);
+        DataValue[] r1 = pool.RentDataValues(2);
+        r1[0] = DataValue.FromInt32(2);
+        r1[1] = DataValue.FromStruct(
+            [DataValue.FromInt32(20), DataValue.FromString("beta", arena)],
+            arena, (ushort)structTypeId);
+        batch.Add(r1);
+
+        string sidecarPath = SidecarPath(datumPath);
+        using DatumFileWriterV2 writer = new(datumPath, sidecarPath);
+        writer.SetTypeRegistry(writerRegistry);
+        writer.Initialize([intColumn, structColumn]);
         writer.WriteRowBatch(batch);
         writer.FinalizeWriter();
     }

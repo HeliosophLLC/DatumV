@@ -920,7 +920,7 @@ internal static class UpdateExecutor
             ValueRef result = await evaluator.EvaluateAsValueRefAsync(
                 target.ComputedExpression!, frame, cancellationToken).ConfigureAwait(false);
             DataValue converted = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                result, target, workArena, target.Name);
+                result, target, workArena, target.Name, frame.Types);
 
             // No-op detection: if the recomputed value equals the existing
             // slot, don't emit a write (cross-store Equals is conservative
