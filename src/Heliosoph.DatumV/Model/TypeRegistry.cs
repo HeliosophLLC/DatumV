@@ -121,6 +121,58 @@ public sealed class TypeRegistry
         return InternStructType(descriptors);
     }
 
+    /// <summary>
+    /// Inverse of <see cref="InternStructFromColumnInfoFields"/>: converts a
+    /// registered struct (or array-of-struct) shape back into the ordered
+    /// <see cref="ColumnInfo"/> field list the schema layer carries. Returns
+    /// <see langword="null"/> when <paramref name="typeId"/> doesn't resolve
+    /// to a struct shape with fields.
+    /// </summary>
+    public IReadOnlyList<ColumnInfo>? BuildColumnInfoFields(int typeId)
+    {
+        TypeDescriptor? descriptor = GetDescriptor(typeId);
+        if (descriptor is { IsArray: true, ElementTypeId: { } elementTypeId })
+        {
+            descriptor = GetDescriptor(elementTypeId);
+        }
+        if (descriptor?.Fields is not { Count: > 0 } fields) return null;
+
+        ColumnInfo[] result = new ColumnInfo[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            result[i] = FieldDescriptorToColumnInfo(fields[i]);
+        }
+        return result;
+    }
+
+    private ColumnInfo FieldDescriptorToColumnInfo(StructFieldDescriptor field)
+    {
+        TypeDescriptor? fieldType = GetDescriptor(field.TypeId);
+        if (fieldType is null)
+        {
+            throw new InvalidOperationException(
+                $"Struct field '{field.Name}' references type-id {field.TypeId} which is not " +
+                "registered (internal error — the field descriptor and registry are out of sync).");
+        }
+
+        if (fieldType.Kind == DataKind.Struct)
+        {
+            IReadOnlyList<ColumnInfo>? nested = BuildColumnInfoFields(field.TypeId);
+            if (nested is not null)
+            {
+                return new ColumnInfo(field.Name, fieldType.Nullable, nested)
+                {
+                    IsArray = fieldType.IsArray,
+                };
+            }
+        }
+
+        return new ColumnInfo(field.Name, fieldType.Kind, fieldType.Nullable)
+        {
+            IsArray = fieldType.IsArray,
+        };
+    }
+
     // ── lookup ─────────────────────────────────────────────────────────────
 
     /// <summary>

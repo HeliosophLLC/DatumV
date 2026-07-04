@@ -60,6 +60,10 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     // skip the check entirely.
     private SidecarRegistry? _importRegistry;
     private IBlobSource? _ownSidecarSource;
+    // Per-query on-disk → runtime type-id translator, captured off incoming
+    // batches. Foreign Array<Struct> imports translate each slot's type id
+    // source-on-disk → runtime → THIS file's on-disk space (via _allocator).
+    private TypeIdTranslationTable? _importTranslations;
 
     private ColumnDescriptorV2[]? _columns;
     private IPageEncoderV2[]? _encoders;
@@ -394,6 +398,19 @@ public sealed partial class DatumFileWriterV2 : IDisposable
                 $"live schema ({liveCount} live, {_columns.Length - liveCount} tombstoned).");
         }
 
+        // Adopt the query's TypeRegistry from the batch when no registry was
+        // set explicitly. SQL append paths (INSERT / CTAS via the append
+        // session) have no other channel to the per-query registry, and
+        // without one every struct value's type descriptor would be dropped
+        // at finalize. One session serves one statement, so the first
+        // non-null registry is THE registry; adopting it also seeds the
+        // allocator from any carried-forward type table (SetTypeRegistry).
+        if (_typeRegistry is null && batch.Types is not null)
+        {
+            SetTypeRegistry(batch.Types);
+        }
+        _importTranslations ??= batch.TypeIdTranslations;
+
         IValueStore store = batch.Arena;
 
         for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
@@ -514,14 +531,18 @@ public sealed partial class DatumFileWriterV2 : IDisposable
     /// </summary>
     private DataValue ImportReferenceArray(DataValue value, IBlobSource source)
     {
-        if (value.Kind == DataKind.Struct)
+        // Array<Struct> slot blocks embed the SOURCE file's on-disk type ids.
+        // Each one translates source-on-disk → runtime (via the query's
+        // translator, populated when the scan loaded the source table's type
+        // table) → THIS file's on-disk space (via the allocator, so the
+        // descriptor lands in this file's type table at finalize).
+        bool translateSlotTypeIds = value.Kind == DataKind.Struct;
+        if (translateSlotTypeIds && (_typeRegistry is null || _importTranslations is null))
         {
-            // Array<Struct> slot blocks embed the source file's on-disk type
-            // ids, which have no meaning in this file's type table. Importing
-            // them needs a type-id translation pass that doesn't exist yet.
-            throw new NotSupportedException(
-                "Copying a sidecar-backed Array<Struct> value between tables is not supported yet. " +
-                "Rebuild the array in the query so the value materialises in memory before the write.");
+            throw new InvalidOperationException(
+                "Importing a sidecar-backed Array<Struct> value requires the query's TypeRegistry " +
+                "and type-id translations, but the incoming batches carried neither (internal " +
+                "wiring error — the scan should have loaded the source table's type table).");
         }
 
         byte[] rebuilt = source.Read(value.SidecarOffset, value.SidecarLength).ToArray();
@@ -533,7 +554,14 @@ public sealed partial class DatumFileWriterV2 : IDisposable
                 out long elementOffset, out long elementLength, out ushort typeId, out byte codec);
             ReadOnlySpan<byte> elementBytes = source.Read(elementOffset, elementLength);
             (long newOffset, long newLength) = _sidecar!.Append(elementBytes);
-            ArraySlot.Write(rebuilt.AsSpan(pos, ArraySlot.SizeBytes), newOffset, newLength, typeId, codec);
+
+            ushort slotTypeId = typeId;
+            if (translateSlotTypeIds && typeId != 0)
+            {
+                ushort runtimeId = _importTranslations!.Translate(value.SidecarStoreId, typeId);
+                slotTypeId = _allocator.AllocateOrLookup(runtimeId);
+            }
+            ArraySlot.Write(rebuilt.AsSpan(pos, ArraySlot.SizeBytes), newOffset, newLength, slotTypeId, codec);
         }
         (long blockOffset, long blockLength) = _sidecar!.Append(rebuilt);
         return value.WithSidecarLocation(blockOffset, blockLength, storeId: 0);

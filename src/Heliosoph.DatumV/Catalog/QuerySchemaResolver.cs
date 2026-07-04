@@ -658,7 +658,13 @@ public sealed class QuerySchemaResolver
                 column.Nullable,
                 sourceIdentifier,
                 IsArray: column.IsArray,
-                IsMultiDim: isMultiDim);
+                IsMultiDim: isMultiDim)
+            {
+                // Struct columns keep their field lists through SELECT * /
+                // whole-schema resolution so CTAS targets and export sinks
+                // see the declared shape.
+                Fields = column.Fields,
+            };
         }
 
         return columns;
@@ -791,6 +797,22 @@ public sealed class QuerySchemaResolver
             ColumnInfo info = ExpressionTypeResolver.ResolveOutputColumnInfo(
                 elementLiteral, outputName: "_struct_array_probe", nullable: true, sourceSchema, _functionRegistry);
             return info.Fields;
+        }
+
+        // Direct column reference to a struct column (`SELECT s FROM src`) —
+        // the source schema's ColumnInfo already carries the field list.
+        if (expression is ColumnReference colRef)
+        {
+            ColumnInfo? source = sourceSchema.FindColumn(colRef.ColumnName);
+            if (source is null && colRef.QualifiedName is { } qualifiedName)
+            {
+                // Joined schemas carry combined "alias.column" names.
+                source = sourceSchema.FindColumn(qualifiedName);
+            }
+            if (source is { Kind: DataKind.Struct })
+            {
+                return source.Fields;
+            }
         }
 
         return null;

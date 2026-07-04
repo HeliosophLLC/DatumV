@@ -169,8 +169,18 @@ public interface ITableProvider : IDisposable
     /// query callers pass <c>ExecutionContext.Store</c>; ingest-time / standalone
     /// callers may pass <c>null</c>.
     /// </param>
+    /// <param name="typeIdTranslations">
+    /// Optional per-query on-disk → runtime type-id translator. Query callers pass
+    /// <c>ExecutionContext.TypeIdTranslations</c> (after
+    /// <c>IDatumFileTableProvider.EnsureTypeTableLoaded</c>) so decoded struct values
+    /// carry runtime TypeIds that resolve in the query's registry; callers that never
+    /// touch struct columns may omit it.
+    /// </param>
     /// <returns>A seek session bound to the required columns and target arena.</returns>
-    ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null);
+    ISeekSession OpenSeekSession(
+        IReadOnlySet<string>? requiredColumns,
+        Arena? targetArena = null,
+        Model.TypeIdTranslationTable? typeIdTranslations = null);
 
     // ──────────────────── Mutation (catalog-level ALTER TABLE) ────────────────────
 

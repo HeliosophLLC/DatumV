@@ -108,10 +108,19 @@ public sealed class IndexScanOperator : QueryOperator
                 $"does not indicate it is seekable.");
         }
 
+        // Struct columns: load the file's type table into this query's
+        // registry + translator so seek-decoded struct values carry runtime
+        // TypeIds (mirrors ScanOperator's pre-scan step).
+        if (TableProvider is Catalog.Providers.IDatumFileTableProvider datumProvider)
+        {
+            datumProvider.EnsureTypeTableLoaded(context);
+        }
+
         // Open a seek session for the lifetime of this scan — reader and decode
         // buffers are owned by the session, not shared with concurrent calls.
         // Bound to context.Store so emitted batches share the per-query arena.
-        using ISeekSession seekSession = TableProvider.OpenSeekSession(_requiredColumns, context.Store);
+        using ISeekSession seekSession = TableProvider.OpenSeekSession(
+            _requiredColumns, context.Store, context.TypeIdTranslations);
 
         // Traverse the index in sorted order (ascending or descending).
         // Batch consecutive entries from the same chunk into a single read.

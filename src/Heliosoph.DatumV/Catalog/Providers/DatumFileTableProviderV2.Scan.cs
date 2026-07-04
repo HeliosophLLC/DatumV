@@ -348,7 +348,10 @@ public sealed partial class DatumFileTableProviderV2
     /// cost much. Resolved projection metadata is captured once and kept
     /// for the session's lifetime.
     /// </remarks>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
+    public ISeekSession OpenSeekSession(
+        IReadOnlySet<string>? requiredColumns,
+        Arena? targetArena = null,
+        TypeIdTranslationTable? typeIdTranslations = null)
     {
         // Open the session reader first, then derive schema /
         // schemaToFooterIndex from THAT reader's footer (rather than from
@@ -361,19 +364,30 @@ public sealed partial class DatumFileTableProviderV2
         try
         {
             sessionSidecar = TryOpenSidecar(_descriptor.FilePath, sessionReader);
-            (Schema sessionSchema, int[] sessionSchemaToFooterIndex) = BuildSchema(sessionReader.Footer);
+            (Schema sessionSchema, int[] sessionSchemaToFooterIndex) = BuildSchema(sessionReader.Footer, sessionSidecar);
 
             ColumnLookup columnLookup = ResolveProjection(sessionSchema, requiredColumns);
             int projectedCount = columnLookup.Count;
             int[] schemaIndices = new int[projectedCount];
+            ushort[] columnRuntimeStructTypeIds = new ushort[projectedCount];
             for (int i = 0; i < projectedCount; i++)
             {
                 int filteredIndex = columnLookup.GetSchemaColumnIndex(i);
                 schemaIndices[i] = sessionSchemaToFooterIndex[filteredIndex];
+
+                // Same per-column on-disk → runtime StructTypeId translation
+                // ScanAsync performs, so struct values decoded through seek
+                // paths (index scans, seek joins) are self-describing too.
+                if (typeIdTranslations is not null
+                    && sessionReader.Footer.Columns[schemaIndices[i]].StructTypeId is { } onDiskId)
+                {
+                    columnRuntimeStructTypeIds[i] = typeIdTranslations.Translate(SidecarStoreId, onDiskId);
+                }
             }
 
             return new DatumFileSeekSessionV2(
-                _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId, targetArena);
+                _pool, sessionReader, sessionSidecar, columnLookup, schemaIndices, SidecarStoreId,
+                targetArena, columnRuntimeStructTypeIds);
         }
         catch
         {

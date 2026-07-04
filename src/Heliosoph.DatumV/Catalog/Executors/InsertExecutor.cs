@@ -275,7 +275,7 @@ internal static class InsertExecutor
                             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                                 sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
                             targetRow[targetIndex] = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                                evaluated, target, arena, target.Name);
+                                evaluated, target, arena, target.Name, context.Types);
                         }
                     }
                     else
@@ -1070,7 +1070,7 @@ internal static class InsertExecutor
             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                 target.DefaultExpression, frame, cancellationToken).ConfigureAwait(false);
             return ComputedColumnEvaluator.ConvertValueRefToTarget(
-                evaluated, target, arena, target.Name);
+                evaluated, target, arena, target.Name, frame.Types);
         }
         // Nullable: NULL.
         if (target.Nullable)
@@ -1113,7 +1113,7 @@ internal static class InsertExecutor
                 ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                     target.DefaultExpression!, frame, cancellationToken).ConfigureAwait(false);
                 return ComputedColumnEvaluator.ConvertValueRefToTarget(
-                    evaluated, target, arena, target.Name);
+                    evaluated, target, arena, target.Name, frame.Types);
             }
 
             case OmittedFill.FillKind.Identity:
@@ -1176,7 +1176,8 @@ internal static class InsertExecutor
             ColumnInfo target = targetSchema.Columns[i];
             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                 target.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
-            targetRow[i] = ComputedColumnEvaluator.ConvertValueRefToTarget(evaluated, target, arena, target.Name);
+            targetRow[i] = ComputedColumnEvaluator.ConvertValueRefToTarget(
+                evaluated, target, arena, target.Name, context.Types);
         }
     }
 

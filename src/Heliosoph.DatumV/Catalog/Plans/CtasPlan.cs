@@ -281,6 +281,29 @@ internal sealed class CtasPlan : StatementPlan
                     "specified more than once. Add an alias (e.g. SELECT expr AS name) to " +
                     "disambiguate.");
             }
+            // Struct projections carry their resolved field list into the
+            // target schema — CreatePersistentTable persists it as the
+            // file's declared shape, and INSERT/append coercion keys off
+            // ColumnInfo.Fields. A struct whose shape isn't statically
+            // resolvable would create a column no write could ever target,
+            // so reject it with a pointer at the explicit-DDL escape hatch.
+            if (resolved.Kind == DataKind.Struct)
+            {
+                if (resolved.Fields is not { Count: > 0 } fields)
+                {
+                    throw new InvalidOperationException(
+                        $"CREATE TABLE '{tableName}' AS SELECT: column \"{resolved.ColumnName}\" is a " +
+                        "struct whose field shape cannot be resolved statically. Declare the table " +
+                        "explicitly (CREATE TABLE … (col Struct<…>)) and INSERT … SELECT instead.");
+                }
+                columns[i] = new ColumnInfo(resolved.ColumnName, resolved.Nullable, fields)
+                {
+                    IsArray = resolved.IsArray,
+                    IsMultiDim = resolved.IsMultiDim,
+                };
+                continue;
+            }
+
             columns[i] = new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable)
             {
                 IsArray = resolved.IsArray,

@@ -274,7 +274,9 @@ public sealed class FlatFileCatalog : ITableCatalog
             : schema.PrimaryKeyColumnIndices.Select(i => checked((ushort)i)).ToArray();
 
         DatumFileWriterV2.CreateEmpty(
-            targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices, columnComputeds);
+            targetPath, descriptors, columnDefaults, identityWriterSpec, pkColumnIndices, columnComputeds,
+            schemaColumns: schema.Columns,
+            sidecarPath: System.IO.Path.ChangeExtension(targetPath, SidecarConstants.FileExtension));
 
         // PK sidecar.
         if (schema.PrimaryKeyColumnIndices.Count >= 1)

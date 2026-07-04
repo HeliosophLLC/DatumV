@@ -142,7 +142,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         // Open a seek session once for the lifetime of this executor — it owns the
         // reader, decode buffers, and projection metadata for every build-side fetch.
         // Bound to context.Store so emitted batches share the per-query arena.
-        ISeekSession seekSession = _buildTableProvider.OpenSeekSession(requiredColumns: null, context.Store);
+        ISeekSession seekSession = _buildTableProvider.OpenSeekSession(requiredColumns: null, context.Store, context.TypeIdTranslations);
 
         DatumActivity.Operators.Trace("INLJ probing probe side");
         await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))

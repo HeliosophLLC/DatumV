@@ -384,7 +384,30 @@ public sealed partial class DatumFileWriterV2
         IReadOnlyList<ColumnDefaultV4>? columnDefaults,
         IdentityWriterSpec? identity,
         IReadOnlyList<ushort>? primaryKeyColumnIndices,
-        IReadOnlyList<ColumnComputedV4>? columnComputeds)
+        IReadOnlyList<ColumnComputedV4>? columnComputeds) =>
+        CreateEmpty(
+            datumPath, columns, columnDefaults, identity, primaryKeyColumnIndices,
+            columnComputeds, schemaColumns: null, sidecarPath: null);
+
+    /// <summary>
+    /// Full-fidelity overload of <c>CreateEmpty</c> that additionally
+    /// persists declared struct column shapes. When any entry in
+    /// <paramref name="schemaColumns"/> carries struct <see cref="ColumnInfo.Fields"/>,
+    /// the writer opens <paramref name="sidecarPath"/>, interns the shapes
+    /// into a fresh registry, and finalizes with a type table + per-column
+    /// <c>StructTypeId</c>s — the empty file is self-describing before the
+    /// first row lands, so append sessions and cold reopens rebuild the
+    /// schema's field lists from the file alone.
+    /// </summary>
+    public static void CreateEmpty(
+        string datumPath,
+        IReadOnlyList<ColumnDescriptorV2> columns,
+        IReadOnlyList<ColumnDefaultV4>? columnDefaults,
+        IdentityWriterSpec? identity,
+        IReadOnlyList<ushort>? primaryKeyColumnIndices,
+        IReadOnlyList<ColumnComputedV4>? columnComputeds,
+        IReadOnlyList<ColumnInfo>? schemaColumns,
+        string? sidecarPath)
     {
         ArgumentNullException.ThrowIfNull(datumPath);
         ArgumentNullException.ThrowIfNull(columns);
@@ -394,9 +417,41 @@ public sealed partial class DatumFileWriterV2
                 "CreateEmpty requires at least one column.", nameof(columns));
         }
 
-        // No sidecar — empty file has no values to spill.
-        using DatumFileWriterV2 writer = new(datumPath, sidecarPath: null);
+        bool hasStructShapes = false;
+        if (schemaColumns is not null)
+        {
+            foreach (ColumnInfo column in schemaColumns)
+            {
+                if (column.Kind == DataKind.Struct && column.Fields is { Count: > 0 })
+                {
+                    hasStructShapes = true;
+                    break;
+                }
+            }
+        }
+        if (hasStructShapes && sidecarPath is null)
+        {
+            throw new ArgumentException(
+                "CreateEmpty received struct column shapes but no sidecar path; the type-table " +
+                "descriptor blobs need a .datum-blob to land in.", nameof(sidecarPath));
+        }
+
+        // Sidecar only opens when struct shapes need descriptor blobs —
+        // shape-free tables stay single-file until a value actually spills.
+        using DatumFileWriterV2 writer = new(datumPath, hasStructShapes ? sidecarPath : null);
         writer.Initialize(columns, columnDefaults, identity, primaryKeyColumnIndices, columnComputeds);
+        if (hasStructShapes)
+        {
+            writer.SetTypeRegistry(new TypeRegistry());
+            for (int i = 0; i < schemaColumns!.Count; i++)
+            {
+                ColumnInfo column = schemaColumns[i];
+                if (column.Kind == DataKind.Struct && column.Fields is { Count: > 0 } fields)
+                {
+                    writer.DeclareStructColumnShape(i, fields);
+                }
+            }
+        }
         writer.FinalizeWriter();
     }
 

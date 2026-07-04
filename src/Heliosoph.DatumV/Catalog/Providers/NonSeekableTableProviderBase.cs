@@ -44,7 +44,10 @@ public abstract class NonSeekableTableProviderBase : ITableProvider
     public Indexing.SourceIndex? GetSourceIndex() => null;
 
     /// <inheritdoc/>
-    public ISeekSession OpenSeekSession(IReadOnlySet<string>? requiredColumns, Arena? targetArena = null)
+    public ISeekSession OpenSeekSession(
+        IReadOnlySet<string>? requiredColumns,
+        Arena? targetArena = null,
+        Model.TypeIdTranslationTable? typeIdTranslations = null)
         => throw new NotSupportedException($"{GetType().Name} does not support seek sessions; use ScanAsync.");
 
     /// <inheritdoc/>

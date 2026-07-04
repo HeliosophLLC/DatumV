@@ -124,6 +124,13 @@ public sealed partial class DatumFileWriterV2
                 writer.AttachSidecar(sidecarStore);
             }
 
+            // Replay decoded partial-page rows into the fresh encoders.
+            // Deferred until after the sidecar attach because eagerly-
+            // materialized values (Struct scalars) re-encode through the
+            // arena path, which needs the write-side blob sink — during
+            // rehydrate only the read-side mmap existed.
+            writer.ReplayPendingPartialPageRows();
+
             // Position stream past the old tail so new pages stream out
             // append-only. Old pages, footer, and tail bytes remain
             // intact; the FinalizeWriter tail-flip is what supersedes
@@ -177,7 +184,10 @@ public sealed partial class DatumFileWriterV2
 
         if ((flags & DatumFileFlagsV2.HasSidecarReferences) == 0) return null;
 
-        return datumPath + DatumFile.Sidecar.SidecarConstants.FileExtension;
+        // Sidecar convention: foo.datum → foo.datum-blob (extension is
+        // REPLACED, not appended — matches the provider's OpenAppendWriter
+        // and the read-side reader wiring).
+        return Path.ChangeExtension(datumPath, DatumFile.Sidecar.SidecarConstants.FileExtension);
     }
 
     /// <summary>
@@ -264,6 +274,18 @@ public sealed partial class DatumFileWriterV2
         }
 
         int columnCount = footer.Columns.Count;
+
+        // Carry forward the struct type table. Entries re-emit verbatim at
+        // finalize (their descriptor blobs are already in the sidecar), and
+        // the captured blob bytes let SetTypeRegistry seed the allocator so
+        // same-shape values reuse existing on-disk ids instead of colliding.
+        // Per-column StructTypeIds carry forward alongside so a session that
+        // never writes struct values doesn't strip them from the footer.
+        _existingColumnOnDiskStructTypeIds = new ushort?[columnCount];
+        for (int colIndex = 0; colIndex < columnCount; colIndex++)
+        {
+            _existingColumnOnDiskStructTypeIds[colIndex] = footer.Columns[colIndex].StructTypeId;
+        }
         _columns = new ColumnDescriptorV2[columnCount];
         _encoders = new IPageEncoderV2[columnCount];
         _pageDirectory = new List<PageDescriptorV2>[columnCount];
@@ -279,6 +301,30 @@ public sealed partial class DatumFileWriterV2
         DatumFile.Sidecar.SidecarReadStore? sidecarReadStore = null;
         try
         {
+            if (footer.TypeTable.Count > 0)
+            {
+                sidecarReadStore ??= TryOpenSidecarForRehydrate(_stream, header);
+                if (sidecarReadStore is null)
+                {
+                    throw new InvalidDataException(
+                        $"File declares a type table with {footer.TypeTable.Count} entries but its " +
+                        "companion .datum-blob sidecar is missing; the descriptor blobs cannot be read.");
+                }
+                List<(TypeTableEntryV5 Entry, byte[] Blob)> existing = new(footer.TypeTable.Count);
+                ushort maxOnDiskId = 0;
+                foreach (TypeTableEntryV5 entry in footer.TypeTable)
+                {
+                    byte[] blob = sidecarReadStore.Read(entry.SidecarOffset, entry.DescriptorLength).ToArray();
+                    existing.Add((entry, blob));
+                    if (entry.OnDiskTypeId > maxOnDiskId) maxOnDiskId = entry.OnDiskTypeId;
+                }
+                _existingTypeTableEntries = existing;
+                _allocator.EnsureNextOnDiskIdAtLeast((ushort)(maxOnDiskId + 1));
+                // SetTypeRegistry seeds the allocator from these blobs; if a
+                // registry was attached before rehydrate, seed now instead.
+                SeedAllocatorFromExistingTypeTable();
+            }
+
             for (int colIndex = 0; colIndex < columnCount; colIndex++)
             {
                 ColumnFooterV2 columnFooter = footer.Columns[colIndex];
@@ -331,13 +377,24 @@ public sealed partial class DatumFileWriterV2
         }
     }
 
+    // Rows decoded out of trailing partial pages during rehydrate, waiting
+    // for ReplayPendingPartialPageRows once the write-side sidecar is
+    // attached. The shared arena holds eagerly-materialized payloads
+    // (Struct field blocks) until the replay re-encodes them.
+    private List<(int ColumnIndex, Model.DataValue[] Values)>? _pendingPartialPageRows;
+    private Model.Arena? _rehydrateArena;
+
     /// <summary>
-    /// Decodes the rows of <paramref name="partialPage"/> back into
-    /// <see cref="_encoders"/>[<paramref name="columnIndex"/>] so the
-    /// encoder's accumulated row count matches the partial page's row
-    /// count. New <see cref="WriteRowBatch"/> calls fill the rest of
-    /// the page; on flush the encoder produces fresh page bytes (with a
-    /// fresh zone map) at a new file offset.
+    /// Decodes the rows of <paramref name="partialPage"/> and queues them
+    /// for <see cref="ReplayPendingPartialPageRows"/> so the encoder's
+    /// accumulated row count matches the partial page's row count. New
+    /// <see cref="WriteRowBatch"/> calls fill the rest of the page; on
+    /// flush the encoder produces fresh page bytes (with a fresh zone map)
+    /// at a new file offset. Decode and re-encode are split because the
+    /// decode needs the read-side sidecar mmap while re-encode of
+    /// eagerly-materialized values needs the write-side sink — on Windows
+    /// the two can't be open simultaneously, so OpenForAppend sequences
+    /// decode → attach sink → replay.
     /// </summary>
     private void ExtendPartialPage(
         int columnIndex,
@@ -358,12 +415,11 @@ public sealed partial class DatumFileWriterV2
             _stream.Position = savedPosition;
         }
 
-        // Build a temporary read arena to absorb eagerly-materialized
-        // children (Struct field arrays). Values that come back as
-        // sidecar-pointer DataValues (IsInSidecar = true) flow through
-        // the encoder's IsInSidecar fast path and never need
-        // reconstitution.
-        Model.Arena rehydrateArena = new();
+        // Shared read arena absorbing eagerly-materialized children
+        // (Struct field arrays). Values that come back as sidecar-pointer
+        // DataValues (IsInSidecar = true) flow through the encoder's
+        // IsInSidecar fast path and never need reconstitution.
+        _rehydrateArena ??= new Model.Arena();
         Decoding.IPageDecoderV2 decoder = Decoding.PageDecoderFactoryV2.Create(
             column,
             new ReadOnlyMemory<byte>(pageBytes),
@@ -371,14 +427,38 @@ public sealed partial class DatumFileWriterV2
             sidecarStoreId: 0,
             hasNullBitmap: partialPage.HasNullBitmap,
             sidecarSource: sidecarReadStore,
-            eagerStore: rehydrateArena);
+            eagerStore: _rehydrateArena);
 
-        IPageEncoderV2 encoder = _encoders![columnIndex];
+        Model.DataValue[] values = new Model.DataValue[partialPage.RowCount];
         for (int row = 0; row < partialPage.RowCount; row++)
         {
-            Model.DataValue value = decoder.ReadValue(row);
-            encoder.Append(value, rehydrateArena, _sidecar);
+            values[row] = decoder.ReadValue(row);
         }
+        _pendingPartialPageRows ??= new List<(int, Model.DataValue[])>();
+        _pendingPartialPageRows.Add((columnIndex, values));
+    }
+
+    /// <summary>
+    /// Re-encodes the partial-page rows queued by
+    /// <see cref="ExtendPartialPage"/> into their column encoders. Called
+    /// by <see cref="OpenForAppend"/> after the write-side sidecar is
+    /// attached so arena-backed payloads (eagerly-decoded Struct scalars)
+    /// have a blob sink to spill into.
+    /// </summary>
+    private void ReplayPendingPartialPageRows()
+    {
+        if (_pendingPartialPageRows is null) return;
+
+        foreach ((int columnIndex, Model.DataValue[] values) in _pendingPartialPageRows)
+        {
+            IPageEncoderV2 encoder = _encoders![columnIndex];
+            foreach (Model.DataValue value in values)
+            {
+                encoder.Append(value, _rehydrateArena, _sidecar);
+            }
+        }
+        _pendingPartialPageRows = null;
+        _rehydrateArena = null;
     }
 
     /// <summary>
@@ -401,7 +481,7 @@ public sealed partial class DatumFileWriterV2
             return null;
         }
 
-        string sidecarPath = fs.Name + DatumFile.Sidecar.SidecarConstants.FileExtension;
+        string sidecarPath = Path.ChangeExtension(fs.Name, DatumFile.Sidecar.SidecarConstants.FileExtension);
         if (!File.Exists(sidecarPath))
         {
             return null;

@@ -103,6 +103,27 @@ public sealed partial class ExpressionEvaluator
                 DataValue[] fields = maybeStruct.AsStruct(frame.Source);
                 int fieldIndex = ResolveStructFieldIndexByName(
                     maybeStruct.TypeId, column.ColumnName, frame);
+                if (fieldIndex < 0 && _sourceSchema is not null)
+                {
+                    // Values from decode paths that don't stamp a runtime
+                    // TypeId (e.g. index-scan seek sessions) still resolve
+                    // when the schema declares the struct column's fields —
+                    // field order in the serialized payload matches the
+                    // declared order by construction.
+                    IReadOnlyList<ColumnInfo>? schemaFields = FindStructColumnFields(
+                        new ColumnReference(column.TableName), _sourceSchema);
+                    if (schemaFields is not null)
+                    {
+                        for (int i = 0; i < schemaFields.Count; i++)
+                        {
+                            if (string.Equals(schemaFields[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                fieldIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                }
                 if (fieldIndex >= 0 && fieldIndex < fields.Length)
                 {
                     return fields[fieldIndex];

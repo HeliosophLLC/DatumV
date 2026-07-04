@@ -29,7 +29,8 @@ internal static class ComputedColumnEvaluator
     /// scan arena.
     /// </summary>
     public static DataValue ConvertValueRefToTarget(
-        ValueRef source, ColumnInfo target, Arena targetArena, string columnName)
+        ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
+        TypeRegistry? types = null)
     {
         if (source.IsNull)
         {
@@ -49,6 +50,16 @@ internal static class ComputedColumnEvaluator
                 throw new InvalidOperationException(
                     $"Column '{columnName}': target is {target.Kind}[] but the " +
                     $"supplied value is scalar {source.Kind}.");
+            }
+
+            // Array<Struct> targets always take the per-element coercion path.
+            // The same-kind ToDataValue fast path below would carry whatever
+            // per-element TypeIds the source expression happened to stamp;
+            // coercing against the declared shape re-orders fields, coerces
+            // field kinds, and stamps the column's canonical type-id.
+            if (target.Kind == DataKind.Struct)
+            {
+                return ConvertStructArrayValueRef(source, target, targetArena, columnName, types);
             }
 
             // Same element kind: hand the array directly to ToDataValue, which
@@ -83,9 +94,7 @@ internal static class ComputedColumnEvaluator
         }
         if (source.Kind == DataKind.Struct)
         {
-            throw new InvalidOperationException(
-                $"Column '{columnName}': struct values are not yet supported. " +
-                "Struct-typed manifest support lands with the Value Type Registry.");
+            return ConvertStructValueRef(source, target, targetArena, columnName, types);
         }
 
         // Blob-kind sources (Image / Audio / Video / Json). ValueRef.ToDataValue
@@ -111,6 +120,159 @@ internal static class ComputedColumnEvaluator
         // store needed at this boundary.
         return LiteralCoercion.Coerce(
             source.ToObject(), target, targetArena, columnName);
+    }
+
+    /// <summary>
+    /// Converts a struct-shaped <see cref="ValueRef"/> into the declared
+    /// struct column shape. Fields match by NAME (case-insensitive) through
+    /// the value's <see cref="TypeDescriptor"/>, each field coercing
+    /// recursively to its declared <see cref="ColumnInfo"/>. The result is
+    /// rebuilt in the declared field order and stamped with the type-id
+    /// interned from the declared shape, so downstream consumers (writer
+    /// type-table capture, field access) see the column's canonical type.
+    /// Missing source fields land as typed nulls when the declared field is
+    /// nullable and throw otherwise; extra source fields always throw —
+    /// silently dropping data is worse than an error.
+    /// </summary>
+    private static DataValue ConvertStructValueRef(
+        ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
+        TypeRegistry? types, ushort precomputedTypeId = 0)
+    {
+        if (target.Kind != DataKind.Struct || target.Fields is not { Count: > 0 } declared)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': target is {target.Kind}{(target.IsArray ? "[]" : "")} " +
+                "but the supplied value is a struct.");
+        }
+        // A scalar struct can't fill an Array<Struct> column — Array<Struct>
+        // targets route through ConvertStructArrayValueRef, which calls this
+        // with a per-element (non-array) target. Reaching here with an array
+        // target means a scalar struct was handed to an array column.
+        if (target.IsArray)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': target is an Array<Struct> column but the supplied value " +
+                "is a scalar struct — wrap it in an array literal to match the declared shape.");
+        }
+
+        TypeDescriptor? shape = types?.GetDescriptor(source.TypeId);
+        if (shape?.Fields is not { } sourceFields)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': the struct value carries no type information, so its " +
+                "fields cannot be matched to the declared Struct shape by name.");
+        }
+
+        ReadOnlySpan<ValueRef> values = source.GetStructFields();
+        if (values.Length != sourceFields.Count)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': struct value carries {values.Length} fields but its " +
+                $"type descriptor declares {sourceFields.Count} — the construction site stamped " +
+                "a mismatched type-id (internal error).");
+        }
+
+        DataValue[] coerced = new DataValue[declared.Count];
+        for (int i = 0; i < declared.Count; i++)
+        {
+            ColumnInfo field = declared[i];
+            int sourceIndex = -1;
+            for (int f = 0; f < sourceFields.Count; f++)
+            {
+                if (string.Equals(sourceFields[f].Name, field.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    sourceIndex = f;
+                    break;
+                }
+            }
+
+            if (sourceIndex < 0)
+            {
+                if (!field.Nullable)
+                {
+                    throw new InvalidOperationException(
+                        $"Column '{columnName}': struct value has no field '{field.Name}', " +
+                        "which the declared Struct type marks NOT NULL.");
+                }
+                coerced[i] = field.IsArray ? DataValue.NullArrayOf(field.Kind) : DataValue.Null(field.Kind);
+                continue;
+            }
+
+            coerced[i] = ConvertValueRefToTarget(
+                values[sourceIndex], field, targetArena, $"{columnName}.{field.Name}", types);
+        }
+
+        foreach (StructFieldDescriptor sourceField in sourceFields)
+        {
+            bool known = false;
+            for (int i = 0; i < declared.Count; i++)
+            {
+                if (string.Equals(declared[i].Name, sourceField.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known)
+            {
+                throw new InvalidOperationException(
+                    $"Column '{columnName}': struct value carries field '{sourceField.Name}' " +
+                    "which the declared Struct type does not define.");
+            }
+        }
+
+        // Array element coercion pre-interns the declared shape once and
+        // passes it down, so per-element interning collapses to a no-op.
+        ushort typeId = precomputedTypeId != 0
+            ? precomputedTypeId
+            : checked((ushort)types!.InternStructFromColumnInfoFields(declared));
+        return DataValue.FromStruct(coerced, targetArena, typeId);
+    }
+
+    /// <summary>
+    /// Converts an array-of-struct <see cref="ValueRef"/> into the declared
+    /// <c>Array&lt;Struct&gt;</c> column shape: every element runs through
+    /// <see cref="ConvertStructValueRef"/> (name-matched, declared field
+    /// order, canonical type-id) and the result is reassembled with the
+    /// declared element type-id so downstream encoders persist a consistent
+    /// shape.
+    /// </summary>
+    private static DataValue ConvertStructArrayValueRef(
+        ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
+        TypeRegistry? types)
+    {
+        if (target.Fields is not { Count: > 0 } declared)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': the declared Array<Struct> column carries no field " +
+                "shape, so struct elements cannot be coerced.");
+        }
+        if (types is null)
+        {
+            throw new InvalidOperationException(
+                $"Column '{columnName}': coercing Array<Struct> values requires the query's " +
+                "TypeRegistry (internal wiring error).");
+        }
+
+        ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
+        ushort elementTypeId = checked((ushort)types.InternStructFromColumnInfoFields(declared));
+        ColumnInfo elementTarget = new(target.Name, nullable: true, declared);
+
+        DataValue[][] fieldArrays = new DataValue[elements.Length][];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (elements[i].IsNull)
+            {
+                throw new InvalidOperationException(
+                    $"Column '{columnName}': null element at index {i}; " +
+                    "per-element nulls inside arrays are not yet supported.");
+            }
+            DataValue coerced = ConvertStructValueRef(
+                elements[i], elementTarget, targetArena, $"{columnName}[{i}]", types,
+                precomputedTypeId: elementTypeId);
+            fieldArrays[i] = coerced.AsStruct(targetArena);
+        }
+        return DataValue.FromStructArray(fieldArrays, targetArena, elementTypeId);
     }
 
     /// <summary>
