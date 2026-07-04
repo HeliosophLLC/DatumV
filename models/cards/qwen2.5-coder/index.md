@@ -2,7 +2,7 @@
 
 Alibaba's coding-focused LLM family, quantized to GGUF for local
 `llama.cpp` dispatch. Strong at code generation, explanation, and
-transformation — the reach-for model when the task is *about code*. Three
+transformation — the reach-for model when the task is *about code*. Two
 sizes trade quality for VRAM. Apache-2.0.
 
 Like every LLM in the zoo, each model registers two SQL surfaces: a
@@ -14,7 +14,6 @@ Like every LLM in the zoo, each model registers two SQL surfaces: a
 | Size | Chat model                | Completion model     | Disk    |
 | ---- | ------------------------- | -------------------- | ------- |
 | 1.5B | `qwen25_coder_1_5b_chat`  | `qwen25_coder_1_5b`  | ~1.1 GB |
-| 3B   | `qwen25_coder_3b_chat`    | `qwen25_coder_3b`    | ~1.9 GB |
 | 7B   | `qwen25_coder_7b_chat`    | `qwen25_coder_7b`    | ~5.2 GB |
 
 - `..._chat(messages Array<ChatMessage>, max_tokens Int32 = 1024, temperature Float32 = 0.7)`
@@ -53,7 +52,7 @@ Deterministic output — drop `temperature` to 0 for greedy decoding
 (reproducible), and cap length with `max_tokens`:
 
 ```sql
-SELECT models.qwen25_coder_3b('Explain what a CTE is, in one sentence.', 64, 0.0) AS answer;
+SELECT models.qwen25_coder_1_5b('Explain what a CTE is, in one sentence.', 64, 0.0) AS answer;
 ```
 
 ## Output shape
@@ -81,7 +80,9 @@ first.
 ## License & attribution
 
 Apache-2.0. Original model by Alibaba (Qwen 2.5 Coder); GGUF quantization
-by bartowski.
+by bartowski. The license applies to the shipped 1.5B and 7B sizes — the
+mid-size 3B is under the non-commercial Qwen Research License upstream
+and is not in the catalog.
 
 - Upstream: [Qwen2.5-Coder](https://huggingface.co/Qwen)
 - GGUF: [bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF](https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF)
