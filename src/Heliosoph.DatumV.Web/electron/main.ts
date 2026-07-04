@@ -140,7 +140,16 @@ async function startDotnetBackend(catalogPath: string): Promise<string> {
   const cmd = isDev
     ? 'dotnet'
     : path.join(process.resourcesPath, 'backend', backendBinary);
-  const args = isDev ? ['run', '--project', projectDir, '-c', dotnetConfig] : [];
+  // SkipClientApp=true in dev: the renderer is served by the concurrent Vite
+  // dev server (DEV_VITE_URL), so the backend never needs wwwroot built. Left
+  // unset, the `dotnet run` build would trigger the csproj's ClientAppInstall
+  // (npm ci) + Vite build, and `npm ci` wipes ClientApp/node_modules out from
+  // under the running dev server — killing Vite and taking the app down. In
+  // prod the published binary already ships wwwroot, so this only applies to
+  // the dev `dotnet run` path.
+  const args = isDev
+    ? ['run', '--project', projectDir, '-c', dotnetConfig, '--property:SkipClientApp=true']
+    : [];
 
   // Catalog + global-data paths are the workspace contract: backend
   // refuses to start without DATUMV_CATALOG_PATH (see Program.cs).
