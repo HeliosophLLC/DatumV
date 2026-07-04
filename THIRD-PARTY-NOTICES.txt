@@ -1,5 +1,5 @@
 DatumV THIRD-PARTY NOTICES
-Generated: 2026-06-24T02:11:29.973Z
+Generated: 2026-07-04T12:41:16.258Z
 
 This file aggregates license and copyright notices for every
 third-party component that ships with the DatumV installer,
@@ -27,8 +27,6 @@ below; the AUP is published at
 **Applies to:** All Llama 3.1 models (8B, 70B, 405B; base and Instruct variants) and their derivatives.
 
 **Authoritative full text:** https://www.llama.com/llama3_1/license/
-
-> ⚠️ This file is a working copy intended for in-app display. **Before redistribution, replace with the verbatim canonical text from the URL above** and verify it has not been amended.
 
 ---
 
@@ -113,35 +111,35 @@ Policy it incorporates is published at
   https://stability.ai/use-policy
 
 STABILITY AI COMMUNITY LICENSE AGREEMENT
-
+	
 Last Updated: July 5, 2024
 
 1. INTRODUCTION
 
 This Agreement applies to any individual person or entity (“You”, “Your” or “Licensee”) that uses or distributes any portion or element of the Stability AI Materials  or Derivative Works thereof for any Research & Non-Commercial or Commercial purpose. Capitalized terms not otherwise defined herein are defined in Section V below.
 
-This Agreement is intended to allow research, non-commercial, and limited commercial uses of the Models free of charge. In order to ensure that certain limited commercial uses of the Models continue to be allowed, this Agreement  preserves free access to the Models for people or organizations  generating annual revenue of less than US $1,000,000 (or local currency equivalent).
+This Agreement is intended to allow research, non-commercial, and limited commercial uses of the Models free of charge. In order to ensure that certain limited commercial uses of the Models continue to be allowed, this Agreement  preserves free access to the Models for people or organizations  generating annual revenue of less than US $1,000,000 (or local currency equivalent).  
 
-By clicking “I Accept”  or by using or distributing or using any portion or element of the Stability Materials or Derivative Works, You agree that You have read, understood and are bound by the terms of this Agreement. If You are acting on behalf of a company, organization or other entity, then “You” includes you and that entity, and You agree that You: (i) are an authorized representative of such entity with the authority to bind such entity to this Agreement, and (ii) You agree to the terms of this Agreement on that entity’s behalf.
+By clicking “I Accept”  or by using or distributing or using any portion or element of the Stability Materials or Derivative Works, You agree that You have read, understood and are bound by the terms of this Agreement. If You are acting on behalf of a company, organization or other entity, then “You” includes you and that entity, and You agree that You: (i) are an authorized representative of such entity with the authority to bind such entity to this Agreement, and (ii) You agree to the terms of this Agreement on that entity’s behalf. 
 
 2. RESEARCH & NON-COMMERCIAL USE LICENSE
 
-Subject to the terms of this Agreement, Stability AI grants You a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable and royalty-free limited license under Stability AI’s intellectual property or other rights owned by Stability AI embodied in the Stability AI Materials to use, reproduce, distribute, and create Derivative Works of, and make modifications to, the Stability AI Materials for any Research or Non-Commercial Purpose. “Research Purpose” means academic or scientific advancement, and in each case, is not primarily intended for commercial advantage or monetary compensation to You or others. “Non-Commercial Purpose” means any purpose other than a Research Purpose that is not primarily intended for commercial advantage or monetary compensation to You or others, such as personal use (i.e., hobbyist) or evaluation and testing.
+Subject to the terms of this Agreement, Stability AI grants You a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable and royalty-free limited license under Stability AI’s intellectual property or other rights owned by Stability AI embodied in the Stability AI Materials to use, reproduce, distribute, and create Derivative Works of, and make modifications to, the Stability AI Materials for any Research or Non-Commercial Purpose. “Research Purpose” means academic or scientific advancement, and in each case, is not primarily intended for commercial advantage or monetary compensation to You or others. “Non-Commercial Purpose” means any purpose other than a Research Purpose that is not primarily intended for commercial advantage or monetary compensation to You or others, such as personal use (i.e., hobbyist) or evaluation and testing.  
 
 3. COMMERCIAL USE LICENSE
 
-Subject to the terms of this Agreement (including the remainder of this Section III), Stability AI grants You a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable and royalty-free limited license under Stability AI’s intellectual property or other rights owned by Stability AI embodied in the Stability AI Materials to use, reproduce, distribute, and create Derivative Works of, and make modifications to, the Stability AI Materials for any Commercial Purpose. “Commercial Purpose” means any purpose other than a Research Purpose or Non-Commercial Purpose that is primarily intended for commercial advantage or monetary compensation to You or others, including but not limited to, (i) creating, modifying, or distributing Your product or service, including via a hosted service or application programming interface, and (ii) for Your business’s or organization’s internal operations.
+Subject to the terms of this Agreement (including the remainder of this Section III), Stability AI grants You a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable and royalty-free limited license under Stability AI’s intellectual property or other rights owned by Stability AI embodied in the Stability AI Materials to use, reproduce, distribute, and create Derivative Works of, and make modifications to, the Stability AI Materials for any Commercial Purpose. “Commercial Purpose” means any purpose other than a Research Purpose or Non-Commercial Purpose that is primarily intended for commercial advantage or monetary compensation to You or others, including but not limited to, (i) creating, modifying, or distributing Your product or service, including via a hosted service or application programming interface, and (ii) for Your business’s or organization’s internal operations. 
 If You are using or distributing the Stability AI Materials for a Commercial Purpose, You must register with Stability AI at (https://stability.ai/community-license). If at any time You or Your Affiliate(s), either individually or in aggregate, generate more than USD $1,000,000 in annual revenue (or the equivalent thereof in Your local currency), regardless of whether that revenue is generated directly or indirectly from the Stability AI Materials or Derivative Works, any licenses granted to You under this Agreement shall terminate as of such date. You must request a license from Stability AI at (https://stability.ai/enterprise) , which Stability AI may grant to You in its sole discretion. If you receive Stability AI Materials, or any Derivative Works thereof, from a Licensee as part of an integrated end user product, then Section III of this Agreement will not apply to you.
 
 4. GENERAL TERMS
 
 Your Research, Non-Commercial, and Commercial License(s) under this Agreement are subject to the following terms.
 a.  Distribution & Attribution. If You distribute or make available the Stability AI Materials or a Derivative Work to a third party, or a product or service that uses any portion of them, You shall: (i) provide a copy of this Agreement to that third party, (ii) retain the following attribution notice within a "Notice" text file distributed as a part of such copies: "This Stability AI Model is licensed under the Stability AI Community License, Copyright ©  Stability AI Ltd. All Rights Reserved”, and (iii) prominently display “Powered by Stability AI” on a related website, user interface, blogpost, about page, or product documentation.  If You create a Derivative Work, You may add your own attribution notice(s) to the “Notice” text file included with that Derivative Work, provided that You clearly indicate which attributions apply to the Stability AI Materials and state in the “Notice” text file that You changed the Stability AI Materials and how it was modified.
-b.  Use Restrictions. Your use of the Stability AI Materials and Derivative Works, including any output or results of the Stability AI Materials or Derivative Works, must comply with applicable laws and regulations (including Trade Control Laws and equivalent regulations) and adhere to the Documentation and Stability AI’s AUP, which is hereby incorporated by reference. Furthermore, You will not use the Stability AI Materials or Derivative Works, or any output or results of the Stability AI Materials or Derivative Works, to create or improve any foundational generative AI model (excluding the Models or Derivative Works).
-c.  Intellectual Property.
+b.  Use Restrictions. Your use of the Stability AI Materials and Derivative Works, including any output or results of the Stability AI Materials or Derivative Works, must comply with applicable laws and regulations (including Trade Control Laws and equivalent regulations) and adhere to the Documentation and Stability AI’s AUP, which is hereby incorporated by reference. Furthermore, You will not use the Stability AI Materials or Derivative Works, or any output or results of the Stability AI Materials or Derivative Works, to create or improve any foundational generative AI model (excluding the Models or Derivative Works). 
+c.  Intellectual Property. 
 (i) Trademark License.  No trademark licenses are granted under this Agreement, and in connection with the Stability AI Materials or Derivative Works, You may not use any name or mark owned by or associated with Stability AI or any of its Affiliates, except as required under Section IV(a) herein.
 (ii)  Ownership of Derivative Works.  As between You and Stability AI, You are the owner of Derivative Works You create, subject to Stability AI’s ownership of the Stability AI Materials and any Derivative Works made by or for Stability AI.
-(iii)  Ownership of Outputs. As between You and Stability AI, You own any outputs generated from the Models or Derivative Works to the extent permitted by applicable law.
+(iii)  Ownership of Outputs. As between You and Stability AI, You own any outputs generated from the Models or Derivative Works to the extent permitted by applicable law. 
 (iv)  Disputes.  If You or Your Affiliate(s) institute litigation or other proceedings against Stability AI (including a cross-claim or counterclaim in a lawsuit) alleging that the Stability AI Materials, Derivative Works or associated outputs or results, or any portion of any of the foregoing, constitutes infringement of intellectual property or other rights owned or licensable by You, then any licenses granted to You under this Agreement shall terminate as of the date such litigation or claim is filed or instituted. You will indemnify and hold harmless Stability AI from and against any claim by any third party arising out of or related to Your use or distribution of the Stability AI Materials or Derivative Works in violation of this Agreement.
 (v)  Feedback.  From time to time, You may provide Stability AI with verbal and/or written suggestions, comments or other feedback related to Stability AI’s existing or prospective technology, products or services (collectively, “Feedback”). You are not obligated to provide Stability AI with Feedback, but to the extent that You do, You hereby grant Stability AI a perpetual, irrevocable, royalty-free, fully-paid, sub-licensable, transferable, non-exclusive, worldwide right and license to exploit the Feedback in any manner without restriction. Your Feedback is provided “AS IS” and You make no warranties whatsoever about any Feedback.
 d.  Disclaimer Of Warranty. UNLESS REQUIRED BY APPLICABLE LAW, THE STABILITY AI MATERIALS AND ANY OUTPUT AND RESULTS THEREFROM ARE PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION, ANY WARRANTIES OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE. YOU ARE SOLELY RESPONSIBLE FOR DETERMINING THE APPROPRIATENESS OR LAWFULNESS OF USING OR REDISTRIBUTING THE STABILITY AI MATERIALS, DERIVATIVE WORKS OR ANY OUTPUT OR RESULTS AND ASSUME ANY RISKS ASSOCIATED WITH YOUR USE OF THE STABILITY AI MATERIALS, DERIVATIVE WORKS AND ANY OUTPUT AND RESULTS.
@@ -149,7 +147,7 @@ e.  Limitation Of Liability. IN NO EVENT WILL STABILITY AI OR ITS AFFILIATES BE 
 f.  Term And Termination. The term of this Agreement will commence upon Your acceptance of this Agreement or access to the Stability AI Materials and will continue in full force and effect until terminated in accordance with the terms and conditions herein. Stability AI may terminate this Agreement if You are in breach of any term or condition of this Agreement. Upon termination of this Agreement, You shall delete and cease use of any Stability AI Materials or Derivative Works. Section IV(d), (e), and (g) shall survive the termination of this Agreement.
 g.  Governing Law.  This Agreement will be governed by and constructed in accordance with the laws of the United States and the State of California without regard to choice of law principles, and the UN Convention on Contracts for International Sale of Goods does not apply to this Agreement.
 
-5. DEFINITIONS
+5. DEFINITIONS 
 
 “Affiliate(s)” means any entity that directly or indirectly controls, is controlled by, or is under common control with the subject entity; for purposes of this definition, “control” means direct or indirect ownership or control of more than 50% of the voting interests of the subject entity.
 
@@ -167,7 +165,7 @@ g.  Governing Law.  This Agreement will be governed by and constructed in accord
 
 "Software" means Stability AI’s proprietary software made available under this Agreement now or in the future.
 
-“Stability AI Materials” means, collectively, Stability’s proprietary Models, Software and Documentation (and any portion or combination thereof) made available under this Agreement.
+“Stability AI Materials” means, collectively, Stability’s proprietary Models, Software and Documentation (and any portion or combination thereof) made available under this Agreement. 
 
 “Trade Control Laws” means any applicable U.S. and non-U.S. export control and trade sanctions laws and regulations.
 
@@ -241,7 +239,7 @@ Apache.Arrow.Scalars 23.0.0
   License: Apache-2.0
   URL: https://arrow.apache.org/
 
-CardinalityEstimation 1.14.0
+CardinalityEstimation 1.15.0
   License: MIT
   URL: https://github.com/saguiitay/CardinalityEstimation
 
@@ -301,14 +299,6 @@ Microsoft.Extensions.AI.Abstractions 10.4.1
   License: MIT
   URL: https://dot.net/
 
-Microsoft.Extensions.ApiDescription.Server 6.0.3
-  License: MIT
-  URL: https://asp.net/
-
-Microsoft.Extensions.FileProviders.Embedded 9.0.0
-  License: MIT
-  URL: https://asp.net/
-
 Microsoft.IO.RecyclableMemoryStream 3.0.1
   License: MIT
   URL: https://github.com/Microsoft/Microsoft.IO.RecyclableMemoryStream
@@ -355,7 +345,7 @@ murmurhash 1.0.3
   License: MS-PL
   URL: https://github.com/darrenkopp/murmurhash-net
 
-Namotion.Reflection 3.2.0
+Namotion.Reflection 3.5.0
   License: MIT
   URL: https://github.com/RicoSuter/Namotion.Reflection
 
@@ -363,47 +353,47 @@ Newtonsoft.Json 13.0.3
   License: MIT
   URL: https://www.newtonsoft.com/json
 
-NJsonSchema 11.1.0
+NJsonSchema 11.6.1
   License: MIT
   URL: http://njsonschema.org/
 
-NJsonSchema.Annotations 11.1.0
+NJsonSchema.Annotations 11.6.1
   License: MIT
   URL: http://njsonschema.org/
 
-NJsonSchema.NewtonsoftJson 11.1.0
+NJsonSchema.NewtonsoftJson 11.6.1
   License: MIT
   URL: http://njsonschema.org/
 
-NJsonSchema.Yaml 11.1.0
+NJsonSchema.Yaml 11.6.1
   License: MIT
   URL: http://njsonschema.org/
 
-NSwag.Annotations 14.2.0
+NSwag.Annotations 14.7.1
   License: MIT
   URL: http://nswag.org/
 
-NSwag.AspNetCore 14.2.0
-  License: MIT
-  URL: https://github.com/RicoSuter/NSwag
-
-NSwag.Core 14.2.0
+NSwag.AspNetCore 14.7.1
   License: MIT
   URL: http://nswag.org/
 
-NSwag.Core.Yaml 14.2.0
+NSwag.Core 14.7.1
   License: MIT
   URL: http://nswag.org/
 
-NSwag.Generation 14.2.0
+NSwag.Core.Yaml 14.7.1
   License: MIT
   URL: http://nswag.org/
 
-NSwag.Generation.AspNetCore 14.2.0
+NSwag.Generation 14.7.1
   License: MIT
   URL: http://nswag.org/
 
-NSwag.MSBuild 14.2.0
+NSwag.Generation.AspNetCore 14.7.1
+  License: MIT
+  URL: http://nswag.org/
+
+NSwag.MSBuild 14.7.1
   License: MIT
   URL: https://github.com/RicoSuter/NSwag
 
@@ -471,7 +461,7 @@ System.Interactive.Async 7.0.0
   License: MIT
   URL: https://github.com/dotnet/reactive
 
-System.IO.Hashing 9.0.0
+System.IO.Hashing 10.0.7
   License: MIT
   URL: https://dot.net/
 
@@ -483,7 +473,7 @@ System.Numerics.Tensors 10.0.5
   License: MIT
   URL: https://dot.net/
 
-YamlDotNet 16.2.0
+YamlDotNet 16.3.0
   License: MIT
   URL: https://github.com/aaubry/YamlDotNet/wiki
 
@@ -598,157 +588,162 @@ universalify 2.0.1
 Renderer SPA (ClientApp/)
 ------------------------------------------------------------
 
-@babel/code-frame 7.29.0
+@babel/code-frame 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/compat-data 7.29.3
+@babel/compat-data 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/core 7.29.0
+@babel/core 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/generator 7.29.1
+@babel/generator 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-annotate-as-pure 7.27.3
+@babel/helper-annotate-as-pure 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-compilation-targets 7.28.6
+@babel/helper-compilation-targets 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-create-class-features-plugin 7.29.3
+@babel/helper-create-class-features-plugin 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-globals 7.28.0
+@babel/helper-globals 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-member-expression-to-functions 7.28.5
+@babel/helper-member-expression-to-functions 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-module-imports 7.28.6
+@babel/helper-module-imports 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-module-transforms 7.28.6
+@babel/helper-module-transforms 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-optimise-call-expression 7.27.1
+@babel/helper-optimise-call-expression 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-plugin-utils 7.28.6
+@babel/helper-plugin-utils 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-replace-supers 7.28.6
+@babel/helper-replace-supers 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-skip-transparent-expression-wrappers 7.27.1
+@babel/helper-skip-transparent-expression-wrappers 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-string-parser 7.27.1
+@babel/helper-string-parser 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-validator-identifier 7.28.5
+@babel/helper-validator-identifier 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helper-validator-option 7.27.1
+@babel/helper-validator-option 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/helpers 7.29.2
+@babel/helpers 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/parser 7.29.3
+@babel/parser 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/plugin-syntax-jsx 7.28.6
+@babel/plugin-syntax-jsx 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/plugin-syntax-typescript 7.28.6
+@babel/plugin-syntax-typescript 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/plugin-transform-modules-commonjs 7.28.6
+@babel/plugin-transform-modules-commonjs 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/plugin-transform-typescript 7.28.6
+@babel/plugin-transform-typescript 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/preset-typescript 7.28.5
+@babel/preset-typescript 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/runtime 7.29.2
+@babel/runtime 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/template 7.28.6
+@babel/runtime 8.0.0
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/traverse 7.29.0
+@babel/template 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@babel/types 7.29.0
+@babel/traverse 7.29.7
   License: MIT
   URL: https://github.com/babel/babel
   Authors: The Babel Team
 
-@base-ui/react 1.4.1
+@babel/types 7.29.7
+  License: MIT
+  URL: https://github.com/babel/babel
+  Authors: The Babel Team
+
+@base-ui/react 1.6.0
   License: MIT
   URL: https://github.com/mui/base-ui
   Authors: MUI Team
 
-@base-ui/utils 0.2.8
+@base-ui/utils 0.3.1
   License: MIT
   URL: https://github.com/mui/base-ui
   Authors: MUI Team
@@ -757,15 +752,15 @@ Renderer SPA (ClientApp/)
   License: Apache-2.0
   URL: https://github.com/dimforge/rapier.js
 
-@dotenvx/dotenvx 1.65.0
+@dotenvx/dotenvx 1.75.1
   License: BSD-3-Clause
   URL: https://github.com/dotenvx/dotenvx
   Authors: @motdotla
 
-@ecies/ciphers 0.2.6
-  License: MIT
-  URL: https://github.com/ecies/js-ciphers
-  Authors: Weiliang Li
+@dotenvx/primitives 0.8.0
+  License: BSD-3-Clause
+  URL: https://github.com/dotenvx/dotenvx
+  Authors: @motdotla
 
 @floating-ui/core 1.7.5
   License: MIT
@@ -787,21 +782,21 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/floating-ui/floating-ui
   Authors: atomiks
 
-@fontsource-variable/geist 5.2.8
+@fontsource-variable/geist 5.2.9
   License: OFL-1.1
   URL: https://github.com/fontsource/font-files
   Authors: Google Inc.
 
-@formatjs/fast-memoize 3.1.4
+@formatjs/fast-memoize 3.1.6
   License: MIT
   URL: https://github.com/formatjs/formatjs
   Authors: Long Ho
 
-@formatjs/icu-messageformat-parser 3.5.7
+@formatjs/icu-messageformat-parser 3.5.12
   License: MIT
   URL: https://github.com/formatjs/formatjs
 
-@formatjs/icu-skeleton-parser 2.1.7
+@formatjs/icu-skeleton-parser 2.1.10
   License: MIT
   URL: https://github.com/formatjs/formatjs
 
@@ -809,31 +804,6 @@ Renderer SPA (ClientApp/)
   License: MIT
   URL: https://github.com/honojs/node-server
   Authors: Yusuke Wada
-
-@inquirer/ansi 2.0.5
-  License: MIT
-  URL: https://github.com/SBoudrias/Inquirer.js
-  Authors: Simon Boudrias
-
-@inquirer/confirm 6.0.13
-  License: MIT
-  URL: https://github.com/SBoudrias/Inquirer.js
-  Authors: Simon Boudrias
-
-@inquirer/core 11.1.10
-  License: MIT
-  URL: https://github.com/SBoudrias/Inquirer.js
-  Authors: Simon Boudrias
-
-@inquirer/figures 2.0.5
-  License: MIT
-  URL: https://github.com/SBoudrias/Inquirer.js
-  Authors: Simon Boudrias
-
-@inquirer/type 4.0.5
-  License: MIT
-  URL: https://github.com/SBoudrias/Inquirer.js
-  Authors: Simon Boudrias
 
 @jridgewell/gen-mapping 0.3.13
   License: MIT
@@ -889,26 +859,6 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/MONOGRID/gainmap-js
   Authors: MONOGRID
 
-@mswjs/interceptors 0.41.8
-  License: MIT
-  URL: https://github.com/mswjs/interceptors
-  Authors: Artem Zakharchenko
-
-@noble/ciphers 1.3.0
-  License: MIT
-  URL: https://github.com/paulmillr/noble-ciphers
-  Authors: Paul Miller
-
-@noble/curves 1.9.7
-  License: MIT
-  URL: https://github.com/paulmillr/noble-curves
-  Authors: Paul Miller
-
-@noble/hashes 1.8.0
-  License: MIT
-  URL: https://github.com/paulmillr/noble-hashes
-  Authors: Paul Miller
-
 @nodelib/fs.scandir 2.1.5
   License: MIT
   URL: https://github.com/nodelib/nodelib.git#master
@@ -920,26 +870,6 @@ Renderer SPA (ClientApp/)
 @nodelib/fs.walk 1.2.8
   License: MIT
   URL: https://github.com/nodelib/nodelib.git#master
-
-@open-draft/deferred-promise 2.2.0
-  License: MIT
-  URL: https://github.com/open-draft/deferred-promise
-  Authors: Artem Zakharchenko
-
-@open-draft/deferred-promise 3.0.0
-  License: MIT
-  URL: https://github.com/open-draft/deferred-promise
-  Authors: Artem Zakharchenko
-
-@open-draft/logger 0.3.0
-  License: MIT
-  URL: https://github.com/open-draft/logger
-  Authors: Artem Zakharchenko
-
-@open-draft/until 2.1.0
-  License: MIT
-  URL: https://github.com/open-draft/until
-  Authors: Artem Zakharchenko
 
 @react-three/drei 10.7.7
   License: MIT
@@ -960,12 +890,12 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/sindresorhus/merge-streams
   Authors: Sindre Sorhus
 
-@tanstack/react-virtual 3.13.24
+@tanstack/react-virtual 3.14.5
   License: MIT
   URL: https://github.com/TanStack/virtual
   Authors: Tanner Linsley
 
-@tanstack/virtual-core 3.14.0
+@tanstack/virtual-core 3.17.3
   License: MIT
   URL: https://github.com/TanStack/virtual
   Authors: Tanner Linsley
@@ -988,7 +918,7 @@ Renderer SPA (ClientApp/)
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
-@types/estree 1.0.8
+@types/estree 1.0.9
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
@@ -1008,15 +938,11 @@ Renderer SPA (ClientApp/)
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
-@types/node 22.19.18
-  License: MIT
-  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
-
 @types/offscreencanvas 2019.7.3
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
-@types/react 19.2.14
+@types/react 19.2.17
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
@@ -1024,15 +950,7 @@ Renderer SPA (ClientApp/)
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
-@types/set-cookie-parser 2.4.10
-  License: MIT
-  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
-
 @types/stats.js 0.17.4
-  License: MIT
-  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
-
-@types/statuses 2.0.6
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
@@ -1065,7 +983,7 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/uiwjs/react-json-view
   Authors: Kenny Wang
 
-@ungap/structured-clone 1.3.1
+@ungap/structured-clone 1.3.2
   License: ISC
   URL: https://github.com/ungap/structured-clone
   Authors: Andrea Giammarchi
@@ -1089,20 +1007,25 @@ accepts 2.0.0
   License: MIT
   URL: https://github.com/jshttp/accepts
 
-agent-base 7.1.4
-  License: MIT
-  URL: https://github.com/TooTallNate/proxy-agents
-  Authors: Nathan Rajlich
-
 ajv 8.20.0
   License: MIT
   URL: https://github.com/ajv-validator/ajv
+  Authors: Evgeny Poberezkin
+
+ajv-formats 2.1.1
+  License: MIT
+  URL: https://github.com/ajv-validator/ajv-formats
   Authors: Evgeny Poberezkin
 
 ajv-formats 3.0.1
   License: MIT
   URL: https://github.com/ajv-validator/ajv-formats
   Authors: Evgeny Poberezkin
+
+ansi-colors 4.1.3
+  License: MIT
+  URL: https://github.com/doowb/ansi-colors
+  Authors: Brian Woodward
 
 ansi-regex 5.0.1
   License: MIT
@@ -1114,11 +1037,6 @@ ansi-regex 6.2.2
   URL: https://github.com/chalk/ansi-regex
   Authors: Sindre Sorhus
 
-ansi-styles 4.3.0
-  License: MIT
-  URL: https://github.com/chalk/ansi-styles
-  Authors: Sindre Sorhus
-
 argparse 2.0.1
   License: Python-2.0
   URL: https://github.com/nodeca/argparse
@@ -1127,6 +1045,11 @@ ast-types 0.16.1
   License: MIT
   URL: https://github.com/benjamn/ast-types
   Authors: Ben Newman
+
+atomically 1.7.0
+  License: MIT
+  URL: https://github.com/fabiospampinato/atomically
+  Authors: Fabio Spampinato
 
 bail 2.0.2
   License: MIT
@@ -1142,7 +1065,7 @@ base64-js 1.5.1
   URL: https://github.com/beatgammit/base64-js
   Authors: T. Jameson Little
 
-baseline-browser-mapping 2.10.29
+baseline-browser-mapping 2.10.41
   License: Apache-2.0
   URL: https://github.com/web-platform-dx/baseline-browser-mapping
 
@@ -1151,11 +1074,11 @@ bidi-js 1.0.3
   URL: https://github.com/lojjic/bidi-js
   Authors: Jason Johnston
 
-body-parser 2.2.2
+body-parser 2.3.0
   License: MIT
   URL: https://github.com/expressjs/body-parser
 
-brace-expansion 5.0.6
+brace-expansion 5.0.7
   License: MIT
   URL: https://github.com/juliangruber/brace-expansion
 
@@ -1164,7 +1087,7 @@ braces 3.0.3
   URL: https://github.com/micromatch/braces
   Authors: Jon Schlinkert
 
-browserslist 4.28.2
+browserslist 4.28.4
   License: MIT
   URL: https://github.com/browserslist/browserslist
   Authors: Andrey Sitnik
@@ -1204,7 +1127,7 @@ camera-controls 3.1.2
   URL: https://github.com/yomotsu/camera-controls
   Authors: Yomotsu
 
-caniuse-lite 1.0.30001792
+caniuse-lite 1.0.30001800
   License: CC-BY-4.0
   URL: https://github.com/browserslist/caniuse-lite
   Authors: Ben Briggs
@@ -1253,16 +1176,6 @@ cli-spinners 2.9.2
   URL: https://github.com/sindresorhus/cli-spinners
   Authors: Sindre Sorhus
 
-cli-width 4.1.0
-  License: ISC
-  URL: https://github.com/knownasilya/cli-width
-  Authors: Ilya Radchenko
-
-cliui 8.0.1
-  License: ISC
-  URL: https://github.com/yargs/cliui
-  Authors: Ben Coe
-
 clsx 2.1.1
   License: MIT
   URL: https://github.com/lukeed/clsx
@@ -1272,16 +1185,6 @@ code-block-writer 13.0.3
   License: MIT
   URL: https://github.com/dsherret/code-block-writer
   Authors: David Sherret
-
-color-convert 2.0.1
-  License: MIT
-  URL: https://github.com/Qix-/color-convert
-  Authors: Heather Arthur
-
-color-name 1.1.4
-  License: MIT
-  URL: https://github.com/colorjs/color-name
-  Authors: DY
 
 comma-separated-tokens 2.0.3
   License: MIT
@@ -1298,12 +1201,22 @@ commander 14.0.3
   URL: https://github.com/tj/commander.js
   Authors: TJ Holowaychuk
 
+conf 10.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/conf
+  Authors: Sindre Sorhus
+
 content-disposition 1.1.0
   License: MIT
   URL: https://github.com/jshttp/content-disposition
   Authors: Douglas Christopher Wilson
 
 content-type 1.0.5
+  License: MIT
+  URL: https://github.com/jshttp/content-type
+  Authors: Douglas Christopher Wilson
+
+content-type 2.0.0
   License: MIT
   URL: https://github.com/jshttp/content-type
   Authors: Douglas Christopher Wilson
@@ -1318,11 +1231,6 @@ cookie 0.7.2
   URL: https://github.com/jshttp/cookie
   Authors: Roman Shtylman
 
-cookie 1.1.1
-  License: MIT
-  URL: https://github.com/jshttp/cookie
-  Authors: Roman Shtylman
-
 cookie-signature 1.2.2
   License: MIT
   URL: https://github.com/visionmedia/node-cookie-signature
@@ -1333,7 +1241,7 @@ cors 2.8.6
   URL: https://github.com/expressjs/cors
   Authors: Troy Goode
 
-cosmiconfig 9.0.1
+cosmiconfig 9.0.2
   License: MIT
   URL: https://github.com/cosmiconfig/cosmiconfig
   Authors: Daniel Fischer
@@ -1358,10 +1266,10 @@ csstype 3.2.3
   URL: https://github.com/frenic/csstype
   Authors: Fredrik Nicol
 
-data-uri-to-buffer 4.0.1
+debounce-fn 4.0.0
   License: MIT
-  URL: https://github.com/TooTallNate/node-data-uri-to-buffer
-  Authors: Nathan Rajlich
+  URL: https://github.com/sindresorhus/debounce-fn
+  Authors: Sindre Sorhus
 
 debug 4.4.3
   License: MIT
@@ -1390,6 +1298,11 @@ default-browser 5.5.0
 default-browser-id 5.0.1
   License: MIT
   URL: https://github.com/sindresorhus/default-browser-id
+  Authors: Sindre Sorhus
+
+define-lazy-prop 2.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/define-lazy-prop
   Authors: Sindre Sorhus
 
 define-lazy-prop 3.0.0
@@ -1426,6 +1339,11 @@ dompurify 3.2.7
   URL: https://github.com/cure53/DOMPurify
   Authors: Dr.-Ing. Mario Heiderich, Cure53
 
+dot-prop 6.0.1
+  License: MIT
+  URL: https://github.com/sindresorhus/dot-prop
+  Authors: Sindre Sorhus
+
 dotenv 17.4.2
   License: BSD-2-Clause
   URL: https://github.com/motdotla/dotenv
@@ -1440,17 +1358,12 @@ dunder-proto 1.0.1
   URL: https://github.com/es-shims/dunder-proto
   Authors: Jordan Harband
 
-eciesjs 0.4.18
-  License: MIT
-  URL: https://github.com/ecies/js
-  Authors: Weiliang Li
-
 ee-first 1.1.1
   License: MIT
   URL: https://github.com/jonathanong/ee-first
   Authors: Jonathan Ong
 
-electron-to-chromium 1.5.353
+electron-to-chromium 1.5.385
   License: ISC
   URL: https://github.com/Kilian/electron-to-chromium
   Authors: Kilian Valkhof
@@ -1460,14 +1373,14 @@ emoji-regex 10.6.0
   URL: https://github.com/mathiasbynens/emoji-regex
   Authors: Mathias Bynens
 
-emoji-regex 8.0.0
-  License: MIT
-  URL: https://github.com/mathiasbynens/emoji-regex
-  Authors: Mathias Bynens
-
 encodeurl 2.0.0
   License: MIT
   URL: https://github.com/pillarjs/encodeurl
+
+enquirer 2.4.1
+  License: MIT
+  URL: https://github.com/enquirer/enquirer
+  Authors: Jon Schlinkert
 
 env-paths 2.2.1
   License: MIT
@@ -1488,7 +1401,7 @@ es-errors 1.3.0
   URL: https://github.com/ljharb/es-errors
   Authors: Jordan Harband
 
-es-object-atoms 1.1.1
+es-object-atoms 1.1.2
   License: MIT
   URL: https://github.com/ljharb/es-object-atoms
   Authors: Jordan Harband
@@ -1536,7 +1449,7 @@ eventsource 3.0.7
   URL: git://git@github.com/EventSource/eventsource
   Authors: Espen Hovlandsdal
 
-eventsource-parser 3.0.8
+eventsource-parser 3.1.0
   License: MIT
   URL: https://github.com/rexxars/eventsource-parser
   Authors: Espen Hovlandsdal
@@ -1556,7 +1469,7 @@ express 5.2.1
   URL: https://github.com/expressjs/express
   Authors: TJ Holowaychuk
 
-express-rate-limit 8.5.1
+express-rate-limit 8.5.2
   License: MIT
   URL: https://github.com/express-rate-limit/express-rate-limit
   Authors: Nathan Friedly
@@ -1576,23 +1489,10 @@ fast-glob 3.3.3
   URL: https://github.com/mrmlnc/fast-glob
   Authors: Denis Malinochkin
 
-fast-string-truncated-width 3.0.3
-  License: MIT
-  URL: https://github.com/fabiospampinato/fast-string-truncated-width
-
-fast-string-width 3.0.2
-  License: MIT
-  URL: https://github.com/fabiospampinato/fast-string-width
-
-fast-uri 3.1.2
+fast-uri 3.1.3
   License: BSD-3-Clause
   URL: https://github.com/fastify/fast-uri
   Authors: Vincent Le Goff
-
-fast-wrap-ansi 0.2.0
-  License: MIT
-  URL: https://github.com/43081j/fast-wrap-ansi
-  Authors: James Garbutt
 
 fastq 1.20.1
   License: ISC
@@ -1603,11 +1503,6 @@ fdir 6.5.0
   License: MIT
   URL: https://github.com/thecodrr/fdir
   Authors: thecodrr
-
-fetch-blob 3.2.0
-  License: MIT
-  URL: https://github.com/node-fetch/fetch-blob
-  Authors: Jimmy Wärting
 
 fetch-cookie 2.2.0
   License: Unlicense
@@ -1639,10 +1534,10 @@ finalhandler 2.1.1
   URL: https://github.com/pillarjs/finalhandler
   Authors: Douglas Christopher Wilson
 
-formdata-polyfill 4.0.10
+find-up 3.0.0
   License: MIT
-  URL: git+https://jimmywarting@github.com/jimmywarting/FormData
-  Authors: Jimmy Wärting
+  URL: https://github.com/sindresorhus/find-up
+  Authors: Sindre Sorhus
 
 forwarded 0.2.0
   License: MIT
@@ -1653,7 +1548,7 @@ fresh 2.0.0
   URL: https://github.com/jshttp/fresh
   Authors: TJ Holowaychuk
 
-fs-extra 11.3.5
+fs-extra 11.3.6
   License: MIT
   URL: https://github.com/jprichardson/node-fs-extra
   Authors: JP Richardson
@@ -1672,11 +1567,6 @@ gensync 1.0.0-beta.2
   License: MIT
   URL: https://github.com/loganfsmyth/gensync
   Authors: Logan Smyth
-
-get-caller-file 2.0.5
-  License: ISC
-  URL: https://github.com/stefanpenner/get-caller-file
-  Authors: Stefan Penner
 
 get-east-asian-width 1.6.0
   License: MIT
@@ -1732,16 +1622,12 @@ graceful-fs 4.2.11
   License: ISC
   URL: https://github.com/isaacs/node-graceful-fs
 
-graphql 16.14.0
-  License: MIT
-  URL: https://github.com/graphql/graphql-js
-
 has-symbols 1.1.0
   License: MIT
   URL: https://github.com/inspect-js/has-symbols
   Authors: Jordan Harband
 
-hasown 2.0.3
+hasown 2.0.4
   License: MIT
   URL: https://github.com/inspect-js/hasOwn
   Authors: Jordan Harband
@@ -1776,11 +1662,6 @@ hast-util-whitespace 3.0.0
   URL: https://github.com/syntax-tree/hast-util-whitespace
   Authors: Titus Wormer
 
-headers-polyfill 5.0.1
-  License: MIT
-  URL: https://github.com/mswjs/headers-polyfill
-  Authors: Artem Zakharchenko
-
 highlight.js 11.11.1
   License: BSD-3-Clause
   URL: https://github.com/highlightjs/highlight.js
@@ -1790,7 +1671,7 @@ hls.js 1.6.16
   License: Apache-2.0
   URL: https://github.com/video-dev/hls.js
 
-hono 4.12.18
+hono 4.12.27
   License: MIT
   URL: https://github.com/honojs/hono
   Authors: Yusuke Wada
@@ -1810,11 +1691,6 @@ http-errors 2.0.1
   URL: https://github.com/jshttp/http-errors
   Authors: Jonathan Ong
 
-https-proxy-agent 7.0.6
-  License: MIT
-  URL: https://github.com/TooTallNate/proxy-agents
-  Authors: Nathan Rajlich
-
 human-signals 2.1.0
   License: Apache-2.0
   URL: https://github.com/ehmicky/human-signals
@@ -1825,12 +1701,12 @@ human-signals 8.0.1
   URL: https://github.com/ehmicky/human-signals
   Authors: ehmicky
 
-i18next 26.1.0
+i18next 26.3.4
   License: MIT
   URL: https://github.com/i18next/i18next
   Authors: Jan Mühlemann
 
-i18next-icu 2.4.3
+i18next-icu 2.4.4
   License: MIT
   URL: https://github.com/i18next/i18next-icu
   Authors: Jan Mühlemann
@@ -1867,7 +1743,7 @@ inline-style-parser 0.2.7
   License: MIT
   URL: https://github.com/remarkablemark/inline-style-parser
 
-intl-messageformat 11.2.4
+intl-messageformat 11.2.9
   License: BSD-3-Clause
   URL: https://github.com/formatjs/formatjs
   Authors: Eric Ferraiuolo
@@ -1902,6 +1778,11 @@ is-decimal 2.0.1
   URL: https://github.com/wooorm/is-decimal
   Authors: Titus Wormer
 
+is-docker 2.2.1
+  License: MIT
+  URL: https://github.com/sindresorhus/is-docker
+  Authors: Sindre Sorhus
+
 is-docker 3.0.0
   License: MIT
   URL: https://github.com/sindresorhus/is-docker
@@ -1911,11 +1792,6 @@ is-extglob 2.1.1
   License: MIT
   URL: https://github.com/jonschlinkert/is-extglob
   Authors: Jon Schlinkert
-
-is-fullwidth-code-point 3.0.0
-  License: MIT
-  URL: https://github.com/sindresorhus/is-fullwidth-code-point
-  Authors: Sindre Sorhus
 
 is-glob 4.0.3
   License: MIT
@@ -1942,14 +1818,15 @@ is-interactive 2.0.0
   URL: https://github.com/sindresorhus/is-interactive
   Authors: Sindre Sorhus
 
-is-node-process 1.2.0
-  License: MIT
-  URL: https://github.com/mswjs/is-node-process
-
 is-number 7.0.0
   License: MIT
   URL: https://github.com/jonschlinkert/is-number
   Authors: Jon Schlinkert
+
+is-obj 2.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-obj
+  Authors: Sindre Sorhus
 
 is-obj 3.0.0
   License: MIT
@@ -1996,6 +1873,11 @@ is-unicode-supported 2.1.0
   URL: https://github.com/sindresorhus/is-unicode-supported
   Authors: Sindre Sorhus
 
+is-wsl 2.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/is-wsl
+  Authors: Sindre Sorhus
+
 is-wsl 3.1.1
   License: MIT
   URL: https://github.com/sindresorhus/is-wsl
@@ -2026,7 +1908,7 @@ js-tokens 4.0.0
   URL: https://github.com/lydell/js-tokens
   Authors: Simon Lydell
 
-js-yaml 4.1.1
+js-yaml 4.3.0
   License: MIT
   URL: https://github.com/nodeca/js-yaml
   Authors: Vladimir Zapparov
@@ -2045,6 +1927,10 @@ json-schema-traverse 1.0.0
   License: MIT
   URL: https://github.com/epoberezkin/json-schema-traverse
   Authors: Evgeny Poberezkin
+
+json-schema-typed 7.0.3
+  License: BSD-2-Clause
+  URL: https://github.com/typeslick/json-schema-typed
 
 json-schema-typed 8.0.2
   License: BSD-2-Clause
@@ -2080,6 +1966,11 @@ lines-and-columns 1.2.4
   URL: https://github.com/eventualbuddha/lines-and-columns
   Authors: Brian Donovan
 
+locate-path 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/locate-path
+  Authors: Sindre Sorhus
+
 log-symbols 6.0.0
   License: MIT
   URL: https://github.com/sindresorhus/log-symbols
@@ -2100,7 +1991,7 @@ lru-cache 5.1.1
   URL: https://github.com/isaacs/node-lru-cache
   Authors: Isaac Z. Schlueter
 
-lucide-react 1.14.0
+lucide-react 1.23.0
   License: ISC
   URL: https://github.com/lucide-icons/lucide
   Authors: Eric Fennis
@@ -2383,6 +2274,11 @@ mimic-fn 2.1.0
   URL: https://github.com/sindresorhus/mimic-fn
   Authors: Sindre Sorhus
 
+mimic-fn 3.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/mimic-fn
+  Authors: Sindre Sorhus
+
 mimic-function 5.0.1
   License: MIT
   URL: https://github.com/sindresorhus/mimic-function
@@ -2412,17 +2308,7 @@ ms 2.1.3
   License: MIT
   URL: https://github.com/vercel/ms
 
-msw 2.14.5
-  License: MIT
-  URL: https://github.com/mswjs/msw
-  Authors: Artem Zakharchenko
-
-mute-stream 3.0.0
-  License: ISC
-  URL: https://github.com/npm/mute-stream
-  Authors: GitHub Inc.
-
-nanoid 3.3.12
+nanoid 3.3.15
   License: MIT
   URL: https://github.com/ai/nanoid
   Authors: Andrey Sitnik
@@ -2431,22 +2317,12 @@ negotiator 1.0.0
   License: MIT
   URL: https://github.com/jshttp/negotiator
 
-node-domexception 1.0.0
-  License: MIT
-  URL: https://github.com/jimmywarting/node-domexception
-  Authors: Jimmy Wärting
-
 node-fetch 2.7.0
   License: MIT
   URL: https://github.com/bitinn/node-fetch
   Authors: David Frank
 
-node-fetch 3.3.2
-  License: MIT
-  URL: https://github.com/node-fetch/node-fetch
-  Authors: David Frank
-
-node-releases 2.0.38
+node-releases 2.0.50
   License: MIT
   URL: https://github.com/chicoxyzzy/node-releases
   Authors: Sergey Rubanov
@@ -2500,15 +2376,30 @@ open 11.0.0
   URL: https://github.com/sindresorhus/open
   Authors: Sindre Sorhus
 
+open 8.4.2
+  License: MIT
+  URL: https://github.com/sindresorhus/open
+  Authors: Sindre Sorhus
+
 ora 8.2.0
   License: MIT
   URL: https://github.com/sindresorhus/ora
   Authors: Sindre Sorhus
 
-outvariant 1.4.3
+p-limit 2.3.0
   License: MIT
-  URL: https://github.com/open-draft/outvariant
-  Authors: Artem Zakharchenko
+  URL: https://github.com/sindresorhus/p-limit
+  Authors: Sindre Sorhus
+
+p-locate 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/p-locate
+  Authors: Sindre Sorhus
+
+p-try 2.2.0
+  License: MIT
+  URL: https://github.com/sindresorhus/p-try
+  Authors: Sindre Sorhus
 
 parent-module 1.0.1
   License: MIT
@@ -2539,6 +2430,11 @@ path-browserify 1.0.1
   URL: https://github.com/browserify/path-browserify
   Authors: James Halliday
 
+path-exists 3.0.0
+  License: MIT
+  URL: https://github.com/sindresorhus/path-exists
+  Authors: Sindre Sorhus
+
 path-key 3.1.1
   License: MIT
   URL: https://github.com/sindresorhus/path-key
@@ -2548,10 +2444,6 @@ path-key 4.0.0
   License: MIT
   URL: https://github.com/sindresorhus/path-key
   Authors: Sindre Sorhus
-
-path-to-regexp 6.3.0
-  License: MIT
-  URL: https://github.com/pillarjs/path-to-regexp
 
 path-to-regexp 8.4.2
   License: MIT
@@ -2567,7 +2459,7 @@ picomatch 2.3.2
   URL: https://github.com/micromatch/picomatch
   Authors: Jon Schlinkert
 
-picomatch 4.0.4
+picomatch 4.0.5
   License: MIT
   URL: https://github.com/micromatch/picomatch
   Authors: Jon Schlinkert
@@ -2577,12 +2469,17 @@ pkce-challenge 5.0.1
   URL: https://github.com/crouchcd/pkce-challenge
   Authors: crouchcd
 
-postcss 8.5.14
+pkg-up 3.1.0
+  License: MIT
+  URL: https://github.com/sindresorhus/pkg-up
+  Authors: Sindre Sorhus
+
+postcss 8.5.16
   License: MIT
   URL: https://github.com/postcss/postcss
   Authors: Andrey Sitnik
 
-postcss-selector-parser 7.1.1
+postcss-selector-parser 7.1.4
   License: MIT
   URL: https://github.com/postcss/postcss-selector-parser
 
@@ -2611,7 +2508,7 @@ prompts 2.4.2
   URL: https://github.com/terkelg/prompts
   Authors: Terkel Gjervig
 
-property-information 7.1.0
+property-information 7.2.0
   License: MIT
   URL: https://github.com/wooorm/property-information
   Authors: Titus Wormer
@@ -2636,7 +2533,7 @@ punycode 2.3.1
   URL: https://github.com/mathiasbynens/punycode.js
   Authors: Mathias Bynens
 
-qs 6.15.1
+qs 6.15.3
   License: BSD-3-Clause
   URL: https://github.com/ljharb/qs
 
@@ -2650,7 +2547,7 @@ queue-microtask 1.2.3
   URL: https://github.com/feross/queue-microtask
   Authors: Feross Aboukhadijeh
 
-range-parser 1.2.1
+range-parser 1.3.0
   License: MIT
   URL: https://github.com/jshttp/range-parser
   Authors: TJ Holowaychuk
@@ -2660,15 +2557,15 @@ raw-body 3.0.2
   URL: https://github.com/stream-utils/raw-body
   Authors: Jonathan Ong
 
-react 19.2.6
+react 19.2.7
   License: MIT
   URL: https://github.com/facebook/react
 
-react-dom 19.2.6
+react-dom 19.2.7
   License: MIT
   URL: https://github.com/facebook/react
 
-react-i18next 17.0.7
+react-i18next 17.0.8
   License: MIT
   URL: https://github.com/i18next/react-i18next
   Authors: Jan Mühlemann
@@ -2678,7 +2575,7 @@ react-markdown 10.1.0
   URL: https://github.com/remarkjs/react-markdown
   Authors: Espen Hovlandsdal
 
-react-resizable-panels 4.11.1
+react-resizable-panels 4.12.0
   License: MIT
   URL: https://github.com/bvaughn/react-resizable-panels
   Authors: Brian Vaughn
@@ -2688,7 +2585,7 @@ react-use-measure 2.1.7
   URL: https://github.com/pmndrs/react-use-measure
   Authors: Paul Henschel
 
-recast 0.23.11
+recast 0.23.12
   License: MIT
   URL: https://github.com/benjamn/recast
   Authors: Ben Newman
@@ -2723,11 +2620,6 @@ remark-stringify 11.0.0
   URL: https://github.com/remarkjs/remark.git#main
   Authors: Titus Wormer
 
-require-directory 2.1.1
-  License: MIT
-  URL: https://github.com/troygoode/node-require-directory
-  Authors: Troy Goode
-
 require-from-string 2.0.2
   License: MIT
   URL: https://github.com/floatdrop/require-from-string
@@ -2738,7 +2630,7 @@ requires-port 1.0.0
   URL: https://github.com/unshiftio/requires-port
   Authors: Arnout Kazemier
 
-reselect 5.1.1
+reselect 5.2.0
   License: MIT
   URL: https://github.com/reduxjs/reselect
 
@@ -2751,11 +2643,6 @@ restore-cursor 5.1.0
   License: MIT
   URL: https://github.com/sindresorhus/restore-cursor
   Authors: Sindre Sorhus
-
-rettime 0.11.11
-  License: MIT
-  URL: https://github.com/kettanaito/rettime
-  Authors: Artem Zakharchenko
 
 reusify 1.1.0
   License: MIT
@@ -2791,6 +2678,11 @@ semver 6.3.1
   URL: https://github.com/npm/node-semver
   Authors: GitHub Inc.
 
+semver 7.8.5
+  License: ISC
+  URL: https://github.com/npm/node-semver
+  Authors: GitHub Inc.
+
 send 1.2.1
   License: MIT
   URL: https://github.com/pillarjs/send
@@ -2806,17 +2698,12 @@ set-cookie-parser 2.7.2
   URL: https://github.com/nfriedly/set-cookie-parser
   Authors: Nathan Friedly
 
-set-cookie-parser 3.1.0
-  License: MIT
-  URL: https://github.com/nfriedly/set-cookie-parser
-  Authors: Nathan Friedly
-
 setprototypeof 1.2.0
   License: ISC
   URL: https://github.com/wesleytodd/setprototypeof
   Authors: Wes Todd
 
-shadcn 4.7.0
+shadcn 4.12.0
   License: MIT
   URL: https://github.com/shadcn-ui/ui
   Authors: shadcn
@@ -2831,7 +2718,7 @@ shebang-regex 3.0.0
   URL: https://github.com/sindresorhus/shebang-regex
   Authors: Sindre Sorhus
 
-side-channel 1.1.0
+side-channel 1.1.1
   License: MIT
   URL: https://github.com/ljharb/side-channel
   Authors: Jordan Harband
@@ -2905,16 +2792,6 @@ stdin-discarder 0.2.2
   URL: https://github.com/sindresorhus/stdin-discarder
   Authors: Sindre Sorhus
 
-strict-event-emitter 0.5.1
-  License: MIT
-  URL: https://github.com/open-draft/strict-event-emitter
-  Authors: Artem Zakharchenko
-
-string-width 4.2.3
-  License: MIT
-  URL: https://github.com/sindresorhus/string-width
-  Authors: Sindre Sorhus
-
 string-width 7.2.0
   License: MIT
   URL: https://github.com/sindresorhus/string-width
@@ -2970,10 +2847,10 @@ suspend-react 0.1.3
   URL: https://github.com/pmndrs/suspend-react
   Authors: Paul Henschel
 
-tagged-tag 1.0.0
+systeminformation 5.31.11
   License: MIT
-  URL: https://github.com/sindresorhus/tagged-tag
-  Authors: Sindre Sorhus
+  URL: https://github.com/sebhildebrandt/systeminformation
+  Authors: Sebastian Hildebrandt
 
 tailwind-merge 3.6.0
   License: MIT
@@ -3005,16 +2882,6 @@ tiny-invariant 1.3.3
   URL: https://github.com/alexreardon/tiny-invariant
   Authors: Alex Reardon
 
-tldts 7.0.30
-  License: MIT
-  URL: https://github.com/remusao/tldts
-  Authors: Rémi Berson
-
-tldts-core 7.0.30
-  License: MIT
-  URL: https://github.com/remusao/tldts
-  Authors: Rémi Berson
-
 to-regex-range 5.0.1
   License: MIT
   URL: https://github.com/micromatch/to-regex-range
@@ -3026,11 +2893,6 @@ toidentifier 1.0.1
   Authors: Douglas Christopher Wilson
 
 tough-cookie 4.1.4
-  License: BSD-3-Clause
-  URL: https://github.com/salesforce/tough-cookie
-  Authors: Jeremy Stashewsky
-
-tough-cookie 6.0.1
   License: BSD-3-Clause
   URL: https://github.com/salesforce/tough-cookie
   Authors: Jeremy Stashewsky
@@ -3090,21 +2952,16 @@ tw-animate-css 1.4.0
   URL: https://github.com/Wombosvideo/tw-animate-css
   Authors: Luca Bosin
 
-type-fest 5.6.0
-  License: (MIT OR CC0-1.0)
-  URL: https://github.com/sindresorhus/type-fest
-  Authors: Sindre Sorhus
-
-type-is 2.0.1
+type-is 2.1.0
   License: MIT
   URL: https://github.com/jshttp/type-is
 
-typescript 5.9.3
+typescript 6.0.3
   License: Apache-2.0
   URL: https://github.com/microsoft/TypeScript
   Authors: Microsoft Corp.
 
-undici-types 6.21.0
+undici 7.28.0
   License: MIT
   URL: https://github.com/nodejs/undici
 
@@ -3163,11 +3020,6 @@ unpipe 1.0.0
   URL: https://github.com/stream-utils/unpipe
   Authors: Douglas Christopher Wilson
 
-until-async 3.0.2
-  License: MIT
-  URL: https://github.com/kettanaito/until-async
-  Authors: Artem Zakharchenko
-
 update-browserslist-db 1.2.3
   License: MIT
   URL: https://github.com/browserslist/update-db
@@ -3222,11 +3074,6 @@ void-elements 3.1.0
   URL: https://github.com/pugjs/void-elements
   Authors: hemanth.hm
 
-web-streams-polyfill 3.3.3
-  License: MIT
-  URL: https://github.com/MattiasBuelens/web-streams-polyfill
-  Authors: Mattias Buelens
-
 webgl-constants 1.1.1
   License: MIT*
   Authors: Tim van Scherpenzeel
@@ -3256,17 +3103,12 @@ which 4.0.0
   URL: https://github.com/npm/node-which
   Authors: GitHub Inc.
 
-wrap-ansi 7.0.0
-  License: MIT
-  URL: https://github.com/chalk/wrap-ansi
-  Authors: Sindre Sorhus
-
 wrappy 1.0.2
   License: ISC
   URL: https://github.com/npm/wrappy
   Authors: Isaac Z. Schlueter
 
-ws 7.5.10
+ws 7.5.11
   License: MIT
   URL: https://github.com/websockets/ws
   Authors: Einar Otto Stangvik
@@ -3276,24 +3118,10 @@ wsl-utils 0.3.1
   URL: https://github.com/sindresorhus/wsl-utils
   Authors: Sindre Sorhus
 
-y18n 5.0.8
-  License: ISC
-  URL: https://github.com/yargs/y18n
-  Authors: Ben Coe
-
 yallist 3.1.1
   License: ISC
   URL: https://github.com/isaacs/yallist
   Authors: Isaac Z. Schlueter
-
-yargs 17.7.2
-  License: MIT
-  URL: https://github.com/yargs/yargs
-
-yargs-parser 21.1.1
-  License: ISC
-  URL: https://github.com/yargs/yargs-parser
-  Authors: Ben Coe
 
 yocto-spinner 1.2.0
   License: MIT
@@ -3320,7 +3148,7 @@ zustand 4.5.7
   URL: https://github.com/pmndrs/zustand
   Authors: Paul Henschel
 
-zustand 5.0.13
+zustand 5.0.14
   License: MIT
   URL: https://github.com/pmndrs/zustand
   Authors: Paul Henschel
