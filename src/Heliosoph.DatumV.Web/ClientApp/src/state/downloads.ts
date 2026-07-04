@@ -289,6 +289,9 @@ export async function uninstallModel(modelId: string): Promise<void> {
     // Refresh the active-version map so the drift count drops the row.
     void refreshActiveVersions();
     void refreshVersionsOnDisk();
+    // The model's functions are gone from the server registry now — refresh
+    // the grammar so its `models.xyz` calls stop rendering as functions.
+    refreshSqlGrammar();
   } catch (err) {
     console.error('[downloads] uninstall failed', modelId, err);
     downloadsState.errors[modelId] = describeError(err);
@@ -472,6 +475,16 @@ function readLicenseRequired(err: unknown): string | null {
 
 // ───────────────────────── Hub event wiring ─────────────────────────
 
+// Re-fetch the SQL grammar so a freshly (un)installed model's `models.xyz`
+// functions colourise in the editor without an app restart. The Monarch
+// `@builtinFunctions` table is a boot-time snapshot of the server function
+// registry, and a model's scalar function only exists once its files are on
+// disk. Dynamic import keeps the heavy monaco/lsp module out of this state
+// module's eager graph (and sidesteps any import cycle through state/*).
+function refreshSqlGrammar(): void {
+  void import('@/monaco/lsp').then((m) => m.refreshGrammar());
+}
+
 onModelDownloadStarted((event) => {
   const existing = downloadsState.active[event.modelId];
   downloadsState.active[event.modelId] = {
@@ -521,6 +534,11 @@ onModelDownloadComplete((event) => {
     // until OnModelInstalled lifts it back.
     downloadsState.state[event.modelId] = 'installed';
   }
+  // Terminal for entries with no installSql: the model's functions are now
+  // registered server-side, so re-fetch the grammar to colourise them.
+  // (installSql entries refresh again on OnModelInstalled once installSql
+  // has run; the extra fetch here is a cheap no-op for them.)
+  refreshSqlGrammar();
   // Native toast on Electron. Best-effort — fire and forget; failure
   // (e.g. user disabled notifications) is silent.
   if (window.electronHost?.isElectron) {
@@ -552,6 +570,9 @@ onModelInstalled((event) => {
   // the on-disk map refreshed.
   void refreshActiveVersions();
   void refreshVersionsOnDisk();
+  // installSql has run, so the model's `models.xyz` functions are now in
+  // the server registry — refresh the grammar to colourise them live.
+  refreshSqlGrammar();
   if (window.electronHost?.isElectron) {
     void window.electronHost.notify({
       title: 'Install complete',
