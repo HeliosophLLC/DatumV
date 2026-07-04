@@ -3477,8 +3477,8 @@
     },
     {
       "name": "Qwen2.5-Coder (GGUF)",
-      "summary": "Alibaba's coding-focused LLM family. Three sizes (1.5B / 3B / 7B) at GGUF quantizations for llama.cpp dispatch.",
-      "description": "All variants are llama.cpp-dispatched GGUFs with the same prompt template + chat schema. Pick by available RAM / latency budget.",
+      "summary": "Alibaba's coding-focused LLM family. Two sizes (1.5B / 7B) at GGUF quantizations for llama.cpp dispatch.",
+      "description": "Both variants are llama.cpp-dispatched GGUFs with the same prompt template + chat schema. Pick by available RAM / latency budget. (The mid-size 3B is not shipped: upstream licenses it under the non-commercial Qwen Research License, unlike its Apache-2.0 siblings.)",
       "tasks": [
         "TextGenerator",
         "ChatCompleter"
@@ -3526,42 +3526,6 @@
                 },
                 {
                   "identifier": "qwen25_coder_1_5b"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "id": "qwen2.5-coder-3b-instruct-gguf",
-          "displayName": "3B",
-          "summary": "Middle (3B-parameter) Apache-2.0 code-focused chat LLM from Alibaba. Meaningfully more coherent on multi-section HTML and short scripts than the 1.5B sibling.",
-          "tags": [],
-          "hardware": {
-            "minRamMb": 4096,
-            "minVramMb": 0,
-            "preferred": "cuda"
-          },
-          "approxSizeMb": 1900,
-          "versions": [
-            {
-              "version": "2026-06-01",
-              "sources": [
-                {
-                  "type": "huggingface",
-                  "repo": "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
-                  "revision": "7c137640ef0332dfedb229f2504c58d83ed4307a",
-                  "include": [
-                    "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf"
-                  ]
-                }
-              ],
-              "installSql": "sql/qwen2.5-coder-3b-instruct-gguf/2026-06-01.sql",
-              "models": [
-                {
-                  "identifier": "qwen25_coder_3b_chat"
-                },
-                {
-                  "identifier": "qwen25_coder_3b"
                 }
               ]
             }
