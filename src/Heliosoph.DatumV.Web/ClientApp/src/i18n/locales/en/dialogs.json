@@ -187,6 +187,9 @@
       "llamaTerms": "Use of Llama models is subject to Meta's {licenseLink} and {aupLink}.",
       "licenseLinkText": "Llama Community License",
       "aupLinkText": "Acceptable Use Policy",
+      "stabilityAttribution": "Powered by Stability AI.",
+      "stabilityTerms": "Stable Diffusion image models (SD Turbo, SDXL Turbo) are licensed under the {stabilityLink}.",
+      "stabilityLinkText": "Stability AI Community License",
       "dependencies": "DatumV is built on Llama, LLamaSharp, ONNX Runtime, FFmpeg, Apache Arrow, Electron, and .NET 10.",
       "viewThirdPartyLicenses": "View third-party licenses"
     },
