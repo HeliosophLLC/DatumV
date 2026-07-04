@@ -25,11 +25,11 @@
       },
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.24.4, )",
-        "resolved": "1.24.4",
-        "contentHash": "895huFBVrZkZEGjlsxBSZD3p6D32Cdz6q8DM9UcUps2YKFYdFR8TefaTggFBUTYlvcSyfNTpmOOU/ZkeL69izw==",
+        "requested": "[1.27.0, )",
+        "resolved": "1.27.0",
+        "contentHash": "QdVsm9tkp1M7lmI5F3uLn/Ruc8I4FCMtFVD0ohmWo7JvC7YsZgAu1S3CEEJhZr1YB+lCPWXa7tpBDbQLCZGPTg==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.24.4"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.27.0"
         }
       },
       "Microsoft.NET.Test.Sdk": {
@@ -228,8 +228,8 @@
       },
       "Microsoft.ML.OnnxRuntime.Managed": {
         "type": "Transitive",
-        "resolved": "1.24.4",
-        "contentHash": "e5jsEo0HcCKDMkuRsMSievKoMv10Odv4MGmxbCin8SEm4Pto1qTpwti47xRwMtk9I/zVvfAiFIWquOq/0+22DA==",
+        "resolved": "1.27.0",
+        "contentHash": "9HZjUh9j/gIe4SN/9e4sg/GeTy+JWaPDGzLgz01FQRaj3/SzwjGFc76DMW+wb3ZU7mwfT4lx8GUqwIDgAaHCpw==",
         "dependencies": {
           "System.Numerics.Tensors": "9.0.0"
         }
