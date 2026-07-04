@@ -13,12 +13,16 @@ import { resolveDialog } from '@/state/dialogs';
 //
 // The "Built with" section satisfies Meta's Llama Community License
 // attribution requirement ("Built with Llama" displayed prominently)
-// and the AUP pass-through. The "View third-party licenses" link
-// opens THIRD-PARTY-NOTICES.txt — see electron/main.ts for the path
-// resolution (production: process.resourcesPath; dev: repo root).
+// and the AUP pass-through, plus the Stability AI Community License
+// requirement to prominently display "Powered by Stability AI" (§4.a)
+// for the SD Turbo / SDXL Turbo diffusion models offered in the catalog.
+// The "View third-party licenses" link opens THIRD-PARTY-NOTICES.txt —
+// see electron/main.ts for the path resolution (production:
+// process.resourcesPath; dev: repo root).
 
 const LLAMA_LICENSE_URL = 'https://llama.meta.com/llama3_1/license/';
 const LLAMA_AUP_URL = 'https://llama.meta.com/llama3/use-policy/';
+const STABILITY_LICENSE_URL = 'https://stability.ai/community-license-agreement';
 
 export interface AboutDialogProps {
   requestId: string;
@@ -94,6 +98,32 @@ export function AboutDialog({ requestId }: AboutDialogProps) {
                   <button
                     type="button"
                     onClick={() => openExternalLink(LLAMA_AUP_URL)}
+                    className="text-primary underline-offset-2 hover:underline cursor-pointer"
+                  />
+                ),
+              }}
+            />
+          </p>
+          <p className="text-foreground mb-2 text-xs font-medium">
+            {t('about.builtWith.stabilityAttribution')}
+          </p>
+          {/*
+            Same Trans pattern as the Llama terms above: the single
+            `{stabilityLink}` placeholder binds to a <button> that opens
+            the Stability AI Community License in the user's browser.
+          */}
+          <p className="text-foreground/80 mb-3 text-xs leading-relaxed">
+            <Trans
+              i18nKey="about.builtWith.stabilityTerms"
+              t={t}
+              values={{
+                stabilityLink: t('about.builtWith.stabilityLinkText'),
+              }}
+              components={{
+                stabilityLink: (
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink(STABILITY_LICENSE_URL)}
                     className="text-primary underline-offset-2 hover:underline cursor-pointer"
                   />
                 ),

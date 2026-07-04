@@ -10,9 +10,13 @@
 //      these inside the asar bundle).
 //   3. npm deps from `ClientApp/` (production-only, used by Vite to
 //      build wwwroot/).
-//   4. Special manual section: the Llama Community License text,
-//      sourced from licenses/llama-3.1-community.md. Required by
-//      Meta's terms whenever the app facilitates Llama use.
+//   4. Special manual sections: the Llama Community License text,
+//      sourced from licenses/llama-3.1-community.md (required by
+//      Meta's terms whenever the app facilitates Llama use), and the
+//      Stability AI Community License text, sourced from
+//      licenses/stability-ai-community.md (required by Stability's
+//      §4.a whenever the app makes SD Turbo / SDXL Turbo available,
+//      including the verbatim "Notice" attribution line).
 //
 // Output is plain text, deduplicated, sorted alphabetically within
 // each section. Run via `npm run generate:notices` from
@@ -30,6 +34,7 @@ const CLIENT_APP_DIR = path.resolve(ELECTRON_DIR, '..', 'ClientApp');
 const WEB_CSPROJ = path.resolve(ELECTRON_DIR, '..', 'Heliosoph.DatumV.Web.csproj');
 const OUTPUT = path.join(REPO_ROOT, 'THIRD-PARTY-NOTICES.txt');
 const LLAMA_LICENSE_FILE = path.join(REPO_ROOT, 'licenses', 'llama-3.1-community.md');
+const STABILITY_LICENSE_FILE = path.join(REPO_ROOT, 'licenses', 'stability-ai-community.md');
 
 function log(msg) {
   process.stdout.write(`[notices] ${msg}\n`);
@@ -333,6 +338,10 @@ function main() {
     ? fs.readFileSync(LLAMA_LICENSE_FILE, 'utf8')
     : '(Llama 3.1 Community License not found at licenses/llama-3.1-community.md)';
 
+  const stabilityLicense = fs.existsSync(STABILITY_LICENSE_FILE)
+    ? fs.readFileSync(STABILITY_LICENSE_FILE, 'utf8')
+    : '(Stability AI Community License not found at licenses/stability-ai-community.md)';
+
   const now = new Date().toISOString();
   const out =
     `DatumV THIRD-PARTY NOTICES\n` +
@@ -340,8 +349,8 @@ function main() {
     `\n` +
     `This file aggregates license and copyright notices for every\n` +
     `third-party component that ships with the DatumV installer,\n` +
-    `plus the Llama Community License for the AI model platform\n` +
-    `the app is built with.\n` +
+    `plus the Llama and Stability AI community licenses for the AI\n` +
+    `model platforms the app is built with.\n` +
     `\n` +
     `Models downloaded through the in-app catalog at runtime are\n` +
     `NOT covered here — their licenses are presented at install\n` +
@@ -354,12 +363,22 @@ function main() {
     `below; the AUP is published at\n` +
     `  https://llama.meta.com/llama3/use-policy/\n\n` +
     llamaLicense.trim() + '\n' +
-    header('SECTION 2 — BUNDLED SYSTEM RUNTIME LIBRARIES') +
+    header('SECTION 2 — STABILITY AI') +
+    `Powered by Stability AI.\n\n` +
+    `This Stability AI Model is licensed under the Stability AI Community\n` +
+    `License, Copyright © Stability AI Ltd. All Rights Reserved.\n\n` +
+    `The Stable Diffusion image models offered through the in-app catalog\n` +
+    `(SD Turbo and SDXL Turbo) are governed by the Stability AI Community\n` +
+    `License. The full license text follows below; the Acceptable Use\n` +
+    `Policy it incorporates is published at\n` +
+    `  https://stability.ai/use-policy\n\n` +
+    stabilityLicense.trim() + '\n' +
+    header('SECTION 3 — BUNDLED SYSTEM RUNTIME LIBRARIES') +
     formatBundledRuntimesSection() +
-    header('SECTION 3 — .NET / NUGET DEPENDENCIES') +
+    header('SECTION 4 — .NET / NUGET DEPENDENCIES') +
     `The DatumV engine (.NET 10) bundles the following NuGet packages.\n` +
     `License text for each license family (MIT, Apache-2.0, BSD-*,\n` +
-    `LGPL-*) follows in Section 5 below.\n\n` +
+    `LGPL-*) follows in Section 6 below.\n\n` +
     `DatumV ships in two installer variants — \`cuda\` (NVIDIA stack) and\n` +
     `\`standard\` (DirectML/Vulkan/CPU cross-vendor stack). Most packages are\n` +
     `shared between both variants and are listed unannotated. The handful\n` +
@@ -367,12 +386,12 @@ function main() {
     `only" line at the bottom of their entry.\n\n` +
     formatSection(dotnetEntries) +
     formatCopyleftNote(dotnetEntries.filter((e) => isCopyleftLicense(e.license))) +
-    header('SECTION 4 — NODE / NPM DEPENDENCIES') +
+    header('SECTION 5 — NODE / NPM DEPENDENCIES') +
     subheader('Electron shell (electron/)') +
     formatSection(electronEntries) +
     subheader('Renderer SPA (ClientApp/)') +
     formatSection(clientAppEntries) +
-    header('SECTION 5 — STANDARD LICENSE TEXTS') +
+    header('SECTION 6 — STANDARD LICENSE TEXTS') +
     `Per-package licenses above identify the license family. The full\n` +
     `text of each is reproduced from the canonical source:\n\n` +
     `  MIT:        https://opensource.org/licenses/MIT\n` +
