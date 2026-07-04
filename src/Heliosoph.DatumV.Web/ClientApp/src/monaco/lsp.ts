@@ -28,16 +28,38 @@ export async function initLsp(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
+  await refreshGrammar();
+
+  registerCompletionProvider();
+  registerHoverProvider();
+  registerHoverCommands();
+  registerSignatureHelpProvider();
+  registerDiagnosticsPump();
+}
+
+/**
+ * Fetches the server's Monarch grammar + theme bundle and (re)applies it
+ * to the `sql` language, retokenising every open SQL model in place.
+ *
+ * The `@builtinFunctions` case table baked into the grammar is what marks
+ * a name as `predefined.function` (rendered pink by the paired theme). It
+ * is a snapshot of the live function registry, so it changes whenever a
+ * model is installed/uninstalled — a `models.xyz` scalar function only
+ * exists once its model is on disk. `initLsp` runs this once at boot;
+ * download/install completion handlers call it again so newly-registered
+ * model functions colourise without an app restart.
+ */
+export async function refreshGrammar(): Promise<void> {
   // Grammar bootstrap. The endpoint returns a bundle of
   //   { grammar, themes: { light, dark } }
   // shaped so the grammar feeds straight into `setMonarchTokensProvider`
   // and each theme body into `defineTheme`. The generated client types
   // it as a FileResponse (NSwag can't statically see the JSON shape
   // from an IActionResult return); plain fetch is simpler than
-  // re-typing it. Best-effort: on failure, the SQL language stays
-  // registered (see setup.ts) with no tokenizer and the placeholder
-  // themes pre-registered there keep the editor's theme name valid, so
-  // text renders in the stock vs/vs-dark palette until the next reload.
+  // re-typing it. Best-effort: on failure, the SQL language keeps its
+  // previously-registered tokenizer (or, on the first boot call, stays
+  // untokenised with the placeholder themes from setup.ts), so text
+  // renders in the last-good palette until the next reload.
   try {
     const res = await fetch(GRAMMAR_URL, {
       headers: { Accept: 'application/json' },
@@ -82,12 +104,6 @@ export async function initLsp(): Promise<void> {
   } catch (err) {
     console.warn('[lsp] grammar fetch errored, falling back to built-in tokenizer', err);
   }
-
-  registerCompletionProvider();
-  registerHoverProvider();
-  registerHoverCommands();
-  registerSignatureHelpProvider();
-  registerDiagnosticsPump();
 }
 
 // Commands invoked by `command:` links inside trusted hover markdown
