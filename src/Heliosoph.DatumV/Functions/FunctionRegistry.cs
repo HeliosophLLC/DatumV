@@ -929,6 +929,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Image.ImageToTensorChwBgrFunction>();
         registry.RegisterScalar<Scalar.Image.DepthMapToImageFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCropFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageConcatFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCutoutFunction>();
         registry.RegisterScalar<Scalar.Image.ImageMultiplyFunction>();
         registry.RegisterScalar<Scalar.Image.ImageCompositeOverFunction>();
