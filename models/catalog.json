@@ -3046,6 +3046,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/absolute-reality-hyper/index.md",
+      "heroImageFile": "cards/absolute-reality-hyper/hero.jpg",
       "variants": [
         {
           "id": "absolute-reality-hyper",
@@ -3105,6 +3106,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/dreamshaper-hyper/index.md",
+      "heroImageFile": "cards/dreamshaper-hyper/hero.jpg",
       "variants": [
         {
           "id": "dreamshaper-hyper",
@@ -3164,6 +3166,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/epicrealism-hyper/index.md",
+      "heroImageFile": "cards/epicrealism-hyper/hero.jpg",
       "variants": [
         {
           "id": "epicrealism-hyper",
@@ -3223,6 +3226,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/mo-di-hyper/index.md",
+      "heroImageFile": "cards/mo-di-hyper/hero.jpg",
       "variants": [
         {
           "id": "mo-di-hyper",
@@ -3283,6 +3287,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/realistic-vision-hyper/index.md",
+      "heroImageFile": "cards/realistic-vision-hyper/hero.jpg",
       "variants": [
         {
           "id": "realistic-vision-hyper",
@@ -3340,6 +3345,7 @@
         "Stability AI — SD Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion 2.1."
       ],
       "cardFile": "cards/sd-turbo/index.md",
+      "heroImageFile": "cards/sd-turbo/hero.jpg",
       "variants": [
         {
           "id": "sd-turbo",
@@ -3397,6 +3403,7 @@
         "Stability AI — SDXL Turbo (Sauer, Lorenz, Blattmann, Rombach, 2023). ADD distillation of Stable Diffusion XL."
       ],
       "cardFile": "cards/sdxl-turbo/index.md",
+      "heroImageFile": "cards/sdxl-turbo/hero.jpg",
       "variants": [
         {
           "id": "sdxl-turbo",
