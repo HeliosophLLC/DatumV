@@ -1,0 +1,55 @@
+---
+layout: default
+section: models
+title: Models
+permalink: /models/
+---
+{% assign data = site.data.generated.models %}
+<div class="browse" data-search-filter="models" data-index="{{ '/assets/search/models.json' | relative_url }}">
+  <aside class="browse-facets" aria-label="Filters">
+    {% for group in data.taskGroups %}
+    <div class="facet-group">
+      <h3>{{ group.label }}</h3>
+      <div class="facet-chips">
+        {% for task in group.tasks %}
+          <button type="button" class="facet-chip facet-task fam-{{ group.family }}" aria-pressed="false"
+                  data-facet-group="tasks" data-facet-value="{{ task }}">{{ task }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </aside>
+
+  <div class="browse-main">
+    <form class="list-search" role="search" autocomplete="off" onsubmit="return false">
+      <input type="search" placeholder="Search models…" aria-label="Search models" data-search-input>
+    </form>
+    <p class="count-note" data-count>{{ data.entries | size }} results</p>
+
+    <div class="card-grid" data-grid>
+      {% for e in data.entries %}
+        <a class="entry-card" href="{{ e.url | relative_url }}"
+           data-slug="{{ e.slug }}"
+           data-tasks="{{ e.tasks | join: ' ' }}"
+           data-tags="{{ e.tags | join: ' ' }}">
+          {% if e.hero %}
+            <img class="card-hero" src="{{ e.hero | relative_url }}" alt="{{ e.name }}" loading="lazy">
+          {% else %}
+            {% assign fam_task = e.tasks | first %}
+            <div class="card-hero-placeholder hero-placeholder fam-{{ site.data.generated.task_families[fam_task] }}"><span class="hero-name">{{ e.name }}</span></div>
+          {% endif %}
+          <div class="card-body">
+            <div class="card-title">{{ e.name }}</div>
+            <p class="card-summary">{{ e.summary }}</p>
+            <div class="chip-row">
+              {% for task in e.tasks %}<span class="chip chip-task fam-{{ site.data.generated.task_families[task] }}">{{ task }}</span>{% endfor %}
+            </div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script src="{{ '/assets/js/vendor/minisearch.min.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/search.js' | relative_url }}" defer></script>

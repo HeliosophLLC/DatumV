@@ -1,0 +1,24 @@
+{%- comment -%}
+Recursive folder tree for the docs sidebar. Params:
+  include.nodes    — array of tree nodes (folder | file)
+  include.current  — the active page's doc_path (e.g. "sql/select")
+Folders render as native <details>, opened when they contain the active page.
+{%- endcomment -%}
+<ul class="doc-tree">
+{%- for node in include.nodes -%}
+  {%- if node.type == "folder" -%}
+    {%- assign is_open = false -%}
+    {%- if include.current and include.current contains node.path -%}{%- assign is_open = true -%}{%- endif -%}
+    <li class="tree-folder">
+      <details {% if is_open %}open{% endif %}>
+        <summary>{{ node.name | replace: '-', ' ' | replace: '_', ' ' | capitalize }}</summary>
+        {% include doc-tree.html nodes=node.children current=include.current %}
+      </details>
+    </li>
+  {%- else -%}
+    <li class="tree-file{% if node.path == include.current %} active{% endif %}">
+      <a href="{{ node.url | relative_url }}">{{ node.title }}</a>
+    </li>
+  {%- endif -%}
+{%- endfor -%}
+</ul>

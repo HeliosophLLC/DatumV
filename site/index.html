@@ -1,0 +1,264 @@
+---
+permalink: /
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DatumV — ML inference, written in SQL</title>
+<meta name="description" content="DatumV runs vision, audio, and text models on your data — locally and batched. Describe the result in SQL; the engine handles inference, batching, calibration, and I/O.">
+<link rel="icon" href="{{ '/assets/img/emblem.png' | relative_url }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { -webkit-font-smoothing: antialiased; }
+  a { text-decoration: none; color: inherit; }
+  a.nav-link:hover { color: #F2F0EA !important; }
+  a.pill:hover { filter: brightness(1.06); }
+  @keyframes dv-spin { to { transform: rotate(360deg); } }
+  /* Collapse the two fixed multi-column grids on narrow viewports. */
+  @media (max-width: 860px) {
+    .dv-hero-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
+    .dv-cards { grid-template-columns: repeat(2, 1fr) !important; }
+    .dv-two { grid-template-columns: 1fr !important; }
+    .dv-nav-links { gap: 16px !important; flex-wrap: wrap; justify-content: flex-end; }
+  }
+  @media (max-width: 520px) {
+    .dv-cards { grid-template-columns: 1fr !important; }
+  }
+</style>
+</head>
+<body style="background:#0C0E12;">
+
+    <!-- nav -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:22px 48px;border-bottom:1px solid rgba(255,255,255,.07);">
+      <a href="{{ '/' | relative_url }}" style="display:flex;align-items:center;gap:11px;">
+        <img src="{{ '/assets/img/emblem.png' | relative_url }}" style="width:30px;height:30px;object-fit:contain;" alt="DatumV">
+        <span style="font:600 20px/1 'Space Grotesk',sans-serif;letter-spacing:-.01em;color:#F2F0EA;">Datum<span style="color:#E0A93B;">V</span></span>
+      </a>
+      <div class="dv-nav-links" style="display:flex;align-items:center;gap:28px;font:500 14px/1 'Space Grotesk',sans-serif;color:#8b909b;">
+        <a class="nav-link" href="{{ '/docs/' | relative_url }}">Docs</a>
+        <a class="nav-link" href="{{ '/models/' | relative_url }}">Models</a>
+        <a class="nav-link" href="{{ '/datasets/' | relative_url }}">Datasets</a>
+        <a class="nav-link" href="{{ '/docs/examples/index.html' | relative_url }}">Examples</a>
+        <a class="nav-link" href="https://github.com/HeliosophLLC/DatumV" rel="noopener" style="display:flex;align-items:center;gap:6px;">GitHub</a>
+        <a class="pill" href="{{ '/docs/getting-started.html' | relative_url }}" style="display:inline-block;background:#E0A93B;color:#1A1408;padding:9px 17px;border-radius:7px;font-weight:600;">Get started</a>
+      </div>
+    </div>
+
+    <!-- hero split -->
+    <div style="position:relative;overflow:hidden;padding:80px 48px 70px;">
+      <div style="position:absolute;inset:0;background:radial-gradient(900px 480px at 78% 8%,rgba(224,169,59,.13),transparent 60%);pointer-events:none;"></div>
+      <img src="{{ '/assets/img/emblem.png' | relative_url }}" style="position:absolute;right:-120px;top:40px;width:360px;opacity:.10;pointer-events:none;animation:dv-spin 120s linear infinite;" alt="">
+      <div class="dv-hero-grid" style="position:relative;display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;">
+        <div>
+          <div style="display:inline-flex;align-items:center;gap:9px;border:1px solid rgba(224,169,59,.35);border-radius:99px;padding:6px 14px;font:600 11.5px/1 'Space Grotesk',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:#E0A93B;margin-bottom:26px;"><span style="width:6px;height:6px;border-radius:99px;background:#5B9A6B;"></span>Local · Open source · No Python</div>
+          <h1 style="font:600 64px/1.02 'Space Grotesk',sans-serif;color:#F4F2EC;letter-spacing:-1.5px;margin:0 0 22px;">ML inference,<br>written in <span style="background:linear-gradient(120deg,#F2C75A,#C8851B);-webkit-background-clip:text;background-clip:text;color:transparent;">SQL</span>.</h1>
+          <p style="font:400 18px/1.6 'Hanken Grotesk',sans-serif;color:#a9aeb8;margin:0 0 32px;max-width:480px;">DatumV runs vision, audio, and text models on your data — locally and batched. Describe the result in SQL; the engine handles inference, batching, calibration, and I/O.</p>
+          <div style="display:flex;gap:13px;margin-bottom:30px;">
+            <a class="pill" href="{{ '/docs/getting-started.html' | relative_url }}" style="display:inline-block;background:#E0A93B;color:#1A1408;padding:14px 26px;border-radius:8px;font:600 16px/1 'Space Grotesk',sans-serif;box-shadow:0 12px 30px -10px rgba(224,169,59,.6);">Get started</a>
+            <a class="pill" href="https://github.com/HeliosophLLC/DatumV" rel="noopener" style="display:inline-block;border:1px solid rgba(255,255,255,.16);color:#d6d9df;padding:14px 24px;border-radius:8px;font:600 16px/1 'Space Grotesk',sans-serif;">★ Star on GitHub</a>
+          </div>
+          <div style="display:flex;gap:22px;font:500 13px/1 'JetBrains Mono',monospace;color:#6f7682;">
+            <span>MIT licensed</span><span style="color:#3f4652;">·</span><span>Zero config</span><span style="color:#3f4652;">·</span><span>Auto-download models</span>
+          </div>
+        </div>
+        <div style="background:#15181F;border-radius:13px;overflow:hidden;box-shadow:0 40px 80px -30px rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.08);">
+          <div style="display:flex;align-items:center;padding:0 14px 0 0;border-bottom:1px solid rgba(255,255,255,.07);user-select: none;-ms-user-select: none;">
+            <span style="display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-right:1px solid rgba(255,255,255,.07);background:rgba(224,169,59,.06);">
+              <span style="width:8px;height:8px;border-radius:2px;background:#E0A93B;"></span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#cfd3da;">people.sql</span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#5a606b;margin-left:4px;">✕</span>
+            </span>
+          </div>
+          <div style="margin:0;padding:24px 26px;font:13.5px/1.9 'JetBrains Mono',monospace;color:#C7CBD1;overflow-x:auto;"><div><span style="color:#E0A93B;">SELECT</span></div><div style="padding-left:2.4ch;"><span style="color:#9AA4B2;">LET</span> classes = <span style="color:#E0A93B;">models</span>.yolox_s(a.file),</div><div style="padding-left:2.4ch;"><span style="color:#E0A93B;">image_crop</span>(file, c.value.bbox)</div><div><span style="color:#E0A93B;">FROM</span> datasets.coco_val2017 a</div><div><span style="color:#E0A93B;">CROSS JOIN</span> unnest(classes) c</div><div><span style="color:#E0A93B;">WHERE</span> c.value.label = <span style="color:#7FB892;">'person'</span></div><div><span style="color:#E0A93B;">LIMIT</span> <span style="color:#C9A2E0;">100</span></div></div>
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;border-top:1px solid rgba(255,255,255,.07);font:500 12px/1 'JetBrains Mono',monospace;color:#7b8190;user-select: none;-ms-user-select: none;">
+            <span style="color:#7FB892;">✓ 100 rows</span><span>27.6s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- stat strip -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:0;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07);">
+      <div style="flex:1;text-align:center;padding:26px 16px;border-right:1px solid rgba(255,255,255,.07);"><div style="font:600 30px/1 'Space Grotesk',sans-serif;color:#E0A93B;">45+</div><div style="font:500 12.5px/1 'Hanken Grotesk',sans-serif;color:#7b8190;letter-spacing:.1em;text-transform:uppercase;margin-top:8px;">Models</div></div>
+      <div style="flex:1;text-align:center;padding:26px 16px;border-right:1px solid rgba(255,255,255,.07);"><div style="font:600 30px/1 'Space Grotesk',sans-serif;color:#E0A93B;">3</div><div style="font:500 12.5px/1 'Hanken Grotesk',sans-serif;color:#7b8190;letter-spacing:.1em;text-transform:uppercase;margin-top:8px;">Modalities</div></div>
+      <div style="flex:1;text-align:center;padding:26px 16px;border-right:1px solid rgba(255,255,255,.07);"><div style="font:600 30px/1 'Space Grotesk',sans-serif;color:#E0A93B;">0</div><div style="font:500 12.5px/1 'Hanken Grotesk',sans-serif;color:#7b8190;letter-spacing:.1em;text-transform:uppercase;margin-top:8px;">Lines of Python</div></div>
+      <div style="flex:1;text-align:center;padding:26px 16px;"><div style="font:600 30px/1 'Space Grotesk',sans-serif;color:#E0A93B;">100%</div><div style="font:500 12.5px/1 'Hanken Grotesk',sans-serif;color:#7b8190;letter-spacing:.1em;text-transform:uppercase;margin-top:8px;">On-device</div></div>
+    </div>
+
+    <!-- screenshot -->
+    <div style="padding:78px 48px 30px;text-align:center;">
+      <h2 style="font:600 40px/1.1 'Space Grotesk',sans-serif;color:#F4F2EC;letter-spacing:-.8px;margin:0 0 14px;">Watch a model run over a dataset.</h2>
+      <p style="font:400 17px/1.6 'Hanken Grotesk',sans-serif;color:#a9aeb8;max-width:580px;margin:0 auto 44px;">YOLOX across COCO val2017, every <em style="color:#E0A93B;font-style:normal;">person</em> detection cropped and returned — in one statement, on your laptop.</p>
+      <div style="border-radius:12px;overflow:hidden;box-shadow:0 50px 100px -30px rgba(0,0,0,.9),0 0 0 1px rgba(224,169,59,.15);max-width:1080px;margin:0 auto;">
+        <img src="{{ '/assets/img/search_person.jpg' | relative_url }}" style="width:100%;display:block;" alt="DatumV results grid">
+      </div>
+    </div>
+
+    <!-- generative showcase -->
+    <div style="padding:44px 48px 24px;max-width:1120px;margin:0 auto;">
+      <div style="text-align:center;margin-bottom:38px;">
+        <div style="font:600 12px/1 'Space Grotesk',sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#E0A93B;margin-bottom:12px;">Not just analysis — generation</div>
+        <h2 style="font:600 34px/1.12 'Space Grotesk',sans-serif;color:#F4F2EC;letter-spacing:-.6px;margin:0 0 12px;">Paint with prompts. Ask an LLM. Same <span style="background:linear-gradient(120deg,#F2C75A,#C8851B);-webkit-background-clip:text;background-clip:text;color:transparent;">SELECT</span>.</h2>
+        <p style="font:400 16px/1.6 'Hanken Grotesk',sans-serif;color:#a9aeb8;max-width:600px;margin:0 auto;">Diffusion models and local LLMs are just functions here. Generate a column of images, or run a language model over every row — no serving stack, no Python, nothing leaves the box.</p>
+      </div>
+      <div class="dv-two" style="display:grid;grid-template-columns:1fr 1fr;gap:22px;">
+
+        <!-- text-to-image card -->
+        <div>
+          <div style="background:#15181F;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);box-shadow:0 30px 60px -30px rgba(0,0,0,.8);">
+            <div style="display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.07);user-select:none;">
+              <span style="width:8px;height:8px;border-radius:2px;background:#E0A93B;"></span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#cfd3da;">dream.sql</span>
+            </div>
+            <div style="padding:22px 24px;font:13.5px/1.9 'JetBrains Mono',monospace;color:#C7CBD1;overflow-x:auto;">
+              <div><span style="color:#E0A93B;">SELECT</span> p.text <span style="color:#9AA4B2;">AS</span> prompt,</div>
+              <div style="padding-left:2.4ch;"><span style="color:#E0A93B;">models</span>.sdxl_turbo(p.text) <span style="color:#9AA4B2;">AS</span> image</div>
+              <div><span style="color:#E0A93B;">FROM</span> prompts p;</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-top:1px solid rgba(255,255,255,.07);font:500 12px/1 'JetBrains Mono',monospace;color:#7b8190;user-select:none;">
+              <span style="color:#7FB892;">✓ 8 images</span><span>3.1s</span>
+            </div>
+          </div>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:14px 2px 0;">A whole table of images from a whole table of prompts. Swap in <span style="color:#d6d9df;">dreamshaper_hyper</span> or <span style="color:#d6d9df;">realistic_vision_hyper</span> for a different look.</p>
+        </div>
+
+        <!-- llm card -->
+        <div>
+          <div style="background:#15181F;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);box-shadow:0 30px 60px -30px rgba(0,0,0,.8);">
+            <div style="display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.07);user-select:none;">
+              <span style="width:8px;height:8px;border-radius:2px;background:#E0A93B;"></span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#cfd3da;">ask.sql</span>
+            </div>
+            <div style="padding:22px 24px;font:13.5px/1.9 'JetBrains Mono',monospace;color:#C7CBD1;overflow-x:auto;">
+              <div><span style="color:#E0A93B;">SELECT</span> a.title,</div>
+              <div style="padding-left:2.4ch;"><span style="color:#E0A93B;">models</span>.llama31_8b(</div>
+              <div style="padding-left:4.8ch;"><span style="color:#7FB892;">'One-line summary: '</span> || a.body) <span style="color:#9AA4B2;">AS</span> tldr</div>
+              <div><span style="color:#E0A93B;">FROM</span> articles a</div>
+              <div><span style="color:#E0A93B;">LIMIT</span> <span style="color:#C9A2E0;">50</span>;</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-top:1px solid rgba(255,255,255,.07);font:500 12px/1 'JetBrains Mono',monospace;color:#7b8190;user-select:none;">
+              <span style="color:#7FB892;">✓ 50 rows</span><span>12.4s</span>
+            </div>
+          </div>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:14px 2px 0;">Call any local LLM by name — <span style="color:#d6d9df;">llama31_8b</span>, <span style="color:#d6d9df;">mistral_7b</span>, <span style="color:#d6d9df;">qwen25_coder_7b</span> — and swap models without touching the query.</p>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- catalog redirect -->
+    <div style="padding:20px 48px 8px;max-width:1120px;margin:0 auto;text-align:center;">
+      <a class="pill" href="{{ '/models/' | relative_url }}" style="display:inline-flex;align-items:center;gap:10px;background:#15181F;border:1px solid rgba(224,169,59,.35);color:#F2F0EA;padding:16px 26px;border-radius:10px;font:600 15.5px/1 'Space Grotesk',sans-serif;">
+        Browse the full model catalog
+        <span style="color:#E0A93B;">→</span>
+      </a>
+      <p style="font:400 13.5px/1.5 'Hanken Grotesk',sans-serif;color:#7b8190;margin:14px 0 0;">45+ models across vision, audio, and text — searchable, with example SQL for each.</p>
+    </div>
+
+    <!-- capabilities cards -->
+    <div style="padding:64px 48px 30px;">
+      <div class="dv-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1120px;margin:0 auto;">
+        <div style="background:#15181F;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:26px 24px;">
+          <h3 style="font:600 17px/1.2 'Space Grotesk',sans-serif;color:#F2F0EA;margin:0 0 9px;">Built-in catalog</h3>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:0;">Dozens of models, one reference away. Downloaded on first use.</p>
+        </div>
+        <div style="background:#15181F;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:26px 24px;">
+          <h3 style="font:600 17px/1.2 'Space Grotesk',sans-serif;color:#F2F0EA;margin:0 0 9px;">Batched &amp; calibrated</h3>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:0;">The planner batches inference and calibrates outputs for you.</p>
+        </div>
+        <div style="background:#15181F;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:26px 24px;">
+          <h3 style="font:600 17px/1.2 'Space Grotesk',sans-serif;color:#F2F0EA;margin:0 0 9px;">Handles the I/O</h3>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:0;">Decoding, resizing, unnesting — done. You just write SQL.</p>
+        </div>
+        <div style="background:#15181F;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:26px 24px;">
+          <h3 style="font:600 17px/1.2 'Space Grotesk',sans-serif;color:#F2F0EA;margin:0 0 9px;">Runs locally</h3>
+          <p style="font:400 14px/1.55 'Hanken Grotesk',sans-serif;color:#9298a3;margin:0;">On your machine, on your data. Nothing leaves the box.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- catalog rows -->
+    <div style="padding:46px 48px 72px;max-width:1120px;margin:0 auto;">
+      <div style="font:600 12px/1 'Space Grotesk',sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#E0A93B;margin-bottom:24px;text-align:center;">A model for every column</div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:center;gap:18px;">
+          <span style="width:78px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;">vision</span>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;">
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">yolox_s</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">mobilesam</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">florence</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">trocr</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">depth_anything</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <span style="width:78px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;">generate</span>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;">
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">sdxl_turbo</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">dreamshaper_hyper</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">realistic_vision_hyper</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">sd_turbo</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <span style="width:78px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;">audio</span>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;">
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">whisper</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">silero_vad</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">bark</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">kokoro</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <span style="width:78px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;">text</span>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;">
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">bert</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">all_minilm</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">jina</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">bge_reranker</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <span style="width:78px;flex:none;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;">llms</span>
+          <div style="display:flex;flex-wrap:wrap;gap:9px;">
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">llama31_8b</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">mistral_7b</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">qwen25_coder_7b</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">granite31_1b</span>
+            <span style="border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:8px 14px;font:500 13.5px/1 'JetBrains Mono',monospace;color:#d6d9df;">tinyllama_1_1b</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- footer -->
+    <div style="padding:80px 48px;border-top:1px solid rgba(255,255,255,.07);text-align:center;background:radial-gradient(700px 360px at 50% 0%,rgba(224,169,59,.1),transparent 60%);">
+      <h2 style="font:600 44px/1.08 'Space Grotesk',sans-serif;color:#F4F2EC;letter-spacing:-1px;margin:0 0 14px;">Download it. Run your first query.</h2>
+      <p style="font:400 17px/1.6 'Hanken Grotesk',sans-serif;color:#a9aeb8;max-width:520px;margin:0 auto 30px;">Examples and built-in datasets ship in the box. Models download automatically the first time you call them.</p>
+      <div style="display:flex;gap:13px;justify-content:center;flex-wrap:wrap;">
+        <a class="pill" href="https://github.com/HeliosophLLC/DatumV/releases" rel="noopener" style="display:inline-flex;align-items:center;gap:9px;background:#E0A93B;color:#1A1408;padding:14px 26px;border-radius:8px;font:600 15.5px/1 'Space Grotesk',sans-serif;">Download for Windows/Linux</a>
+        <a class="pill" href="{{ '/docs/' | relative_url }}" style="display:inline-flex;align-items:center;border:1px solid rgba(255,255,255,.16);color:#d6d9df;padding:14px 26px;border-radius:8px;font:600 15.5px/1 'Space Grotesk',sans-serif;">Documentation</a>
+      </div>
+      <div style="margin-top:18px;font:500 13px/1 'JetBrains Mono',monospace;color:#7b8190;letter-spacing:.02em;">Linux &amp; Windows available now · <span style="color:#9298a3;">macOS coming soon</span></div>
+    </div>
+
+    <!-- legal -->
+    <div style="padding:24px 48px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+      <a href="{{ '/' | relative_url }}" style="display:flex;align-items:center;gap:9px;">
+        <img src="{{ '/assets/img/emblem.png' | relative_url }}" style="width:20px;height:20px;object-fit:contain;" alt="">
+        <span style="font:600 14px/1 'Space Grotesk',sans-serif;color:#cfd3da;">Datum<span style="color:#E0A93B;">V</span></span>
+      </a>
+      <div style="font:400 12.5px/1.7 'Hanken Grotesk',sans-serif;color:#6f7682;text-align:right;max-width:640px;">
+        &copy; 2026 Heliosoph LLC. All rights reserved. &middot; DatumV&trade; and the DatumV logo are trademarks of Heliosoph LLC.<br>
+        The DatumV software is released under the MIT License.
+      </div>
+    </div>
+
+</body>
+</html>

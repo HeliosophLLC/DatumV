@@ -1,0 +1,274 @@
+/* DatumV static site. Dark theme echoing the in-app editor surface. */
+
+:root {
+  /* Warm palette shared with the landing page (index.html). */
+  --bg:        #0C0E12;
+  --bg-2:      #15181F;
+  --bg-3:      #1C2029;
+  --border:    rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --fg:        #E9E7E0;
+  --fg-muted:  #9298A3;
+  --primary:   #E0A93B;               /* gold — the DatumV accent */
+  --primary-15: rgba(224, 169, 59, 0.15);
+  --primary-hover: #F2C75A;
+  --accent:    #E0A93B;
+  --success:   #7FB892;
+  --radius:    7px;
+  --maxw:      52rem;
+  --sidebar-w: 19rem;
+  --header-h:  3.25rem;
+  --display: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 { font-family: var(--display); letter-spacing: -0.01em; }
+
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- header ---------- */
+.site-header {
+  position: sticky; top: 0; z-index: 20;
+  height: var(--header-h);
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: 0 1.25rem;
+  background: rgba(14, 17, 22, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-family: var(--display); font-weight: 600; font-size: 1.15rem; letter-spacing: -0.02em; }
+.brand:hover { text-decoration: none; }
+.brand-mark { color: #F2F0EA; }
+.brand-accent { color: var(--primary); }
+.site-nav { display: flex; gap: 1.1rem; margin-left: auto; font-family: var(--display); }
+.site-nav a { color: var(--fg-muted); font-size: 0.9rem; font-weight: 500; }
+.site-nav a:hover { color: var(--fg); text-decoration: none; }
+.site-nav a.active { color: var(--primary); }
+
+.site-main { min-height: calc(100vh - var(--header-h)); }
+
+/* ---------- docs shell ---------- */
+.docs-shell { display: flex; align-items: flex-start; }
+.docs-sidebar {
+  position: sticky; top: var(--header-h);
+  width: var(--sidebar-w); flex: none;
+  height: calc(100vh - var(--header-h));
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 1rem 0.75rem;
+  background: var(--bg-2);
+}
+.doc-article { flex: 1 1 auto; min-width: 0; padding: 1.5rem 2rem 4rem; }
+.doc-article > h1:first-of-type { margin-top: 0.25rem; }
+.crumbs { color: var(--fg-muted); font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; }
+
+/* sidebar search */
+.sidebar-search input,
+.list-search input {
+  width: 100%; padding: 0.45rem 0.6rem;
+  background: var(--bg-3); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 0.85rem; outline: none;
+}
+.sidebar-search input:focus,
+.list-search input:focus { border-color: var(--primary); }
+.sidebar-search { margin-bottom: 0.75rem; }
+
+/* tree */
+.tree-nav { font-size: 0.85rem; }
+.doc-tree { list-style: none; margin: 0; padding: 0; }
+.doc-tree .doc-tree { margin-left: 0.7rem; border-left: 1px solid var(--border); padding-left: 0.4rem; }
+.tree-file a { display: block; padding: 0.15rem 0.4rem; border-radius: 4px; color: var(--fg-muted); }
+.tree-file a:hover { background: var(--bg-3); color: var(--fg); text-decoration: none; }
+.tree-file.active a { background: var(--primary-15); color: var(--primary); }
+.tree-folder > details > summary {
+  cursor: pointer; padding: 0.15rem 0.4rem; border-radius: 4px;
+  color: var(--fg); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; list-style: none;
+}
+.tree-folder > details > summary::-webkit-details-marker { display: none; }
+.tree-folder > details > summary::before { content: "▸ "; color: var(--fg-muted); }
+.tree-folder > details[open] > summary::before { content: "▾ "; }
+.tree-folder > details > summary:hover { background: var(--bg-3); }
+
+/* search results (shared) */
+.search-results { list-style: none; margin: 0 0 0.75rem; padding: 0; }
+.search-results .hit { display: block; padding: 0.5rem 0.5rem; border-radius: var(--radius); }
+.search-results .hit:hover { background: var(--bg-3); text-decoration: none; }
+.search-results .hit .hit-title { color: var(--fg); font-weight: 600; font-size: 0.85rem; }
+.search-results .hit .hit-path { color: var(--fg-muted); font-family: var(--mono); font-size: 0.7rem; }
+.search-results .hit .hit-snippet { color: var(--fg-muted); font-size: 0.78rem; display: block; margin-top: 0.15rem; }
+.search-results mark { background: rgba(245, 166, 35, 0.28); color: var(--fg); border-radius: 2px; padding: 0 1px; }
+.search-empty { color: var(--fg-muted); font-size: 0.85rem; padding: 0.5rem; }
+
+/* ---------- listing (models / datasets / docs browse) ---------- */
+.browse { display: flex; align-items: flex-start; }
+.browse-facets {
+  position: sticky; top: var(--header-h);
+  width: 15rem; flex: none; height: calc(100vh - var(--header-h));
+  overflow-y: auto; border-right: 1px solid var(--border);
+  padding: 1rem 0.9rem; background: var(--bg-2);
+}
+.browse-main { flex: 1 1 auto; min-width: 0; padding: 1.25rem 1.5rem 4rem; }
+.list-search { margin-bottom: 1rem; max-width: 30rem; }
+.facet-group { margin-bottom: 1.25rem; }
+.facet-group h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); margin: 0 0 0.5rem; }
+.facet-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.facet-chip {
+  cursor: pointer; border: 1px solid var(--border); background: var(--bg-3);
+  color: var(--fg-muted); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.75rem;
+}
+.facet-chip:hover { color: var(--fg); }
+.facet-chip[aria-pressed="true"] { background: var(--primary-15); border-color: var(--primary); color: var(--primary); }
+
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; }
+.entry-card {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  transition: border-color 0.12s, transform 0.12s;
+}
+.entry-card:hover { border-color: var(--primary); text-decoration: none; transform: translateY(-2px); }
+.entry-card .card-hero { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--bg-3); }
+/* Fallback for entries with no hero image: the entry name over a gradient
+   tinted by the entry's task family (via `--fam`, set by a `fam-<Family>`
+   class). Entries with no known family fall back to the gold accent. */
+.hero-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0.75rem 1rem; text-align: center;
+  background:
+    radial-gradient(130% 130% at 15% 0%, color-mix(in srgb, var(--fam, var(--primary)) 42%, transparent), transparent 58%),
+    linear-gradient(135deg, color-mix(in srgb, var(--fam, var(--primary)) 26%, var(--bg-2)), var(--bg));
+}
+.hero-placeholder .hero-name {
+  font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
+  color: #F4F2EC; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.entry-card .card-hero-placeholder { width: 100%; aspect-ratio: 16 / 9; border-bottom: 1px solid var(--border); }
+.entry-card .card-hero-placeholder .hero-name { font-size: 1rem; line-height: 1.25; }
+.entry-card .card-body { padding: 0.8rem 0.9rem; }
+.entry-card .card-title { font-family: var(--display); color: #F2F0EA; font-weight: 600; font-size: 0.95rem; }
+.entry-card .card-summary { color: var(--fg-muted); font-size: 0.82rem; margin: 0.3rem 0 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.count-note { color: var(--fg-muted); font-size: 0.8rem; margin: 0 0 0.75rem; }
+
+/* chips */
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.6rem 0; }
+.chip { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
+.chip-tag { color: var(--fg-muted); }
+.chip-modality { color: var(--accent); border-color: rgba(224, 169, 59, 0.4); }
+.entry-card .chip-row { margin: 0.5rem 0 0; }
+
+/* Task-family accents — mirror the app's TaskTypeRegistry family colours
+   (ComputerVision=blue, NaturalLanguageProcessing=red, Audio=green,
+   Multimodal=orange, Tabular=violet). The `--fam` custom property is set by
+   a `fam-<Family>` class; task chips/buttons pick it up for their side
+   accent so the site reads the same as the in-app model catalog. */
+.fam-ComputerVision            { --fam: #3b82f6; }
+.fam-NaturalLanguageProcessing { --fam: #ef4444; }
+.fam-Audio                     { --fam: #10b981; }
+.fam-Multimodal                { --fam: #f97316; }
+.fam-Tabular                   { --fam: #8b5cf6; }
+
+/* Small task chip on cards / detail headers: squared with a coloured left rule. */
+.chip-task {
+  color: var(--fg);
+  border-radius: 4px;
+  border-color: var(--border);
+  border-left: 4px solid var(--fam, var(--fg-muted));
+  padding-left: 0.45rem;
+}
+
+/* Task facet button: thin border + 5px family-coloured left rule, tinted on
+   hover and when selected (aria-pressed). Overrides the generic gold facet
+   styling via higher specificity. */
+.facet-chip.facet-task {
+  border-radius: 5px;
+  border-left-width: 5px;
+  border-left-color: var(--fam);
+}
+.facet-chip.facet-task:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fam) 12%, transparent);
+}
+.facet-chip.facet-task[aria-pressed="true"] {
+  color: #fff;
+  border-color: var(--border-strong);
+  border-left-color: var(--fam);
+  background: color-mix(in srgb, var(--fam) 22%, transparent);
+}
+
+/* ---------- detail pages ---------- */
+/* Full-width wrapper; the hero spans it edge-to-edge while the reading
+   content is re-constrained by .detail-body below. */
+.detail-page { padding-bottom: 4rem; }
+.detail-body { max-width: var(--maxw); margin: 0 auto; padding: 1.5rem 1.5rem 0; }
+.back-link { font-size: 0.85rem; margin: 0 0 1rem; }
+.detail-hero,
+.detail-hero-placeholder {
+  width: 100%; margin: 0; border: 0; border-radius: 0;
+  border-bottom: 1px solid var(--border);
+}
+.detail-hero { max-height: 20rem; object-fit: cover; display: block; }
+.detail-hero-placeholder { height: 12rem; }
+.detail-hero-placeholder .hero-name { font-size: 1.9rem; }
+.detail-header h1 { margin: 0 0 0.4rem; }
+.detail-summary { color: var(--fg-muted); font-size: 1.02rem; margin: 0 0 0.5rem; }
+.meta-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 1rem; margin: 0.75rem 0 0; font-size: 0.85rem; }
+.meta-grid dt { color: var(--fg-muted); }
+.meta-grid dd { margin: 0; }
+.variants { margin: 1.75rem 0; }
+.variant-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.variant-table th, .variant-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.variant-table th { color: var(--fg-muted); font-weight: 600; }
+.variant-table code { font-size: 0.8rem; }
+.attributions { margin-top: 2rem; color: var(--fg-muted); font-size: 0.85rem; }
+.attributions ul { padding-left: 1.1rem; }
+
+/* ---------- markdown body ---------- */
+.markdown-body { max-width: var(--maxw); }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { line-height: 1.25; margin-top: 1.8rem; }
+.markdown-body h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+.markdown-body img { max-width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+.markdown-body code { font-family: var(--mono); font-size: 0.86em; background: var(--bg-3); padding: 0.1rem 0.35rem; border-radius: 4px; }
+.markdown-body pre { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.9rem 1rem; overflow-x: auto; }
+.markdown-body pre code { background: none; padding: 0; font-size: 0.85rem; }
+.markdown-body table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
+.markdown-body th { background: var(--bg-3); }
+.markdown-body blockquote { border-left: 3px solid var(--primary); margin: 1rem 0; padding: 0.25rem 1rem; color: var(--fg-muted); }
+
+/* ---------- landing ---------- */
+.hero { max-width: 60rem; margin: 0 auto; padding: 4rem 1.5rem 2rem; text-align: center; }
+.hero h1 { font-size: 2.6rem; letter-spacing: -0.03em; margin: 0 0 0.75rem; }
+.hero p.lede { font-size: 1.2rem; color: var(--fg-muted); max-width: 40rem; margin: 0 auto 1.75rem; }
+.hero .cta { display: inline-flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
+.btn { display: inline-block; padding: 0.6rem 1.2rem; border-radius: var(--radius); font-weight: 600; font-size: 0.95rem; border: 1px solid var(--border); }
+.btn-primary { background: var(--primary); color: #1A1408; border-color: var(--primary); }
+.btn-primary:hover { text-decoration: none; filter: brightness(1.08); }
+.btn-ghost { color: var(--fg); }
+.btn-ghost:hover { text-decoration: none; border-color: var(--primary); }
+.landing-cards { max-width: 60rem; margin: 2rem auto; padding: 0 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+.landing-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+.landing-card:hover { border-color: var(--primary); text-decoration: none; }
+.landing-card h3 { margin: 0 0 0.4rem; color: var(--fg); }
+.landing-card p { margin: 0; color: var(--fg-muted); font-size: 0.9rem; }
+.markdown-body pre.highlight, .highlight pre { background: var(--bg-2); }
+
+@media (max-width: 820px) {
+  .docs-sidebar, .browse-facets { position: static; width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  .docs-shell, .browse { flex-direction: column; }
+}

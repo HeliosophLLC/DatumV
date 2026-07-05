@@ -1,0 +1,11 @@
+<header class="site-header">
+  <a class="brand" href="{{ '/' | relative_url }}">
+    <span class="brand-mark">Datum<span class="brand-accent">V</span></span>
+  </a>
+  <nav class="site-nav">
+    <a href="{{ '/docs/' | relative_url }}" class="{% if page.section == 'docs' %}active{% endif %}">Docs</a>
+    <a href="{{ '/models/' | relative_url }}" class="{% if page.section == 'models' %}active{% endif %}">Models</a>
+    <a href="{{ '/datasets/' | relative_url }}" class="{% if page.section == 'datasets' %}active{% endif %}">Datasets</a>
+    <a href="https://github.com/HeliosophLLC/DatumV" class="external" rel="noopener">GitHub</a>
+  </nav>
+</header>
