@@ -18,3 +18,8 @@ tests/Heliosoph.DatumV.Tests/TestResults/**
 src/Heliosoph.DatumV.Web/ClientApp/node_modules/
 src/Heliosoph.DatumV.Web/ClientApp/node_modules.win/
 src/Heliosoph.DatumV.Web/wwwroot/
+
+# Jekyll static-site build artifacts (site source lives in /site).
+/_site/
+/.jekyll-cache/
+/.jekyll-metadata

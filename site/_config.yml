@@ -1,0 +1,46 @@
+# DatumV static site (Jekyll). Rendered by GitHub Actions and deployed to
+# GitHub Pages. All browsable content — the /docs corpus, the model catalog,
+# and the dataset catalog — is staged into this source tree by
+# `scripts/build-site.rb` before `jekyll build` runs. See site/README.md.
+
+title: DatumV
+description: >-
+  A SQL engine that runs ML models on your data, locally. Browse the docs,
+  the model zoo, and the dataset catalog.
+lang: en
+
+# Served at the custom domain root (see CNAME), so baseurl is empty. Internal
+# links between staged pages are kept relative and asset/include references go
+# through the `relative_url` filter, so this stays correct whether the site is
+# at a domain root ("") or a project sub-path ("/DatumV").
+url: https://datumv.heliosoph.com
+baseurl: ""
+
+# Staged detail pages carry an explicit `permalink` so their URLs mirror the
+# source tree (e.g. docs/sql/select.md -> /docs/sql/select.html). Everything
+# else falls back to this.
+permalink: pretty
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  hard_wrap: false
+
+# Generated content and Jekyll build artifacts never ship as source.
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .jekyll-cache
+  - node_modules
+
+# Sensible defaults per staged section.
+defaults:
+  - scope: { path: "docs", type: "pages" }
+    values: { layout: doc, section: docs }
+  - scope: { path: "models", type: "pages" }
+    values: { layout: model, section: models }
+  - scope: { path: "datasets", type: "pages" }
+    values: { layout: dataset, section: datasets }

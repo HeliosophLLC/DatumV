@@ -441,6 +441,83 @@
 				"clear": true
 			}
 		},
+		{
+			// Stages the /docs, /models, /datasets corpora into site/ (pages,
+			// search indexes, _data, copied images). Hidden helper; "Site:
+			// Serve" runs it first via dependsOn. Safe to run standalone after
+			// editing source docs or a catalog.
+			"label": "Site: Stage content",
+			"type": "shell",
+			"command": "ruby",
+			"args": ["scripts/build-site.rb"],
+			"options": { "cwd": "${workspaceFolder}" },
+			"problemMatcher": [],
+			"presentation": { "reveal": "silent", "panel": "shared" },
+			"hide": true
+		},
+		{
+			// Start the static site locally at http://localhost:4000/DatumV/.
+			// Stages content first, then runs the globally-installed Jekyll.
+			// JEKYLL_NO_BUNDLER_REQUIRE bypasses Bundler so no `bundle install`
+			// (and no Windows-only wdm C-extension build) is needed for local
+			// preview; CI builds through Bundler on Linux instead.
+			//
+			// Run via: Ctrl+Shift+P -> "Tasks: Run Task" -> "Site: Serve".
+			// Stop via: "Site: Stop" (or the trash icon on this terminal).
+			"label": "Site: Serve",
+			"type": "shell",
+			"command": "jekyll",
+			"args": ["serve", "--host", "127.0.0.1", "--port", "4000", "--livereload"],
+			"dependsOn": "Site: Stage content",
+			"options": {
+				"cwd": "${workspaceFolder}/site",
+				"env": { "JEKYLL_NO_BUNDLER_REQUIRE": "true" },
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			// Well-formed compile-error regex (never matched by Jekyll output)
+			// paired with a background matcher that flips to "ready" once
+			// Jekyll prints its serving line.
+			"problemMatcher": {
+				"owner": "jekyll-serve",
+				"pattern": {
+					"regexp": "^([^\\s].*)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s+(.*)$",
+					"file": 1,
+					"line": 2,
+					"column": 3,
+					"severity": 4,
+					"message": 5
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".",
+					"endsPattern": "Server running"
+				}
+			}
+		},
+		{
+			// Stop the local Jekyll server by killing whatever is listening on
+			// port 4000. Idempotent — reports if nothing is running.
+			"label": "Site: Stop",
+			"type": "shell",
+			"command": "$c = Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue; if ($c) { $c.OwningProcess | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; 'Stopped site server on port 4000.' } else { 'Site server not running.' }",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-Command"]
+				}
+			},
+			"problemMatcher": [],
+			"presentation": { "reveal": "always", "panel": "shared", "clear": true }
+		}
 	],
 	"inputs": [
 		{

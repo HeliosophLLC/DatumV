@@ -1,0 +1,65 @@
+name: Deploy site to GitHub Pages
+
+# Builds the static Jekyll site in /site and publishes it to GitHub Pages.
+# The site sources its content (the /docs corpus, the model catalog, and the
+# dataset catalog) from the repo root, so the whole repo is checked out and
+# scripts/build-site.rb stages that content into site/ before jekyll builds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "models/catalog.json"
+      - "models/cards/**"
+      - "datasets/catalog.json"
+      - "datasets/cards/**"
+      - "scripts/build-site.rb"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer pushes cancel in-progress runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: site
+
+      - name: Stage content into the site tree
+        run: ruby scripts/build-site.rb
+
+      - name: Build with Jekyll
+        working-directory: site
+        env:
+          JEKYLL_ENV: production
+        run: bundle exec jekyll build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,59 @@
+---
+layout: default
+---
+<article class="detail-page">
+  {% if page.hero %}
+    <img class="detail-hero" src="{{ page.hero | relative_url }}" alt="{{ page.title }}">
+  {% else %}
+    {% assign fam_task = page.tasks | first %}
+    <div class="detail-hero-placeholder hero-placeholder fam-{{ site.data.generated.task_families[fam_task] }}"><span class="hero-name">{{ page.title }}</span></div>
+  {% endif %}
+
+  <div class="detail-body">
+  <p class="back-link"><a href="{{ '/datasets/' | relative_url }}">← All datasets</a></p>
+
+  <header class="detail-header">
+    <h1>{{ page.title }}</h1>
+    {% if page.summary %}<p class="detail-summary">{{ page.summary }}</p>{% endif %}
+
+    <div class="chip-row">
+      {% for m in page.modalities %}<span class="chip chip-modality">{{ m }}</span>{% endfor %}
+      {% for task in page.tasks %}<span class="chip chip-task fam-{{ site.data.generated.task_families[task] }}">{{ task }}</span>{% endfor %}
+    </div>
+
+    <dl class="meta-grid">
+      {% if page.license_ids and page.license_ids.size > 0 %}
+        <dt>License</dt><dd>{{ page.license_ids | join: ", " }}</dd>
+      {% endif %}
+      {% if page.variants and page.variants.size > 0 %}
+        <dt>Variants</dt><dd>{{ page.variants.size }}</dd>
+      {% endif %}
+    </dl>
+  </header>
+
+  {% if page.variants and page.variants.size > 0 %}
+    <section class="variants">
+      <h2>Variants</h2>
+      <table class="variant-table">
+        <thead><tr><th>Install handle</th><th>Name</th></tr></thead>
+        <tbody>
+          {% for v in page.variants %}
+            <tr><td><code>{{ v.id }}</code></td><td>{{ v.displayName }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
+  <section class="card-body markdown-body">
+    {{ content }}
+  </section>
+
+  {% if page.attributions and page.attributions.size > 0 %}
+    <section class="attributions">
+      <h2>Attributions</h2>
+      <ul>{% for a in page.attributions %}<li>{{ a }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+  </div>
+</article>

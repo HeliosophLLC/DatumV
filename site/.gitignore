@@ -1,0 +1,23 @@
+# Jekyll build output and caches.
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/
+Gemfile.lock
+vendor/
+
+# Content staged into the source tree by scripts/build-site.rb. These are
+# regenerated on every build (locally and in CI) and must never be committed.
+# The hand-authored listing pages that share these directories are re-included
+# below.
+/docs/**
+!/docs/
+!/docs/index.html
+/models/**
+!/models/
+!/models/index.html
+/datasets/**
+!/datasets/
+!/datasets/index.html
+/_data/generated/
+/assets/search/

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="{{ site.lang }}">
+<head>
+  {% include head.html %}
+</head>
+<body class="section-{{ page.section | default: 'home' }}">
+  {% include header.html %}
+  <main class="site-main">
+    {{ content }}
+  </main>
+</body>
+</html>

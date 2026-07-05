@@ -1,0 +1,33 @@
+---
+layout: default
+section: docs
+title: Documentation
+permalink: /docs/
+---
+<div class="docs-shell">
+  <aside class="docs-sidebar" aria-label="Documentation"
+         data-search-sidebar="docs" data-index="{{ '/assets/search/docs.json' | relative_url }}">
+    <form class="sidebar-search" role="search" autocomplete="off" onsubmit="return false">
+      <input type="search" name="q" placeholder="Search docs…" aria-label="Search docs" data-search-input>
+    </form>
+    <div class="search-results" data-search-results hidden></div>
+    <nav class="tree-nav" data-tree>
+      {% include doc-tree.html nodes=site.data.generated.docs_tree current="" %}
+    </nav>
+  </aside>
+
+  <article class="doc-article markdown-body">
+    <h1>Documentation</h1>
+    <p>Everything about DatumV — a SQL engine that runs ML models on your data,
+      locally. Browse the tree on the left, or search across the whole corpus.</p>
+    <ul>
+      <li><a href="{{ '/docs/getting-started.html' | relative_url }}">Getting Started</a> — the welcome tour.</li>
+      <li><a href="{{ '/docs/sql/select.html' | relative_url }}">SQL Reference</a> — clauses, joins, functions.</li>
+      <li><a href="{{ '/docs/examples/index.html' | relative_url }}">Examples</a> — end-to-end walkthroughs.</li>
+      <li><a href="{{ '/docs/technical/architecture.html' | relative_url }}">Technical</a> — architecture and internals.</li>
+    </ul>
+  </article>
+</div>
+
+<script src="{{ '/assets/js/vendor/minisearch.min.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/search.js' | relative_url }}" defer></script>
