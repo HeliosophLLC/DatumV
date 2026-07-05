@@ -2392,7 +2392,8 @@
           ]
         }
       ],
-      "cardFile": "cards/realesrgan-x4v3/index.md"
+      "cardFile": "cards/realesrgan-x4v3/index.md",
+      "heroImageFile": "cards/realesrgan-x4v3/hero.jpg"
     },
     {
       "name": "SwinIR Real-World SR (4×)",
@@ -2449,7 +2450,8 @@
           ]
         }
       ],
-      "cardFile": "cards/swinir-realsr-x4/index.md"
+      "cardFile": "cards/swinir-realsr-x4/index.md",
+      "heroImageFile": "cards/swinir-realsr-x4/hero.jpg"
     },
     {
       "name": "SwinIR Color Denoising (σ=25)",
@@ -2505,7 +2507,8 @@
           ]
         }
       ],
-      "cardFile": "cards/swinir-denoising-color-25/index.md"
+      "cardFile": "cards/swinir-denoising-color-25/index.md",
+      "heroImageFile": "cards/swinir-denoising-color-25/hero.jpg"
     },
     {
       "name": "SCUNet (Image Denoising)",
@@ -2798,7 +2801,8 @@
           ]
         }
       ],
-      "cardFile": "cards/scunet/index.md"
+      "cardFile": "cards/scunet/index.md",
+      "heroImageFile": "cards/scunet/hero.jpg"
     },
     {
       "name": "MobileNetV2 (ImageNet Classification)",
@@ -3947,6 +3951,7 @@
         "onnx-community (ONNX export)"
       ],
       "cardFile": "cards/whisper/index.md",
+      "heroImageFile": "cards/whisper/hero.jpg",
       "variants": [
         {
           "id": "whisper-tiny",
