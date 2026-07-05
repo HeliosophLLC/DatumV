@@ -344,6 +344,24 @@ SELECT resize(mask, 512, 512, 'nearest') AS mask FROM segmentation
 
 Crop rectangular region. Three call shapes: explicit pixel coordinates, a single rect struct (field names case-insensitive), or an array of rect structs (returns one cropped Image per rect in input order). All numeric kinds are accepted for the coordinate values; floats truncate to integer pixel offsets.
 
+### image_concat
+
+`image_concat(a, b)` → Image
+`image_concat(a, b, direction)` → Image
+
+Join two images into one. The two-argument form places them side-by-side (horizontal); pass a third `direction` argument to choose the axis (case-insensitive): `'horizontal'` / `'h'` places `b` to the right of `a`, `'vertical'` / `'v'` places `b` below `a`.
+
+The images need not share dimensions. A horizontal join is `(w_a + w_b) × max(h_a, h_b)`; a vertical join is `max(w_a, w_b) × (h_a + h_b)`. Each image is centred along the perpendicular (cross) axis and any leftover margin is filled with transparent pixels — a shorter image beside a taller one gains transparent bands rather than being stretched, so the output is always RGBA. Returns `NULL` when either image is `NULL`.
+
+```sql
+-- Side-by-side before/after strip for a super-resolution model
+SELECT image_concat(img, models.realesrgan_x4v3(img)) AS comparison FROM photos
+
+-- Stack the original above its depth map
+SELECT image_concat(img, apply_colormap(models.midas_small(img)), 'vertical') AS panel
+FROM photos
+```
+
 ### image_draw_bounding_boxes
 
 `image_draw_bounding_boxes(img, boxes Array<Struct> [, stroke_color Color [, fill_color Color]])` → Image
