@@ -91,7 +91,7 @@ export function ModelDetail({
 
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col">
-      <ModelHeroBand entryName={entryName} />
+      <ModelHeroBand key={entryName} entryName={entryName} />
       <div className="flex flex-col gap-4 px-6 py-5">
         <header className="flex flex-col gap-2">
           <div className="flex items-start justify-between gap-3">
