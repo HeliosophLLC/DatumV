@@ -389,6 +389,7 @@
       "attributions": [
         "Microsoft Research"
       ],
+      "heroImageFile": "cards/florence2/hero.jpg",
       "cardFile": "cards/florence2/index.md",
       "variants": [
         {
@@ -502,6 +503,7 @@
         "apache-2.0"
       ],
       "cardFile": "cards/vit-gpt2/index.md",
+      "heroImageFile": "cards/vit-gpt2/hero.jpg",
       "attributions": [
         "nlpconnect — Ankur Singh et al."
       ],
@@ -801,7 +803,8 @@
           ]
         }
       ],
-      "cardFile": "cards/yolox/index.md"
+      "cardFile": "cards/yolox/index.md",
+      "heroImageFile": "cards/yolox/hero.jpg"
     },
     {
       "name": "RT-DETR-R18",
@@ -823,6 +826,7 @@
         "onnx-community (ONNX export)"
       ],
       "cardFile": "cards/rtdetr-r18/index.md",
+      "heroImageFile": "cards/rtdetr-r18/hero.jpg",
       "variants": [
         {
           "id": "rtdetr-r18",
@@ -1000,7 +1004,8 @@
           ]
         }
       ],
-      "cardFile": "cards/mobile-sam/index.md"
+      "cardFile": "cards/mobile-sam/index.md",
+      "heroImageFile": "cards/mobile-sam/hero.jpg"
     },
     {
       "name": "U²-Net (Salient Object Segmentation)",
@@ -1023,6 +1028,7 @@
         "Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan, Osmar R. Zaiane, Martin Jagersand — U²-Net (University of Alberta)"
       ],
       "cardFile": "cards/u2net/index.md",
+      "heroImageFile": "cards/u2net/hero.jpg",
       "variants": [
         {
           "id": "u2netp",
@@ -1111,6 +1117,7 @@
         "Intel ISL — Ranftl, Bochkovskiy, Koltun (DPT / MiDaS)"
       ],
       "cardFile": "cards/dpt-large/index.md",
+      "heroImageFile": "cards/dpt-large/hero.jpg",
       "variants": [
         {
           "id": "dpt-large",
@@ -1166,6 +1173,7 @@
         "Intel ISL — Ranftl, Lasinger, Hafner, Schindler, Koltun (MiDaS)"
       ],
       "cardFile": "cards/midas-small/index.md",
+      "heroImageFile": "cards/midas-small/hero.jpg",
       "variants": [
         {
           "id": "midas-small",
@@ -1224,6 +1232,7 @@
         "onnx-community (ONNX export)"
       ],
       "cardFile": "cards/depth-anything-v2/index.md",
+      "heroImageFile": "cards/depth-anything-v2/hero.jpg",
       "variants": [
         {
           "id": "depth-anything-v2-small",
@@ -1370,7 +1379,8 @@
           ]
         }
       ],
-      "cardFile": "cards/da3metric-large/index.md"
+      "cardFile": "cards/da3metric-large/index.md",
+      "heroImageFile": "cards/da3metric-large/hero.jpg"
     },
     {
       "name": "Depth Anything 3 Base (Depth + Pose)",
@@ -1548,7 +1558,8 @@
           ]
         }
       ],
-      "cardFile": "cards/da3-base/index.md"
+      "cardFile": "cards/da3-base/index.md",
+      "heroImageFile": "cards/da3-base/hero.jpg"
     },
     {
       "name": "Metric3D V2 (Metric Depth + Normals)",
@@ -1837,7 +1848,8 @@
           ]
         }
       ],
-      "cardFile": "cards/metric3d-v2/index.md"
+      "cardFile": "cards/metric3d-v2/index.md",
+      "heroImageFile": "cards/metric3d-v2/hero.jpg"
     },
     {
       "name": "ZoeDepth (NYU+KITTI, Metric Depth)",
@@ -1939,7 +1951,8 @@
           ]
         }
       ],
-      "cardFile": "cards/zoedepth-nyu-kitti/index.md"
+      "cardFile": "cards/zoedepth-nyu-kitti/index.md",
+      "heroImageFile": "cards/zoedepth-nyu-kitti/hero.jpg"
     },
     {
       "name": "TripoSR (Single-Image to 3D Mesh)",
@@ -2022,6 +2035,7 @@
         "Joshua Lochner / Xenova (ONNX export)"
       ],
       "cardFile": "cards/glpn-nyu/index.md",
+      "heroImageFile": "cards/glpn-nyu/hero.jpg",
       "variants": [
         {
           "id": "glpn-nyu",
@@ -2155,7 +2169,8 @@
           ]
         }
       ],
-      "cardFile": "cards/mediapipe-face/index.md"
+      "cardFile": "cards/mediapipe-face/index.md",
+      "heroImageFile": "cards/mediapipe-face/hero.jpg"
     },
     {
       "name": "PaddleOCR PP-OCRv4 Detection",
@@ -2211,7 +2226,8 @@
           ]
         }
       ],
-      "cardFile": "cards/paddleocr-v4-det/index.md"
+      "cardFile": "cards/paddleocr-v4-det/index.md",
+      "heroImageFile": "cards/paddleocr-v4-det/hero.jpg"
     },
     {
       "name": "TrOCR Base Printed",
@@ -2800,6 +2816,7 @@
       "licenseIds": [
         "apache-2.0"
       ],
+      "heroImageFile": "cards/mobilenetv2/hero.jpg",
       "attributions": [
         "Google AI Research — MobileNetV2 (Sandler, Howard, Zhu, Zhmoginov, Chen)",
         "ONNX Model Zoo (ONNX export)"
