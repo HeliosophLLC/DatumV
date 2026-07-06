@@ -79,7 +79,7 @@ jobs:
               "key": "linux-standard",
               "script": "dist:linux:standard",
               "artifact": "linux-standard-appimage",
-              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/standard-linux.yml"
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/standard-linux.yml"
             },
             {
               "os": "windows-latest",
@@ -95,7 +95,7 @@ jobs:
               "key": "linux-cuda",
               "script": "dist:linux:cuda",
               "artifact": "linux-cuda-appimage",
-              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/*.blockmap\nsrc/Heliosoph.DatumV.Web/electron/out/cuda-linux.yml"
+              "attach_glob": "src/Heliosoph.DatumV.Web/electron/out/*.AppImage\nsrc/Heliosoph.DatumV.Web/electron/out/cuda-linux.yml"
             }
           ]
           JSON
