@@ -519,7 +519,7 @@ FROM datasets.coco_val2017
 LIMIT 32`;
 
 const COMPARE_IMAGES_EXAMPLE_SQL = `-- This will take a little while your first time as the models calibrate, expect 10-13GB of VRAM
-DECLARE prompt String = 'A grand stone castle, blue skys, natural light, realistic'
+DECLARE prompt String = 'A grand stone castle, blue skies, natural light, realistic'
 
 SELECT
     g.value
