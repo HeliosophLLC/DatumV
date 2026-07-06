@@ -129,6 +129,18 @@ DatumV v0.1 installers are **unsigned**. We plan to add code signing in a future
 - **Queryable.** Filter, join, group, and rank on model outputs without writing glue code.
 - **Inspectable.** Every intermediate is a row in a table you can `SELECT` from.
 
+## What DatumV is (and isn't)
+ 
+DatumV is a **single-node, batch-oriented inference engine**. It's built to run models over collections of data with high throughput, using SQL as the interface. That shape implies some deliberate limits — worth stating plainly so you can decide whether it fits before you install:
+ 
+- **It's not distributed.** Execution is single-machine. There's no cluster, no sharding, no multi-node coordination. If your workload doesn't fit on one box, DatumV isn't the tool yet.
+- **It's not a serving layer.** DatumV optimizes for throughput over batches, not sub-millisecond single-row latency. It's for "run this model over these 200k images," not "serve one prediction per web request."
+- **It's not a Python framework.** No `DataLoader` to wire, no CUDA-version juggling in your environment. The trade-off is that you work in DatumV's SQL dialect and catalog rather than arbitrary Python.
+- **It's not general-purpose OLTP.** No transactions across concurrent writers, no multi-user auth. It's a local analytical/inference engine, not a system of record.
+- **The format is pre-1.0.** The `.datum` v6 storage format and the SQL surface may change before `v1.0`. Databases written today aren't guaranteed to open on future versions yet.
+- **GPU support is NVIDIA-first.** CUDA acceleration on NVIDIA; CPU fallback elsewhere. Non-NVIDIA on Linux is CPU-only, and older NVIDIA architectures (Pascal, Maxwell) have cuDNN gaps. See the [GPU support matrix](#gpu-acceleration).
+- **Models aren't bundled.** The catalog downloads from upstream publishers and Heliosoph mirrors on first use; availability and licensing track those sources.
+
 ## The catalog
 
 DatumV ships with a built-in catalog spanning object detection, segmentation, classification, depth estimation, OCR, captioning, embeddings, text-to-speech, image generation, and LLMs — including MobileSAM, the YOLOX family, Stable Diffusion variants, all-MiniLM-L6-v2, Florence-2, PaddleOCR, MiDaS, DPT, U²-Net, and Bark.
