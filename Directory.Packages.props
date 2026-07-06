@@ -28,7 +28,7 @@
     <PackageVersion Include="NSwag.AspNetCore" Version="14.7.1" />
     <PackageVersion Include="NSwag.MSBuild" Version="14.7.1" />
     <PackageVersion Include="OpenCvSharp4" Version="4.13.0.20260302" />
-    <PackageVersion Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
+    <PackageVersion Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
     <PackageVersion Include="OpenCvSharp4.official.runtime.linux-x64.slim" Version="4.13.0.20260302" />
     <PackageVersion Include="Parquet.Net" Version="5.5.0" />
     <PackageVersion Include="PureHDF" Version="2.1.1" />
