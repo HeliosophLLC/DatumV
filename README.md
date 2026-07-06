@@ -43,7 +43,7 @@ See [Examples — Depth model comparison](docs/examples/depth-comparison.md) for
 ![Compare text-to-image models](docs/figures/compare_images.jpg)
 
 ```sql
-DECLARE prompt String = 'A grand stone castle, blue skys, natural light, realistic'
+DECLARE prompt String = 'A grand stone castle, blue skies, natural light, realistic'
 
 SELECT
     g.value
@@ -149,7 +149,7 @@ You can add your own ONNX models with `CREATE MODEL`. See [docs/models.md](docs/
 ## Building from source
 
 ```bash
-git clone https://github.com/Heliosoph/DatumV.git
+git clone https://github.com/HeliosophLLC/DatumV.git
 cd DatumV
 dotnet build
 dotnet test
