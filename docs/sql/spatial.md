@@ -387,7 +387,7 @@ critical for video-length inputs.
   in the output cloud; you can render them as points or cubes (see the
   viewer's mode toggle) and see the structure directly.
 - Permissively licensed end-to-end — all primitives are yours, the
-  depth model (Depth-Anything-v2/v3 family) is Apache 2.0.
+  depth model (Depth-Anything-v2/DA3METRIC-LARGE) is Apache 2.0.
 
 **Known limit**: vote counts don't account for *visibility* — far
 surfaces seen by fewer frames get fewer votes intrinsically. With one
