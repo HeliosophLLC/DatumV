@@ -3329,6 +3329,65 @@
       ]
     },
     {
+      "name": "Realistic Vision V6 (CFG, full quality)",
+      "summary": "Photoreal portraits at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+      "description": "Non-distilled Realistic Vision V6 with classifier-free guidance and negative-prompt support. Higher fidelity and prompt adherence than the 4-step Hyper variant, at a higher per-image cost.",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sd-1.5",
+        "cfg",
+        "photorealistic",
+        "portraits"
+      ],
+      "licenseIds": [
+        "creativeml-openrail-m"
+      ],
+      "attributions": [
+        "SG161222 — Realistic Vision V6 (SD 1.5 fine-tune)",
+        "Stability AI — sd-vae-ft-mse (paired VAE)",
+        "CompVis / Stability AI — Stable Diffusion 1.5 base"
+      ],
+      "cardFile": "cards/realistic-vision-cfg/index.md",
+      "variants": [
+        {
+          "id": "realistic-vision-cfg",
+          "displayName": "Realistic Vision V6 (CFG, full quality)",
+          "summary": "Photoreal portraits at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+          "tags": [],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 4096,
+            "preferred": "cuda"
+          },
+          "approxSizeMb": 4096,
+          "versions": [
+            {
+              "version": "2026-06-30",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/realistic-vision-cfg-onnx",
+                  "revision": "f2a4365906c1e0ba73b5b6ed0dbe78ccbd73d4e5",
+                  "include": [
+                    "**/*"
+                  ]
+                }
+              ],
+              "installSql": "sql/realistic-vision-cfg/2026-06-30.sql",
+              "models": [
+                {
+                  "identifier": "realistic_vision_cfg"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "SD Turbo (1-4 step)",
       "summary": "Stability AI's distilled SD 2.1 — 512x512 text-to-image in just 1-4 steps. The reference small-and-fast diffusion model: faster than the Hyper variants, broadly capable, no fine-tune bias.",
       "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of Stable Diffusion 2.1. Single CLIP-H text encoder (1024-dim), 512×512 latent decode, designed for 1-step inference with 4 steps as the quality sweet spot. Pick over the SD 1.5 Hyper variants when you want the canonical Stability baseline rather than a fine-tune; pick over SDXL Turbo when 512×512 is enough and you want roughly half the VRAM footprint. Subject to the Stability AI Community License — free for individuals and commercial use below $1M annual revenue.",
