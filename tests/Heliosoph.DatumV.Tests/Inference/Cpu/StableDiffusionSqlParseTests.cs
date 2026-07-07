@@ -64,6 +64,7 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     [InlineData("epicrealism-hyper")]
     [InlineData("mo-di-hyper")]
     [InlineData("realistic-vision-hyper")]
+    [InlineData("realistic-vision-cfg")]
     [InlineData("sd-turbo")]
     [InlineData("sdxl-turbo")]
     public void TextToImage_DeclaresOptionalSeedParameter(string modelId)
@@ -77,6 +78,30 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
         Assert.False(seed.IsNotNull);
         // NULL default — omitting the arg falls back to the shared RNG.
         Assert.NotNull(seed.Default);
+    }
+
+    /// <summary>
+    /// The CFG quality variant adds two parameters the Hyper bodies lack:
+    /// a <c>negative_prompt String</c> (defaulted, for the unconditional pass)
+    /// and a <c>guidance Float32</c> scale. This parses the real catalog SQL
+    /// (no bundle, no Plan) so it runs everywhere and guards the CFG surface.
+    /// </summary>
+    [Fact]
+    public void RealisticVisionCfg_DeclaresGuidanceAndNegativePrompt()
+    {
+        Statement stmt = SqlParser.ParseStatement(LoadCanonicalSql("realistic-vision-cfg"));
+        CreateModelStatement model = Assert.IsType<CreateModelStatement>(stmt);
+
+        UdfParameter negative = Assert.Single(
+            model.Parameters, p => p.Name == "negative_prompt");
+        Assert.Equal("String", negative.TypeName, ignoreCase: true);
+        // Defaulted so a bare prompt-only call still has an unconditional pass.
+        Assert.NotNull(negative.Default);
+
+        UdfParameter guidance = Assert.Single(
+            model.Parameters, p => p.Name == "guidance");
+        Assert.Equal("Float32", guidance.TypeName, ignoreCase: true);
+        Assert.NotNull(guidance.Default);
     }
 
     [Fact]
