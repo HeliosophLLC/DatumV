@@ -1289,7 +1289,7 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // PG-style named arguments — rewrite fn(a := 1, b => 2) into the
         // canonical positional shape before UdfInliner / planner passes,
         // which all assume positional argument lists.
-        QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, SearchPath);
+        QueryExpression permuted = NamedArgPermuter.Permute(query, Functions, Udfs, DeclaredModels, SearchPath);
 
         // Parse-time pre-flight: walk the top-level statement for
         // catalog-model references that need a download or a typo fix

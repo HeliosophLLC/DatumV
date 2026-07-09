@@ -1,5 +1,6 @@
 ﻿using Heliosoph.DatumV.Catalog;
 using Heliosoph.DatumV.Execution;
+using Heliosoph.DatumV.Inference;
 using Heliosoph.DatumV.Model;
 
 namespace Heliosoph.DatumV.Tests.Execution;
@@ -152,6 +153,127 @@ public sealed class NamedArgumentExecutionTests : ServiceTestBase
         List<DataValue> values = await CollectFirstColumnAsync(plan);
 
         Assert.Equal(105, values[0].AsInt32());
+    }
+
+    // ─── SQL-defined model named arguments ────────────────────────────
+    //
+    // Models declared via CREATE MODEL register a synthetic scalar
+    // FunctionDescriptor (IsOptional set from the parameter's DEFAULT) but
+    // carry their default AST on ModelDescriptor.Parameters[i].Default in a
+    // separate registry from UDFs. The permuter must consult that registry
+    // when filling skipped middle slots — otherwise a positional + named
+    // call that skips a defaulted middle param NULL-fills it, and the
+    // model body sees NULL instead of the declared default. These use
+    // delegating models (no USING clause), so no ONNX Runtime / infer() is
+    // needed — the body computes a scalar directly from its parameters,
+    // making the injected defaults observable in the result.
+
+    private TableCatalog CreateCatalogWithModels()
+    {
+        TableCatalog catalog = CreateCatalog("t", columns: ["id"], new object?[] { 1 });
+        catalog.InferenceDispatcher = new NoopDispatcher();
+        return catalog;
+    }
+
+    /// <summary>
+    /// Primary repro: a positional arg plus one trailing named arg skips a
+    /// defaulted middle parameter. Pre-fix the permuter NULL-filled the
+    /// middle slot; the fix injects the model's declared default so the
+    /// body sees 100, not NULL.
+    /// </summary>
+    [Fact]
+    public async Task Model_NamedSkip_MiddleSlot_UsesParameterDefault()
+    {
+        TableCatalog catalog = CreateCatalogWithModels();
+        catalog.Plan(
+            "CREATE MODEL sum3(a Int32, b Int32 = 100, c Int32 = 7) RETURNS Int32 "
+            + "AS BEGIN RETURN a + b + c END");
+
+        StatementPlan plan = catalog.Plan("SELECT models.sum3(1, c := 3) AS r FROM t");
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+
+        Assert.Equal(104, values[0].AsInt32()); // 1 + 100(default) + 3
+    }
+
+    /// <summary>
+    /// The exact shape of the reported bug: two skipped middle defaults
+    /// (steps, guidance) between a positional prompt-stand-in and a trailing
+    /// named arg (seed). Both defaults must flow through — including the
+    /// Float32 default — while the supplied trailing arg is honoured.
+    /// </summary>
+    [Fact]
+    public async Task Model_NamedSkip_MultipleMiddleSlots_UseDefaults()
+    {
+        TableCatalog catalog = CreateCatalogWithModels();
+        catalog.Plan(
+            "CREATE MODEL cfg(a Int32, steps Int32 = 25, "
+            + "guidance Float32 = CAST(7.5 AS Float32), seed Int64 = NULL) RETURNS Float32 "
+            + "AS BEGIN RETURN CAST(steps AS Float32) + guidance "
+            + "+ CAST(COALESCE(seed, CAST(0 AS Int64)) AS Float32) END");
+
+        StatementPlan plan = catalog.Plan("SELECT models.cfg(1, seed := 10) AS r FROM t");
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+
+        Assert.Equal(42.5f, values[0].AsFloat32(), 4); // 25 + 7.5 + 10
+    }
+
+    /// <summary>
+    /// A parameter whose default is <c>NULL</c> stays NULL when skipped in
+    /// a middle slot — injecting the model's default reproduces exactly the
+    /// NULL the old NULL-fill produced, and no spurious IS NOT NULL
+    /// assertion fires. Here <c>seed</c> is a middle slot (a trailing
+    /// <c>tail</c> arg is supplied by name).
+    /// </summary>
+    [Fact]
+    public async Task Model_NamedSkip_NullDefaultParam_StaysNull()
+    {
+        TableCatalog catalog = CreateCatalogWithModels();
+        catalog.Plan(
+            "CREATE MODEL seeded(a Int32, seed Int64 = NULL, tail Int32 = 9) RETURNS Int64 "
+            + "AS BEGIN RETURN COALESCE(seed, CAST(-1 AS Int64)) + CAST(tail AS Int64) END");
+
+        StatementPlan plan = catalog.Plan("SELECT models.seeded(1, tail := 3) AS r FROM t");
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+
+        Assert.Equal(2L, values[0].AsInt64()); // COALESCE(NULL, -1) + 3
+    }
+
+    /// <summary>
+    /// Regression guard for the form that already worked: supplying every
+    /// argument by name still binds correctly, so the model-default
+    /// injection doesn't disturb the all-named path.
+    /// </summary>
+    [Fact]
+    public async Task Model_AllNamed_StillReordersCorrectly()
+    {
+        TableCatalog catalog = CreateCatalogWithModels();
+        catalog.Plan(
+            "CREATE MODEL sum3b(a Int32, b Int32 = 100, c Int32 = 7) RETURNS Int32 "
+            + "AS BEGIN RETURN a + b + c END");
+
+        StatementPlan plan = catalog.Plan(
+            "SELECT models.sum3b(c := 3, a := 1, b := 2) AS r FROM t");
+        List<DataValue> values = await CollectFirstColumnAsync(plan);
+
+        Assert.Equal(6, values[0].AsInt32()); // 1 + 2 + 3, no defaults used
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IInferenceDispatcher"/> that satisfies the
+    /// CREATE MODEL registration-time non-null check. Delegating models
+    /// (no USING clause) never load a bundle, so LoadBundleAsync is never
+    /// reached — it throws to make any accidental call obvious.
+    /// </summary>
+    private sealed class NoopDispatcher : IInferenceDispatcher
+    {
+        public IReadOnlyList<IInferenceBackend> Backends => Array.Empty<IInferenceBackend>();
+
+        public ValueTask<IReadOnlyDictionary<string, IModelSession>> LoadBundleAsync(
+            BundleManifest bundle,
+            InferencePreferences preferences,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "Delegating models declare no USING clause and never load a bundle.");
     }
 
     // ─── TVF named arguments in FROM ──────────────────────────────────
