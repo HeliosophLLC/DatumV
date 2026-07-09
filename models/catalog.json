@@ -3148,6 +3148,65 @@
       ]
     },
     {
+      "name": "DreamShaper 8 (CFG, full quality)",
+      "summary": "Stylized fantasy and concept art at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+      "description": "Non-distilled DreamShaper 8 with classifier-free guidance and negative-prompt support. Higher fidelity and prompt adherence than the 4-step Hyper variant, at a higher per-image cost.",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sd-1.5",
+        "cfg",
+        "fantasy",
+        "concept-art"
+      ],
+      "licenseIds": [
+        "creativeml-openrail-m"
+      ],
+      "attributions": [
+        "Lykon — DreamShaper 8 (SD 1.5 fine-tune)",
+        "CompVis / Stability AI — Stable Diffusion 1.5 base"
+      ],
+      "cardFile": "cards/dreamshaper-cfg/index.md",
+      "heroImageFile": "cards/dreamshaper-cfg/hero.jpg",
+      "variants": [
+        {
+          "id": "dreamshaper-cfg",
+          "displayName": "DreamShaper 8 (CFG, full quality)",
+          "summary": "Stylized fantasy and concept art at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+          "tags": [],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 4096,
+            "preferred": "cuda"
+          },
+          "approxSizeMb": 4096,
+          "versions": [
+            {
+              "version": "2026-06-30",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/dreamshaper-cfg-onnx",
+                  "revision": "c07d9ea3c46471649e10b0900a6ec1f785420df4",
+                  "include": [
+                    "**/*"
+                  ]
+                }
+              ],
+              "installSql": "sql/dreamshaper-cfg/2026-06-30.sql",
+              "models": [
+                {
+                  "identifier": "dreamshaper_cfg"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "epiCRealism + Hyper-SD (4-step)",
       "summary": "Generate photoreal environments — landscapes, architecture, interiors — in 4 steps. Pick when the subject is 'a place' rather than 'a person'.",
       "description": "Photorealistic environments + natural lighting. Pick over Realistic Vision when the subject is 'a place'.",
@@ -3351,6 +3410,7 @@
         "CompVis / Stability AI — Stable Diffusion 1.5 base"
       ],
       "cardFile": "cards/realistic-vision-cfg/index.md",
+      "heroImageFile": "cards/realistic-vision-cfg/hero.jpg",
       "variants": [
         {
           "id": "realistic-vision-cfg",
@@ -3370,7 +3430,7 @@
                 {
                   "type": "huggingface",
                   "repo": "Heliosoph/realistic-vision-cfg-onnx",
-                  "revision": "f2a4365906c1e0ba73b5b6ed0dbe78ccbd73d4e5",
+                  "revision": "20f2bfe722fa883f7852578f3335af1d437bcc75",
                   "include": [
                     "**/*"
                   ]
