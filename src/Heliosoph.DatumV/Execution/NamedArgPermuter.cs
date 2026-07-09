@@ -35,8 +35,10 @@ namespace Heliosoph.DatumV.Execution;
 ///   <item>Skipped trailing slots are simply omitted (matching the
 ///   existing trailing-trim behaviour <see cref="FunctionMetadata.TryMatch"/>
 ///   permits). Skipped middle slots are filled with the parameter's
-///   default value when available (procedural UDFs carry
-///   <see cref="UdfParameter.Default"/> AST fragments) or with a NULL
+///   default value when available (procedural UDFs and SQL-defined models
+///   both carry <see cref="UdfParameter.Default"/> AST fragments — the
+///   former resolved through <see cref="UdfRegistry"/>, the latter through
+///   <see cref="ModelRegistry"/>) or with a NULL
 ///   literal otherwise — and only when the parameter is
 ///   <see cref="ParameterSpec.IsOptional"/>; required-slot skips raise
 ///   an error.</item>
@@ -69,9 +71,9 @@ public static class NamedArgPermuter
     /// not mutated.
     /// </summary>
     public static QueryExpression Permute(
-        QueryExpression query, FunctionRegistry functions, UdfRegistry udfs, IReadOnlyList<string> searchPath)
+        QueryExpression query, FunctionRegistry functions, UdfRegistry udfs, ModelRegistry models, IReadOnlyList<string> searchPath)
     {
-        Permuter permuter = new(functions, udfs, searchPath);
+        Permuter permuter = new(functions, udfs, models, searchPath);
         return permuter.RewriteQuery(query);
     }
 
@@ -79,9 +81,9 @@ public static class NamedArgPermuter
     /// Convenience overload for tests / single-expression rewrites.
     /// </summary>
     public static Expression Permute(
-        Expression expression, FunctionRegistry functions, UdfRegistry udfs, IReadOnlyList<string> searchPath)
+        Expression expression, FunctionRegistry functions, UdfRegistry udfs, ModelRegistry models, IReadOnlyList<string> searchPath)
     {
-        Permuter permuter = new(functions, udfs, searchPath);
+        Permuter permuter = new(functions, udfs, models, searchPath);
         return permuter.Rewrite(expression);
     }
 
@@ -89,12 +91,14 @@ public static class NamedArgPermuter
     {
         private readonly FunctionRegistry _functions;
         private readonly UdfRegistry _udfs;
+        private readonly ModelRegistry _models;
         private readonly IReadOnlyList<string> _searchPath;
 
-        public Permuter(FunctionRegistry functions, UdfRegistry udfs, IReadOnlyList<string> searchPath)
+        public Permuter(FunctionRegistry functions, UdfRegistry udfs, ModelRegistry models, IReadOnlyList<string> searchPath)
         {
             _functions = functions;
             _udfs = udfs;
+            _models = models;
             _searchPath = searchPath;
         }
 
@@ -254,6 +258,14 @@ public static class NamedArgPermuter
             UdfDescriptor? udf = null;
             _udfs.TryResolve(call.SchemaName, call.FunctionName, _searchPath, out udf);
 
+            // SQL-defined models carry their default AST on
+            // ModelDescriptor.Parameters[i].Default (same UdfParameter shape as
+            // UDFs) but live in a separate registry — they never appear in
+            // _udfs. Resolve here so skipped middle slots can pick up the
+            // model's declared default instead of NULL-filling.
+            ModelDescriptor? model = null;
+            _models.TryResolve(call.SchemaName, call.FunctionName, _searchPath, out model);
+
             string?[] names = call.ArgumentNames!.ToArray();
             int argCount = names.Length;
 
@@ -335,10 +347,17 @@ public static class NamedArgPermuter
                 }
 
                 // Skipped middle slot. Procedural UDF defaults win, then
-                // scalar IsOptional NULL-fill, then error.
+                // SQL-defined model defaults, then scalar IsOptional NULL-fill,
+                // then error.
                 if (udf is not null && i < udf.Parameters.Count && udf.Parameters[i].Default is { } defaultExpr)
                 {
                     permutedArgs[i] = defaultExpr;
+                    continue;
+                }
+
+                if (model is not null && i < model.Parameters.Count && model.Parameters[i].Default is { } modelDefault)
+                {
+                    permutedArgs[i] = modelDefault;
                     continue;
                 }
 

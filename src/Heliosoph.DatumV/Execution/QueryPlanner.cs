@@ -53,7 +53,7 @@ public sealed class QueryPlanner
         // arguments; the re-application here is idempotent (no-op when
         // every call has already been permuted) and covers test-harness
         // paths that call the planner directly.
-        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
+        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.DeclaredModels, _catalog.SearchPath);
 
         // Lift table-valued calls that appear as top-level SELECT projections
         // into synthesized FROM sources. Must run before the function gate
@@ -212,7 +212,7 @@ public sealed class QueryPlanner
         // facing paths; this call covers direct planner invocations from
         // test fixtures and from PlanCompoundWithSubqueriesAsync's
         // recursion.
-        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.SearchPath);
+        query = NamedArgPermuter.Permute(query, _functionRegistry, _catalog.Udfs, _catalog.DeclaredModels, _catalog.SearchPath);
 
         // Lift table-valued calls in SELECT projections into synthesized
         // FROM sources. Matches the sync Plan() pass so test fixtures and
