@@ -3267,6 +3267,65 @@
       ]
     },
     {
+      "name": "epiCRealism (CFG, full quality)",
+      "summary": "Photoreal environments at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+      "description": "Non-distilled epiCRealism with classifier-free guidance and negative-prompt support. Higher fidelity and prompt adherence than the 4-step Hyper variant, at a higher per-image cost. Strongest on environments, landscapes, and architecture.",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sd-1.5",
+        "cfg",
+        "photorealistic",
+        "environments"
+      ],
+      "licenseIds": [
+        "creativeml-openrail-m"
+      ],
+      "attributions": [
+        "emilianJR — epiCRealism (SD 1.5 fine-tune)",
+        "CompVis / Stability AI — Stable Diffusion 1.5 base"
+      ],
+      "cardFile": "cards/epicrealism-cfg/index.md",
+      "heroImageFile": "cards/epicrealism-cfg/hero.jpg",
+      "variants": [
+        {
+          "id": "epicrealism-cfg",
+          "displayName": "epiCRealism (CFG, full quality)",
+          "summary": "Photoreal environments at full quality — classifier-free guidance, negative prompts, and ~25 steps. Slower than the Hyper variant; reach for it on final renders.",
+          "tags": [],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 4096,
+            "preferred": "cuda"
+          },
+          "approxSizeMb": 4096,
+          "versions": [
+            {
+              "version": "2026-06-30",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/epicrealism-cfg-onnx",
+                  "revision": "8ff2a192b7d7de3a6a35c4997d7e809267b0e52f",
+                  "include": [
+                    "**/*"
+                  ]
+                }
+              ],
+              "installSql": "sql/epicrealism-cfg/2026-06-30.sql",
+              "models": [
+                {
+                  "identifier": "epicrealism_cfg"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Mo-Di + Hyper-SD (4-step)",
       "summary": "Generate images in modern Disney / Pixar style — the model expects the activator phrase `modern disney style` somewhere in your prompt. 4 sampling steps.",
       "description": "Modern Disney/Pixar style fine-tune. Activator: 'modern disney style'.",
