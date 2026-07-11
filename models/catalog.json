@@ -3507,6 +3507,65 @@
       ]
     },
     {
+      "name": "Openjourney v4 (CFG, full quality)",
+      "summary": "Midjourney-v4-style cinematic scenes at full quality — classifier-free guidance, negative prompts, and ~25 steps. No activator phrase. Slower than the Hyper variant; reach for it on final renders.",
+      "description": "Non-distilled Openjourney v4 with classifier-free guidance and negative-prompt support. Higher fidelity and prompt adherence than the 4-step Hyper variant, at a higher per-image cost. Midjourney-v4-style aesthetic; no activator phrase (v4 dropped the v1/v3 trigger).",
+      "tasks": [
+        "TextToImage"
+      ],
+      "tags": [
+        "text-to-image",
+        "sd-1.5",
+        "cfg",
+        "midjourney-style",
+        "stylized"
+      ],
+      "licenseIds": [
+        "creativeml-openrail-m"
+      ],
+      "attributions": [
+        "PromptHero — Openjourney v4 (SD 1.5 fine-tune)",
+        "CompVis / Stability AI — Stable Diffusion 1.5 base"
+      ],
+      "cardFile": "cards/openjourney-cfg/index.md",
+      "heroImageFile": "cards/openjourney-cfg/hero.jpg",
+      "variants": [
+        {
+          "id": "openjourney-cfg",
+          "displayName": "Openjourney v4 (CFG, full quality)",
+          "summary": "Midjourney-v4-style cinematic scenes at full quality — classifier-free guidance, negative prompts, and ~25 steps. No activator phrase. Slower than the Hyper variant; reach for it on final renders.",
+          "tags": [],
+          "hardware": {
+            "minRamMb": 2048,
+            "minVramMb": 4096,
+            "preferred": "cuda"
+          },
+          "approxSizeMb": 4096,
+          "versions": [
+            {
+              "version": "2026-06-30",
+              "sources": [
+                {
+                  "type": "huggingface",
+                  "repo": "Heliosoph/openjourney-cfg-onnx",
+                  "revision": "17353451a75037c4660a27a292fac6e3a7e6dede",
+                  "include": [
+                    "**/*"
+                  ]
+                }
+              ],
+              "installSql": "sql/openjourney-cfg/2026-06-30.sql",
+              "models": [
+                {
+                  "identifier": "openjourney_cfg"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "SD Turbo (1-4 step)",
       "summary": "Stability AI's distilled SD 2.1 — 512x512 text-to-image in just 1-4 steps. The reference small-and-fast diffusion model: faster than the Hyper variants, broadly capable, no fine-tune bias.",
       "description": "Stability AI's Adversarial Diffusion Distillation (ADD) of Stable Diffusion 2.1. Single CLIP-H text encoder (1024-dim), 512×512 latent decode, designed for 1-step inference with 4 steps as the quality sweet spot. Pick over the SD 1.5 Hyper variants when you want the canonical Stability baseline rather than a fine-tune; pick over SDXL Turbo when 512×512 is enough and you want roughly half the VRAM footprint. Subject to the Stability AI Community License — free for individuals and commercial use below $1M annual revenue.",

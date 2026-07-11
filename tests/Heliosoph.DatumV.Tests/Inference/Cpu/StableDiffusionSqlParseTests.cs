@@ -67,6 +67,7 @@ public sealed class StableDiffusionSqlParseTests : ServiceTestBase
     [InlineData("mo-di-hyper")]
     [InlineData("realistic-vision-hyper")]
     [InlineData("realistic-vision-cfg")]
+    [InlineData("openjourney-cfg")]
     [InlineData("sd-turbo")]
     [InlineData("sdxl-turbo")]
     public void TextToImage_DeclaresOptionalSeedParameter(string modelId)
