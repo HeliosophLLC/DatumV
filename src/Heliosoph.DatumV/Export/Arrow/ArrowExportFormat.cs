@@ -61,7 +61,11 @@ public sealed class ArrowExportFormat : IExportFormat
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
         ExportOptions options,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        // Deliberately unused: Arrow timestamps are UTC-normalized instants
+        // with UTC schema metadata, session-independent by design (schema
+        // fingerprints and round-trips must not vary with SET TIME ZONE).
+        TimeZoneInfo? sessionTimeZone = null)
     {
         if (target is not ExportTarget.File fileTarget)
         {

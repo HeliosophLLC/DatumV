@@ -275,7 +275,7 @@ internal static class InsertExecutor
                             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                                 sourceExpr, frame, CancellationToken.None).ConfigureAwait(false);
                             targetRow[targetIndex] = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                                evaluated, target, arena, target.Name, context.Types);
+                                evaluated, target, arena, target.Name, context.Types, context.SessionTimeZone);
                         }
                     }
                     else
@@ -438,7 +438,7 @@ internal static class InsertExecutor
                             }
                             targetRow[targetIndex] = ConvertSourceValue(
                                 sourceRow[sourceIndex], sourceStore, catalog.SidecarRegistry,
-                                target, targetArena, target.Name);
+                                target, targetArena, target.Name, context.SessionTimeZone);
                         }
                         else
                         {
@@ -535,7 +535,8 @@ internal static class InsertExecutor
         SidecarRegistry sidecarRegistry,
         ColumnInfo target,
         Arena targetArena,
-        string columnName)
+        string columnName,
+        TimeZoneInfo? sessionZone = null)
     {
         if (source.IsNull)
         {
@@ -628,7 +629,7 @@ internal static class InsertExecutor
         // target.Kind can't accept the source kind, LiteralCoercion throws
         // with the canonical message.
         object? scalar = source.ToObject(sourceStore, sidecarRegistry);
-        return LiteralCoercion.Coerce(scalar, target, targetArena, columnName);
+        return LiteralCoercion.Coerce(scalar, target, targetArena, columnName, sessionZone);
     }
 
     /// <summary>
@@ -1070,7 +1071,7 @@ internal static class InsertExecutor
             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                 target.DefaultExpression, frame, cancellationToken).ConfigureAwait(false);
             return ComputedColumnEvaluator.ConvertValueRefToTarget(
-                evaluated, target, arena, target.Name, frame.Types);
+                evaluated, target, arena, target.Name, frame.Types, frame.Context.SessionTimeZone);
         }
         // Nullable: NULL.
         if (target.Nullable)
@@ -1113,7 +1114,7 @@ internal static class InsertExecutor
                 ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                     target.DefaultExpression!, frame, cancellationToken).ConfigureAwait(false);
                 return ComputedColumnEvaluator.ConvertValueRefToTarget(
-                    evaluated, target, arena, target.Name, frame.Types);
+                    evaluated, target, arena, target.Name, frame.Types, frame.Context.SessionTimeZone);
             }
 
             case OmittedFill.FillKind.Identity:
@@ -1177,7 +1178,7 @@ internal static class InsertExecutor
             ValueRef evaluated = await evaluator.EvaluateAsValueRefAsync(
                 target.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
             targetRow[i] = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                evaluated, target, arena, target.Name, context.Types);
+                evaluated, target, arena, target.Name, context.Types, context.SessionTimeZone);
         }
     }
 

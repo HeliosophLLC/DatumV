@@ -155,7 +155,8 @@ internal static class UpdateExecutor
 
                             ColumnInfo target = schema.Columns[columnIndex];
                             DataValue coerced = CoerceForUpdate(
-                                raw, sourceArena, workArena, target, update.TableName, catalog.SidecarRegistry);
+                                raw, sourceArena, workArena, target, update.TableName, catalog.SidecarRegistry,
+                                setFrame.Context.SessionTimeZone);
 
                             // No-op detection: when the new value matches the
                             // existing cell, drop it from the per-row map.
@@ -490,7 +491,8 @@ internal static class UpdateExecutor
 
                             ColumnInfo target = targetSchema.Columns[columnIndex];
                             DataValue coerced = CoerceForUpdate(
-                                raw, targetArena, workArena, target, update.TableName, catalog.SidecarRegistry);
+                                raw, targetArena, workArena, target, update.TableName, catalog.SidecarRegistry,
+                                setFrame.Context.SessionTimeZone);
 
                             // Last-match-wins with no-op detection: if the
                             // final value matches the existing cell, drop
@@ -624,7 +626,8 @@ internal static class UpdateExecutor
         Arena targetArena,
         ColumnInfo target,
         string tableName,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        TimeZoneInfo? sessionZone = null)
     {
         if (source.IsNull)
         {
@@ -693,7 +696,7 @@ internal static class UpdateExecutor
         // here are always in targetArena. Reading them out of sourceStore (the
         // batch arena, often empty) throws "Arena[#N] has not been allocated".
         object scalar = source.ToObject(targetArena, sidecarRegistry)!;
-        return LiteralCoercion.Coerce(scalar, target, targetArena, target.Name);
+        return LiteralCoercion.Coerce(scalar, target, targetArena, target.Name, sessionZone);
     }
 
     /// <summary>
@@ -920,7 +923,7 @@ internal static class UpdateExecutor
             ValueRef result = await evaluator.EvaluateAsValueRefAsync(
                 target.ComputedExpression!, frame, cancellationToken).ConfigureAwait(false);
             DataValue converted = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                result, target, workArena, target.Name, frame.Types);
+                result, target, workArena, target.Name, frame.Types, frame.Context.SessionTimeZone);
 
             // No-op detection: if the recomputed value equals the existing
             // slot, don't emit a write (cross-store Equals is conservative

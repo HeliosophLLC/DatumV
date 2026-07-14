@@ -311,6 +311,11 @@ public sealed class QueryStreamService
         using InProcessDatumDbCommand command = connection.CreateCommand();
         command.Statements = pairs;
 
+        // Session time zone for timestamptz cell rendering. Re-captured at
+        // each cell (= statement) boundary so a SET TIME ZONE earlier in the
+        // script affects the display of subsequent statements' results.
+        TimeZoneInfo sessionTimeZone = _catalog.SessionTimeZone;
+
         try
         {
             await foreach (BatchEvent ev in command
@@ -323,6 +328,7 @@ public sealed class QueryStreamService
                         schemaEmitted = false;
                         cellRowCount = 0;
                         cellTruncated = false;
+                        sessionTimeZone = _catalog.SessionTimeZone;
                         if (traceState is not null) traceState.OnCellStarted(started.CellId);
                         await WriteEventAsync(output, jsonOptions, writeLock, new CellStartedEvent("cell_started", started.CellId, started.Kind, null), ct).ConfigureAwait(false);
                         break;
@@ -351,7 +357,9 @@ public sealed class QueryStreamService
                             JsonCell[] cells = new JsonCell[batch.ColumnLookup.Count];
                             for (int c = 0; c < batch.ColumnLookup.Count; c++)
                             {
-                                cells[c] = WebCellFormatter.Format(row[c], arena, registry, batch.Types, batch.TypeIdTranslations);
+                                cells[c] = WebCellFormatter.Format(
+                                    row[c], arena, registry, batch.Types, batch.TypeIdTranslations,
+                                    sessionTimeZone);
                             }
                             await WriteEventAsync(output, jsonOptions, writeLock, new RowEvent("row", rowEvent.CellId, cells), ct).ConfigureAwait(false);
                             cellRowCount++;

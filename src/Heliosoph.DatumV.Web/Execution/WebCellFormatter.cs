@@ -18,7 +18,8 @@ internal static class WebCellFormatter
         Arena arena,
         SidecarRegistry registry,
         TypeRegistry? types = null,
-        TypeIdTranslationTable? translations = null)
+        TypeIdTranslationTable? translations = null,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         if (value.IsNull)
         {
@@ -164,12 +165,12 @@ internal static class WebCellFormatter
         // a one-line {f0: ..., f1: ...} blob.
         if (ShouldRouteToJson(value))
         {
-            object? tree = BuildJsonNode(value, arena, registry, types, translations);
+            object? tree = BuildJsonNode(value, arena, registry, types, translations, sessionTimeZone);
             string text = JsonSerializer.Serialize(tree, JsonOpts);
             return new JsonCell("json", Text: text);
         }
 
-        return new JsonCell("text", Text: FormatText(value, arena, registry, types, translations));
+        return new JsonCell("text", Text: FormatText(value, arena, registry, types, translations, sessionTimeZone));
     }
 
     /// <summary>
@@ -552,13 +553,13 @@ internal static class WebCellFormatter
     /// </summary>
     private static object? BuildJsonNode(
         DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types,
-        TypeIdTranslationTable? translations)
+        TypeIdTranslationTable? translations, TimeZoneInfo? sessionTimeZone = null)
     {
         if (value.IsNull) return null;
 
         if (value.IsArray)
         {
-            return BuildJsonArrayNode(value, arena, registry, types, translations);
+            return BuildJsonArrayNode(value, arena, registry, types, translations, sessionTimeZone);
         }
 
         if (value.Kind == DataKind.Struct)
@@ -574,7 +575,7 @@ internal static class WebCellFormatter
                 // Disambiguate clashes (rare — duplicate field name in a struct
                 // shape). Avoids a Dictionary key collision throwing mid-render.
                 if (obj.ContainsKey(name)) name = $"{name}_{i}";
-                obj[name] = BuildJsonNode(fieldValues[i], arena, registry, types, translations);
+                obj[name] = BuildJsonNode(fieldValues[i], arena, registry, types, translations, sessionTimeZone);
             }
             return obj;
         }
@@ -599,7 +600,8 @@ internal static class WebCellFormatter
             DataKind.Float64 => Float64ToJson(value.AsFloat64()),
             DataKind.Decimal => value.AsDecimal(),
             DataKind.Date => value.AsDate().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            DataKind.TimestampTz => value.AsTimestampTz().ToString("O", CultureInfo.InvariantCulture),
+            DataKind.TimestampTz => TemporalSemantics.ProjectForDisplay(value.AsTimestampTz(), sessionTimeZone)
+                .ToString("O", CultureInfo.InvariantCulture),
             DataKind.Timestamp => value.AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
             DataKind.Time => value.AsTime().ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
             DataKind.Duration => value.AsDuration().ToString(),
@@ -644,7 +646,7 @@ internal static class WebCellFormatter
 
     private static List<object?> BuildJsonArrayNode(
         DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types,
-        TypeIdTranslationTable? translations)
+        TypeIdTranslationTable? translations, TimeZoneInfo? sessionTimeZone = null)
     {
         // Struct arrays: each element is a self-describing Struct DataValue —
         // recurse into BuildJsonNode for each. The translator turns sidecar-
@@ -656,7 +658,7 @@ internal static class WebCellFormatter
             List<object?> arr = new(elements.Length);
             for (int i = 0; i < elements.Length; i++)
             {
-                arr.Add(BuildJsonNode(elements[i], arena, registry, types, translations));
+                arr.Add(BuildJsonNode(elements[i], arena, registry, types, translations, sessionTimeZone));
             }
             return arr;
         }
@@ -785,13 +787,13 @@ internal static class WebCellFormatter
 
     private static string FormatText(
         DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
-        TypeIdTranslationTable? translations = null)
+        TypeIdTranslationTable? translations = null, TimeZoneInfo? sessionTimeZone = null)
     {
         if (value.IsNull) return "NULL";
 
         if (value.IsArray)
         {
-            return FormatArray(value, arena, registry, types, translations);
+            return FormatArray(value, arena, registry, types, translations, sessionTimeZone);
         }
 
         if (value.Kind == DataKind.Struct)
@@ -804,7 +806,7 @@ internal static class WebCellFormatter
                 string name = typeDesc?.Fields is { } tFields && i < tFields.Count
                     ? tFields[i].Name
                     : $"f{i}";
-                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types, translations)}";
+                parts[i] = $"{name}: {FormatText(fieldValues[i], arena, registry, types, translations, sessionTimeZone)}";
             }
             return "{" + string.Join(", ", parts) + "}";
         }
@@ -824,7 +826,8 @@ internal static class WebCellFormatter
             DataKind.Float64 => value.AsFloat64().ToString("G", CultureInfo.InvariantCulture),
             DataKind.Decimal => value.AsDecimal().ToString(CultureInfo.InvariantCulture),
             DataKind.Date => value.AsDate().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            DataKind.TimestampTz => value.AsTimestampTz().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            DataKind.TimestampTz => TemporalSemantics.ProjectForDisplay(value.AsTimestampTz(), sessionTimeZone)
+                .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             DataKind.Timestamp => value.AsTimestamp().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             DataKind.Time => value.AsTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             DataKind.Duration => value.AsDuration().ToString(),
@@ -869,7 +872,7 @@ internal static class WebCellFormatter
 
     private static string FormatArray(
         DataValue value, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
-        TypeIdTranslationTable? translations = null)
+        TypeIdTranslationTable? translations = null, TimeZoneInfo? sessionTimeZone = null)
     {
         if (value.Kind == DataKind.Struct)
         {
@@ -882,7 +885,7 @@ internal static class WebCellFormatter
             for (int i = 0; i < elements.Length; i++)
             {
                 DataValue[] fields = elements[i].AsStruct(arena);
-                parts[i] = FormatStructFromFields(fields, arena, registry, types, elements[i].TypeId, translations);
+                parts[i] = FormatStructFromFields(fields, arena, registry, types, elements[i].TypeId, translations, sessionTimeZone);
             }
             return "[" + string.Join(", ", parts) + "]";
         }
@@ -918,7 +921,8 @@ internal static class WebCellFormatter
     private static string FormatStructFromFields(
         DataValue[] fieldValues, Arena arena, SidecarRegistry registry, TypeRegistry? types = null,
         ushort elementTypeId = 0,
-        TypeIdTranslationTable? translations = null)
+        TypeIdTranslationTable? translations = null,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         TypeDescriptor? typeDesc = elementTypeId != 0 ? types?.GetDescriptor(elementTypeId) : null;
         string[] parts = new string[fieldValues.Length];

@@ -105,7 +105,7 @@ Backward-compatible aliases (DatumV extensions):
 
 > **Note:** `second` returns fractional seconds (e.g. 45.5 for 45s 500ms), matching PostgreSQL behavior. Use `millisecond` or `microsecond` for integer-scaled sub-second precision.
 
-> **Note:** `timezone`, `timezone_hour`, and `timezone_minute` reflect the UTC offset stored in the value. Use `AT TIME ZONE` first to convert a UTC timestamp to a specific zone before extracting these parts.
+> **Note:** for `timestamptz` values, wall-clock fields (`hour`, `day`, …) read the [session time zone](../sql/session.md#set-time-zone)'s clock face, and `timezone`, `timezone_hour`, and `timezone_minute` report the session zone's UTC offset at that instant (DST-aware). With the default UTC session, all three return 0. For naive `timestamp` values the timezone fields are always 0. `epoch` is zone-independent.
 
 > **Note:** `dow` uses the PostgreSQL convention (0=Sunday, 6=Saturday). The standalone `dayofweek()` function uses ISO 8601 (1=Monday, 7=Sunday). Use `isodow` for ISO convention via `date_part`/`EXTRACT`.
 
@@ -185,25 +185,25 @@ PostgreSQL-compatible temporal constants that return the same value for all refe
 
 `CURRENT_DATE` -> Date
 
-Current UTC date.
+Current date on the [session time zone](../sql/session.md#set-time-zone)'s clock face (UTC by default).
 
 ### CURRENT_TIME
 
 `CURRENT_TIME` or `CURRENT_TIME(p)` -> Time
 
-Current UTC time-of-day. Optional precision `p` truncates to that many fractional-second digits (0-6).
+Current time-of-day on the session time zone's clock face (UTC by default). Optional precision `p` truncates to that many fractional-second digits (0-6).
 
 ### CURRENT_TIMESTAMP
 
 `CURRENT_TIMESTAMP` or `CURRENT_TIMESTAMP(p)` -> TimestampTz
 
-Current UTC timestamp. Optional precision `p` truncates to that many fractional-second digits.
+Current timestamp — an absolute instant, independent of the session time zone. Optional precision `p` truncates to that many fractional-second digits.
 
 ### LOCALTIME
 
 `LOCALTIME` or `LOCALTIME(p)` -> Time
 
-Same as `CURRENT_TIME` (no session timezone).
+Same as `CURRENT_TIME`.
 
 ### LOCALTIMESTAMP
 
@@ -286,7 +286,9 @@ SELECT date_add('month', 3, start_date) AS extended FROM contracts
 
 Truncate a temporal value to the start of the named field. `Timestamp` and
 `TimestampTz` preserve their kind; `Date` inputs promote to `Timestamp`.
-Week uses ISO 8601 (Monday start).
+Week uses ISO 8601 (Monday start). `TimestampTz` values truncate at
+[session time zone](../sql/session.md#set-time-zone) boundaries —
+`date_trunc('day', …)` lands on the session zone's midnight (UTC by default).
 
 Supported parts: `microsecond`, `millisecond`, `second`, `minute`, `hour`,
 `day`, `week`, `month`, `quarter`, `year`, `decade`, `century`, `millennium`.

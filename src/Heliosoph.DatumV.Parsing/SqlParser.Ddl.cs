@@ -829,6 +829,79 @@ public static partial class SqlParser
         .Try();
 
     /// <summary>
+    /// The value slot of a <c>SET TIME ZONE</c> / <c>SET timezone</c> form:
+    /// a quoted zone name (<c>'America/New_York'</c>), a bare identifier
+    /// (<c>UTC</c>), or <c>DEFAULT</c> / <c>LOCAL</c> — both of which reset
+    /// to the engine default and yield <see langword="null"/>. Numeric UTC
+    /// offsets (PG's <c>SET TIME ZONE -7</c>) are not supported.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string?> TimeZoneValueParser =
+        Token.EqualTo(SqlToken.StringLiteral).Select(t => (string?)GetTokenText(t))
+            .Or(Token.EqualTo(SqlToken.Default).Value((string?)null))
+            .Or(Token.EqualTo(SqlToken.Identifier).Select(t =>
+            {
+                string text = GetTokenText(t);
+                return text.Equals("LOCAL", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : (string?)text;
+            }));
+
+    /// <summary>
+    /// Parses the session time-zone assignment in both PG spellings:
+    /// <c>SET TIME ZONE value</c> (dedicated keywords) and
+    /// <c>SET timezone = value</c> / <c>SET timezone TO value</c> /
+    /// <c>SET time_zone …</c> (configuration-parameter form). The prefix
+    /// through the assignment operator is <c>.Try()</c>-protected so a
+    /// non-matching <c>SET</c> falls through to <c>SET search_path</c> and
+    /// the procedural <c>SET var = expr</c>; the value slot is committed.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> SetTimeZoneParser =
+        from prefix in (
+            from setKw in Token.EqualTo(SqlToken.Set)
+            from form in (
+                from timeKw in Token.EqualTo(SqlToken.Time)
+                from zoneKw in Token.EqualTo(SqlToken.Zone)
+                select Unit.Value
+            ).Or(
+                from nameTok in Token.EqualTo(SqlToken.Identifier)
+                    .Where(t =>
+                    {
+                        string text = GetTokenText(t);
+                        return text.Equals("timezone", StringComparison.OrdinalIgnoreCase)
+                            || text.Equals("time_zone", StringComparison.OrdinalIgnoreCase);
+                    }, "timezone")
+                from assign in Token.EqualTo(SqlToken.Equals).Or(Token.EqualTo(SqlToken.To))
+                select Unit.Value)
+            select Unit.Value
+        ).Try()
+        from value in TimeZoneValueParser
+        select (Statement)new SetTimeZoneStatement(value);
+
+    /// <summary>
+    /// Parses <c>SHOW name</c> / <c>SHOW TIME ZONE</c>. <c>SHOW</c> is a
+    /// contextual identifier, not a reserved token. Setting names are
+    /// lowercased and canonicalized (<c>TIME ZONE</c> and <c>time_zone</c>
+    /// both become <c>timezone</c>); unknown names are rejected at plan
+    /// time, not here.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> ShowStatementParser =
+        (from showKw in Token.EqualTo(SqlToken.Identifier)
+             .Where(t => GetTokenText(t).Equals("SHOW", StringComparison.OrdinalIgnoreCase), "SHOW")
+         from name in (
+             from timeKw in Token.EqualTo(SqlToken.Time)
+             from zoneKw in Token.EqualTo(SqlToken.Zone)
+             select "timezone"
+         ).Or(IdentifierOrKeywordAsName.Select(NormalizeSettingName))
+         select (Statement)new ShowStatement(name))
+        .Try();
+
+    private static string NormalizeSettingName(string name)
+    {
+        string lowered = name.ToLowerInvariant();
+        return lowered == "time_zone" ? "timezone" : lowered;
+    }
+
+    /// <summary>
     /// Optional <c>USING method</c> clause after the column list. The
     /// <c>USING</c> keyword is matched as a contextual identifier (no
     /// dedicated token); the method name is captured lowercased so the

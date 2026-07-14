@@ -41,6 +41,7 @@ internal sealed class CsvExportSink : IExportSink
     private readonly string _lineEnding;
     private readonly string _nullString;
     private readonly bool _writeHeader;
+    private readonly TimeZoneInfo? _sessionTimeZone;
     // Pre-allocated builder, reused across rows. Output is char-oriented
     // (StreamWriter's natural surface) so a StringBuilder is the right
     // intermediate buffer for JSON-encoded composites and quoted fields.
@@ -61,7 +62,8 @@ internal sealed class CsvExportSink : IExportSink
         char quote,
         string lineEnding,
         string nullString,
-        bool writeHeader)
+        bool writeHeader,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         _path = path;
         _schema = schema;
@@ -71,6 +73,7 @@ internal sealed class CsvExportSink : IExportSink
         _lineEnding = lineEnding;
         _nullString = nullString;
         _writeHeader = writeHeader;
+        _sessionTimeZone = sessionTimeZone;
     }
 
     /// <inheritdoc />
@@ -238,7 +241,7 @@ internal sealed class CsvExportSink : IExportSink
         if (value.IsArray || value.Kind == DataKind.Struct)
         {
             _scratch.Clear();
-            DataValueJsonWriter.WriteValue(_scratch, value, store, _sidecarRegistry);
+            DataValueJsonWriter.WriteValue(_scratch, value, store, _sidecarRegistry, _sessionTimeZone);
             WriteField(writer, _scratch);
             return;
         }
@@ -288,10 +291,12 @@ internal sealed class CsvExportSink : IExportSink
                     "yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));
                 break;
             case DataKind.TimestampTz:
-                // "O" produces a round-trippable ISO 8601 form with offset; the
-                // engine stores TimestampTz as UTC ticks so the offset is always
-                // +00:00 on the way out — that's accurate, not a fidelity loss.
-                writer.Write(value.AsTimestampTz().ToString("O", CultureInfo.InvariantCulture));
+                // "O" produces a round-trippable ISO 8601 form with offset,
+                // projected into the session zone's wall clock when one is
+                // set (PG display semantics). The instant is unchanged — a
+                // reimport parses the offset back to the same UTC ticks.
+                writer.Write(TemporalSemantics.ProjectForDisplay(value.AsTimestampTz(), _sessionTimeZone)
+                    .ToString("O", CultureInfo.InvariantCulture));
                 break;
             case DataKind.Duration:
                 writer.Write(value.AsDuration().ToString("c", CultureInfo.InvariantCulture));
@@ -323,7 +328,7 @@ internal sealed class CsvExportSink : IExportSink
             case DataKind.Point2D:
             case DataKind.Point3D:
                 _scratch.Clear();
-                DataValueJsonWriter.WriteValue(_scratch, value, store, _sidecarRegistry);
+                DataValueJsonWriter.WriteValue(_scratch, value, store, _sidecarRegistry, _sessionTimeZone);
                 WriteField(writer, _scratch);
                 break;
 
@@ -404,7 +409,8 @@ internal static class DataValueJsonWriter
         StringBuilder destination,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone = null)
     {
         ArrayBufferWriter<byte> bytes = new(initialCapacity: 64);
         using (Utf8JsonWriter writer = new(bytes, new JsonWriterOptions
@@ -418,7 +424,7 @@ internal static class DataValueJsonWriter
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         }))
         {
-            WriteValueInternal(writer, value, store, registry);
+            WriteValueInternal(writer, value, store, registry, sessionZone);
         }
         // ArrayBufferWriter holds UTF-8 bytes; StringBuilder.Append is char-
         // oriented. UTF8Encoding.GetString does the decode in one pass without
@@ -430,7 +436,8 @@ internal static class DataValueJsonWriter
         Utf8JsonWriter writer,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         if (value.IsNull)
         {
@@ -440,7 +447,7 @@ internal static class DataValueJsonWriter
 
         if (value.IsArray)
         {
-            WriteArray(writer, value, store, registry);
+            WriteArray(writer, value, store, registry, sessionZone);
             return;
         }
 
@@ -495,7 +502,8 @@ internal static class DataValueJsonWriter
                     "yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));
                 break;
             case DataKind.TimestampTz:
-                writer.WriteStringValue(value.AsTimestampTz().ToString("O", CultureInfo.InvariantCulture));
+                writer.WriteStringValue(TemporalSemantics.ProjectForDisplay(value.AsTimestampTz(), sessionZone)
+                    .ToString("O", CultureInfo.InvariantCulture));
                 break;
             case DataKind.Duration:
                 writer.WriteStringValue(value.AsDuration().ToString("c", CultureInfo.InvariantCulture));
@@ -535,7 +543,7 @@ internal static class DataValueJsonWriter
                 }
 
             case DataKind.Struct:
-                WriteStruct(writer, value, store, registry);
+                WriteStruct(writer, value, store, registry, sessionZone);
                 break;
 
             case DataKind.Json:
@@ -558,7 +566,8 @@ internal static class DataValueJsonWriter
         Utf8JsonWriter writer,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         DataValue[] fieldValues = value.AsStruct(store);
         writer.WriteStartObject();
@@ -571,7 +580,7 @@ internal static class DataValueJsonWriter
             // f0, f1, … gives a stable, inspectable shape on disk; users
             // who need named struct fields should export to Parquet.
             writer.WritePropertyName($"f{i}");
-            WriteValueInternal(writer, fieldValues[i], store, registry);
+            WriteValueInternal(writer, fieldValues[i], store, registry, sessionZone);
         }
         writer.WriteEndObject();
     }
@@ -580,7 +589,8 @@ internal static class DataValueJsonWriter
         Utf8JsonWriter writer,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         writer.WriteStartArray();
         switch (value.Kind)
@@ -638,7 +648,7 @@ internal static class DataValueJsonWriter
                     DataValue[] elements = value.AsStructArray(store, registry);
                     for (int i = 0; i < elements.Length; i++)
                     {
-                        WriteValueInternal(writer, elements[i], store, registry);
+                        WriteValueInternal(writer, elements[i], store, registry, sessionZone);
                     }
                     break;
                 }

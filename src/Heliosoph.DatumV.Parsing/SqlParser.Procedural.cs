@@ -745,8 +745,14 @@ public static partial class SqlParser
             .Or(RaiseStatementParser.Try())
             .Or(TryStatementParser.Try())
             .Or(DeclareStatementParser.Try())
+            // SET TIME ZONE must precede the procedural SET var = expr
+            // fallback: `SET timezone = '…'` is a session assignment, not a
+            // variable named timezone (PG reserves configuration-parameter
+            // names in SET position).
+            .Or(SetTimeZoneParser)
             .Or(SetSearchPathParser)
             .Or(SetStatementParser.Try())
+            .Or(ShowStatementParser)
             .Or(CreateSchemaParser)
             .Or(CreateTableParser)
             .Or(DropSchemaParser)

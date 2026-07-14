@@ -74,7 +74,11 @@ public sealed class ParquetExportFormat : IExportFormat
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
         ExportOptions options,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        // Deliberately unused: Parquet timestamps are UTC-normalized
+        // instants (isAdjustedToUTC semantics), session-independent by
+        // design so round-trips don't vary with SET TIME ZONE.
+        TimeZoneInfo? sessionTimeZone = null)
     {
         if (target is not ExportTarget.File fileTarget)
         {

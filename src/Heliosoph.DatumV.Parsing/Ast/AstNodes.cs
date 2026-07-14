@@ -1286,6 +1286,35 @@ public sealed record SetSearchPathStatement(
     IReadOnlyList<string> Schemas) : Statement;
 
 /// <summary>
+/// <c>SET TIME ZONE 'zone'</c> / <c>SET timezone = 'zone'</c> /
+/// <c>SET timezone TO 'zone'</c> — updates the session time zone used to
+/// interpret and display <c>timestamptz</c> values. PG-style: the zone is
+/// an IANA name (<c>'America/New_York'</c>), a fixed-offset name
+/// (<c>'UTC'</c>), or <c>DEFAULT</c>/<c>LOCAL</c> to reset to the engine
+/// default (UTC).
+/// </summary>
+/// <param name="TimeZoneName">
+/// The requested zone name, or <see langword="null"/> for
+/// <c>DEFAULT</c>/<c>LOCAL</c> (reset to UTC). Validated against the
+/// system time-zone database at execution time, not parse time.
+/// </param>
+public sealed record SetTimeZoneStatement(
+    string? TimeZoneName) : Statement;
+
+/// <summary>
+/// <c>SHOW name</c> / <c>SHOW TIME ZONE</c> — reports the current value of
+/// a session setting as a single-row, single-column result. PG-style:
+/// recognized settings are <c>timezone</c> and <c>search_path</c>; unknown
+/// names are rejected at plan time.
+/// </summary>
+/// <param name="SettingName">
+/// The setting name, lowercased and canonicalized by the parser
+/// (<c>TIME ZONE</c> and <c>time_zone</c> both arrive as <c>timezone</c>).
+/// </param>
+public sealed record ShowStatement(
+    string SettingName) : Statement;
+
+/// <summary>
 /// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col1[, col2]*)
 /// [USING method] [WITH (opt = 'value', ...)]</c> — creates a maintained
 /// secondary index over one or more columns of a table. The <c>USING</c>
