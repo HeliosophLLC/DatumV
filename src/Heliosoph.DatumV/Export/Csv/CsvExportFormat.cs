@@ -50,7 +50,8 @@ public sealed class CsvExportFormat : IExportFormat
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
         ExportOptions options,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         if (target is not ExportTarget.File fileTarget)
         {
@@ -77,7 +78,8 @@ public sealed class CsvExportFormat : IExportFormat
             quote: ResolveQuote(options),
             lineEnding: ResolveLineEnding(options),
             nullString: ResolveNullString(options),
-            writeHeader: ResolveHeader(options));
+            writeHeader: ResolveHeader(options),
+            sessionTimeZone: sessionTimeZone);
     }
 
     /// <summary>

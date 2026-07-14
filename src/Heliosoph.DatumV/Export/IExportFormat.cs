@@ -50,11 +50,18 @@ public interface IExportFormat
     /// rather than the row arena. <see langword="null"/> is only safe when
     /// the caller guarantees no sidecar-backed values reach the sink
     /// (planner-time validation calls, single-statement smoke tests).
+    /// The <paramref name="sessionTimeZone"/> parameter carries the session
+    /// time zone for <c>timestamptz</c> rendering in text formats (CSV /
+    /// JSON); null means UTC. Binary formats (Arrow / Parquet) ignore it —
+    /// their <c>timestamptz</c> representation is a UTC-normalized instant
+    /// with UTC schema metadata, and stays that way regardless of session
+    /// zone so schema fingerprints and round-trips are session-independent.
     /// </summary>
     IExportSink CreateSink(
         ExportTarget target,
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
         ExportOptions options,
-        SidecarRegistry? sidecarRegistry);
+        SidecarRegistry? sidecarRegistry,
+        TimeZoneInfo? sessionTimeZone = null);
 }

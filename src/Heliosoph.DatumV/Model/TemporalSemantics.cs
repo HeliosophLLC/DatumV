@@ -100,6 +100,15 @@ public static class TemporalSemantics
         => TimeZoneInfo.ConvertTime(instant, zone);
 
     /// <summary>
+    /// Display projection for <c>timestamptz</c> rendering: the instant's
+    /// wall clock in <paramref name="zone"/>, or the UTC form when
+    /// <paramref name="zone"/> is null. The instant itself is unchanged —
+    /// re-parsing the rendered offset form yields the same UTC ticks.
+    /// </summary>
+    public static DateTimeOffset ProjectForDisplay(DateTimeOffset instant, TimeZoneInfo? zone)
+        => zone is null ? instant : TimeZoneInfo.ConvertTime(instant, zone);
+
+    /// <summary>
     /// Detects whether a temporal input string carries an explicit UTC
     /// offset (<c>+05:30</c>, <c>-07</c>, <c>Z</c>). Uses the round-trip
     /// parse's <see cref="DateTimeKind"/>: offset-less input yields

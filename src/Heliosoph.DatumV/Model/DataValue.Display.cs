@@ -115,10 +115,17 @@ public readonly partial struct DataValue
     /// This lets callers customise specific kinds (e.g. numeric precision, date format)
     /// while inheriting default formatting for everything else.
     /// </param>
+    /// <param name="timeZone">
+    /// Optional session time zone for <see cref="DataKind.TimestampTz"/> rendering:
+    /// the UTC instant is projected into this zone's wall clock with its offset
+    /// suffix (PG display semantics). Null renders in UTC — the storage form.
+    /// </param>
     /// <returns>
     /// A formatted string, or <c>"NULL"</c> when <see cref="IsNull"/> is true.
     /// </returns>
-    public string ToDisplayString(Func<DataValue, (bool Handled, string? Result)>? converter = null)
+    public string ToDisplayString(
+        Func<DataValue, (bool Handled, string? Result)>? converter = null,
+        TimeZoneInfo? timeZone = null)
     {
         if (IsNull) return "NULL";
 
@@ -147,7 +154,9 @@ public readonly partial struct DataValue
             DataKind.Boolean  => AsBoolean() ? "true" : "false",
             DataKind.Date     => AsDate().ToString("yyyy-MM-dd"),
             DataKind.Timestamp   => AsTimestamp().ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture),
-            DataKind.TimestampTz => AsTimestampTz().ToString("O"),
+            DataKind.TimestampTz => (timeZone is null
+                ? AsTimestampTz()
+                : TemporalSemantics.ToZoneWallClock(AsTimestampTz(), timeZone)).ToString("O"),
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
             DataKind.Interval => AsInterval().Format(),

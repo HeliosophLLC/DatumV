@@ -32,10 +32,15 @@ The session time zone drives the interpretation and extraction of `timestamptz` 
 
 A `SET TIME ZONE` takes effect from the next statement onward, including later statements in the same batch; the zone is stable within a single statement.
 
+Display and export also follow the session zone:
+
+- **Result display** — `timestamptz` cells render as the session zone's wall clock (`2026-01-15 12:00:00` for a 17:00 UTC instant under `America/New_York`).
+- **CSV / JSON export** — `timestamptz` values render in ISO 8601 with the session zone's offset (`2026-01-15T12:00:00.0000000-05:00`). The instant is preserved: re-importing parses the offset back to the same UTC ticks.
+- **Arrow / Parquet export** — deliberately session-independent: `timestamptz` is a UTC-normalized instant with UTC schema metadata regardless of the session zone, so schema fingerprints and binary round-trips never vary with `SET TIME ZONE`.
+
 Notes:
 
 - Comparison-time implicit coercion (`WHERE tz_col > '2026-01-15 12:00'` with a string literal) anchors bare wall clocks to UTC, not the session zone. Use an explicit `TIMESTAMPTZ '…'` literal or cast for session-zone interpretation.
-- Result display renders `timestamptz` in UTC. Use [`AT TIME ZONE`](type-system.md#at-time-zone) to project a value into a specific zone's wall-clock time.
 - PG's numeric-offset form (`SET TIME ZONE -7`) and interval form are not supported; name the zone instead.
 - The setting is session-scoped, not persisted: a reopened catalog starts back at UTC.
 

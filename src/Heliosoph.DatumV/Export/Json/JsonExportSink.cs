@@ -44,6 +44,7 @@ internal sealed class JsonExportSink : IExportSink
     private readonly SidecarRegistry? _sidecarRegistry;
     private readonly bool _lines;
     private readonly bool _indent;
+    private readonly TimeZoneInfo? _sessionTimeZone;
 
     private FileStream? _stream;
     private Utf8JsonWriter? _writer;
@@ -57,13 +58,15 @@ internal sealed class JsonExportSink : IExportSink
         Schema schema,
         SidecarRegistry? sidecarRegistry,
         bool lines,
-        bool indent)
+        bool indent,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         _path = path;
         _schema = schema;
         _sidecarRegistry = sidecarRegistry;
         _lines = lines;
         _indent = indent;
+        _sessionTimeZone = sessionTimeZone;
     }
 
     /// <inheritdoc />
@@ -122,7 +125,7 @@ internal sealed class JsonExportSink : IExportSink
                 ColumnInfo col = _schema.Columns[c];
                 writer.WritePropertyName(col.Name);
                 WriteSchemaAwareValue(
-                    writer, row[sourceOrdinals[c]], col, store, _sidecarRegistry);
+                    writer, row[sourceOrdinals[c]], col, store, _sidecarRegistry, _sessionTimeZone);
             }
             writer.WriteEndObject();
             RowsWritten++;
@@ -241,7 +244,8 @@ internal sealed class JsonExportSink : IExportSink
         DataValue value,
         ColumnInfo column,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone = null)
     {
         if (value.IsNull)
         {
@@ -250,15 +254,15 @@ internal sealed class JsonExportSink : IExportSink
         }
         if (value.IsArray)
         {
-            WriteArray(writer, value, column, store, registry);
+            WriteArray(writer, value, column, store, registry, sessionZone);
             return;
         }
         if (value.Kind == DataKind.Struct)
         {
-            WriteStruct(writer, value, column.Fields, store, registry);
+            WriteStruct(writer, value, column.Fields, store, registry, sessionZone);
             return;
         }
-        WriteScalar(writer, value, store, registry);
+        WriteScalar(writer, value, store, registry, sessionZone);
     }
 
     private static void WriteStruct(
@@ -266,7 +270,8 @@ internal sealed class JsonExportSink : IExportSink
         DataValue value,
         IReadOnlyList<ColumnInfo>? fields,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         DataValue[] fieldValues = value.AsStruct(store);
         writer.WriteStartObject();
@@ -282,7 +287,7 @@ internal sealed class JsonExportSink : IExportSink
             writer.WritePropertyName(fieldName);
             if (fieldCol is not null)
             {
-                WriteSchemaAwareValue(writer, fieldValues[i], fieldCol, store, registry);
+                WriteSchemaAwareValue(writer, fieldValues[i], fieldCol, store, registry, sessionZone);
             }
             else
             {
@@ -290,7 +295,7 @@ internal sealed class JsonExportSink : IExportSink
                 // structureless path. Nested structs inside this field
                 // will themselves fall back to f0, f1, … which is the
                 // honest answer when the shape isn't carried.
-                WriteValueWithoutSchema(writer, fieldValues[i], store, registry);
+                WriteValueWithoutSchema(writer, fieldValues[i], store, registry, sessionZone);
             }
         }
         writer.WriteEndObject();
@@ -301,7 +306,8 @@ internal sealed class JsonExportSink : IExportSink
         DataValue value,
         ColumnInfo column,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         writer.WriteStartArray();
         switch (value.Kind)
@@ -361,7 +367,7 @@ internal sealed class JsonExportSink : IExportSink
                     // pass column.Fields through to every element's writer.
                     for (int i = 0; i < elements.Length; i++)
                     {
-                        WriteStruct(writer, elements[i], column.Fields, store, registry);
+                        WriteStruct(writer, elements[i], column.Fields, store, registry, sessionZone);
                     }
                     break;
                 }
@@ -388,7 +394,8 @@ internal sealed class JsonExportSink : IExportSink
         Utf8JsonWriter writer,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         switch (value.Kind)
         {
@@ -445,8 +452,9 @@ internal sealed class JsonExportSink : IExportSink
                     "yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture));
                 break;
             case DataKind.TimestampTz:
-                writer.WriteStringValue(value.AsTimestampTz().ToString(
-                    "O", CultureInfo.InvariantCulture));
+                writer.WriteStringValue(TemporalSemantics.ProjectForDisplay(
+                        value.AsTimestampTz(), sessionZone)
+                    .ToString("O", CultureInfo.InvariantCulture));
                 break;
             case DataKind.Duration:
                 writer.WriteStringValue(value.AsDuration().ToString(
@@ -515,7 +523,8 @@ internal sealed class JsonExportSink : IExportSink
         Utf8JsonWriter writer,
         DataValue value,
         IValueStore store,
-        SidecarRegistry? registry)
+        SidecarRegistry? registry,
+        TimeZoneInfo? sessionZone)
     {
         if (value.IsNull) { writer.WriteNullValue(); return; }
         if (value.IsArray)
@@ -525,15 +534,15 @@ internal sealed class JsonExportSink : IExportSink
             // the value's TypeId-less fallback (positional names inside
             // each element). Other array branches don't read Fields.
             ColumnInfo synthesized = new("", value.Kind, nullable: true) { IsArray = true };
-            WriteArray(writer, value, synthesized, store, registry);
+            WriteArray(writer, value, synthesized, store, registry, sessionZone);
             return;
         }
         if (value.Kind == DataKind.Struct)
         {
-            WriteStruct(writer, value, fields: null, store, registry);
+            WriteStruct(writer, value, fields: null, store, registry, sessionZone);
             return;
         }
-        WriteScalar(writer, value, store, registry);
+        WriteScalar(writer, value, store, registry, sessionZone);
     }
 
     /// <summary>
