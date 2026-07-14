@@ -145,6 +145,15 @@
           href: sql/ddl-dml.md#analyze
         - name: Batch Execution
           href: sql/ddl-dml.md#batch-execution
+    - name: Session Settings
+      href: sql/session.md
+      items:
+        - name: SET TIME ZONE
+          href: sql/session.md#set-time-zone
+        - name: SET search_path
+          href: sql/session.md#set-search_path
+        - name: SHOW
+          href: sql/session.md#show
     - name: User-Defined Functions
       href: sql/udf.md
       items:

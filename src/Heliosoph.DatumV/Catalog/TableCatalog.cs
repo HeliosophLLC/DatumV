@@ -142,6 +142,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     private volatile IReadOnlyList<string> _searchPath = new[] { "public", "system" };
 
     /// <summary>
+    /// Session time zone backing field. Reference-swapped atomically so
+    /// readers that captured an earlier snapshot aren't affected by a
+    /// concurrent SET. Defaults to UTC, matching PG server defaults and
+    /// the engine's TimestampTz storage convention.
+    /// </summary>
+    private volatile TimeZoneInfo _sessionTimeZone = TimeZoneInfo.Utc;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="TableCatalog"/> class with the given resource pool.
     /// </summary>
     /// <param name="pool">The resource pool to use for table providers.</param>
@@ -377,6 +385,15 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
     /// <see cref="SchemaExecutor.SetSearchPath"/>.
     /// </summary>
     public IReadOnlyList<string> SearchPath => _searchPath;
+
+    /// <summary>
+    /// The current session time zone (PG <c>TimeZone</c> setting). Reads
+    /// atomically; callers should capture one snapshot per query so a
+    /// concurrent <c>SET TIME ZONE</c> can't shift interpretation
+    /// mid-flight. Mutated only by <see cref="SetSessionTimeZone"/>.
+    /// Defaults to UTC.
+    /// </summary>
+    public TimeZoneInfo SessionTimeZone => _sessionTimeZone;
 
     /// <summary>
     /// Report from the catalog file's load on construction. <see langword="null"/>
@@ -1218,6 +1235,14 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         {
             return Plans.SchemaPlan.ForSetSearchPath(this, setSearchPath);
         }
+        else if (statement is SetTimeZoneStatement setTimeZone)
+        {
+            return Plans.SessionPlan.ForSetTimeZone(this, setTimeZone);
+        }
+        else if (statement is ShowStatement show)
+        {
+            return PlanShow(show);
+        }
         else if (statement is CreateTableStatement createTable)
         {
             return Plans.TablePlan.ForCreateTable(this, createTable, sourceText);
@@ -1282,6 +1307,32 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
             Columns: [new SelectColumn(call.Call)]);
         QueryExpression syntheticQuery = new SelectQueryExpression(syntheticSelect);
         return PlanQuery(syntheticQuery);
+    }
+
+    private StatementPlan PlanShow(ShowStatement show)
+    {
+        // Lower SHOW name to SELECT current_setting('name') AS label — a
+        // tableless single-row query. The setting value is read when the
+        // plan executes, not here, so SET-then-SHOW in one batch reports
+        // the post-SET value.
+        string columnLabel = show.SettingName switch
+        {
+            // PG reports this parameter under its mixed-case GUC name.
+            "timezone" => "TimeZone",
+            "search_path" => "search_path",
+            _ => throw new QueryPlanException(
+                $"SHOW: unrecognized configuration parameter '{show.SettingName}'."),
+        };
+        SelectStatement syntheticSelect = new(
+            Columns:
+            [
+                new SelectColumn(
+                    new FunctionCallExpression(
+                        "current_setting",
+                        [new LiteralExpression(show.SettingName)]),
+                    Alias: columnLabel),
+            ]);
+        return PlanQuery(new SelectQueryExpression(syntheticSelect));
     }
 
     internal SelectPlan PlanQuery(QueryExpression query)
@@ -1490,6 +1541,34 @@ public sealed class TableCatalog : IDisposable, IEnumerable<ITableProvider>, ICa
         // Snapshot to a fresh immutable list so callers that captured the
         // old reference keep their view.
         _searchPath = schemas.ToArray();
+    }
+
+    /// <summary>
+    /// Replaces the session time zone. Used by <c>SET TIME ZONE …</c> /
+    /// <c>SET timezone = …</c>. A <see langword="null"/>
+    /// <paramref name="timeZoneName"/> (<c>DEFAULT</c> / <c>LOCAL</c>)
+    /// resets to UTC. The name resolves against the system time-zone
+    /// database — IANA ids (<c>America/New_York</c>) and Windows ids both
+    /// resolve on modern .NET; unknown names throw a
+    /// <see cref="Execution.SessionSettingException"/>.
+    /// </summary>
+    internal void SetSessionTimeZone(string? timeZoneName)
+    {
+        if (timeZoneName is null)
+        {
+            _sessionTimeZone = TimeZoneInfo.Utc;
+            return;
+        }
+        try
+        {
+            _sessionTimeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneName);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            throw new Execution.SessionSettingException(
+                $"SET TIME ZONE: unrecognized time zone '{timeZoneName}'. "
+                + "Use an IANA name like 'America/New_York', or 'UTC'.", ex);
+        }
     }
 
     internal static bool IsBuiltinSchema(string schema)
