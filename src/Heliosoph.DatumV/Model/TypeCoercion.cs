@@ -261,11 +261,14 @@ public static class TypeCoercion
             DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date)
                 => DataValue.FromDate(date),
 
-            DataKind.TimestampTz when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out DateTimeOffset dateTime) => DataValue.FromTimestampTz(dateTime),
+            // Deterministic UTC anchoring for bare wall clocks (never the
+            // machine zone). Comparison-time coercion has no session-zone
+            // channel; explicit CAST is the session-zone-aware path.
+            DataKind.TimestampTz when TemporalSemantics.TryParseTimestampTz(
+                text, sessionZone: null, out DateTimeOffset dateTime) => DataValue.FromTimestampTz(dateTime),
 
-            DataKind.Timestamp when DateTime.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeLocal, out DateTime timestamp) => DataValue.FromTimestamp(timestamp),
+            DataKind.Timestamp when TemporalSemantics.TryParseTimestamp(
+                text, out DateTime timestamp) => DataValue.FromTimestamp(timestamp),
 
             DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time)
                 => DataValue.FromTime(time),

@@ -343,7 +343,8 @@ public sealed partial class ExpressionEvaluator : ILambdaInvoker
                 case ColumnReference column:
                     return new ValueTask<DataValue>(EvaluateColumn(column, frame));
                 case CurrentTimestampExpression ct:
-                    return new ValueTask<DataValue>(EvaluateTemporalConstant(ct));
+                    return new ValueTask<DataValue>(EvaluateTemporalConstant(
+                        ct, frame.Context?.SessionTimeZone ?? TimeZoneInfo.Utc));
                 case TypeLiteralExpression typeLiteral:
                     return new ValueTask<DataValue>(EvaluateTypeLiteral(typeLiteral));
 

@@ -495,9 +495,12 @@ public sealed partial class ExpressionEvaluator
                 result = default; return false;
             case DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date):
                 result = ValueRef.FromDate(date); return true;
-            case DataKind.TimestampTz when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset dtOffset):
+            // Deterministic UTC anchoring for bare wall clocks (never the
+            // machine zone); mirrors TypeCoercion.TryCoerceString. Explicit
+            // CAST is the session-zone-aware path.
+            case DataKind.TimestampTz when TemporalSemantics.TryParseTimestampTz(text, sessionZone: null, out DateTimeOffset dtOffset):
                 result = ValueRef.FromTimestampTz(dtOffset); return true;
-            case DataKind.Timestamp when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime dt):
+            case DataKind.Timestamp when TemporalSemantics.TryParseTimestamp(text, out DateTime dt):
                 result = ValueRef.FromTimestamp(dt); return true;
             case DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time):
                 result = ValueRef.FromTime(time); return true;

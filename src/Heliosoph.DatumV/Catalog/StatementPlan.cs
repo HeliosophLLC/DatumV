@@ -120,6 +120,10 @@ public abstract class StatementPlan : PreparedSql
         ExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        // Statement entry is the PG boundary for session-setting visibility:
+        // a SET TIME ZONE earlier in the batch/block is visible here, and the
+        // zone stays stable for the rest of this statement.
+        context.RefreshSessionTimeZone();
         return IsProductive && context.IsStreamingActive
             ? ExecuteWithBracketAsync(cancellationToken, context)
             : ExecuteImplAsync(cancellationToken, context);

@@ -93,6 +93,7 @@ public sealed class ExecutionContext : IDisposable
         FunctionRegistry = catalog.Functions;
         Catalog = catalog;
         Pool = catalog.Pool;
+        SessionTimeZone = catalog.SessionTimeZone;
         Types = types ?? new TypeRegistry();
         PrintSink = printSink ?? NoOpPrintSink;
         CellSink = cellSink ?? NoOpCellSink;
@@ -208,6 +209,27 @@ public sealed class ExecutionContext : IDisposable
 
     /// <summary>Registry of named tables and provider factories.</summary>
     public TableCatalog Catalog { get; }
+
+    /// <summary>
+    /// Per-statement snapshot of the session time zone. Captured from
+    /// <see cref="TableCatalog.SessionTimeZone"/> at construction and
+    /// refreshed by <see cref="Heliosoph.DatumV.Catalog.StatementPlan.ExecuteAsync"/>
+    /// at each statement entry, so the zone is stable within a statement
+    /// and a <c>SET TIME ZONE</c> takes effect from the next statement
+    /// onward (PG semantics). Consumed by string→timestamptz coercion,
+    /// Timestamp↔TimestampTz casts, and the zone-aware temporal functions.
+    /// <c>current_setting()</c> deliberately bypasses the snapshot and
+    /// reads the live catalog value.
+    /// </summary>
+    public TimeZoneInfo SessionTimeZone { get; private set; }
+
+    /// <summary>
+    /// Re-reads the session time zone from the catalog. Called once per
+    /// statement by the <see cref="Heliosoph.DatumV.Catalog.StatementPlan"/>
+    /// execution dispatch; derived (borrowed) contexts inherit the parent's
+    /// snapshot instead so mid-statement work never shifts zones.
+    /// </summary>
+    internal void RefreshSessionTimeZone() => SessionTimeZone = Catalog.SessionTimeZone;
 
     /// <summary>
     /// The single per-query arena for all non-inline, non-sidecar
@@ -506,7 +528,8 @@ public sealed class ExecutionContext : IDisposable
             MaxStratifyClasses = MaxStratifyClasses,
             ModelTracer = ModelTracer,
             SpillDirectory = SpillDirectory,
-            ProcedureCallDepth = ProcedureCallDepth
+            ProcedureCallDepth = ProcedureCallDepth,
+            SessionTimeZone = SessionTimeZone
         };
     }
 
@@ -626,7 +649,8 @@ public sealed class ExecutionContext : IDisposable
             MaxStratifyClasses = MaxStratifyClasses,
             ModelTracer = ModelTracer,
             SpillDirectory = SpillDirectory,
-            ProcedureCallDepth = ProcedureCallDepth
+            ProcedureCallDepth = ProcedureCallDepth,
+            SessionTimeZone = SessionTimeZone
         };
     }
 
