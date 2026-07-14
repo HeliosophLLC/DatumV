@@ -83,16 +83,19 @@ jobs:
       # On dependabot PRs we --force-evaluate (regenerate) and push the
       # updated lock files back to the PR branch in the next step. On
       # human PRs we keep locked mode so dependency drift fails the build.
+      # Keyed off the PR author rather than github.actor: the actor is
+      # whoever triggered the run, so a human re-running (or pushing to)
+      # a dependabot branch would otherwise fall into the locked-mode arm.
       - name: Restore
         run: |
-          if [ "${{ github.actor }}" = "dependabot[bot]" ]; then
+          if [ "${{ github.event.pull_request.user.login }}" = "dependabot[bot]" ]; then
             dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard --force-evaluate
           else
             dotnet restore Heliosoph.DatumV.slnx -p:GpuVariant=standard -p:RestoreLockedMode=true
           fi
 
       - name: Commit regenerated lock files (dependabot only)
-        if: github.actor == 'dependabot[bot]'
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
         run: |
           # The workspace is a host-mounted volume owned by the runner's host
           # uid, but this container step runs as root, so git's ownership guard
