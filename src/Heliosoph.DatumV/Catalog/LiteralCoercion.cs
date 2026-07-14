@@ -14,7 +14,16 @@ namespace Heliosoph.DatumV.Catalog;
 /// </summary>
 internal static class LiteralCoercion
 {
-    public static DataValue Coerce(object? literal, ColumnInfo target, Arena arena, string columnName)
+    /// <param name="literal">The CLR literal to coerce.</param>
+    /// <param name="target">The target column.</param>
+    /// <param name="arena">Arena for non-inline payloads.</param>
+    /// <param name="columnName">Column name for error messages.</param>
+    /// <param name="sessionZone">
+    /// Session time zone for PG-conformant <c>TimestampTz</c> input: bare
+    /// wall-clock strings and <c>Date</c> literals are anchored in this zone.
+    /// Null means UTC — never the machine zone.
+    /// </param>
+    public static DataValue Coerce(object? literal, ColumnInfo target, Arena arena, string columnName, TimeZoneInfo? sessionZone = null)
     {
         if (literal is null)
         {
@@ -57,7 +66,7 @@ internal static class LiteralCoercion
             DataKind.Date => CoerceDate(literal, columnName),
             DataKind.Time => CoerceTime(literal, columnName),
             DataKind.Timestamp => CoerceTimestamp(literal, columnName),
-            DataKind.TimestampTz => CoerceTimestampTz(literal, columnName),
+            DataKind.TimestampTz => CoerceTimestampTz(literal, columnName, sessionZone),
             DataKind.Duration => CoerceDuration(literal, columnName),
             DataKind.Decimal => CoerceDecimal(literal, columnName),
             _ => throw new InvalidOperationException(
@@ -229,16 +238,21 @@ internal static class LiteralCoercion
             _ => throw IncompatibleLiteral(literal, "Time", columnName),
         };
 
-    private static DataValue CoerceTimestampTz(object literal, string columnName) =>
+    private static DataValue CoerceTimestampTz(object literal, string columnName, TimeZoneInfo? sessionZone) =>
         literal switch
         {
             // PG: input offset normalised to UTC at construction, original
             // offset discarded. FromTimestampTz handles this internally.
             DateTimeOffset dto => DataValue.FromTimestampTz(dto),
-            DateTime dt => DataValue.FromTimestampTz(new DateTimeOffset(
-                dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt)),
-            DateOnly d => DataValue.FromTimestampTz(new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
-            string s when DateTimeOffset.TryParse(s, out DateTimeOffset parsed)
+            DateTime dt => DataValue.FromTimestampTz(dt.Kind == DateTimeKind.Unspecified
+                ? TemporalSemantics.InterpretInZone(dt, sessionZone ?? TimeZoneInfo.Utc)
+                : new DateTimeOffset(dt)),
+            // PG: midnight of the date in the session zone.
+            DateOnly d => DataValue.FromTimestampTz(TemporalSemantics.InterpretInZone(
+                d.ToDateTime(TimeOnly.MinValue), sessionZone ?? TimeZoneInfo.Utc)),
+            // Explicit offset honored; bare wall clock anchored in the
+            // session zone. Never culture- or machine-zone-dependent.
+            string s when TemporalSemantics.TryParseTimestampTz(s, sessionZone, out DateTimeOffset parsed)
                 => DataValue.FromTimestampTz(parsed),
             _ => throw IncompatibleLiteral(literal, "TimestampTz", columnName),
         };
@@ -252,7 +266,9 @@ internal static class LiteralCoercion
             DateTime dt => DataValue.FromTimestamp(dt),
             DateTimeOffset dto => DataValue.FromTimestamp(dto.DateTime),
             DateOnly d => DataValue.FromTimestamp(d.ToDateTime(TimeOnly.MinValue)),
-            string s when DateTime.TryParse(s, out DateTime parsed) => DataValue.FromTimestamp(parsed),
+            // Wall clock as written; explicit offset ignored (PG). Never
+            // culture- or machine-zone-dependent.
+            string s when TemporalSemantics.TryParseTimestamp(s, out DateTime parsed) => DataValue.FromTimestamp(parsed),
             _ => throw IncompatibleLiteral(literal, "Timestamp", columnName),
         };
 

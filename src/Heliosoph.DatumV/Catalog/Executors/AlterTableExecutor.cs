@@ -712,7 +712,8 @@ internal static class AlterTableExecutor
                     ValueRef result = await evaluator.EvaluateAsValueRefAsync(
                         column.ComputedExpression!, frame, CancellationToken.None).ConfigureAwait(false);
                     DataValue computed = ComputedColumnEvaluator.ConvertValueRefToTarget(
-                        result, column, workArena, column.Name);
+                        result, column, workArena, column.Name,
+                        sessionZone: backfillContext.SessionTimeZone);
 
                     // Skip rows whose computed value is NULL — the column's
                     // pages already hold NULL after AddColumn's pump, so an

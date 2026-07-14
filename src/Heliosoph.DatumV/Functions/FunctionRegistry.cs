@@ -724,6 +724,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias<Scalar.TypeofFunction>("pg_typeof");
         registry.RegisterScalar<Scalar.CoalesceFunction>();
         registry.RegisterScalar<Scalar.NullifFunction>();
+        registry.RegisterScalar<Scalar.CurrentSettingFunction>();
 
         // String
         registry.RegisterScalar<Scalar.Strings.ConcatFunction>();

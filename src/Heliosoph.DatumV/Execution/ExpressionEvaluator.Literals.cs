@@ -198,14 +198,18 @@ public sealed partial class ExpressionEvaluator
     /// Fallback evaluation for <see cref="CurrentTimestampExpression"/> when the
     /// <see cref="TemporalConstantFolder"/> pass has not been applied (e.g. direct
     /// programmatic API usage). Uses <see cref="DateTimeOffset.UtcNow"/> as the clock.
+    /// PG semantics: <c>CURRENT_DATE</c> and <c>CURRENT_TIME</c> read the session
+    /// zone's clock face (the date in Tokyo, not the date in UTC);
+    /// <c>CURRENT_TIMESTAMP</c> is an absolute instant, zone-independent.
     /// </summary>
-    private static DataValue EvaluateTemporalConstant(CurrentTimestampExpression ct)
+    private static DataValue EvaluateTemporalConstant(CurrentTimestampExpression ct, TimeZoneInfo sessionZone)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTime zoneClock = TemporalSemantics.ToZoneWallClock(now, sessionZone).DateTime;
         return ct.Kind switch
         {
-            CurrentTimestampKind.CurrentDate => DataValue.FromDate(DateOnly.FromDateTime(now.UtcDateTime)),
-            CurrentTimestampKind.CurrentTime => DataValue.FromTime(TimeOnly.FromTimeSpan(now.TimeOfDay)),
+            CurrentTimestampKind.CurrentDate => DataValue.FromDate(DateOnly.FromDateTime(zoneClock)),
+            CurrentTimestampKind.CurrentTime => DataValue.FromTime(TimeOnly.FromDateTime(zoneClock)),
             // PG current_timestamp returns timestamptz.
             CurrentTimestampKind.CurrentTimestamp => DataValue.FromTimestampTz(now),
             _ => throw new InvalidOperationException($"Unknown CurrentTimestampKind: {ct.Kind}"),

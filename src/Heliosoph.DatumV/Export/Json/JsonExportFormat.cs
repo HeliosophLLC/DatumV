@@ -55,7 +55,8 @@ public sealed class JsonExportFormat : IExportFormat
         Schema schema,
         IReadOnlyList<MediaDisposition> columnDispositions,
         ExportOptions options,
-        SidecarRegistry? sidecarRegistry)
+        SidecarRegistry? sidecarRegistry,
+        TimeZoneInfo? sessionTimeZone = null)
     {
         if (target is not ExportTarget.File fileTarget)
         {
@@ -80,7 +81,8 @@ public sealed class JsonExportFormat : IExportFormat
             schema,
             sidecarRegistry,
             lines: ResolveEffectiveLines(options, fileTarget.Path),
-            indent: ResolveIndent(options));
+            indent: ResolveIndent(options),
+            sessionTimeZone: sessionTimeZone);
     }
 
     /// <summary>

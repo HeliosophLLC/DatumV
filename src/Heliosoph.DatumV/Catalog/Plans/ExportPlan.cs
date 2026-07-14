@@ -160,7 +160,7 @@ internal sealed class ExportPlan : StatementPlan
                             _projectedSchema, _columnDispositions, _format, _options, batch);
                     sink = _format.CreateSink(
                         _target, effectiveSchema, effectiveDispositions, _options,
-                        context.SidecarRegistry);
+                        context.SidecarRegistry, context.SessionTimeZone);
                 }
                 await sink.WriteAsync(batch, cancellationToken).ConfigureAwait(false);
             }
@@ -168,7 +168,7 @@ internal sealed class ExportPlan : StatementPlan
             // can distinguish "the export ran" from "the export never started".
             sink ??= _format.CreateSink(
                 _target, _projectedSchema, _columnDispositions, _options,
-                context.SidecarRegistry);
+                context.SidecarRegistry, context.SessionTimeZone);
             await sink.FinishAsync(cancellationToken).ConfigureAwait(false);
             // Capture the counts before Dispose runs — IExportSink doesn't
             // promise the properties remain readable after disposal, and the

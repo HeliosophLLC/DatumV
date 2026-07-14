@@ -178,6 +178,21 @@ Returns true when `x` is positive or negative infinity. Note that `is_finite` an
 SELECT count(*) FILTER (WHERE is_infinite(rate)) AS overflow_rows FROM metrics
 ```
 
+## Session Introspection
+
+### current_setting
+
+`current_setting(setting_name)` → String
+
+Returns the current value of a session setting as text. Recognized settings: `'timezone'` (the session time zone's canonical id) and `'search_path'` (the schema search path as a comma-separated list). Unknown setting names raise an error; a null argument yields null. The value is read when the expression evaluates, so a `SET` earlier in the same batch is already visible.
+
+```sql
+SELECT current_setting('timezone')     -- 'UTC' by default
+SELECT current_setting('search_path')  -- 'public, system'
+```
+
+`SHOW timezone` and `SHOW search_path` are statement-level shorthands for the same lookups — see [Session Settings](../sql/session.md).
+
 ## See Also
 
 - [Numeric Functions](numeric.md) -- arithmetic, rounding, `sign`, normalization

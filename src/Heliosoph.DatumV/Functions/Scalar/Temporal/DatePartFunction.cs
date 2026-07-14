@@ -77,7 +77,8 @@ public sealed class DatePartFunction : IFunction, IScalarFunction
             DataKind.Date => FromDate(field, src.AsDate()),
             DataKind.Time => FromTime(field, src.AsTime()),
             DataKind.Timestamp => FromDateTime(field, src.AsTimestamp()),
-            DataKind.TimestampTz => FromDateTime(field, src.AsTimestampTz().UtcDateTime),
+            DataKind.TimestampTz => FromTimestampTz(
+                field, src.AsTimestampTz(), frame.Context?.SessionTimeZone ?? TimeZoneInfo.Utc),
             DataKind.Duration => FromDuration(field, src.AsDuration()),
             DataKind.Interval => FromInterval(field, src.AsInterval()),
             _ => throw new InvalidOperationException(
@@ -85,6 +86,24 @@ public sealed class DatePartFunction : IFunction, IScalarFunction
         };
         return new ValueTask<ValueRef>(ValueRef.FromFloat64(result));
     }
+
+    /// <summary>
+    /// TimestampTz extraction with PG session-zone semantics: wall-clock
+    /// fields (year, day, hour, …) read the session zone's clock face at
+    /// that instant; <c>epoch</c> is zone-independent and computed from the
+    /// UTC instant; the <c>timezone</c> family reports the session zone's
+    /// UTC offset at that instant (seconds / signed hour part / signed
+    /// minute part). With the default UTC session everything reduces to the
+    /// naive-UTC behaviour.
+    /// </summary>
+    private static double FromTimestampTz(string field, DateTimeOffset instant, TimeZoneInfo zone) => field switch
+    {
+        "epoch" => (instant.UtcDateTime - DateTime.UnixEpoch).TotalSeconds,
+        "timezone" => zone.GetUtcOffset(instant).TotalSeconds,
+        "timezone_hour" => zone.GetUtcOffset(instant).Hours,
+        "timezone_minute" => zone.GetUtcOffset(instant).Minutes,
+        _ => FromDateTime(field, TemporalSemantics.ToZoneWallClock(instant, zone).DateTime),
+    };
 
     private static double FromDate(string field, DateOnly d) => field switch
     {

@@ -125,7 +125,9 @@ public sealed class CastFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(input);
         }
 
-        if (TryCastCore(input, targetKind, out ValueRef result))
+        // frame.Context is null for direct programmatic invocation with a
+        // default frame (unit tests); null zone = UTC.
+        if (TryCastCore(input, targetKind, out ValueRef result, frame.Context?.SessionTimeZone))
         {
             return new ValueTask<ValueRef>(result);
         }
@@ -273,9 +275,14 @@ public sealed class CastFunction : IFunction, IScalarFunction
     /// Returns <see langword="true"/> with a populated <paramref name="result"/>
     /// when the conversion succeeds. Returns <see langword="false"/> for
     /// kind pairs that aren't supported (the caller decides whether to throw
-    /// or produce a typed null).
+    /// or produce a typed null). <paramref name="sessionTimeZone"/> drives
+    /// the PG session-zone semantics of the temporal conversions
+    /// (Timestamp↔TimestampTz, Date↔TimestampTz, bare String→TimestampTz);
+    /// null means UTC — callers without a session (procedural list
+    /// coercion) stay deterministic rather than falling back to the
+    /// machine zone.
     /// </summary>
-    internal static bool TryCastCore(ValueRef input, DataKind targetKind, out ValueRef result)
+    internal static bool TryCastCore(ValueRef input, DataKind targetKind, out ValueRef result, TimeZoneInfo? sessionTimeZone = null)
     {
         result = default;
 
@@ -327,29 +334,35 @@ public sealed class CastFunction : IFunction, IScalarFunction
             return true;
         }
 
+        TimeZoneInfo zone = sessionTimeZone ?? TimeZoneInfo.Utc;
         switch ((input.Kind, targetKind))
         {
             case (DataKind.Date, DataKind.TimestampTz):
-                result = ValueRef.FromTimestampTz(
-                    new DateTimeOffset(input.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+                // PG: midnight of the date in the session zone.
+                result = ValueRef.FromTimestampTz(TemporalSemantics.InterpretInZone(
+                    input.AsDate().ToDateTime(TimeOnly.MinValue), zone));
                 return true;
             case (DataKind.Date, DataKind.Timestamp):
                 result = ValueRef.FromTimestamp(input.AsDate().ToDateTime(TimeOnly.MinValue));
                 return true;
             case (DataKind.TimestampTz, DataKind.Date):
-                result = ValueRef.FromDate(DateOnly.FromDateTime(input.AsTimestampTz().UtcDateTime));
+                // PG: the date of the session-zone wall clock at that instant.
+                result = ValueRef.FromDate(DateOnly.FromDateTime(
+                    TemporalSemantics.ToZoneWallClock(input.AsTimestampTz(), zone).DateTime));
                 return true;
             case (DataKind.Timestamp, DataKind.Date):
                 result = ValueRef.FromDate(DateOnly.FromDateTime(input.AsTimestamp()));
                 return true;
             case (DataKind.Timestamp, DataKind.TimestampTz):
-                // PG: assumes session TZ. We assume UTC until session TZ lands.
-                result = ValueRef.FromTimestampTz(
-                    new DateTimeOffset(input.AsTimestamp().Ticks, TimeSpan.Zero));
+                // PG: the naive wall clock is anchored in the session zone.
+                result = ValueRef.FromTimestampTz(TemporalSemantics.InterpretInZone(
+                    input.AsTimestamp(), zone));
                 return true;
             case (DataKind.TimestampTz, DataKind.Timestamp):
-                // PG: converts to session TZ then drops. We keep UTC ticks unchanged.
-                result = ValueRef.FromTimestamp(input.AsTimestampTz().UtcDateTime);
+                // PG: converts to the session-zone wall clock, then drops the zone.
+                result = ValueRef.FromTimestamp(DateTime.SpecifyKind(
+                    TemporalSemantics.ToZoneWallClock(input.AsTimestampTz(), zone).DateTime,
+                    DateTimeKind.Unspecified));
                 return true;
             case (DataKind.String, DataKind.Date):
                 if (DateOnly.TryParse(input.AsString(), CultureInfo.InvariantCulture, out DateOnly d))
@@ -359,14 +372,18 @@ public sealed class CastFunction : IFunction, IScalarFunction
                 }
                 return false;
             case (DataKind.String, DataKind.TimestampTz):
-                if (DateTimeOffset.TryParse(input.AsString(), CultureInfo.InvariantCulture, out DateTimeOffset dto))
+                // PG: explicit offset honored; bare wall clock interpreted in
+                // the session zone. Never the machine zone.
+                if (TemporalSemantics.TryParseTimestampTz(input.AsString(), zone, out DateTimeOffset dto))
                 {
                     result = ValueRef.FromTimestampTz(dto);
                     return true;
                 }
                 return false;
             case (DataKind.String, DataKind.Timestamp):
-                if (DateTime.TryParse(input.AsString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTime dt))
+                // PG: wall clock taken as written; an explicit offset is
+                // ignored. Never the machine zone.
+                if (TemporalSemantics.TryParseTimestamp(input.AsString(), out DateTime dt))
                 {
                     result = ValueRef.FromTimestamp(dt);
                     return true;
