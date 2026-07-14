@@ -83,7 +83,9 @@ public sealed class DateTruncFunction : IFunction, IScalarFunction
             DataKind.Timestamp => new ValueTask<ValueRef>(
                 ValueRef.FromTimestamp(TruncateDateTime(field, args[1].AsTimestamp()))),
             DataKind.TimestampTz => new ValueTask<ValueRef>(
-                ValueRef.FromTimestampTz(TruncateDateTimeOffset(field, args[1].AsTimestampTz()))),
+                ValueRef.FromTimestampTz(TruncateDateTimeOffset(
+                    field, args[1].AsTimestampTz(),
+                    frame.Context?.SessionTimeZone ?? TimeZoneInfo.Utc))),
             DataKind.Date => new ValueTask<ValueRef>(
                 ValueRef.FromTimestamp(TruncateDateTime(field, args[1].AsDate().ToDateTime(TimeOnly.MinValue)))),
             _ => throw new ExecutionException(
@@ -117,14 +119,16 @@ public sealed class DateTruncFunction : IFunction, IScalarFunction
 
     /// <summary>
     /// <see cref="DateTimeOffset"/> overload of <see cref="TruncateDateTime"/>.
-    /// The instant is truncated in UTC, preserving offset 0 like PG's
-    /// session-TZ-pinned-to-UTC behaviour.
+    /// PG semantics: the wall clock is read in the session zone, truncated
+    /// there, and the truncated wall clock is re-anchored in the same zone —
+    /// so <c>date_trunc('day', …)</c> lands on the session zone's midnight,
+    /// not UTC midnight. With the default UTC session the two coincide.
     /// </summary>
-    internal static DateTimeOffset TruncateDateTimeOffset(string field, DateTimeOffset dto)
+    internal static DateTimeOffset TruncateDateTimeOffset(string field, DateTimeOffset dto, TimeZoneInfo zone)
     {
-        DateTime utc = dto.UtcDateTime;
-        DateTime trunc = TruncateDateTime(field, utc);
-        return new DateTimeOffset(DateTime.SpecifyKind(trunc, DateTimeKind.Unspecified).Ticks, TimeSpan.Zero);
+        DateTime wallClock = TemporalSemantics.ToZoneWallClock(dto, zone).DateTime;
+        DateTime trunc = TruncateDateTime(field, wallClock);
+        return TemporalSemantics.InterpretInZone(trunc, zone);
     }
 
     private static DateTime TruncateToIsoWeekStart(DateTime dt)

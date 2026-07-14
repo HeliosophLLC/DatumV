@@ -92,7 +92,7 @@ public sealed class CanCastFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(ValueRef.FromBoolean(false));
         }
 
-        bool ok = CastFunction.TryCastCore(input, targetKind, out _);
+        bool ok = CastFunction.TryCastCore(input, targetKind, out _, frame.Context?.SessionTimeZone);
         return new ValueTask<ValueRef>(ValueRef.FromBoolean(ok));
     }
 

@@ -22,9 +22,20 @@ SET time_zone TO 'Europe/Paris';
 
 Sets the session time zone. Zone names are IANA identifiers (`America/New_York`, `Europe/Paris`) or fixed-zone names (`UTC`, `GMT`); Windows zone ids also resolve. Unknown names raise an error and leave the setting unchanged. The default is UTC.
 
+The session time zone drives the interpretation and extraction of `timestamptz` values (storage is always UTC instants):
+
+- **Bare literals and string casts** — `TIMESTAMPTZ '2026-01-15 12:00:00'` (and any string→`timestamptz` cast or INSERT coercion without an explicit offset) interprets the wall clock in the session zone. An explicit offset (`+05`, `Z`) always wins. Plain `timestamp` literals take the wall clock as written; an explicit offset is ignored.
+- **Casts** — `timestamp → timestamptz` anchors the naive wall clock in the session zone; `timestamptz → timestamp` converts to the session zone's wall clock and drops the zone. `date → timestamptz` is the session zone's midnight; `timestamptz → date` is the session zone's calendar date at that instant.
+- **`date_part` / `EXTRACT`** — wall-clock fields (`hour`, `day`, …) read the session zone's clock face; `epoch` is zone-independent; the `timezone` / `timezone_hour` / `timezone_minute` fields report the session zone's UTC offset at that instant (DST-aware).
+- **`date_trunc`** — truncates at session-zone boundaries: `date_trunc('day', …)` lands on the session zone's midnight.
+- **`CURRENT_DATE` / `CURRENT_TIME`** — read the session zone's clock face. `CURRENT_TIMESTAMP` / `now()` return an absolute instant, zone-independent.
+
+A `SET TIME ZONE` takes effect from the next statement onward, including later statements in the same batch; the zone is stable within a single statement.
+
 Notes:
 
-- `timestamptz` values are stored and compared as UTC instants regardless of the session time zone, and currently also render in UTC. Use [`AT TIME ZONE`](type-system.md#at-time-zone) to convert a value to a specific zone's wall-clock time.
+- Comparison-time implicit coercion (`WHERE tz_col > '2026-01-15 12:00'` with a string literal) anchors bare wall clocks to UTC, not the session zone. Use an explicit `TIMESTAMPTZ '…'` literal or cast for session-zone interpretation.
+- Result display renders `timestamptz` in UTC. Use [`AT TIME ZONE`](type-system.md#at-time-zone) to project a value into a specific zone's wall-clock time.
 - PG's numeric-offset form (`SET TIME ZONE -7`) and interval form are not supported; name the zone instead.
 - The setting is session-scoped, not persisted: a reopened catalog starts back at UTC.
 

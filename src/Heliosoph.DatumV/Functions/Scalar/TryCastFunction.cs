@@ -74,7 +74,7 @@ public sealed class TryCastFunction : IFunction, IScalarFunction
             return new ValueTask<ValueRef>(input);
         }
 
-        if (CastFunction.TryCastCore(input, targetKind, out ValueRef result))
+        if (CastFunction.TryCastCore(input, targetKind, out ValueRef result, frame.Context?.SessionTimeZone))
         {
             return new ValueTask<ValueRef>(result);
         }

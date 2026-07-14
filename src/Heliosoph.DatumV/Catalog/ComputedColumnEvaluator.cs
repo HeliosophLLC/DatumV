@@ -30,7 +30,7 @@ internal static class ComputedColumnEvaluator
     /// </summary>
     public static DataValue ConvertValueRefToTarget(
         ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null, TimeZoneInfo? sessionZone = null)
     {
         if (source.IsNull)
         {
@@ -59,7 +59,7 @@ internal static class ComputedColumnEvaluator
             // field kinds, and stamps the column's canonical type-id.
             if (target.Kind == DataKind.Struct)
             {
-                return ConvertStructArrayValueRef(source, target, targetArena, columnName, types);
+                return ConvertStructArrayValueRef(source, target, targetArena, columnName, types, sessionZone);
             }
 
             // Same element kind: hand the array directly to ToDataValue, which
@@ -81,7 +81,7 @@ internal static class ComputedColumnEvaluator
             // arrays come from struct/array literal evaluation, which builds
             // ValueRef[] payloads, so the call is safe here.
             ReadOnlySpan<ValueRef> elements = source.GetArrayElements();
-            DataValue coerced = CoerceArrayElements(elements, target, targetArena, columnName);
+            DataValue coerced = CoerceArrayElements(elements, target, targetArena, columnName, sessionZone);
             return LiteralCoercion.EnforceFixedShape(coerced, target, columnName, targetArena);
         }
 
@@ -94,7 +94,7 @@ internal static class ComputedColumnEvaluator
         }
         if (source.Kind == DataKind.Struct)
         {
-            return ConvertStructValueRef(source, target, targetArena, columnName, types);
+            return ConvertStructValueRef(source, target, targetArena, columnName, types, sessionZone: sessionZone);
         }
 
         // Blob-kind sources (Image / Audio / Video / Json). ValueRef.ToDataValue
@@ -119,7 +119,7 @@ internal static class ComputedColumnEvaluator
         // arm reads from ValueRef's in-struct materialized payload — no
         // store needed at this boundary.
         return LiteralCoercion.Coerce(
-            source.ToObject(), target, targetArena, columnName);
+            source.ToObject(), target, targetArena, columnName, sessionZone);
     }
 
     /// <summary>
@@ -136,7 +136,7 @@ internal static class ComputedColumnEvaluator
     /// </summary>
     private static DataValue ConvertStructValueRef(
         ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
-        TypeRegistry? types, ushort precomputedTypeId = 0)
+        TypeRegistry? types, ushort precomputedTypeId = 0, TimeZoneInfo? sessionZone = null)
     {
         if (target.Kind != DataKind.Struct || target.Fields is not { Count: > 0 } declared)
         {
@@ -199,7 +199,7 @@ internal static class ComputedColumnEvaluator
             }
 
             coerced[i] = ConvertValueRefToTarget(
-                values[sourceIndex], field, targetArena, $"{columnName}.{field.Name}", types);
+                values[sourceIndex], field, targetArena, $"{columnName}.{field.Name}", types, sessionZone);
         }
 
         foreach (StructFieldDescriptor sourceField in sourceFields)
@@ -239,7 +239,7 @@ internal static class ComputedColumnEvaluator
     /// </summary>
     private static DataValue ConvertStructArrayValueRef(
         ValueRef source, ColumnInfo target, Arena targetArena, string columnName,
-        TypeRegistry? types)
+        TypeRegistry? types, TimeZoneInfo? sessionZone = null)
     {
         if (target.Fields is not { Count: > 0 } declared)
         {
@@ -269,7 +269,7 @@ internal static class ComputedColumnEvaluator
             }
             DataValue coerced = ConvertStructValueRef(
                 elements[i], elementTarget, targetArena, $"{columnName}[{i}]", types,
-                precomputedTypeId: elementTypeId);
+                precomputedTypeId: elementTypeId, sessionZone: sessionZone);
             fieldArrays[i] = coerced.AsStruct(targetArena);
         }
         return DataValue.FromStructArray(fieldArrays, targetArena, elementTypeId);
@@ -284,7 +284,8 @@ internal static class ComputedColumnEvaluator
         ReadOnlySpan<ValueRef> sourceElements,
         ColumnInfo target,
         Arena targetArena,
-        string columnName)
+        string columnName,
+        TimeZoneInfo? sessionZone = null)
     {
         // LiteralCoercion gates IsArray off the column descriptor; build a
         // scalar-shaped clone so per-element coercion routes through the
@@ -308,7 +309,7 @@ internal static class ComputedColumnEvaluator
             }
 
             object scalar = element.ToObject()!;
-            coerced[i] = LiteralCoercion.Coerce(scalar, elementTarget, targetArena, columnName);
+            coerced[i] = LiteralCoercion.Coerce(scalar, elementTarget, targetArena, columnName, sessionZone);
         }
 
         return DataValue.FromTypedArray(target.Kind, coerced, targetArena, targetArena);

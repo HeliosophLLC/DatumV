@@ -516,19 +516,19 @@ both store **8 bytes of microsecond/tick precision** and DatumV's
   hash equal regardless of the offset in the literal that produced them —
   `'2026-05-19T12:00:00-07:00'` and `'2026-05-19T19:00:00+00:00'` are
   byte-identical once stored. This matches PG.
-- **Bare-literal time zone for `TimestampTz`.** PG assumes the **session
-  time zone** when parsing a bare `'2026-05-19 12:00'` into a `timestamptz`.
-  DatumV currently has no session-TZ concept and assumes **UTC** for
-  bare literals. Literals with an explicit offset suffix
-  (`'2026-05-19T12:00:00-07:00'`) work identically to PG. This is the
-  one known PG-conformance gap; the workaround is to either include an
-  explicit offset in every `timestamptz` literal or to use
-  `AT TIME ZONE 'zone'` to re-anchor a value after construction.
+- **Bare-literal time zone for `TimestampTz`.** PG semantics: a bare
+  `'2026-05-19 12:00'` parsed into a `timestamptz` is interpreted in the
+  **session time zone** (default UTC — see
+  [Session Settings](session.md#set-time-zone)). Literals with an
+  explicit offset suffix (`'2026-05-19T12:00:00-07:00'`) honor the
+  offset regardless of the session zone. The machine's local time zone
+  never participates.
 - **`AT TIME ZONE`.** Kind-shifting operator — see [§ AT TIME
   ZONE](#at-time-zone) below.
-- **`timestamp ↔ timestamptz` casts.** PG converts via the session TZ;
-  DatumV assumes UTC for both directions. Explicit `AT TIME ZONE`
-  is the recommended path for the few cases where this matters.
+- **`timestamp ↔ timestamptz` casts.** PG semantics via the session time
+  zone: `timestamp → timestamptz` anchors the wall clock in the session
+  zone; `timestamptz → timestamp` drops to the session zone's wall
+  clock. With the default UTC session both reduce to tick-identity.
 
 ### Interval Literals
 
