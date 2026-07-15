@@ -19,3 +19,12 @@ export function isExternalUrl(href: string | undefined): href is string {
   if (!href) return false;
   return /^(https?|mailto|tel):/i.test(href);
 }
+
+// True when the text is, in its entirety, an http(s) URL — the shape
+// that earns a click-to-open affordance on a results cell. Deliberately
+// stricter than isExternalUrl: a cell is a value, so scheme-less domains
+// ("acme.com") and URLs embedded in prose stay plain text.
+export function isHttpUrl(text: string | undefined): text is string {
+  if (!text) return false;
+  return /^https?:\/\/\S+$/i.test(text.trim());
+}

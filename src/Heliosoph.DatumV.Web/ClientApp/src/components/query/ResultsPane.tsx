@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, ExternalLink, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import JsonView from '@uiw/react-json-view';
 import { darkTheme } from '@uiw/react-json-view/dark';
@@ -29,6 +29,7 @@ import {
 } from '@/state/columnDisplayModes';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { isHttpUrl, openExternalUrl } from '@/lib/openExternal';
 
 // Plain HTML <table> renderer for streamed query results. One block per
 // cell in the batch; the scrollable area lives above an SSMS-style
@@ -617,6 +618,9 @@ function SingleValueBody({ cell }: { cell: JsonCell }) {
   }
   else if (cell.kind === 'binary_download') {
     return <SingleValueBinaryDownload cell={cell} />;
+  }
+  else if (cell.kind === 'text' && isHttpUrl(cell.text)) {
+    return <SingleValueLink cell={cell} />;
   }
   // Scalar / JSON / catchall. Use a pre-wrap block so multi-line JSON
   // bodies keep their formatting; large font so the value is readable
@@ -1284,6 +1288,7 @@ const VirtualRow = memo(function VirtualRow({
 });
 
 function CellTable({ cell }: { cell: CellResult }) {
+  const { t } = useTranslation('query');
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
   // inside it, so vertical scroll moves rows past the pinned header
@@ -1593,13 +1598,31 @@ function CellTable({ cell }: { cell: CellResult }) {
       // our global listener never fires.
       dragModeRef.current = null;
 
+      // Cell-targeted right-clicks on a URL value get an "Open Link"
+      // entry above the copy actions, mirroring the in-cell launch icon.
+      const targetCell = sourceMode === 'cell' ? cell.rows[row]?.[col] : undefined;
+      const linkUrl =
+        targetCell?.kind === 'text' && isHttpUrl(targetCell.text)
+          ? targetCell.text.trim()
+          : null;
+
       const result = await eh.showContextMenu({
         items: [
-          { id: 'copy', label: 'Copy', accelerator: 'CmdOrCtrl+C' },
-          { id: 'copyWithHeaders', label: 'Copy with Headers' },
+          ...(linkUrl !== null
+            ? [
+                { id: 'openLink', label: t('contextMenu.openLink') },
+                { type: 'separator' as const },
+              ]
+            : []),
+          { id: 'copy', label: t('contextMenu.copy'), accelerator: 'CmdOrCtrl+C' },
+          { id: 'copyWithHeaders', label: t('contextMenu.copyWithHeaders') },
         ],
       });
       if (result === null) return;
+      if (result === 'openLink') {
+        if (linkUrl !== null) openExternalUrl(linkUrl);
+        return;
+      }
 
       const r = selectionRange(activeSelection, numRowsLocal, numColsLocal);
       if (r.rowMax < r.rowMin || r.colMax < r.colMin) return;
@@ -1617,7 +1640,7 @@ function CellTable({ cell }: { cell: CellResult }) {
         // focus, etc.); the menu UX still works for the next action.
       }
     },
-    [selection, cell.rows, cell.schema],
+    [selection, cell.rows, cell.schema, t],
   );
 
   // Stable identity wrapper around handleContextMenu so we can hand it to
@@ -1821,15 +1844,21 @@ function CellValue({
   cell: JsonCell;
   largeMedia?: boolean;
   /**
-   * Resolved per-column display mode (see ColumnDisplayModeDef). Currently
-   * consulted only for `numeric_array` cells; recursive callers (e.g.,
-   * struct field rendering) leave it undefined so nested numeric arrays
-   * keep the default stats chip.
+   * Resolved per-column display mode (see ColumnDisplayModeDef). Consulted
+   * for `numeric_array` cells and URL-shaped `text` cells; recursive
+   * callers (e.g., struct field rendering) leave it undefined so nested
+   * cells keep their default rendering.
    */
   mode?: string;
 }) {
   if (cell.kind === 'null') {
     return <span className="text-muted-foreground italic">null</span>;
+  }
+  // Whole-cell http(s) URLs get a launch icon. Detection is per-cell so
+  // URLs in mixed text columns still get the affordance; the `url`
+  // column mode's `plain` option is the per-column / per-kind opt-out.
+  if (cell.kind === 'text' && mode !== 'plain' && isHttpUrl(cell.text)) {
+    return <LinkTextCell cell={cell} />;
   }
   // The server lumps every single-blob media value into `kind: "media"`
   // and discriminates by the `mime` prefix. The legacy `image` /
@@ -1857,6 +1886,31 @@ function CellValue({
   if (cell.kind === 'json') return <JsonTextCell cell={cell} />;
   if (cell.kind === 'binary_download') return <BinaryDownloadCell cell={cell} />;
   return <span>{cell.text ?? ''}</span>;
+}
+
+// Inline grid cell for a text value that is itself an http(s) URL. The
+// text stays a plain selectable/copyable value — plain click must remain
+// a selection gesture — so the leading icon button carries the launch.
+function LinkTextCell({ cell }: { cell: JsonCell }) {
+  const { t } = useTranslation('query');
+  const url = (cell.text ?? '').trim();
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExternalUrl(url);
+        }}
+        aria-label={t('linkCell.openTooltip')}
+        title={t('linkCell.openTooltip')}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-xs"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+      </button>
+      <span className="truncate">{cell.text ?? ''}</span>
+    </span>
+  );
 }
 
 function BinaryCell({ cell }: { cell: JsonCell }) {
@@ -1912,6 +1966,28 @@ function BinaryDownloadCell({ cell }: { cell: JsonCell }) {
       </button>
       <span className="text-muted-foreground truncate" title={cell.text ?? ''}>{cell.text ?? ''}</span>
     </span>
+  );
+}
+
+// 1×1 result whose value is an http(s) URL: the value stays the primary
+// content; the button underneath opens it in the OS browser.
+function SingleValueLink({ cell }: { cell: JsonCell }) {
+  const { t } = useTranslation('query');
+  const url = (cell.text ?? '').trim();
+  return (
+    <div className="flex max-w-full flex-col items-center gap-3 px-4">
+      <pre className="text-foreground max-w-full overflow-auto font-mono leading-relaxed whitespace-pre-wrap break-words">
+        {cell.text ?? ''}
+      </pre>
+      <button
+        type="button"
+        onClick={() => openExternalUrl(url)}
+        className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex cursor-pointer items-center gap-2 rounded-xs px-4 py-2 text-sm font-medium"
+      >
+        <ExternalLink className="size-4" />
+        {t('linkCell.openButton')}
+      </button>
+    </div>
   );
 }
 

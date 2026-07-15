@@ -15,7 +15,26 @@
         "label": "First values",
         "description": "first elements as text"
       }
+    },
+    "url": {
+      "link": {
+        "label": "Link",
+        "description": "launch icon opens the default browser"
+      },
+      "plain": {
+        "label": "Plain text",
+        "description": "no launch affordance"
+      }
     }
+  },
+  "contextMenu": {
+    "openLink": "Open Link",
+    "copy": "Copy",
+    "copyWithHeaders": "Copy with Headers"
+  },
+  "linkCell": {
+    "openTooltip": "Open in browser",
+    "openButton": "Open in browser"
   },
   "jsonPreview": {
     "arrayChip": "{shown, number} of {total, number} {total, plural, one {item} other {items}}",

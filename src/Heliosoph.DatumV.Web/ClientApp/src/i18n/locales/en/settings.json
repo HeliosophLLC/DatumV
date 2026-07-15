@@ -97,7 +97,8 @@
     "imageGalleryLayoutOff": "Off",
     "imageGalleryLayoutHint": "When every column of a result is an image, render thumbnails as a wrapping gallery instead of a table.",
     "kinds": {
-      "numericArray": "Numeric arrays"
+      "numericArray": "Numeric arrays",
+      "url": "Web links"
     }
   }
 }
