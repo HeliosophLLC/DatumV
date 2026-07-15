@@ -1,3 +1,4 @@
+import { isHttpUrl } from '@/lib/openExternal';
 import type { JsonCell } from './execution';
 
 // Column display modes — the registry of "ways to render this kind of cell"
@@ -65,6 +66,28 @@ export const COLUMN_MODE_REGISTRY: ColumnDisplayModeDef[] = [
         id: 'preview',
         labelKey: 'columnModes.numeric_array.preview.label',
         descriptionKey: 'columnModes.numeric_array.preview.description',
+      },
+    ],
+  },
+  {
+    // Text columns whose values are whole http(s) URLs (detection keys
+    // off the column's first non-null cell, like every other kind).
+    // Cells in mixed columns still get the per-cell launch icon; this
+    // def exists so URL columns get the chip / settings opt-out.
+    kindKey: 'url',
+    appliesTo: (cell) => cell.kind === 'text' && isHttpUrl(cell.text),
+    defaultMode: 'link',
+    settingsLabelKey: 'columnModes.kinds.url',
+    options: [
+      {
+        id: 'link',
+        labelKey: 'columnModes.url.link.label',
+        descriptionKey: 'columnModes.url.link.description',
+      },
+      {
+        id: 'plain',
+        labelKey: 'columnModes.url.plain.label',
+        descriptionKey: 'columnModes.url.plain.description',
       },
     ],
   },
