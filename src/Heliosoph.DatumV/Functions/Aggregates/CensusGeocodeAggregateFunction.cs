@@ -264,8 +264,8 @@ public sealed class CensusGeocodeAggregateFunction : IAggregateFunction, IAggreg
                 return DataValue.NullArrayOf(DataKind.Struct);
             }
 
-            List<CensusGeocodeResult> verdicts =
-                await CensusGeocoderClient.Instance.GeocodeAsync(_records, _benchmark).ConfigureAwait(false);
+            List<CensusGeocodeResult> verdicts = await CensusGeocoderClient.Instance
+                .GeocodeAsync(_records, _benchmark, frame.Cancellation).ConfigureAwait(false);
 
             Dictionary<string, CensusGeocodeResult> byId = new(verdicts.Count, StringComparer.Ordinal);
             foreach (CensusGeocodeResult verdict in verdicts)

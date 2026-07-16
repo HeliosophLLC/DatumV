@@ -57,9 +57,8 @@ public class CensusGeocoderClient : IDisposable
         "https://geocoding.geo.census.gov/geocoder/locations/addressbatch";
 
     // Sized for the observed ~10 records/second service throughput on ChunkSize
-    // rows plus generous slack; keeps a hung connection from stalling a query
-    // forever (the aggregate interface carries no CancellationToken to do it
-    // sooner).
+    // rows plus generous slack; keeps a hung connection from stalling an
+    // uncancelled query forever.
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(10);
 
     // Backoff before the second and third attempt at a chunk. 5xx from the
@@ -104,16 +103,22 @@ public class CensusGeocoderClient : IDisposable
     /// splitting into <see cref="ChunkSize"/>-record chunks. Returns one verdict
     /// per submitted record; order follows the service's response order, so
     /// callers correlate by <see cref="CensusGeocodeResult.Id"/>, not position.
+    /// Cancelling <paramref name="cancellationToken"/> aborts the in-flight
+    /// request and any pending retries with <see cref="OperationCanceledException"/> —
+    /// a cancelled query stops occupying the shared public service.
     /// </summary>
     public async Task<List<CensusGeocodeResult>> GeocodeAsync(
-        IReadOnlyList<CensusAddressRecord> records, string benchmark)
+        IReadOnlyList<CensusAddressRecord> records,
+        string benchmark,
+        CancellationToken cancellationToken = default)
     {
         List<CensusGeocodeResult> all = new(records.Count);
         for (int start = 0; start < records.Count; start += ChunkSize)
         {
             int count = Math.Min(ChunkSize, records.Count - start);
             string requestCsv = BuildRequestCsv(records, start, count);
-            string responseCsv = await PostBatchWithRetryAsync(requestCsv, benchmark).ConfigureAwait(false);
+            string responseCsv =
+                await PostBatchWithRetryAsync(requestCsv, benchmark, cancellationToken).ConfigureAwait(false);
             ParseResponseCsv(responseCsv, all);
         }
         return all;
@@ -126,18 +131,20 @@ public class CensusGeocoderClient : IDisposable
     /// <see cref="RequestTimeout"/> of silence the service is overloaded and
     /// another full-length wait would only stall the query further.
     /// </summary>
-    private async Task<string> PostBatchWithRetryAsync(string requestCsv, string benchmark)
+    private async Task<string> PostBatchWithRetryAsync(
+        string requestCsv, string benchmark, CancellationToken cancellationToken)
     {
         RemoteServiceException? lastFailure = null;
         for (int attempt = 0; attempt <= _retryDelays.Length; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (attempt > 0)
             {
-                await Task.Delay(_retryDelays[attempt - 1]).ConfigureAwait(false);
+                await Task.Delay(_retryDelays[attempt - 1], cancellationToken).ConfigureAwait(false);
             }
             try
             {
-                return await PostBatchAsync(requestCsv, benchmark).ConfigureAwait(false);
+                return await PostBatchAsync(requestCsv, benchmark, cancellationToken).ConfigureAwait(false);
             }
             catch (RemoteServiceException ex) when (ex.IsRetryable)
             {
@@ -149,7 +156,8 @@ public class CensusGeocoderClient : IDisposable
             lastFailure.InnerException);
     }
 
-    private async Task<string> PostBatchAsync(string requestCsv, string benchmark)
+    private async Task<string> PostBatchAsync(
+        string requestCsv, string benchmark, CancellationToken cancellationToken)
     {
         using MultipartFormDataContent form = new();
         form.Add(new StringContent(benchmark), "benchmark");
@@ -160,7 +168,7 @@ public class CensusGeocoderClient : IDisposable
         try
         {
             using HttpResponseMessage response =
-                await _http.PostAsync(EndpointUrl, form).ConfigureAwait(false);
+                await _http.PostAsync(EndpointUrl, form, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 string detail = await ReadErrorSnippetAsync(response).ConfigureAwait(false);
@@ -170,7 +178,13 @@ public class CensusGeocoderClient : IDisposable
                     innerException: null,
                     isRetryable: status >= 500);
             }
-            return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller cancellation, not a service failure — propagate as-is so the
+            // query surfaces "cancelled", never a geocoder error.
+            throw;
         }
         catch (HttpRequestException ex)
         {
