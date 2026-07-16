@@ -395,7 +395,7 @@ internal sealed class QueryScopeValidator
     /// <summary>
     /// Best-effort static resolver for a TVF source's output column
     /// names. Looks the TVF up in the function registry and calls
-    /// <see cref="Functions.ITableValuedFunction.ValidateArguments"/>
+    /// <see cref="Functions.ITableValuedFunction.ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/>
     /// with placeholder argument kinds — for column-name validation
     /// we don't need accurate types, only the output schema's names.
     /// Returns <see langword="null"/> when the registry doesn't know

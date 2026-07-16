@@ -102,6 +102,30 @@ public sealed class UnnestFunction : ITableValuedFunctionMetadata, ITableValuedF
     }
 
     /// <inheritdoc />
+    public Schema ValidateArguments(
+        ReadOnlySpan<ColumnInfo> argumentShapes,
+        ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
+        CancellationToken cancellationToken)
+    {
+        if (argumentShapes.Length == 1
+            && argumentShapes[0] is { Kind: DataKind.Struct, Fields: { Count: > 0 } fields })
+        {
+            // Array<Struct> input with a plan-time shape: the output element
+            // keeps the field list so downstream field access (`x.value.id`)
+            // and CTAS column derivation see concrete field kinds.
+            return new Schema([new ColumnInfo("value", nullable: true, fields)]);
+        }
+
+        DataKind[] argumentKinds = new DataKind[argumentShapes.Length];
+        for (int index = 0; index < argumentShapes.Length; index++)
+        {
+            argumentKinds[index] = argumentShapes[index].Kind;
+        }
+        return ValidateArguments(argumentKinds, constantArguments, constantStore, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         ValueRef[] arguments,
         ExecutionContext context)

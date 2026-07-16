@@ -202,8 +202,8 @@ Batch-geocodes the group's US street addresses through the [US Census Bureau geo
 ```sql
 -- One-time geocode pass, persisted
 CREATE TABLE company_geo AS
-SELECT cast(g.value.id AS Int64) AS id, cast(g.value.status AS String) AS status,
-       cast(g.value.lat AS Float64) AS lat, cast(g.value.lon AS Float64) AS lon
+SELECT g.value.id AS id, g.value.status AS status,
+       g.value.lat AS lat, g.value.lon AS lon
 FROM (SELECT census_geocode_agg(id, street, city, state, zip) AS results
       FROM companies) r
 CROSS JOIN unnest(r.results) g;
@@ -215,7 +215,7 @@ JOIN company_geo geo ON geo.id = c.id
 WHERE geo.status = 'Match'
 ```
 
-The casts in the CTAS matter: the result's struct shape exists only at runtime, so casting each extracted field gives the planner the concrete column kinds the persisted table needs. Plain `SELECT` queries over the unnested fields don't need them.
+The function declares its result shape to the planner, so the extracted fields carry concrete column kinds (`id` Int64 or String, `lat`/`lon` Float64) through `unnest`, projections, and CTAS without casts.
 
 ### STRING_AGG
 

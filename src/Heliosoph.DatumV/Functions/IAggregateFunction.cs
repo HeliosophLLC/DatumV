@@ -119,6 +119,18 @@ public interface IAggregateFunction
     ReturnTypeRule? ReturnRule => null;
 
     /// <summary>
+    /// Optional plan-time declaration of the result's struct field layout, for
+    /// aggregates whose result (or result element, when <see cref="ReturnRule"/>
+    /// declares an array) is a struct with a signature-determined shape.
+    /// Returning a field list lets the schema resolver type field access over
+    /// the result — and CTAS persist extracted fields with concrete kinds —
+    /// instead of falling back to an opaque, fields-less Struct. Return
+    /// <see langword="null"/> (the default) when the shape is unknown or
+    /// runtime-dependent.
+    /// </summary>
+    IReadOnlyList<ColumnInfo>? ResolveResultFields(ReadOnlySpan<DataKind> argumentKinds) => null;
+
+    /// <summary>
     /// How this aggregate consumes <c>WITHIN GROUP (ORDER BY …)</c>.
     /// Default <see cref="WithinGroupSemantics.NotSupported"/> matches
     /// PostgreSQL strictness — most aggregates (<c>SUM</c> / <c>AVG</c> /
