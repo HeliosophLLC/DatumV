@@ -237,21 +237,7 @@ public static class ExpressionTypeResolver
     }
 
     private static DataKind? ResolveColumn(ColumnReference column, Schema sourceSchema)
-    {
-        // Try qualified name first, then unqualified.
-        if (column.TableName is not null)
-        {
-            string qualifiedName = $"{column.TableName}.{column.ColumnName}";
-            ColumnInfo? qualified = sourceSchema.FindColumn(qualifiedName);
-            if (qualified is not null)
-            {
-                return qualified.Kind;
-            }
-        }
-
-        ColumnInfo? info = sourceSchema.FindColumn(column.ColumnName);
-        return info?.Kind;
-    }
+        => ResolveColumnInfo(column, sourceSchema)?.Kind;
 
     /// <summary>
     /// Returns the full <see cref="ColumnInfo"/> for a column-reference expression,
@@ -262,6 +248,37 @@ public static class ExpressionTypeResolver
     {
         if (column.TableName is not null)
         {
+            // Three-part reference (`alias.column.field`): the parser stores
+            // the leading segment in SchemaName. When no real schema-qualified
+            // column matches, the leading two segments name a struct column
+            // and the trailing segment is a field within it — same semantic
+            // QueryScopeValidator applies at validation time. Resolving the
+            // field's ColumnInfo here is what lets projections and CTAS type
+            // struct-field extractions with concrete kinds.
+            if (column.SchemaName is not null)
+            {
+                ColumnInfo? direct = sourceSchema.FindColumn(
+                    $"{column.SchemaName}.{column.TableName}.{column.ColumnName}");
+                if (direct is not null)
+                {
+                    return direct;
+                }
+
+                ColumnInfo? structColumn =
+                    sourceSchema.FindColumn($"{column.SchemaName}.{column.TableName}")
+                    ?? sourceSchema.FindColumn(column.TableName);
+                if (structColumn is { Kind: DataKind.Struct, Fields: { } structFields })
+                {
+                    foreach (ColumnInfo field in structFields)
+                    {
+                        if (string.Equals(field.Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return field;
+                        }
+                    }
+                }
+            }
+
             string qualifiedName = $"{column.TableName}.{column.ColumnName}";
             ColumnInfo? qualified = sourceSchema.FindColumn(qualifiedName);
             if (qualified is not null)

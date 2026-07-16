@@ -20,7 +20,7 @@ namespace Heliosoph.DatumV.Functions;
 /// argument values or kinds (e.g. <c>range(0, 10)</c> vs <c>range(0.0, 1.0)</c>
 /// — the column kind follows the widest argument). Surfaced in hover /
 /// signature help when present; the runtime check still lives in
-/// <see cref="ITableValuedFunction.ValidateArguments"/>.
+/// <see cref="ITableValuedFunction.ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/>.
 /// </param>
 public sealed record TableValuedFunctionSignatureVariant(
     IReadOnlyList<ParameterSpec> Parameters,

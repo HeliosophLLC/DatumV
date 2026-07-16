@@ -220,17 +220,19 @@ public sealed class QuerySchemaResolver
         if (statement.From is not null)
         {
             IReadOnlyList<ResolvedColumn> fromColumns =
-                await ResolveSourceAsync(statement.From.Source, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
+                await ResolveSourceAsync(statement.From.Source, commonTableExpressionsByName, allColumns, cancellationToken).ConfigureAwait(false);
             allColumns.AddRange(fromColumns);
         }
 
-        // Resolve each JOINed source.
+        // Resolve each JOINed source. Sources resolved so far are passed
+        // through so lateral TVF arguments (`CROSS JOIN unnest(r.results) g`)
+        // resolve against the preceding sources' columns.
         if (statement.Joins is not null)
         {
             foreach (JoinClause join in statement.Joins)
             {
                 IReadOnlyList<ResolvedColumn> joinColumns =
-                    await ResolveSourceAsync(join.Source, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
+                    await ResolveSourceAsync(join.Source, commonTableExpressionsByName, allColumns, cancellationToken).ConfigureAwait(false);
 
                 // LEFT/RIGHT/FULL OUTER joins may produce nulls for the outer side.
                 if (join.Type is JoinType.Left or JoinType.Right or JoinType.FullOuter)
@@ -251,6 +253,7 @@ public sealed class QuerySchemaResolver
     private async Task<IReadOnlyList<ResolvedColumn>> ResolveSourceAsync(
         TableSource source,
         IReadOnlyDictionary<string, CommonTableExpression>? commonTableExpressionsByName,
+        IReadOnlyList<ResolvedColumn> precedingColumns,
         CancellationToken cancellationToken)
     {
         return source switch
@@ -261,7 +264,7 @@ public sealed class QuerySchemaResolver
             SubquerySource subquery => await ResolveSubqueryAsync(
                 subquery, cancellationToken).ConfigureAwait(false),
 
-            FunctionSource functionSource => ResolveFunctionSource(functionSource),
+            FunctionSource functionSource => ResolveFunctionSource(functionSource, precedingColumns),
 
             _ => throw new InvalidOperationException(
                 $"Unsupported table source type: {source.GetType().Name}."),
@@ -553,14 +556,15 @@ public sealed class QuerySchemaResolver
 
     /// <summary>
     /// Resolves a table-valued function source by calling
-    /// <see cref="ITableValuedFunction.ValidateArguments"/> with the inferred
+    /// <see cref="ITableValuedFunction.ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/> with the inferred
     /// argument kinds and constant-folded literal values for any argument that
     /// is a literal (in source or post-<c>ParameterBinder</c> substitution).
     /// Returns an empty column list if the function is unknown, if argument
     /// validation fails, or if the TVF's plan-time peek raises an IO/format
     /// exception against the resolved file.
     /// </summary>
-    private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(FunctionSource functionSource)
+    private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(
+        FunctionSource functionSource, IReadOnlyList<ResolvedColumn> precedingColumns)
     {
         ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.CallName);
         if (function is null)
@@ -569,7 +573,7 @@ public sealed class QuerySchemaResolver
         }
 
         int argCount = functionSource.Arguments.Count;
-        DataKind[] argumentKinds = new DataKind[argCount];
+        ColumnInfo[] argumentShapes = new ColumnInfo[argCount];
         DataValue?[] constantArguments = new DataValue?[argCount];
 
         // Per-call store backing any constant DataValue (long file paths,
@@ -583,9 +587,18 @@ public sealed class QuerySchemaResolver
         // references past the call.
         ByteArrayValueStore constantStore = new();
 
-        // For each argument: resolve the kind (used by all TVFs), and try to
-        // surface the constant-folded value (used by TVFs whose output schema
-        // depends on the data they're about to read — open_fits_table,
+        // Lateral scope: FROM/JOIN sources resolve left-to-right, so a TVF
+        // argument may reference any preceding source's columns
+        // (`CROSS JOIN unnest(r.results) g`). When nothing precedes the TVF
+        // (leading `FROM unnest(...)`), fall back to the historical
+        // placeholder so literal arguments still resolve.
+        Schema lateralSchema = precedingColumns.Count > 0
+            ? ToSchema(new ResolvedQuerySchema(precedingColumns))
+            : new Schema([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
+
+        // For each argument: resolve the kind + shape (used by all TVFs), and
+        // try to surface the constant-folded value (used by TVFs whose output
+        // schema depends on the data they're about to read — open_fits_table,
         // open_h5_dataset). LiteralExpression includes $parameter references
         // after ParameterBinder substitution, so this path fires for both
         // literal-in-source and bound-parameter calls.
@@ -593,10 +606,27 @@ public sealed class QuerySchemaResolver
         {
             Expression argument = functionSource.Arguments[index];
 
-            Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
-            DataKind? kind = ExpressionTypeResolver.ResolveType(
-                argument, emptySchema, _functionRegistry);
-            argumentKinds[index] = kind ?? DataKind.Float32;
+            (DataKind Kind, bool IsArray, bool IsMultiDim)? shape = ExpressionTypeResolver.ResolveTypeShape(
+                argument, lateralSchema, _functionRegistry);
+            DataKind kind = shape?.Kind ?? DataKind.Float32;
+
+            // Struct-kinded arguments additionally carry resolved field
+            // metadata so shape-aware TVFs (unnest over Array<Struct>) can
+            // propagate it into their output columns.
+            IReadOnlyList<ColumnInfo>? fields = kind == DataKind.Struct
+                ? ResolveStructFields(argument, lateralSchema)
+                : null;
+            argumentShapes[index] = fields is { Count: > 0 }
+                ? new ColumnInfo($"arg{index}", nullable: true, fields)
+                {
+                    IsArray = shape?.IsArray ?? false,
+                    IsMultiDim = shape?.IsMultiDim ?? false,
+                }
+                : new ColumnInfo($"arg{index}", kind, nullable: true)
+                {
+                    IsArray = shape?.IsArray ?? false,
+                    IsMultiDim = shape?.IsMultiDim ?? false,
+                };
 
             if (LiteralHoister.TryGetConstantValue(argument, constantStore, out DataValue constantValue))
             {
@@ -607,7 +637,7 @@ public sealed class QuerySchemaResolver
         try
         {
             Schema outputSchema = function.ValidateArguments(
-                argumentKinds,
+                argumentShapes,
                 constantArguments,
                 constantStore,
                 cancellationToken: default);
@@ -797,6 +827,25 @@ public sealed class QuerySchemaResolver
             ColumnInfo info = ExpressionTypeResolver.ResolveOutputColumnInfo(
                 elementLiteral, outputName: "_struct_array_probe", nullable: true, sourceSchema, _functionRegistry);
             return info.Fields;
+        }
+
+        // Aggregate calls that statically declare their result element shape
+        // (census_geocode_agg → Array<Struct{...}>): resolve the argument
+        // kinds against the source schema and ask the aggregate for its field
+        // list, so projections / derived tables / CTAS see typed fields
+        // instead of a fields-less Struct.
+        if (expression is FunctionCallExpression aggregateCall
+            && _functionRegistry.TryGetAggregate(aggregateCall.CallName) is { } aggregate)
+        {
+            DataKind[] argumentKinds = new DataKind[aggregateCall.Arguments.Count];
+            for (int index = 0; index < aggregateCall.Arguments.Count; index++)
+            {
+                DataKind? argKind = ExpressionTypeResolver.ResolveType(
+                    aggregateCall.Arguments[index], sourceSchema, _functionRegistry);
+                if (argKind is null) return null;
+                argumentKinds[index] = argKind.Value;
+            }
+            return aggregate.ResolveResultFields(argumentKinds);
         }
 
         // Direct column reference to a struct column (`SELECT s FROM src`) —

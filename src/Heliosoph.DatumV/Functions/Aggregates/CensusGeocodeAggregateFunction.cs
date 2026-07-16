@@ -133,6 +133,27 @@ public sealed class CensusGeocodeAggregateFunction : IAggregateFunction, IAggreg
     public ReturnTypeRule ReturnRule { get; } =
         ReturnTypeRule.ArrayOf(ReturnTypeRule.Constant(DataKind.Struct));
 
+    /// <summary>
+    /// Declares the result element's field layout so the planner can type
+    /// field access over the unnested result and CTAS can persist extracted
+    /// fields with concrete kinds. The <c>id</c> field mirrors the input id's
+    /// kind family: string ids round-trip as strings, integer ids as Int64.
+    /// </summary>
+    public IReadOnlyList<ColumnInfo>? ResolveResultFields(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length is not (5 or 6)) return null;
+        DataKind idKind = argumentKinds[0] == DataKind.String ? DataKind.String : DataKind.Int64;
+        return
+        [
+            new ColumnInfo("id", idKind, nullable: false),
+            new ColumnInfo("status", DataKind.String, nullable: false),
+            new ColumnInfo("match_type", DataKind.String, nullable: true),
+            new ColumnInfo("matched_address", DataKind.String, nullable: true),
+            new ColumnInfo("lat", DataKind.Float64, nullable: true),
+            new ColumnInfo("lon", DataKind.Float64, nullable: true),
+        ];
+    }
+
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new Accumulator();
 

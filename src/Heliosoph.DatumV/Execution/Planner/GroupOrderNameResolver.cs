@@ -278,7 +278,7 @@ internal static class GroupOrderNameResolver
 
     /// <summary>
     /// Adds a table-valued function's output column names, discovered by calling
-    /// its <see cref="ITableValuedFunction.ValidateArguments"/> with placeholder
+    /// its <see cref="ITableValuedFunction.ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/> with placeholder
     /// argument kinds — the same best-effort probe the scope validator uses.
     /// Returns <see langword="false"/> when the function is unknown or rejects the
     /// probe (e.g. a path-typed reader that peeks a real file), leaving the

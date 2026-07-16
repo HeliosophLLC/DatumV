@@ -129,6 +129,16 @@ public sealed class CensusGeocodeAggregateFunctionTests : ServiceTestBase, IAsyn
         AccumulateRow(acc, arena, frame, 3, "200 High St", "Columbus", "OH", "43215");
     }
 
+    /// <summary>Three-company table whose rows pair with <see cref="ThreeRowResponse"/>.</summary>
+    private static void SeedCompanies(TableCatalog catalog)
+    {
+        catalog.Plan("CREATE TABLE companies (id Int64, name String, street String, city String, state String, zip String)");
+        catalog.Plan("INSERT INTO companies VALUES "
+            + "(1, 'Acme', '100 Main St', 'Columbus', 'OH', '43215'),"
+            + "(2, 'Ghost LLC', '123 Nowhere St', 'Springfield', 'XX', '00000'),"
+            + "(3, 'HighCo', '200 High St', 'Columbus', 'OH', '43215')");
+    }
+
     private static (int Id, int Status, int MatchType, int MatchedAddress, int Lat, int Lon) FieldIndexes(
         DataValue element, TypeRegistry types)
     {
@@ -174,6 +184,30 @@ public sealed class CensusGeocodeAggregateFunctionTests : ServiceTestBase, IAsyn
         Assert.Throws<ArgumentException>(() => fn.ValidateArguments(
             [.. five, DataKind.String]));
         Assert.Throws<ArgumentException>(() => fn.ValidateArguments([DataKind.Int64, DataKind.String]));
+    }
+
+    [Fact]
+    public void ResolveResultFields_MirrorsIdKind()
+    {
+        CensusGeocodeAggregateFunction fn = new();
+
+        IReadOnlyList<ColumnInfo>? intFields = fn.ResolveResultFields(
+            [DataKind.Int32, DataKind.String, DataKind.String, DataKind.String, DataKind.String]);
+        Assert.NotNull(intFields);
+        Assert.Equal(6, intFields!.Count);
+        Assert.Equal("id", intFields[0].Name);
+        Assert.Equal(DataKind.Int64, intFields[0].Kind);
+        Assert.Equal(DataKind.String, intFields[1].Kind);
+        Assert.Equal("lat", intFields[4].Name);
+        Assert.Equal(DataKind.Float64, intFields[4].Kind);
+        Assert.Equal(DataKind.Float64, intFields[5].Kind);
+
+        IReadOnlyList<ColumnInfo>? stringFields = fn.ResolveResultFields(
+            [DataKind.String, DataKind.String, DataKind.String, DataKind.String, DataKind.String]);
+        Assert.Equal(DataKind.String, stringFields![0].Kind);
+
+        // Arity outside the signature → no declared shape.
+        Assert.Null(fn.ResolveResultFields([DataKind.Int64]));
     }
 
     // ───────────────────────── result contract ─────────────────────────
@@ -505,20 +539,47 @@ public sealed class CensusGeocodeAggregateFunctionTests : ServiceTestBase, IAsyn
     }
 
     [Fact]
-    public async Task Sql_CtasPersistsGeocodeResults()
+    public async Task Sql_CtasWithoutCasts_PersistsTypedColumns()
     {
-        // The documented geocode-once recipe: CTAS the unnested verdicts into a
-        // table, then everything downstream is a plain join against it.
+        // The documented geocode-once recipe, no casts: the aggregate declares
+        // its element shape (ResolveResultFields), the shape flows through the
+        // derived table into unnest's output column, and field access plans
+        // with concrete kinds — so CTAS persists Int64/String/Float64 columns.
         using ClientSwap swap = UseCannedResponse(ThreeRowResponse, out _);
         using TableCatalog catalog = CreateCatalog(CatalogPath);
-        catalog.Plan("CREATE TABLE companies (id Int64, name String, street String, city String, state String, zip String)");
-        catalog.Plan("INSERT INTO companies VALUES "
-            + "(1, 'Acme', '100 Main St', 'Columbus', 'OH', '43215'),"
-            + "(2, 'Ghost LLC', '123 Nowhere St', 'Springfield', 'XX', '00000'),"
-            + "(3, 'HighCo', '200 High St', 'Columbus', 'OH', '43215')");
-        // The casts matter: the aggregate's element struct shape exists only at
-        // runtime, so without them the planner can't type the extracted fields
-        // and CTAS mis-declares the persisted columns.
+        SeedCompanies(catalog);
+        catalog.Plan(
+            "CREATE TABLE company_geo AS "
+            + "SELECT g.value.id AS id, g.value.status AS status, g.value.lat AS lat, g.value.lon AS lon "
+            + "FROM (SELECT census_geocode_agg(id, street, city, state, zip) AS results FROM companies) r "
+            + "CROSS JOIN unnest(r.results) g");
+
+        Arena arena = CreateArena();
+        arena.AddReference();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT id, status, lat, lon FROM company_geo ORDER BY id",
+            catalog, store: arena);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(DataKind.Int64, rows[0]["id"].Kind);
+        Assert.True(rows[0]["id"].TryToInt64(out long firstId));
+        Assert.Equal(1L, firstId);
+        Assert.Equal("Match", rows[0]["status"].AsString(arena));
+        Assert.Equal(DataKind.Float64, rows[0]["lat"].Kind);
+        Assert.Equal(39.9612, rows[0]["lat"].AsFloat64(), 4);
+        Assert.Equal(-83.0007, rows[0]["lon"].AsFloat64(), 4);
+        Assert.True(rows[1]["lat"].IsNull);
+        Assert.Equal(39.9690, rows[2]["lat"].AsFloat64(), 4);
+    }
+
+    [Fact]
+    public async Task Sql_CtasPersistsGeocodeResults()
+    {
+        // The geocode-once recipe with explicit casts — no longer required now
+        // that the aggregate declares its element shape, but still supported.
+        using ClientSwap swap = UseCannedResponse(ThreeRowResponse, out _);
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        SeedCompanies(catalog);
         catalog.Plan(
             "CREATE TABLE company_geo AS "
             + "SELECT cast(g.value.id AS Int64) AS id, cast(g.value.status AS String) AS status, "

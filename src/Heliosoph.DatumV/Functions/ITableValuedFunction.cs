@@ -58,6 +58,30 @@ public interface ITableValuedFunction
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Shape-aware overload of
+    /// <see cref="ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/>:
+    /// each argument arrives as a full <see cref="ColumnInfo"/> carrying
+    /// array-ness and — for struct-kinded arguments whose shape the resolver
+    /// could determine — field metadata. The default implementation strips the
+    /// shapes down to kinds and forwards; TVFs whose output schema depends on
+    /// an argument's struct shape (<c>unnest</c> over <c>Array&lt;Struct&gt;</c>)
+    /// override to propagate fields into their output columns.
+    /// </summary>
+    Schema ValidateArguments(
+        ReadOnlySpan<ColumnInfo> argumentShapes,
+        ReadOnlySpan<DataValue?> constantArguments,
+        IValueStore constantStore,
+        CancellationToken cancellationToken)
+    {
+        DataKind[] argumentKinds = new DataKind[argumentShapes.Length];
+        for (int index = 0; index < argumentShapes.Length; index++)
+        {
+            argumentKinds[index] = argumentShapes[index].Kind;
+        }
+        return ValidateArguments(argumentKinds, constantArguments, constantStore, cancellationToken);
+    }
+
+    /// <summary>
     /// Executes the function and yields rows asynchronously. Arguments are
     /// pre-evaluated once by the operator before this call; implementations
     /// should rent output batches via <paramref name="context"/>.

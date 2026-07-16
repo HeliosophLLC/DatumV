@@ -1,4 +1,5 @@
 using Heliosoph.DatumV.Manifest;
+using Heliosoph.DatumV.Model;
 
 namespace Heliosoph.DatumV.Functions;
 
@@ -30,7 +31,7 @@ public interface ITableValuedFunctionMetadata
 
     /// <summary>
     /// Accepted argument shapes. The runtime check in
-    /// <see cref="ITableValuedFunction.ValidateArguments"/> remains the
+    /// <see cref="ITableValuedFunction.ValidateArguments(ReadOnlySpan{DataKind}, ReadOnlySpan{DataValue?}, IValueStore, CancellationToken)"/> remains the
     /// source of truth for execution-time enforcement; this static surface
     /// is what the language server reads for completion, hover, and
     /// signature help. Implementations should keep the two in lock-step.
