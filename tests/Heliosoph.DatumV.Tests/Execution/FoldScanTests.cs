@@ -379,9 +379,9 @@ public sealed class FoldScanTests : ServiceTestBase
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(1f, results[0]["rn"].AsFloat32());
+        Assert.Equal(1L, results[0]["rn"].AsInt64());
         Assert.Equal(10f, results[0]["total"].AsFloat32());
-        Assert.Equal(2f, results[1]["rn"].AsFloat32());
+        Assert.Equal(2L, results[1]["rn"].AsInt64());
         Assert.Equal(30f, results[1]["total"].AsFloat32());
     }
 

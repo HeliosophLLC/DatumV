@@ -9,25 +9,25 @@ Window functions compute a value for each row based on a window of related rows 
 
 ### ROW_NUMBER
 
-`ROW_NUMBER() OVER (...)` -> Float32
+`ROW_NUMBER() OVER (...)` -> Int64
 
 Sequential integer 1..N per partition.
 
 ### RANK
 
-`RANK() OVER (...)` -> Float32
+`RANK() OVER (...)` -> Int64
 
 Rank with gaps on ties (1, 1, 3). Requires ORDER BY.
 
 ### DENSE_RANK
 
-`DENSE_RANK() OVER (...)` -> Float32
+`DENSE_RANK() OVER (...)` -> Int64
 
 Rank without gaps (1, 1, 2). Requires ORDER BY.
 
 ### NTILE
 
-`NTILE(n) OVER (...)` -> Float32
+`NTILE(n) OVER (...)` -> Int32
 
 Distribute rows into `n` roughly equal buckets.
 
