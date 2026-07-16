@@ -42,12 +42,12 @@ public sealed class WindowHoistWildcardTests : ServiceTestBase, IAsyncLifetime
             [1, 10.0],
             [2, 20.0]);
 
-        (List<string> names, List<float> rowNumbers) = await RunWithColumnNamesAsync(catalog,
+        (List<string> names, List<long> rowNumbers) = await RunWithColumnNamesAsync(catalog,
             "SELECT row_number() OVER (ORDER BY id) AS rn, * FROM nums",
-            (row, _) => row["rn"].AsFloat32());
+            (row, _) => row["rn"].AsInt64());
 
         Assert.Equal(["rn", "id", "n"], names);
-        Assert.Equal([1f, 2f], rowNumbers);
+        Assert.Equal([1L, 2L], rowNumbers);
     }
 
     [Fact]
@@ -77,12 +77,12 @@ public sealed class WindowHoistWildcardTests : ServiceTestBase, IAsyncLifetime
             [1, 10.0],
             [2, 20.0]);
 
-        (List<string> names, List<float> rowNumbers) = await RunWithColumnNamesAsync(catalog,
+        (List<string> names, List<long> rowNumbers) = await RunWithColumnNamesAsync(catalog,
             "SELECT row_number() OVER (ORDER BY nums.id) AS rn, * FROM nums",
-            (row, _) => row["rn"].AsFloat32());
+            (row, _) => row["rn"].AsInt64());
 
         Assert.Equal(["rn", "id", "n"], names);
-        Assert.Equal([1f, 2f], rowNumbers);
+        Assert.Equal([1L, 2L], rowNumbers);
     }
 
     [Fact]
