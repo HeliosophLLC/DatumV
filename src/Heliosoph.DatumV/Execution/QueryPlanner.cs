@@ -1069,9 +1069,20 @@ public sealed class QueryPlanner
                     continue;
                 }
 
+                // An unaliased bare window call is output-named by its
+                // formatted text. The rewrite below replaces the expression
+                // with a reference to the `__`-hidden hoisted column, so the
+                // pre-rewrite name has to be pinned as an alias here or the
+                // hidden name would surface as the output column name.
+                string? alias = column.Alias;
+                if (alias is null && column.Expression is WindowFunctionCallExpression bareWindowCall)
+                {
+                    alias = QueryExplainer.FormatExpression(bareWindowCall);
+                }
+
                 Expression rewritten = WindowRewriter.RewriteWindowExpression(
                     column.Expression, _functionRegistry, windowColumns);
-                windowRewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
+                windowRewrittenColumns.Add(new SelectColumn(rewritten, alias));
             }
 
             // Rewrite window function calls inside LET binding expressions.
@@ -1230,7 +1241,13 @@ public sealed class QueryPlanner
         bool hasStarOnly = projectionColumns.Count == 1
             && projectionColumns[0] is SelectAllColumns { ExcludedColumns: null, ReplacedColumns: null }
             && letBindings is null
-            && assertions is null;
+            && assertions is null
+            // A WindowOperator below appends `__`-hidden hoisted columns
+            // (QUALIFY hoists even when the SELECT list is a bare `*`);
+            // only the ProjectOperator's wildcard expansion filters those
+            // out, so the passthrough shortcut would leak them.
+            && !hasWindowFunctions
+            && !qualifyHasWindowFunctions;
         if (!hasStarOnly)
         {
             source = new ProjectOperator(source, projectionColumns, letBindings, assertions);

@@ -395,7 +395,16 @@ public sealed class ProjectOperator : QueryOperator
                                 || columnName.Equals(
                                     tableColumns.TableName, StringComparison.OrdinalIgnoreCase))
                             {
-                                if (IsHiddenColumnName(columnName))
+                                // Hiddenness is judged on the name inside the
+                                // alias qualifier: a synthetic alias is
+                                // explicitly targeted by the rewriter that
+                                // created it (`__srf_0.value` must surface
+                                // through `__srf_0.*`), so only a `__` on the
+                                // column portion hides the column.
+                                string unqualifiedName = columnName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                                    ? columnName[prefix.Length..]
+                                    : columnName;
+                                if (IsHiddenColumnName(unqualifiedName))
                                     continue;
                                 if (IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
                                     continue;
@@ -826,12 +835,21 @@ public sealed class ProjectOperator : QueryOperator
     }
 
     /// <summary>
-    /// True for planner-synthetic column names (LET hoists, model invocation outputs, etc.) that
-    /// must not surface through wildcard expansion. The convention is a leading <c>__</c> on the
-    /// unqualified portion of the name; explicit projections may still reference these names.
+    /// True for planner-synthetic column names (LET hoists, window hoists, model invocation
+    /// outputs, etc.) that must not surface through wildcard expansion. The convention is a
+    /// leading <c>__</c>; explicit projections may still reference these names. Callers
+    /// expanding a qualified wildcard (<c>alias.*</c>) must pass the alias-stripped portion —
+    /// a synthetic alias qualifier does not hide the columns behind it.
     /// </summary>
     internal static bool IsHiddenColumnName(string columnName)
     {
+        // Hoisted window column names embed formatted SQL text that can
+        // itself contain dots (`__window_row_number() OVER(ORDER BY t.x)`),
+        // so a raw leading `__` counts before the qualified-name split.
+        if (columnName.StartsWith("__", StringComparison.Ordinal))
+        {
+            return true;
+        }
         int dotIndex = columnName.IndexOf('.');
         ReadOnlySpan<char> unqualified = dotIndex >= 0
             ? columnName.AsSpan(dotIndex + 1)

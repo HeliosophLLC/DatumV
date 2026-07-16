@@ -28,6 +28,15 @@ namespace Heliosoph.DatumV.Execution.Planner;
 internal static class WindowRewriter
 {
     /// <summary>
+    /// Name prefix for hoisted window output columns. The leading <c>__</c>
+    /// marks them planner-synthetic so wildcard expansion skips them (see
+    /// <see cref="ProjectOperator.IsHiddenColumnName"/>); the formatted call
+    /// text appended after it keeps the name unique per distinct window
+    /// expression, which the hoist deduplication relies on.
+    /// </summary>
+    internal const string HoistedColumnPrefix = "__window_";
+
+    /// <summary>
     /// Returns <see langword="true"/> if any SELECT column contains a window function
     /// call. Wildcard columns are skipped.
     /// </summary>
@@ -144,7 +153,7 @@ internal static class WindowRewriter
                     $"'{QueryExplainer.FormatExpression(windowCall)}'.");
             }
 
-            string outputName = QueryExplainer.FormatExpression(windowCall);
+            string outputName = HoistedColumnPrefix + QueryExplainer.FormatExpression(windowCall);
 
             // Deduplicate: reuse existing WindowColumn if the same expression already appears.
             bool alreadyRegistered = false;
