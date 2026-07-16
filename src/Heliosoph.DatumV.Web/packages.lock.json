@@ -253,7 +253,7 @@
           "OpenCvSharp4": "[4.13.0.20260302, )",
           "OpenCvSharp4.runtime.win": "[4.13.0.20260302, )",
           "Parquet.Net": "[5.5.0, )",
-          "PureHDF": "[2.1.1, )",
+          "PureHDF": "[2.1.2, )",
           "Sdcb.FFmpeg": "[7.0.0, )",
           "Sdcb.FFmpeg.runtime.windows-x64": "[7.1.0, )",
           "SharpGLTF.Core": "[1.0.6, )",
@@ -372,9 +372,9 @@
       },
       "PureHDF": {
         "type": "CentralTransitive",
-        "requested": "[2.1.1, )",
-        "resolved": "2.1.1",
-        "contentHash": "u3iOtOBxYRXf7C3W0dpZJPcZayfK3EEB2p7CJKjyyd7FXpxcGNcEHMr1cjTWi8eZOBxKaQEDzBMA4eAb4pq8sQ=="
+        "requested": "[2.1.2, )",
+        "resolved": "2.1.2",
+        "contentHash": "VeJM2EhQPU/HfoZxic2HDjF+CJEskJVuvU7vB4y29F6eJ6gnuLjudlSpFhUX+FY+jB6THpgWPByej5ay0X4g+Q=="
       },
       "Sdcb.FFmpeg": {
         "type": "CentralTransitive",

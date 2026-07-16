@@ -139,9 +139,9 @@
       },
       "PureHDF": {
         "type": "Direct",
-        "requested": "[2.1.1, )",
-        "resolved": "2.1.1",
-        "contentHash": "u3iOtOBxYRXf7C3W0dpZJPcZayfK3EEB2p7CJKjyyd7FXpxcGNcEHMr1cjTWi8eZOBxKaQEDzBMA4eAb4pq8sQ=="
+        "requested": "[2.1.2, )",
+        "resolved": "2.1.2",
+        "contentHash": "VeJM2EhQPU/HfoZxic2HDjF+CJEskJVuvU7vB4y29F6eJ6gnuLjudlSpFhUX+FY+jB6THpgWPByej5ay0X4g+Q=="
       },
       "Sdcb.FFmpeg": {
         "type": "Direct",
