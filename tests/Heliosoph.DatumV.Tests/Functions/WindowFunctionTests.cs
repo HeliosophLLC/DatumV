@@ -68,9 +68,9 @@ public class WindowFunctionTests : ServiceTestBase
 
         DataValue[] results = await ComputeWindowAsync(function, rows);
 
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(2f, results[1].AsFloat32());
-        Assert.Equal(3f, results[2].AsFloat32());
+        Assert.Equal(1L, results[0].AsInt64());
+        Assert.Equal(2L, results[1].AsInt64());
+        Assert.Equal(3L, results[2].AsInt64());
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class WindowFunctionTests : ServiceTestBase
         DataValue[] results = await ComputeWindowAsync(function, rows);
 
         Assert.Single(results);
-        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(1L, results[0].AsInt64());
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class WindowFunctionTests : ServiceTestBase
     {
         RowNumberFunction function = new();
         DataKind result = function.ValidateArguments([]);
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Int64, result);
     }
 
     // --------------- RANK ---------------
@@ -123,10 +123,10 @@ public class WindowFunctionTests : ServiceTestBase
         DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 3 (gap), then rank 4
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(1f, results[1].AsFloat32());
-        Assert.Equal(3f, results[2].AsFloat32());
-        Assert.Equal(4f, results[3].AsFloat32());
+        Assert.Equal(1L, results[0].AsInt64());
+        Assert.Equal(1L, results[1].AsInt64());
+        Assert.Equal(3L, results[2].AsInt64());
+        Assert.Equal(4L, results[3].AsInt64());
     }
 
     [Fact]
@@ -147,9 +147,9 @@ public class WindowFunctionTests : ServiceTestBase
 
         DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(2f, results[1].AsFloat32());
-        Assert.Equal(3f, results[2].AsFloat32());
+        Assert.Equal(1L, results[0].AsInt64());
+        Assert.Equal(2L, results[1].AsInt64());
+        Assert.Equal(3L, results[2].AsInt64());
     }
 
     // --------------- DENSE_RANK ---------------
@@ -174,10 +174,10 @@ public class WindowFunctionTests : ServiceTestBase
         DataValue[] results = await ComputeWindowAsync(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 2 (no gap), then rank 3
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(1f, results[1].AsFloat32());
-        Assert.Equal(2f, results[2].AsFloat32());
-        Assert.Equal(3f, results[3].AsFloat32());
+        Assert.Equal(1L, results[0].AsInt64());
+        Assert.Equal(1L, results[1].AsInt64());
+        Assert.Equal(2L, results[2].AsInt64());
+        Assert.Equal(3L, results[3].AsInt64());
     }
 
     // --------------- NTILE ---------------
@@ -198,10 +198,10 @@ public class WindowFunctionTests : ServiceTestBase
         IReadOnlyList<Expression> arguments = [new LiteralExpression(2)];
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(1f, results[1].AsFloat32());
-        Assert.Equal(2f, results[2].AsFloat32());
-        Assert.Equal(2f, results[3].AsFloat32());
+        Assert.Equal(1, results[0].AsInt32());
+        Assert.Equal(1, results[1].AsInt32());
+        Assert.Equal(2, results[2].AsInt32());
+        Assert.Equal(2, results[3].AsInt32());
     }
 
     [Fact]
@@ -221,11 +221,11 @@ public class WindowFunctionTests : ServiceTestBase
         IReadOnlyList<Expression> arguments = [new LiteralExpression(3)];
         DataValue[] results = await ComputeWindowAsync(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(1f, results[0].AsFloat32());
-        Assert.Equal(1f, results[1].AsFloat32());
-        Assert.Equal(2f, results[2].AsFloat32());
-        Assert.Equal(2f, results[3].AsFloat32());
-        Assert.Equal(3f, results[4].AsFloat32());
+        Assert.Equal(1, results[0].AsInt32());
+        Assert.Equal(1, results[1].AsInt32());
+        Assert.Equal(2, results[2].AsInt32());
+        Assert.Equal(2, results[3].AsInt32());
+        Assert.Equal(3, results[4].AsInt32());
     }
 
     [Fact]

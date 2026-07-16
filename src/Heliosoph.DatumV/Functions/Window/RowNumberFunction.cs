@@ -21,7 +21,7 @@ public sealed class RowNumberFunction : IWindowFunction
             throw new ArgumentException("ROW_NUMBER() accepts no arguments.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int64;
     }
 
     /// <inheritdoc/>
@@ -42,7 +42,7 @@ public sealed class RowNumberFunction : IWindowFunction
         {
             for (int i = 0; i < partitionRows.Count; i++)
             {
-                results[i] = DataValue.FromFloat32(i + 1);
+                results[i] = DataValue.FromInt64(i + 1);
             }
             return ValueTask.CompletedTask;
         }

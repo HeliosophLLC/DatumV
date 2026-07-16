@@ -127,10 +127,10 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
         Row a20 = rows.First(r => r["value"].AsFloat32() == 20f);
         Row a30 = rows.First(r => r["value"].AsFloat32() == 30f);
         Row b50 = rows.First(r => r["value"].AsFloat32() == 50f);
-        Assert.Equal(1f, a10["within_group_rank"].AsFloat32());
-        Assert.Equal(2f, a20["within_group_rank"].AsFloat32());
-        Assert.Equal(3f, a30["within_group_rank"].AsFloat32());
-        Assert.Equal(1f, b50["within_group_rank"].AsFloat32());
+        Assert.Equal(1L, a10["within_group_rank"].AsInt64());
+        Assert.Equal(2L, a20["within_group_rank"].AsInt64());
+        Assert.Equal(3L, a30["within_group_rank"].AsInt64());
+        Assert.Equal(1L, b50["within_group_rank"].AsInt64());
     }
 
     /// <summary>
@@ -154,13 +154,13 @@ public sealed class LetBindingComplexExpressionTests : ServiceTestBase
             catalog);
 
         Assert.Equal(3, rows.Count);
-        // ROW_NUMBER() returns Float32 in this engine; arithmetic preserves Float32.
-        Row a10 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsFloat32() == 100f);
-        Row a20 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsFloat32() == 200f);
+        // ROW_NUMBER() returns Int64; integer arithmetic preserves Int64.
+        Row a10 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsInt64() == 100L);
+        Row a20 = rows.First(r => r["category"].AsString() == "A" && r["scaled_rank"].AsInt64() == 200L);
         Row b30 = rows.First(r => r["category"].AsString() == "B");
         Assert.NotEqual(default, a10);
         Assert.NotEqual(default, a20);
-        Assert.Equal(100f, b30["scaled_rank"].AsFloat32());
+        Assert.Equal(100L, b30["scaled_rank"].AsInt64());
     }
 
     // ──────────────── Scalar subqueries inside LET ────────────────

@@ -22,7 +22,7 @@ public sealed class RankFunction : IWindowFunction
             throw new ArgumentException("RANK() accepts no arguments.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int64;
     }
 
     /// <inheritdoc/>
@@ -46,13 +46,13 @@ public sealed class RankFunction : IWindowFunction
                 return;
             }
 
-            results[0] = DataValue.FromFloat32(1);
+            results[0] = DataValue.FromInt64(1);
 
             for (int i = 1; i < partitionRows.Count; i++)
             {
                 bool isTie = await WindowFunctionHelper.AreOrderByValuesEqualAsync(
                     partitionRows[i - 1], partitionRows[i], orderByItems, evaluator, cancellationToken).ConfigureAwait(false);
-                results[i] = isTie ? results[i - 1] : DataValue.FromFloat32(i + 1);
+                results[i] = isTie ? results[i - 1] : DataValue.FromInt64(i + 1);
             }
         }
     }

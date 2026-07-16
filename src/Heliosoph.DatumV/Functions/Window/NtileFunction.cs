@@ -28,7 +28,7 @@ public sealed class NtileFunction : IWindowFunction
             throw new ArgumentException("NTILE() argument must be a numeric scalar.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc/>
@@ -74,7 +74,7 @@ public sealed class NtileFunction : IWindowFunction
 
                 for (int j = 0; j < bucketSize && rowIndex < rowCount; j++)
                 {
-                    results[rowIndex] = DataValue.FromFloat32(bucket);
+                    results[rowIndex] = DataValue.FromInt32(bucket);
                     rowIndex++;
                 }
             }

@@ -54,9 +54,9 @@ public class WindowOperatorTests : ServiceTestBase
         Assert.Equal(3, results.Count);
         // Each row should have the original "id" column plus "rn"
         Assert.Equal(2, results[0].FieldCount);
-        Assert.Equal(1f, results[0]["rn"].AsFloat32());
-        Assert.Equal(2f, results[1]["rn"].AsFloat32());
-        Assert.Equal(3f, results[2]["rn"].AsFloat32());
+        Assert.Equal(1L, results[0]["rn"].AsInt64());
+        Assert.Equal(2L, results[1]["rn"].AsInt64());
+        Assert.Equal(3L, results[2]["rn"].AsInt64());
     }
 
     // ─────────────── Partitioned row numbering ───────────────
@@ -89,20 +89,20 @@ public class WindowOperatorTests : ServiceTestBase
 
         // Verify row numbers are correct within each partition.
         // Rows are emitted in original order, so we need to verify per-partition numbering.
-        List<float> categoryARowNumbers = results
+        List<long> categoryARowNumbers = results
             .Where(r => r["category"].AsString() == "A")
-            .Select(r => r["rn"].AsFloat32())
+            .Select(r => r["rn"].AsInt64())
             .OrderBy(n => n)
             .ToList();
 
-        List<float> categoryBRowNumbers = results
+        List<long> categoryBRowNumbers = results
             .Where(r => r["category"].AsString() == "B")
-            .Select(r => r["rn"].AsFloat32())
+            .Select(r => r["rn"].AsInt64())
             .OrderBy(n => n)
             .ToList();
 
-        Assert.Equal([1f, 2f, 3f], categoryARowNumbers);
-        Assert.Equal([1f, 2f], categoryBRowNumbers);
+        Assert.Equal([1L, 2L, 3L], categoryARowNumbers);
+        Assert.Equal([1L, 2L], categoryBRowNumbers);
     }
 
     // ─────────────── Rank with ties ───────────────
@@ -132,17 +132,17 @@ public class WindowOperatorTests : ServiceTestBase
 
         // After sorting desc: 100, 100, 90, 80 → ranks 1, 1, 3, 4
         // But results are in original order, so we check by score.
-        List<(float Score, float Rank)> scored = results
-            .Select(r => (r["score"].AsFloat32(), r["rnk"].AsFloat32()))
+        List<(float Score, long Rank)> scored = results
+            .Select(r => (r["score"].AsFloat32(), r["rnk"].AsInt64()))
             .ToList();
 
-        List<float> hundredRanks = scored.Where(s => s.Score == 100f).Select(s => s.Rank).ToList();
-        List<float> ninetyRanks = scored.Where(s => s.Score == 90f).Select(s => s.Rank).ToList();
-        List<float> eightyRanks = scored.Where(s => s.Score == 80f).Select(s => s.Rank).ToList();
+        List<long> hundredRanks = scored.Where(s => s.Score == 100f).Select(s => s.Rank).ToList();
+        List<long> ninetyRanks = scored.Where(s => s.Score == 90f).Select(s => s.Rank).ToList();
+        List<long> eightyRanks = scored.Where(s => s.Score == 80f).Select(s => s.Rank).ToList();
 
-        Assert.All(hundredRanks, r => Assert.Equal(1f, r));
-        Assert.All(ninetyRanks, r => Assert.Equal(3f, r));
-        Assert.All(eightyRanks, r => Assert.Equal(4f, r));
+        Assert.All(hundredRanks, r => Assert.Equal(1L, r));
+        Assert.All(ninetyRanks, r => Assert.Equal(3L, r));
+        Assert.All(eightyRanks, r => Assert.Equal(4L, r));
     }
 
     // ─────────────── Running total frame ───────────────
