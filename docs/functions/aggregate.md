@@ -189,6 +189,34 @@ FROM (SELECT pca_project(pca, emb) AS xy,
                         kmeans_fit_agg(emb, 4) OVER () AS km FROM corpus) f) p
 ```
 
+### census_geocode_agg
+
+`census_geocode_agg(id, street, city, state, zip [, options])` -> Array<Struct>
+
+Batch-geocodes the group's US street addresses through the [US Census Bureau geocoder](https://geocoding.geo.census.gov/) — free, keyless, US-only. Returns one element per input row: `Struct{id, status String, match_type String, matched_address String, lat Float64, lon Float64}`. `status` is the service's verdict (`Match` / `No_Match` / `Tie`); the remaining fields are null for non-matches. Coordinates are WGS-84 decimal degrees. Unnest the result and join back on `id` to attach coordinates to the source rows.
+
+`id` is any integer (returned as Int64) or a string; it must be non-null and unique within the group, because it keys the service's response back to the input rows. Null address parts are sent as empty fields — street plus either city+state or zip generally suffices for a match. The optional `options` struct accepts `benchmark` (string, default `Public_AR_Current`). Requests are chunked at 2,000 records — the service processes roughly 10 records per second, so expect a few minutes per few thousand rows — and transient server-side failures (the gateway intermittently answers 5xx under load) are retried with backoff. Groups with no rows return null.
+
+**The accumulated addresses are sent to `geocoding.geo.census.gov` when the group finalizes.** Geocode once into a table rather than re-querying — the service is shared public infrastructure and results for a fixed address don't change:
+
+```sql
+-- One-time geocode pass, persisted
+CREATE TABLE company_geo AS
+SELECT cast(g.value.id AS Int64) AS id, cast(g.value.status AS String) AS status,
+       cast(g.value.lat AS Float64) AS lat, cast(g.value.lon AS Float64) AS lon
+FROM (SELECT census_geocode_agg(id, street, city, state, zip) AS results
+      FROM companies) r
+CROSS JOIN unnest(r.results) g;
+
+-- Everything downstream is a plain join
+SELECT c.name, geo.lat, geo.lon
+FROM companies c
+JOIN company_geo geo ON geo.id = c.id
+WHERE geo.status = 'Match'
+```
+
+The casts in the CTAS matter: the result's struct shape exists only at runtime, so casting each extracted field gives the planner the concrete column kinds the persisted table needs. Plain `SELECT` queries over the unnested fields don't need them.
+
 ### STRING_AGG
 
 `STRING_AGG(expr, separator [ORDER BY ...])` -> String

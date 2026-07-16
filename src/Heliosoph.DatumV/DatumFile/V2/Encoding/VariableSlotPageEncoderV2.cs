@@ -318,7 +318,7 @@ internal sealed class VariableSlotPageEncoderV2 : IPageEncoderV2
 
         throw new NotSupportedException(
             $"Inline payload extraction not implemented for DataKind.{value.Kind} " +
-            "(IsArray={value.IsArray}, IsInlineArray={value.IsInlineArray}). Add a case when a column " +
+            $"(IsArray={value.IsArray}, IsInlineArray={value.IsInlineArray}). Add a case when a column " +
             "of this kind needs an inline VariableSlot path.");
     }
 
