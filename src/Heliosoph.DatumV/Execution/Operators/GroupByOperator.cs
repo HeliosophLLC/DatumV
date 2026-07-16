@@ -371,7 +371,7 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
             // the channel hop, but the worker reads from context.Store after the
             // batch is returned, so we use context.Store for both.
             InvocationFrame workerAccumFrame = InvocationFrame.Symmetric(
-                context.Store, context.SidecarRegistry, context.Types);
+                context.Store, context.SidecarRegistry, context.Types, context.CancellationToken);
 
             GroupStateFactory globalGroupStateFactory = new(
                 pool, context, _aggregateColumns,
@@ -487,7 +487,8 @@ public sealed class GroupByOperator : QueryOperator, IDisposable
         // Long-lived frame captured by accumulators that need a stable Target arena
         // (e.g. DistinctAccumulatorDecorator's _capturedFrame for replay merges).
         // context.Store survives the query's lifetime.
-        InvocationFrame initFrame = InvocationFrame.Symmetric(context.Store, context.SidecarRegistry, context.Types);
+        InvocationFrame initFrame = InvocationFrame.Symmetric(
+            context.Store, context.SidecarRegistry, context.Types, context.CancellationToken);
 
         long? memoryBudget = context.MemoryBudgetBytes;
 

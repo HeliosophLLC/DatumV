@@ -294,4 +294,66 @@ public sealed class CensusGeocoderClientTests
             HttpRequestMessage request, CancellationToken cancellationToken) =>
             throw new HttpRequestException("simulated DNS failure");
     }
+
+    // ───────────────────────── cancellation ─────────────────────────
+
+    [Fact]
+    public async Task GeocodeAsync_PreCancelled_ThrowsWithoutRequest()
+    {
+        StubHandler handler = new(_ => Ok(string.Empty));
+        using CensusGeocoderClient client = new(handler);
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.GeocodeAsync(
+                [new CensusAddressRecord("1", "A St", "X", "IL", "1")],
+                CensusGeocoderClient.DefaultBenchmark, cts.Token));
+        Assert.Empty(handler.RequestBodies);
+    }
+
+    [Fact]
+    public async Task GeocodeAsync_CancelledMidRequest_PropagatesCancellation()
+    {
+        // Handler parks until the request's own token fires — cancelling the
+        // caller token must abort the in-flight POST as a cancellation, not
+        // surface as a geocoder failure.
+        HangingHandler handler = new();
+        using CensusGeocoderClient client = new(handler);
+        using CancellationTokenSource cts = new();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.GeocodeAsync(
+                [new CensusAddressRecord("1", "A St", "X", "IL", "1")],
+                CensusGeocoderClient.DefaultBenchmark, cts.Token));
+    }
+
+    [Fact]
+    public async Task GeocodeAsync_CancelledDuringRetryDelay_StopsRetrying()
+    {
+        StubHandler handler = new(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)
+        {
+            Content = new StringContent(string.Empty),
+        });
+        using CensusGeocoderClient client = new(handler, retryDelays: [TimeSpan.FromSeconds(30)]);
+        using CancellationTokenSource cts = new();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.GeocodeAsync(
+                [new CensusAddressRecord("1", "A St", "X", "IL", "1")],
+                CensusGeocoderClient.DefaultBenchmark, cts.Token));
+        Assert.Single(handler.RequestBodies);
+    }
+
+    private sealed class HangingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
+    }
 }

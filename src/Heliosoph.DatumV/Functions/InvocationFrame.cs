@@ -59,6 +59,16 @@ public readonly struct InvocationFrame
     public TypeRegistry? Types { get; }
 
     /// <summary>
+    /// The query's cooperative-cancellation token, threaded from
+    /// <c>ExecutionContext.CancellationToken</c>. Functions doing long-running
+    /// finalize work — remote calls, large renders — observe it so a cancelled
+    /// query releases external resources promptly instead of running to
+    /// completion. <see cref="CancellationToken.None"/> outside the query
+    /// pipeline (unit tests, ad-hoc evaluation).
+    /// </summary>
+    public CancellationToken Cancellation { get; }
+
+    /// <summary>
     /// Creates an invocation frame. Pass the same store for <paramref name="source"/>
     /// and <paramref name="target"/> when the distinction doesn't matter (e.g.
     /// numeric-only aggregates). Pass <paramref name="sidecarRegistry"/> when the
@@ -69,12 +79,14 @@ public readonly struct InvocationFrame
         IValueStore source,
         IValueStore target,
         SidecarRegistry? sidecarRegistry = null,
-        TypeRegistry? types = null)
+        TypeRegistry? types = null,
+        CancellationToken cancellation = default)
     {
         Source = source;
         Target = target;
         SidecarRegistry = sidecarRegistry;
         Types = types;
+        Cancellation = cancellation;
     }
 
     /// <summary>
@@ -82,6 +94,9 @@ public readonly struct InvocationFrame
     /// Convenience for call sites that don't care to distinguish source from target.
     /// </summary>
     public static InvocationFrame Symmetric(
-        IValueStore store, SidecarRegistry? sidecarRegistry = null, TypeRegistry? types = null)
-        => new(store, store, sidecarRegistry, types);
+        IValueStore store,
+        SidecarRegistry? sidecarRegistry = null,
+        TypeRegistry? types = null,
+        CancellationToken cancellation = default)
+        => new(store, store, sidecarRegistry, types, cancellation);
 }

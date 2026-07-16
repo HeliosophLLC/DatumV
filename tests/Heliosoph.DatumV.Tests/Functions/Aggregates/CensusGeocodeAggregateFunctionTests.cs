@@ -352,6 +352,24 @@ public sealed class CensusGeocodeAggregateFunctionTests : ServiceTestBase, IAsyn
     }
 
     [Fact]
+    public async Task ResultAsync_CancelledFrame_ThrowsWithoutContactingService()
+    {
+        using ClientSwap swap = UseCannedResponse(ThreeRowResponse, out CannedHandler handler);
+        Arena arena = CreateArena();
+        TypeRegistry types = new();
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+        InvocationFrame frame = InvocationFrame.Symmetric(arena, null, types, cts.Token);
+
+        IAggregateAccumulator acc = new CensusGeocodeAggregateFunction().CreateAccumulator();
+        AccumulateRow(acc, arena, frame, 1, "100 Main St", "Columbus", "OH", "43215");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await acc.ResultAsync(frame));
+        Assert.Empty(handler.RequestBodies);
+    }
+
+    [Fact]
     public async Task HttpFailure_SurfacesAsRemoteService()
     {
         FailingHandler handler = new();
