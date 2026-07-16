@@ -184,6 +184,53 @@ public sealed class DeleteWhereTests : ServiceTestBase, IAsyncLifetime
         Assert.Equal([(1, "alice"), (3, "carol")], rows);
     }
 
+    [Fact]
+    public async Task Delete_TwoSequentialDeletes_OnPersistentTable_TombstonesLiveIndices()
+    {
+        // DeleteRows receives live-row indices (post-tombstone numbering,
+        // per the ITableProvider contract), but the .datum tombstone
+        // bitmaps are keyed by physical row position. The provider must
+        // translate between the two spaces once earlier deletes exist:
+        // here id=4 sits at live index 2 but physical row 3. Applying
+        // the live index as a physical position would tombstone id=3.
+        using (TableCatalog catalog = CreateCatalog(CatalogPath))
+        {
+            catalog.Plan("CREATE TABLE t (id Int32)");
+            catalog.Plan("INSERT INTO t VALUES (1), (2), (3), (4), (5)");
+
+            catalog.Plan("DELETE FROM t WHERE id = 2");
+            catalog.Plan("DELETE FROM t WHERE id = 4");
+
+            List<int> survivors = await ScanIntColumn(catalog["t"], "id");
+            Assert.Equal([1, 3, 5], survivors);
+        }
+
+        // The tombstones must land on the right physical rows on disk,
+        // not just in the live snapshot.
+        using TableCatalog reopened = CreateCatalog(CatalogPath);
+        List<int> persisted = await ScanIntColumn(reopened["t"], "id");
+        Assert.Equal([1, 3, 5], persisted);
+    }
+
+    [Fact]
+    public async Task Delete_SecondDeleteAliasingTombstonedRow_StillDeletesMatch()
+    {
+        // The other face of live/physical aliasing: after deleting the
+        // first physical row, the next match sits at live index 0. If
+        // that live index were applied as a physical position it would
+        // re-mark the already-tombstoned row 0 — an idempotent no-op
+        // that reports success while deleting nothing.
+        using TableCatalog catalog = CreateCatalog(CatalogPath);
+        catalog.Plan("CREATE TABLE t (id Int32)");
+        catalog.Plan("INSERT INTO t VALUES (1), (2), (3), (4), (5)");
+
+        catalog.Plan("DELETE FROM t WHERE id = 1");
+        catalog.Plan("DELETE FROM t WHERE id = 2");
+
+        List<int> survivors = await ScanIntColumn(catalog["t"], "id");
+        Assert.Equal([3, 4, 5], survivors);
+    }
+
     // ──────────────────── Validation ────────────────────
 
     [Fact]
