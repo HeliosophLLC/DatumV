@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSnapshot } from 'valtio';
-import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, ExternalLink, Film, Loader2, Maximize2, Music, Sigma } from 'lucide-react';
+import { AlertCircle, Ban, Braces, Brackets, Check, ChevronDown, Download, ExternalLink, Film, Loader2, Map as MapIcon, Maximize2, Minimize2, Music, Sigma, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import JsonView from '@uiw/react-json-view';
 import { darkTheme } from '@uiw/react-json-view/dark';
@@ -30,6 +30,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { isHttpUrl, openExternalUrl } from '@/lib/openExternal';
+
+// Lazy so maplibre-gl (and its CSS) stays out of the startup bundle — the
+// chunk loads the first time a user flips a result to the map view.
+const MapView = lazy(() => import('./MapView'));
 
 // Plain HTML <table> renderer for streamed query results. One block per
 // cell in the batch; the scrollable area lives above an SSMS-style
@@ -381,6 +385,57 @@ function formatDuration(ms: number): string {
   return `${pad2(minutes)}:${pad2(seconds)}.${pad3(millis)}`;
 }
 
+// Column names accepted as geographic coordinates for the map view. Name
+// matching is deliberately conservative — a column called `x` might be
+// anything, but `lat`/`lon` (and their long forms) are coordinates in
+// practice, and false positives only add an ignorable toggle button.
+// A result may carry MORE than one pair (joins against source tables that
+// ship their own — often empty — Latitude/Longitude columns), so all
+// candidates are collected here and MapView picks the pair whose sampled
+// rows actually contain values.
+const LAT_COLUMN_NAMES = new Set(['lat', 'latitude']);
+const LON_COLUMN_NAMES = new Set(['lon', 'lng', 'long', 'longitude']);
+const COORDINATE_KINDS = new Set(['Float16', 'Float32', 'Float64', 'Decimal']);
+
+function findCoordinateCandidates(
+  schema: readonly { name: string; kind: string; isArray: boolean }[],
+): { lat: number[]; lon: number[] } | null {
+  const lat: number[] = [];
+  const lon: number[] = [];
+  for (let i = 0; i < schema.length; i++) {
+    const column = schema[i];
+    if (column.isArray || !COORDINATE_KINDS.has(column.kind)) continue;
+    const name = column.name.toLowerCase();
+    if (LAT_COLUMN_NAMES.has(name)) lat.push(i);
+    else if (LON_COLUMN_NAMES.has(name)) lon.push(i);
+  }
+  return lat.length > 0 && lon.length > 0 ? { lat, lon } : null;
+}
+
+// Layout of a coordinate-bearing result: map pinned to the left half
+// (default), map alone at full width, or grid alone with a restore button.
+type MapLayout = 'split' | 'full' | 'hidden';
+
+// Grid↔map link state. The source gates each side's reaction: map-sourced
+// changes scroll the grid, grid-sourced changes move the map — a side never
+// reacts to its own gesture. Without the gate, a grid click would scroll
+// its own grid mid-mousedown, and the rows sliding under the held cursor
+// extend the drag selection into a phantom range.
+type LinkedRow = { row: number; source: 'map' | 'grid' } | null;
+
+// Session-remembered map arrangement: new coordinate-bearing results open
+// the way the user last arranged one. In-memory only — a persisted
+// settings row can formalise this if the demand shows.
+let lastMapLayout: MapLayout = 'split';
+let lastMapWidthPct = 50;
+
+const MAP_SPLIT_MIN_PCT = 20;
+const MAP_SPLIT_MAX_PCT = 80;
+
+// Icon-button chrome shared by the map's expand / restore / hide controls.
+const MAP_LAYOUT_BUTTON =
+  'bg-background/90 text-foreground border-border hover:bg-accent inline-flex size-7 cursor-pointer items-center justify-center rounded-md border shadow-sm';
+
 function CellBlock({
   cell,
   tableMode,
@@ -388,11 +443,62 @@ function CellBlock({
   cell: CellResult;
   tableMode: TableMode;
 }) {
+  const { t } = useTranslation('query');
   const settings = useSnapshot(settingsState);
   // `rowCount` (rather than `cell.rows.length`) is the reactive signal:
   // `cell.rows` is ref()'d in the proxy, so reads through it don't
   // subscribe to length changes. See CellResult in state/execution.ts.
   const hasTable = cell.schema !== null && cell.rowCount > 0;
+  // Coordinate-bearing results open with the map pinned to the left half.
+  // Detection is schema-only (names + numeric kinds), so it's stable
+  // across streaming.
+  const coordinates = useMemo(
+    () => (cell.schema !== null ? findCoordinateCandidates(cell.schema) : null),
+    [cell.schema],
+  );
+  const [mapLayout, setMapLayout] = useState<MapLayout>(() => lastMapLayout);
+  const [mapWidthPct, setMapWidthPct] = useState<number>(() => lastMapWidthPct);
+  const changeMapLayout = (next: MapLayout) => {
+    lastMapLayout = next;
+    setMapLayout(next);
+  };
+  // Shared grid↔map selection, keyed by row index: pin clicks set it from
+  // the map (grid scrolls to + tints the row), row clicks set it from the
+  // grid (map glides to + opens the pin's popup).
+  const [linkedRow, setLinkedRow] = useState<LinkedRow>(null);
+
+  // Split-divider drag. Position is tracked outside React state until the
+  // per-pixel move handler commits a clamped percentage; the container ref
+  // anchors the pixel→percent conversion.
+  const rowContainerRef = useRef<HTMLDivElement>(null);
+  const splitDragRef = useRef<{ startX: number; startPct: number } | null>(null);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = splitDragRef.current;
+      const container = rowContainerRef.current;
+      if (drag === null || container === null) return;
+      const width = container.getBoundingClientRect().width;
+      if (width <= 0) return;
+      const next = Math.min(
+        MAP_SPLIT_MAX_PCT,
+        Math.max(MAP_SPLIT_MIN_PCT, drag.startPct + ((e.clientX - drag.startX) / width) * 100),
+      );
+      lastMapWidthPct = next;
+      setMapWidthPct(next);
+    };
+    const onUp = () => {
+      if (splitDragRef.current === null) return;
+      splitDragRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
   // Single-value detection: 1 row × 1 column. Function-tab runs that
   // return a single SELECT result land here, but the path is generic —
   // a SQL tab that runs `SELECT 'hello'` gets the same treatment.
@@ -449,7 +555,102 @@ function CellBlock({
       ) : isImageGallery ? (
         <ImageGalleryView cell={cell} />
       ) : (
-        hasTable && <CellTable cell={cell} />
+        hasTable
+        && (coordinates !== null ? (
+          <div ref={rowContainerRef} className="relative flex min-h-0 flex-1 flex-row">
+            {mapLayout !== 'hidden' && (
+              <div
+                className={cn(
+                  'relative flex min-h-0 flex-col',
+                  mapLayout === 'split' ? 'shrink-0' : 'w-full',
+                )}
+                style={mapLayout === 'split' ? { width: `${mapWidthPct}%` } : undefined}
+              >
+                <Suspense
+                  fallback={
+                    <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+                      <Loader2 className="size-3 animate-spin" />
+                      {t('mapView.loading')}
+                    </div>
+                  }
+                >
+                  <MapView
+                    cell={cell}
+                    latCandidates={coordinates.lat}
+                    lonCandidates={coordinates.lon}
+                    selectedRow={linkedRow?.row ?? null}
+                    selectionSource={linkedRow?.source}
+                    onSelectRow={(row) => setLinkedRow({ row, source: 'map' })}
+                  />
+                </Suspense>
+                {/* Layout controls live on the map itself (maplibre's nav
+                    control moved to top-left to leave this corner free). */}
+                <div className="absolute top-2 right-2 z-20 flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => changeMapLayout(mapLayout === 'split' ? 'full' : 'split')}
+                    aria-label={mapLayout === 'split' ? t('mapView.expand') : t('mapView.split')}
+                    title={mapLayout === 'split' ? t('mapView.expand') : t('mapView.split')}
+                    className={MAP_LAYOUT_BUTTON}
+                  >
+                    {mapLayout === 'split' ? <Maximize2 className="size-3.5" /> : <Minimize2 className="size-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => changeMapLayout('hidden')}
+                    aria-label={t('mapView.hide')}
+                    title={t('mapView.hide')}
+                    className={MAP_LAYOUT_BUTTON}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+            {mapLayout === 'split' && (
+              // Drag handle between map and grid. Doubles as the visual
+              // divider; double-click restores the 50/50 default.
+              <div
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.preventDefault();
+                  splitDragRef.current = { startX: e.clientX, startPct: mapWidthPct };
+                  document.body.style.cursor = 'col-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+                onDoubleClick={() => {
+                  lastMapWidthPct = 50;
+                  setMapWidthPct(50);
+                }}
+                className="bg-border hover:bg-primary/50 z-10 w-1 shrink-0 cursor-col-resize"
+                aria-hidden="true"
+              />
+            )}
+            {mapLayout !== 'full' && (
+              <CellTable
+                cell={cell}
+                highlightedRow={linkedRow?.row ?? null}
+                scrollToHighlight={linkedRow?.source === 'map'}
+                onRowActivate={(row) => setLinkedRow({ row, source: 'grid' })}
+              />
+            )}
+            {mapLayout === 'hidden' && (
+              <button
+                type="button"
+                onClick={() => changeMapLayout('split')}
+                className={cn(
+                  'bg-background/90 text-foreground border-border absolute right-4 bottom-2 z-30 inline-flex items-center gap-1.5',
+                  'hover:bg-accent cursor-pointer rounded-md border px-2 py-1 text-xs shadow-sm',
+                )}
+              >
+                <MapIcon className="size-3.5" />
+                {t('mapView.showMap')}
+              </button>
+            )}
+          </div>
+        ) : (
+          <CellTable cell={cell} />
+        ))
       )}
     </section>
   );
@@ -1191,6 +1392,8 @@ type VirtualRowProps = {
   // rowInRange is true; -1 sentinel otherwise.
   selColMin: number;
   selColMax: number;
+  // Row linked from the map view — tints the whole row.
+  isMapSelected: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   dragModeRef: React.MutableRefObject<SelectionMode | null>;
   beginSelection: (mode: SelectionMode, row: number, col: number, shiftKey: boolean) => void;
@@ -1214,6 +1417,7 @@ const VirtualRow = memo(function VirtualRow({
   rowInRange,
   selColMin,
   selColMax,
+  isMapSelected,
   scrollRef,
   dragModeRef,
   beginSelection,
@@ -1224,7 +1428,10 @@ const VirtualRow = memo(function VirtualRow({
   return (
     <div
       data-index={rowIndex}
-      className="border-border bg-table-row absolute inset-x-0 grid border-b"
+      className={cn(
+        'border-border absolute inset-x-0 grid border-b',
+        isMapSelected ? 'bg-primary/15' : 'bg-table-row',
+      )}
       style={{
         gridTemplateColumns,
         height: rowSize,
@@ -1287,7 +1494,24 @@ const VirtualRow = memo(function VirtualRow({
   );
 });
 
-function CellTable({ cell }: { cell: CellResult }) {
+function CellTable({
+  cell,
+  highlightedRow = null,
+  scrollToHighlight = false,
+  onRowActivate,
+}: {
+  cell: CellResult;
+  /** Row linked from the map view; tinted, and scrolled into view when
+      the link was map-sourced. */
+  highlightedRow?: number | null;
+  /** True when the link came from the map — the only case where the grid
+      should scroll itself. Grid-sourced links must NOT scroll: the user's
+      mouse is still down over the grid, and rows sliding under the held
+      cursor extend the drag selection into a phantom range. */
+  scrollToHighlight?: boolean;
+  /** Fired when the user clicks into a row (cell or gutter). */
+  onRowActivate?: (rowIndex: number) => void;
+}) {
   const { t } = useTranslation('query');
   // Per-cell scroll container that also drives the virtualiser. Sticky
   // `<header>` and absolutely-positioned virtualised rows both live
@@ -1295,6 +1519,10 @@ function CellTable({ cell }: { cell: CellResult }) {
   // and horizontal scroll moves header + rows together (their grid
   // templates match, so columns stay aligned).
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Ref-stabilised so beginSelection (whose identity the memoised
+  // VirtualRow depends on) doesn't rebind per parent render.
+  const onRowActivateRef = useRef(onRowActivate);
+  onRowActivateRef.current = onRowActivate;
 
   // Detect image/video content in the grid to decide whether to use
   // the tall row mode. Sample-bounded for the same reason `colWidths`
@@ -1320,6 +1548,14 @@ function CellTable({ cell }: { cell: CellResult }) {
     estimateSize: () => rowHeight,
     overscan: 12,
   });
+
+  // Map → grid: bring the linked row into view. The tint itself renders
+  // via each VirtualRow's isMapSelected prop.
+  useEffect(() => {
+    if (!scrollToHighlight || highlightedRow === null || highlightedRow >= cell.rowCount) return;
+    rowVirtualizer.scrollToIndex(highlightedRow, { align: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedRow, scrollToHighlight]);
 
   // Content-based column widths. Memoised on the schema + sample-bounded
   // row count: we only ever look at the first SAMPLE_ROWS rows, so once
@@ -1432,6 +1668,11 @@ function CellTable({ cell }: { cell: CellResult }) {
         });
         dragModeRef.current = null;
         return;
+      }
+      // Row-targeted clicks feed the grid↔map link; column/select-all
+      // gestures have no single row to identify.
+      if (mode === 'cell' || mode === 'row') {
+        onRowActivateRef.current?.(row);
       }
       setSelection((prev) => {
         if (shiftKey && prev !== null && prev.mode !== 'all') {
@@ -1823,6 +2064,7 @@ function CellTable({ cell }: { cell: CellResult }) {
               rowInRange={rowInRange}
               selColMin={rowInRange && range !== null ? range.colMin : -1}
               selColMax={rowInRange && range !== null ? range.colMax : -1}
+              isMapSelected={idx === highlightedRow}
               scrollRef={scrollRef}
               dragModeRef={dragModeRef}
               beginSelection={beginSelection}

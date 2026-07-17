@@ -36,6 +36,19 @@
     "openTooltip": "Open in browser",
     "openButton": "Open in browser"
   },
+  "mapView": {
+    "showMap": "Map",
+    "expand": "Expand map to full width",
+    "split": "Restore split view",
+    "hide": "Hide map",
+    "loading": "Loading map…",
+    "plotted": "{shown, number} of {total, number} rows plotted — the rest have no coordinates",
+    "noPoints": "No coordinates to plot — {lat} and {lon} are empty in all {count, number} rows",
+    "truncated": "Showing {shown, number} of {total, number} points",
+    "stackTitle": "{count, number} rows at this location",
+    "colorBy": "Color pins by column",
+    "colorByNone": "No color"
+  },
   "jsonPreview": {
     "arrayChip": "{shown, number} of {total, number} {total, plural, one {item} other {items}}",
     "objectChip": "{shown, number} of {total, number} {total, plural, one {field} other {fields}}",

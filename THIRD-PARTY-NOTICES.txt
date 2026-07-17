@@ -1,5 +1,5 @@
 DatumV THIRD-PARTY NOTICES
-Generated: 2026-07-04T12:41:16.258Z
+Generated: 2026-07-17T10:57:45.719Z
 
 This file aggregates license and copyright notices for every
 third-party component that ships with the DatumV installer,
@@ -830,6 +830,57 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/jridgewell/sourcemaps
   Authors: Justin Ridgewell
 
+@mapbox/jsonlint-lines-primitives 2.0.3
+  License: MIT
+  URL: https://github.com/mapbox/jsonlint
+  Authors: Zach Carter
+
+@mapbox/point-geometry 1.1.0
+  License: ISC
+  URL: https://github.com/mapbox/point-geometry
+  Authors: Tom MacWright
+
+@mapbox/tiny-sdf 2.2.0
+  License: BSD-2-Clause
+  URL: https://github.com/mapbox/tiny-sdf
+  Authors: Vladimir Agafonkin
+
+@mapbox/unitbezier 0.0.1
+  License: BSD-2-Clause
+  URL: https://github.com/mapbox/unitbezier
+
+@mapbox/unitbezier 1.0.0
+  License: BSD-2-Clause
+  URL: https://github.com/mapbox/unitbezier
+
+@mapbox/vector-tile 2.0.5
+  License: BSD-3-Clause
+  URL: https://github.com/mapbox/vector-tile-js
+
+@mapbox/whoots-js 3.1.0
+  License: ISC
+  URL: https://github.com/mapbox/whoots-js
+  Authors: Bryan Housel
+
+@maplibre/geojson-vt 6.1.1
+  License: ISC
+  URL: https://github.com/maplibre/geojson-vt
+  Authors: Vladimir Agafonkin
+
+@maplibre/maplibre-gl-style-spec 24.10.0
+  License: ISC
+  URL: https://github.com/maplibre/maplibre-style-spec
+  Authors: MapLibre
+
+@maplibre/mlt 1.1.12
+  License: (MIT OR Apache-2.0)
+  URL: https://github.com/maplibre/maplibre-tile-spec
+
+@maplibre/vt-pbf 4.3.2
+  License: MIT
+  URL: https://github.com/maplibre/vt-pbf
+  Authors: Anand Thakker
+
 @mediapipe/tasks-vision 0.10.17
   License: Apache-2.0
   Authors: mediapipe@google.com
@@ -923,6 +974,10 @@ Renderer SPA (ClientApp/)
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
 @types/estree-jsx 1.0.5
+  License: MIT
+  URL: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+@types/geojson 7946.0.16
   License: MIT
   URL: https://github.com/DefinitelyTyped/DefinitelyTyped
 
@@ -1358,6 +1413,11 @@ dunder-proto 1.0.1
   URL: https://github.com/es-shims/dunder-proto
   Authors: Jordan Harband
 
+earcut 3.2.3
+  License: ISC
+  URL: https://github.com/mapbox/earcut
+  Authors: Volodymyr Agafonkin
+
 ee-first 1.1.1
   License: MIT
   URL: https://github.com/jonathanong/ee-first
@@ -1602,6 +1662,10 @@ github-slugger 2.0.0
   License: ISC
   URL: https://github.com/Flet/github-slugger
   Authors: Dan Flettre
+
+gl-matrix 3.4.4
+  License: MIT
+  URL: https://github.com/toji/gl-matrix
 
 glob-parent 5.1.2
   License: ISC
@@ -1937,6 +2001,11 @@ json-schema-typed 8.0.2
   URL: https://github.com/RemyRylan/json-schema-typed
   Authors: Remy Rylan
 
+json-stringify-pretty-compact 4.0.0
+  License: MIT
+  URL: https://github.com/lydell/json-stringify-pretty-compact
+  Authors: Simon Lydell
+
 json5 2.2.3
   License: MIT
   URL: https://github.com/json5/json5
@@ -1946,6 +2015,11 @@ jsonfile 6.2.1
   License: MIT
   URL: https://github.com/jprichardson/node-jsonfile
   Authors: JP Richardson
+
+kdbush 4.1.0
+  License: ISC
+  URL: https://github.com/mourner/kdbush
+  Authors: Vladimir Agafonkin
 
 kleur 3.0.3
   License: MIT
@@ -1998,6 +2072,10 @@ lucide-react 1.23.0
 
 maath 0.10.8
   License: MIT
+
+maplibre-gl 5.24.0
+  License: BSD-3-Clause
+  URL: https://github.com/maplibre/maplibre-gl-js
 
 markdown-table 3.0.4
   License: MIT
@@ -2308,6 +2386,11 @@ ms 2.1.3
   License: MIT
   URL: https://github.com/vercel/ms
 
+murmurhash-js 1.0.0
+  License: MIT
+  URL: https://github.com/mikolalysenko/murmurhash-js
+  Authors: Gary Court
+
 nanoid 3.3.15
   License: MIT
   URL: https://github.com/ai/nanoid
@@ -2449,6 +2532,16 @@ path-to-regexp 8.4.2
   License: MIT
   URL: https://github.com/pillarjs/path-to-regexp
 
+pbf 4.0.2
+  License: BSD-3-Clause
+  URL: https://github.com/mapbox/pbf
+  Authors: Konstantin Kaefer
+
+pbf 5.1.2
+  License: BSD-3-Clause
+  URL: https://github.com/mapbox/pbf
+  Authors: Konstantin Kaefer
+
 picocolors 1.1.1
   License: ISC
   URL: https://github.com/alexeyraspopov/picocolors
@@ -2488,6 +2581,11 @@ potpack 1.0.2
   URL: https://github.com/mapbox/potpack
   Authors: Vladimir Agafonkin
 
+potpack 2.1.0
+  License: ISC
+  URL: https://github.com/mapbox/potpack
+  Authors: Vladimir Agafonkin
+
 powershell-utils 0.1.0
   License: MIT
   URL: https://github.com/sindresorhus/powershell-utils
@@ -2512,6 +2610,11 @@ property-information 7.2.0
   License: MIT
   URL: https://github.com/wooorm/property-information
   Authors: Titus Wormer
+
+protocol-buffers-schema 3.6.1
+  License: MIT
+  URL: https://github.com/mafintosh/protocol-buffers-schema
+  Authors: Mathias Buus
 
 proxy-addr 2.0.7
   License: MIT
@@ -2546,6 +2649,11 @@ queue-microtask 1.2.3
   License: MIT
   URL: https://github.com/feross/queue-microtask
   Authors: Feross Aboukhadijeh
+
+quickselect 3.0.0
+  License: ISC
+  URL: https://github.com/mourner/quickselect
+  Authors: Vladimir Agafonkin
 
 range-parser 1.3.0
   License: MIT
@@ -2639,6 +2747,11 @@ resolve-from 4.0.0
   URL: https://github.com/sindresorhus/resolve-from
   Authors: Sindre Sorhus
 
+resolve-protobuf-schema 2.1.0
+  License: MIT
+  URL: https://github.com/mafintosh/resolve-protobuf-schema
+  Authors: Mathias Buus
+
 restore-cursor 5.1.0
   License: MIT
   URL: https://github.com/sindresorhus/restore-cursor
@@ -2703,7 +2816,7 @@ setprototypeof 1.2.0
   URL: https://github.com/wesleytodd/setprototypeof
   Authors: Wes Todd
 
-shadcn 4.12.0
+shadcn 4.13.0
   License: MIT
   URL: https://github.com/shadcn-ui/ui
   Authors: shadcn
@@ -2862,7 +2975,7 @@ three 0.170.0
   URL: https://github.com/mrdoob/three.js
   Authors: mrdoob
 
-three 0.184.0
+three 0.185.1
   License: MIT
   URL: https://github.com/mrdoob/three.js
   Authors: mrdoob
@@ -2881,6 +2994,10 @@ tiny-invariant 1.3.3
   License: MIT
   URL: https://github.com/alexreardon/tiny-invariant
   Authors: Alex Reardon
+
+tinyqueue 3.0.0
+  License: ISC
+  URL: https://github.com/mourner/tinyqueue
 
 to-regex-range 5.0.1
   License: MIT
@@ -3158,7 +3275,37 @@ zwitch 2.0.4
   URL: https://github.com/wooorm/zwitch
   Authors: Titus Wormer
 ============================================================================
-SECTION 6 — STANDARD LICENSE TEXTS
+SECTION 6 — MAP TILE SERVICES AND MAP DATA
+============================================================================
+
+The map view renders basemap tiles fetched at runtime from CARTO's
+public basemap service; the underlying cartography is OpenStreetMap
+data. Neither ships in the installer — tiles are fetched on demand —
+but both carry attribution requirements, which the map satisfies
+on-screen via its attribution control ("© OpenStreetMap contributors
+© CARTO").
+
+
+------------------------------------------------------------
+OpenStreetMap data
+------------------------------------------------------------
+
+Map data © OpenStreetMap contributors, available under the Open
+Database License (ODbL) 1.0.
+  https://www.openstreetmap.org/copyright
+  https://opendatacommons.org/licenses/odbl/1-0/
+
+
+------------------------------------------------------------
+CARTO basemaps
+------------------------------------------------------------
+
+Basemap tiles and glyph fonts are served by CARTO's free basemap
+endpoints, used with attribution per CARTO's basemap terms.
+  https://carto.com/attribution
+
+============================================================================
+SECTION 7 — STANDARD LICENSE TEXTS
 ============================================================================
 
 Per-package licenses above identify the license family. The full
