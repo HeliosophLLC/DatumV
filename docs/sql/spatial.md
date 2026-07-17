@@ -73,6 +73,7 @@ SELECT point2d(latitude, longitude) FROM cities
 | `point_z(p)` | `Float32` | Z component. **`Point3D` only** — `Point2D` has no Z. |
 | `distance(a, b)` | `Float32` | Euclidean distance between two same-dimension points. |
 | `distance_sq(a, b)` | `Float32` | Squared distance — skips the square root for KNN-ranking / threshold checks where absolute distance isn't needed. |
+| `haversine(lat1, lon1, lat2, lon2)` | `Float64` | Great-circle distance in **meters** between two WGS-84 coordinates (decimal degrees — the shape geocoders produce). Spherical earth model matching PostGIS `ST_DistanceSphere`; null in any argument propagates. |
 
 ```sql
 -- Find points within a radius
@@ -80,10 +81,17 @@ SELECT id, distance(pt, point3d(0, 0, 0)) AS r
 FROM cloud
 WHERE distance_sq(pt, point3d(0, 0, 0)) < 100.0
 ORDER BY r
+
+-- Geographic: companies within 10 miles (16,093 m) of a point
+SELECT name, haversine(lat, lon, 39.9612, -82.9988) / 1609.34 AS miles
+FROM company_geo
+WHERE haversine(lat, lon, 39.9612, -82.9988) < 16093.4
+ORDER BY miles
 ```
 
 Mixing `Point2D` with `Point3D` in `distance` / `distance_sq` is a
-function-argument error.
+function-argument error. `haversine` is for geographic degrees; use
+`distance` for planar/projected coordinates.
 
 Both kinds also participate in `typeof()`, `IS Type`, and `CAST` like
 any other DataKind. Field access via `.x` / `.y` / `.z` is sugar for the

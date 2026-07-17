@@ -1253,6 +1253,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar<Scalar.Spatial.PointZFunction>();
         registry.RegisterScalar<Scalar.Spatial.DistanceFunction>();
         registry.RegisterScalar<Scalar.Spatial.DistanceSqFunction>();
+        registry.RegisterScalar<Scalar.Spatial.HaversineFunction>();
 
         // Json — parse, scalar lookup, subdocument query, text re-emit.
         // Backed by canonical CBOR in the arena; the codec lives in Functions/Json.

@@ -391,7 +391,23 @@ function main() {
     formatSection(electronEntries) +
     subheader('Renderer SPA (ClientApp/)') +
     formatSection(clientAppEntries) +
-    header('SECTION 6 — STANDARD LICENSE TEXTS') +
+    header('SECTION 6 — MAP TILE SERVICES AND MAP DATA') +
+    `The map view renders basemap tiles fetched at runtime from CARTO's\n` +
+    `public basemap service; the underlying cartography is OpenStreetMap\n` +
+    `data. Neither ships in the installer — tiles are fetched on demand —\n` +
+    `but both carry attribution requirements, which the map satisfies\n` +
+    `on-screen via its attribution control ("© OpenStreetMap contributors\n` +
+    `© CARTO").\n\n` +
+    subheader('OpenStreetMap data') +
+    `Map data © OpenStreetMap contributors, available under the Open\n` +
+    `Database License (ODbL) 1.0.\n` +
+    `  https://www.openstreetmap.org/copyright\n` +
+    `  https://opendatacommons.org/licenses/odbl/1-0/\n\n` +
+    subheader('CARTO basemaps') +
+    `Basemap tiles and glyph fonts are served by CARTO's free basemap\n` +
+    `endpoints, used with attribution per CARTO's basemap terms.\n` +
+    `  https://carto.com/attribution\n` +
+    header('SECTION 7 — STANDARD LICENSE TEXTS') +
     `Per-package licenses above identify the license family. The full\n` +
     `text of each is reproduced from the canonical source:\n\n` +
     `  MIT:        https://opensource.org/licenses/MIT\n` +
