@@ -920,6 +920,7 @@ public sealed class FunctionRegistry
 
         // Image
         registry.RegisterScalar<Scalar.Image.ImageDecodeFunction>();
+        registry.RegisterScalar<Scalar.Image.ImageDecodeBase64Function>();
         registry.RegisterScalar<Scalar.Image.ImageEncodeFunction>();
         registry.RegisterScalar<Scalar.Image.CreateImageRgbFunction>();
         registry.RegisterScalar<Scalar.Image.VideoFrameToImageFunction>();
