@@ -192,7 +192,9 @@ public sealed class OpenParquetMetaFunction : ITableValuedFunctionMetadata, ITab
         row[0] = DataValue.FromString(columnPath, arena);
         row[1] = DataValue.FromString(
             type.IsSupported ? type.ElementKind.ToString() : "Unknown", arena);
-        row[2] = DataValue.FromBoolean(type.IsArray);
+        // Raw BYTE_ARRAY leaves read back as UInt8[] (one byte bag per row), so
+        // report them as arrays here to match what open_parquet surfaces.
+        row[2] = DataValue.FromBoolean(type.IsArray || type.IsByteArrayBlob);
         row[3] = DataValue.FromBoolean(type.IsNullable);
         row[4] = DataValue.FromBoolean(type.IsSupported);
         row[5] = DataValue.FromString(type.LogicalTypeName ?? string.Empty, arena);

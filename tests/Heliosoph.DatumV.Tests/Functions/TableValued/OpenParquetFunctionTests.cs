@@ -144,6 +144,55 @@ public sealed class OpenParquetFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task Open_RawByteArrayColumn_SurfacesAsUInt8ArrayPerRow()
+    {
+        // Third-party Parquet (e.g. HuggingFace cadquery shards) stores blob
+        // columns — file bytes, rendered PNGs, STEP/STL geometry — as raw
+        // BYTE_ARRAY, which Parquet.Net surfaces as one byte[] per row with
+        // IsArray == false. The engine's own exporter never writes this shape
+        // (it emits LIST<UInt8>), so this exercises the third-party path that
+        // previously crashed with "cannot cast Byte[] to Byte".
+        string path = TempParquet("blobs.parquet");
+        var idField = new DataField<int>("id");
+        var blobField = new DataField<byte[]>("blob");
+        var schema = new ParquetSchema(idField, blobField);
+
+        byte[] blob0 = [0x00, 0x01, 0x02, 0x03];
+        byte[] blob1 = [0xAA, 0xBB];
+        await using (Stream writeStream = File.Create(path))
+        using (ParquetWriter writer = await ParquetWriter.CreateAsync(schema, writeStream))
+        using (ParquetRowGroupWriter rg = writer.CreateRowGroup())
+        {
+            await rg.WriteColumnAsync(new DataColumn(idField, new int[] { 1, 2 }));
+            await rg.WriteColumnAsync(new DataColumn(blobField, new byte[][] { blob0, blob1 }));
+        }
+
+        OpenParquetFunction fn = new();
+
+        // Plan-time peek: the blob column surfaces as UInt8[] (byte bag), not a
+        // scalar UInt8.
+        Schema outSchema = ((ITableValuedFunction)fn).ValidateArguments(
+            argumentKinds: [DataKind.String],
+            constantArguments: [Const(path)],
+            constantStore: _constantStore,
+            cancellationToken: default);
+        Assert.Equal("blob", outSchema.Columns[1].Name);
+        Assert.Equal(DataKind.UInt8, outSchema.Columns[1].Kind);
+        Assert.True(outSchema.Columns[1].IsArray,
+            "Raw BYTE_ARRAY columns should surface as UInt8[], not scalar UInt8.");
+
+        // Runtime: each row's blob is a byte bag carrying the exact bytes.
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0]["id"].AsInt32());
+        Assert.Equal(blob0, rows[0]["blob"].AsUInt8Array(ctx.Store));
+        Assert.Equal(blob1, rows[1]["blob"].AsUInt8Array(ctx.Store));
+    }
+
+    [Fact]
     public async Task Open_TemporalAndDecimalColumns_DecodeAsTypedScalars()
     {
         // Mirrors the NYC taxi trip shape: a Timestamp pickup/dropoff plus

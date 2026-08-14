@@ -124,6 +124,38 @@ public sealed class OpenParquetMetaFunctionTests : ServiceTestBase, IDisposable
     }
 
     [Fact]
+    public async Task Open_RawByteArrayColumn_ReportedAsUInt8Array()
+    {
+        // Raw BYTE_ARRAY blob column (third-party shape — HuggingFace file /
+        // image / geometry shards). Parquet.Net reports IsArray == false for
+        // it, but open_parquet reads it back as UInt8[] (one byte bag per row),
+        // so the meta must report is_array == true to match.
+        string path = TempParquet("raw-byte-array.parquet");
+        var blobField = new DataField<byte[]>("blob");
+        var schema = new ParquetSchema(blobField);
+
+        await using (Stream writeStream = File.Create(path))
+        using (ParquetWriter writer = await ParquetWriter.CreateAsync(schema, writeStream))
+        using (ParquetRowGroupWriter rg = writer.CreateRowGroup())
+        {
+            await rg.WriteColumnAsync(new DataColumn(
+                blobField, new byte[][] { [0x01, 0x02], [0x03] }));
+        }
+
+        OpenParquetMetaFunction fn = new();
+        ExecutionContext ctx = CreateExecutionContext();
+        List<Row> rows = await CollectAsync(
+            ((ITableValuedFunction)fn).ExecuteAsync([ValueRef.FromString(path)], ctx), ctx);
+
+        Assert.Single(rows);
+        Assert.Equal("blob", rows[0]["column_path"].AsString());
+        Assert.Equal("UInt8", rows[0]["element_kind"].AsString());
+        Assert.True(rows[0]["is_array"].AsBoolean(),
+            "Raw BYTE_ARRAY columns read back as UInt8[], so meta should flag is_array.");
+        Assert.True(rows[0]["is_supported"].AsBoolean());
+    }
+
+    [Fact]
     public async Task Open_FileWithDatumvTaggedColumn_SurfacesKindFormatVersion()
     {
         // Slice A: open_parquet_meta now surfaces the datumv.kind / format /

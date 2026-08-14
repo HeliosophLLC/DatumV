@@ -659,7 +659,10 @@ public sealed class OpenParquetFunction : ITableValuedFunctionMetadata, ITableVa
         }
 
         DataKind effectiveKind = route?.TargetKind ?? type.ElementKind;
-        bool effectiveIsArray = route is null && type.IsArray;
+        // Raw BYTE_ARRAY leaves are scalar on disk (IsArray == false) but each
+        // cell is a byte bag, so they surface as UInt8[] — same shape as the
+        // engine's own LIST<UInt8> byte-array columns.
+        bool effectiveIsArray = route is null && (type.IsArray || type.IsByteArrayBlob);
 
         if (route is null && !type.IsSupported)
         {

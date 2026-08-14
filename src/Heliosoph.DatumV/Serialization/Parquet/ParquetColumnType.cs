@@ -41,6 +41,20 @@ internal readonly record struct ParquetColumnType(
     Type ClrType)
 {
     /// <summary>
+    /// True when this column is a raw Parquet <c>BYTE_ARRAY</c> (binary) leaf:
+    /// Parquet.Net surfaces one <c>byte[]</c> per row with
+    /// <c>DataField.IsArray == false</c>.
+    /// Semantically each cell is a byte bag, so the engine surfaces it as a
+    /// <c>UInt8[]</c> (<see cref="Model.DataValue.FromByteArray"/>) rather than a
+    /// scalar <see cref="Model.DataKind.UInt8"/>. Genuine scalar UInt8 columns
+    /// arrive with <c>ClrType == typeof(byte)</c> and are unaffected. Note the
+    /// engine's own exporter never writes this shape — it emits
+    /// <c>LIST&lt;UInt8&gt;</c> instead — so this path only fires for
+    /// third-party Parquet files that store bytes as raw <c>BYTE_ARRAY</c>.
+    /// </summary>
+    public bool IsByteArrayBlob => !IsArray && ClrType == typeof(byte[]);
+
+    /// <summary>
     /// Maps a Parquet leaf <see cref="DataField"/> to the typed shape
     /// the row pipeline will use. Unsupported physical/logical
     /// combinations land with <see cref="ElementKind"/> =

@@ -167,6 +167,12 @@ internal static class ParquetColumnReader
         object? raw = data.GetValue(index);
         if (raw is null) return DataValue.Null(type.ElementKind);
 
+        // Raw BYTE_ARRAY columns hand back one byte[] per row — a byte bag,
+        // surfaced as UInt8[] (matching the engine's own LIST<UInt8> byte-array
+        // round-trip). Genuine scalar UInt8 columns hand back a boxed byte and
+        // fall through to the FromUInt8 case below.
+        if (raw is byte[] bytes) return DataValue.FromByteArray(bytes, arena);
+
         return type.ElementKind switch
         {
             DataKind.Boolean => DataValue.FromBoolean((bool)raw),
