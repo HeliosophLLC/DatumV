@@ -120,9 +120,9 @@
       },
       "OpenCvSharp4.runtime.win": {
         "type": "Direct",
-        "requested": "[4.13.0.20260302, )",
-        "resolved": "4.13.0.20260302",
-        "contentHash": "VC2n9CVZQvAm+p0NXW077e/MGkDBraT3ye4FdInRPpxTVK64DwGnLuIncS8mwrkVcKhqh82/KgcDgKXNWDndAA=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ=="
       },
       "Parquet.Net": {
         "type": "Direct",

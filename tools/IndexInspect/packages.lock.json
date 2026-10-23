@@ -217,7 +217,7 @@
           "Microsoft.ML.OnnxRuntime.DirectML": "[1.24.4, )",
           "Microsoft.ML.Tokenizers": "[0.22.0, )",
           "OpenCvSharp4": "[4.13.0.20260302, )",
-          "OpenCvSharp4.runtime.win": "[4.13.0.20260302, )",
+          "OpenCvSharp4.runtime.win": "[4.13.0.20260627, )",
           "Parquet.Net": "[5.5.0, )",
           "PureHDF": "[2.1.1, )",
           "Sdcb.FFmpeg": "[7.0.0, )",
@@ -350,9 +350,9 @@
       },
       "OpenCvSharp4.runtime.win": {
         "type": "CentralTransitive",
-        "requested": "[4.13.0.20260302, )",
-        "resolved": "4.13.0.20260302",
-        "contentHash": "VC2n9CVZQvAm+p0NXW077e/MGkDBraT3ye4FdInRPpxTVK64DwGnLuIncS8mwrkVcKhqh82/KgcDgKXNWDndAA=="
+        "requested": "[4.13.0.20260627, )",
+        "resolved": "4.13.0.20260627",
+        "contentHash": "POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ=="
       },
       "Parquet.Net": {
         "type": "CentralTransitive",
